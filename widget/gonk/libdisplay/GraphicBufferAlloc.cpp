@@ -48,6 +48,12 @@ sp<GraphicBuffer> GraphicBufferAlloc::createGraphicBuffer(uint32_t w, uint32_t h
     return graphicBuffer;
 }
 
+/* <JGOMEZ> We need this method implementation cause we are using CyanogenMod's android_framewor_native repository */
+void GraphicBufferAlloc::setGraphicBufferSize(int size) {
+    mBufferSize = size;
+}
+
+
 // ----------------------------------------------------------------------------
 }; // namespace android
 // ----------------------------------------------------------------------------
