@@ -51,6 +51,8 @@
 
 #include "Logging.h"
 
+#include "mozilla/CheckedInt.h"
+
 #ifdef PR_LOGGING
 PRLogModuleInfo *
 GetGFX2DLog()
@@ -181,13 +183,62 @@ Factory::HasSSE2()
 #endif
 }
 
+bool
+Factory::CheckSurfaceSize(const IntSize &sz, int32_t limit)
+{
+  if (sz.width < 0 || sz.height < 0) {
+    gfxDebug() << "Surface width or height < 0!";
+    return false;
+  }
+
+  // reject images with sides bigger than limit
+  if (limit && (sz.width > limit || sz.height > limit)) {
+    gfxDebug() << "Surface size too large (exceeds caller's limit)!";
+    return false;
+  }
+
+  // make sure the surface area doesn't overflow a int32_t
+  CheckedInt<int32_t> tmp = sz.width;
+  tmp *= sz.height;
+  if (!tmp.isValid()) {
+    gfxDebug() << "Surface size too large (would overflow)!";
+    return false;
+  }
+
+  // assuming 4 bytes per pixel, make sure the allocation size
+  // doesn't overflow a int32_t either
+  CheckedInt<int32_t> stride = sz.width;
+  stride *= 4;
+
+  // When aligning the stride to 16 bytes, it can grow by up to 15 bytes.
+  stride += 16 - 1;
+
+  if (!stride.isValid()) {
+    gfxDebug() << "Surface size too large (stride overflows int32_t)!";
+    return false;
+  }
+
+  CheckedInt<int32_t> numBytes = GetAlignedStride<16>(sz.width * 4);
+  numBytes *= sz.height;
+  if (!numBytes.isValid()) {
+    gfxDebug() << "Surface size too large (allocation size would overflow int32_t)!";
+    return false;
+  }
+
+  return true;
+}
+
 TemporaryRef<DrawTarget>
 Factory::CreateDrawTarget(BackendType aBackend, const IntSize &aSize, SurfaceFormat aFormat)
 {
+  if (!CheckSurfaceSize(aSize)) {
+    return nullptr;
+  }
+
   RefPtr<DrawTarget> retVal;
   switch (aBackend) {
 #ifdef WIN32
-  case BACKEND_DIRECT2D:
+  case BackendType::DIRECT2D:
     {
       RefPtr<DrawTargetD2D> newTarget;
       newTarget = new DrawTargetD2D();
@@ -197,7 +248,7 @@ Factory::CreateDrawTarget(BackendType aBackend, const IntSize &aSize, SurfaceFor
       break;
     }
 #ifdef USE_D2D1_1
-  case BACKEND_DIRECT2D1_1:
+  case BackendType::DIRECT2D1_1:
     {
       RefPtr<DrawTargetD2D1> newTarget;
       newTarget = new DrawTargetD2D1();
@@ -208,8 +259,8 @@ Factory::CreateDrawTarget(BackendType aBackend, const IntSize &aSize, SurfaceFor
     }
 #endif
 #elif defined XP_MACOSX
-  case BACKEND_COREGRAPHICS:
-  case BACKEND_COREGRAPHICS_ACCELERATED:
+  case BackendType::COREGRAPHICS:
+  case BackendType::COREGRAPHICS_ACCELERATED:
     {
       RefPtr<DrawTargetCG> newTarget;
       newTarget = new DrawTargetCG();
@@ -220,7 +271,7 @@ Factory::CreateDrawTarget(BackendType aBackend, const IntSize &aSize, SurfaceFor
     }
 #endif
 #ifdef USE_SKIA
-  case BACKEND_SKIA:
+  case BackendType::SKIA:
     {
       RefPtr<DrawTargetSkia> newTarget;
       newTarget = new DrawTargetSkia();
@@ -231,7 +282,7 @@ Factory::CreateDrawTarget(BackendType aBackend, const IntSize &aSize, SurfaceFor
     }
 #endif
 #ifdef USE_CAIRO
-  case BACKEND_CAIRO:
+  case BackendType::CAIRO:
     {
       RefPtr<DrawTargetCairo> newTarget;
       newTarget = new DrawTargetCairo();
@@ -254,7 +305,7 @@ Factory::CreateDrawTarget(BackendType aBackend, const IntSize &aSize, SurfaceFor
 
   if (!retVal) {
     // Failed
-    gfxDebug() << "Failed to create DrawTarget, Type: " << aBackend << " Size: " << aSize;
+    gfxDebug() << "Failed to create DrawTarget, Type: " << int(aBackend) << " Size: " << aSize;
   }
   
   return retVal;
@@ -273,11 +324,15 @@ Factory::CreateDrawTargetForData(BackendType aBackend,
                                  int32_t aStride, 
                                  SurfaceFormat aFormat)
 {
+  if (!CheckSurfaceSize(aSize)) {
+    return nullptr;
+  }
+
   RefPtr<DrawTarget> retVal;
 
   switch (aBackend) {
 #ifdef USE_SKIA
-  case BACKEND_SKIA:
+  case BackendType::SKIA:
     {
       RefPtr<DrawTargetSkia> newTarget;
       newTarget = new DrawTargetSkia();
@@ -286,7 +341,7 @@ Factory::CreateDrawTargetForData(BackendType aBackend,
     }
 #endif
 #ifdef XP_MACOSX
-  case BACKEND_COREGRAPHICS:
+  case BackendType::COREGRAPHICS:
     {
       RefPtr<DrawTargetCG> newTarget = new DrawTargetCG();
       if (newTarget->Init(aBackend, aData, aSize, aStride, aFormat))
@@ -295,7 +350,7 @@ Factory::CreateDrawTargetForData(BackendType aBackend,
     }
 #endif
 #ifdef USE_CAIRO
-  case BACKEND_CAIRO:
+  case BackendType::CAIRO:
     {
       RefPtr<DrawTargetCairo> newTarget;
       newTarget = new DrawTargetCairo();
@@ -316,7 +371,7 @@ Factory::CreateDrawTargetForData(BackendType aBackend,
   }
 
   if (!retVal) {
-    gfxDebug() << "Failed to create DrawTarget, Type: " << aBackend << " Size: " << aSize;
+    gfxDebug() << "Failed to create DrawTarget, Type: " << int(aBackend) << " Size: " << aSize;
   }
 
   return retVal;
@@ -327,25 +382,25 @@ Factory::CreateScaledFontForNativeFont(const NativeFont &aNativeFont, Float aSiz
 {
   switch (aNativeFont.mType) {
 #ifdef WIN32
-  case NATIVE_FONT_DWRITE_FONT_FACE:
+  case NativeFontType::DWRITE_FONT_FACE:
     {
       return new ScaledFontDWrite(static_cast<IDWriteFontFace*>(aNativeFont.mFont), aSize);
     }
 #if defined(USE_CAIRO) || defined(USE_SKIA)
-  case NATIVE_FONT_GDI_FONT_FACE:
+  case NativeFontType::GDI_FONT_FACE:
     {
       return new ScaledFontWin(static_cast<LOGFONT*>(aNativeFont.mFont), aSize);
     }
 #endif
 #endif
 #ifdef XP_MACOSX
-  case NATIVE_FONT_MAC_FONT_FACE:
+  case NativeFontType::MAC_FONT_FACE:
     {
       return new ScaledFontMac(static_cast<CGFontRef>(aNativeFont.mFont), aSize);
     }
 #endif
 #if defined(USE_CAIRO) || defined(USE_SKIA_FREETYPE)
-  case NATIVE_FONT_CAIRO_FONT_FACE:
+  case NativeFontType::CAIRO_FONT_FACE:
     {
       return new ScaledFontCairo(static_cast<cairo_scaled_font_t*>(aNativeFont.mFont), aSize);
     }
@@ -363,7 +418,7 @@ Factory::CreateScaledFontForTrueTypeData(uint8_t *aData, uint32_t aSize,
 {
   switch (aType) {
 #ifdef WIN32
-  case FONT_DWRITE:
+  case FontType::DWRITE:
     {
       return new ScaledFontDWrite(aData, aSize, aFaceIndex, aGlyphSize);
     }
@@ -643,6 +698,10 @@ TemporaryRef<DataSourceSurface>
 Factory::CreateDataSourceSurface(const IntSize &aSize,
                                  SurfaceFormat aFormat)
 {
+  if (!CheckSurfaceSize(aSize)) {
+    return nullptr;
+  }
+
   RefPtr<SourceSurfaceAlignedRawData> newSurf = new SourceSurfaceAlignedRawData();
   if (newSurf->Init(aSize, aFormat)) {
     return newSurf;

@@ -136,7 +136,6 @@ NS_INTERFACE_MAP_BEGIN(nsWebBrowser)
     NS_INTERFACE_MAP_ENTRY(nsIScrollable)
     NS_INTERFACE_MAP_ENTRY(nsITextScroll)
     NS_INTERFACE_MAP_ENTRY(nsIDocShellTreeItem)
-    NS_INTERFACE_MAP_ENTRY(nsIDocShellTreeNode)
     NS_INTERFACE_MAP_ENTRY(nsIInterfaceRequestor)
     NS_INTERFACE_MAP_ENTRY(nsIWebBrowserSetup)
     NS_INTERFACE_MAP_ENTRY(nsIWebBrowserPersist)
@@ -430,11 +429,17 @@ NS_IMETHODIMP nsWebBrowser::NameEquals(const char16_t *aName, bool *_retval)
     return NS_OK;
 }
 
+/* virtual */ int32_t
+nsWebBrowser::ItemType()
+{
+   return mContentType;
+}
+
 NS_IMETHODIMP nsWebBrowser::GetItemType(int32_t* aItemType)
 {
    NS_ENSURE_ARG_POINTER(aItemType);
 
-   *aItemType = mContentType;
+   *aItemType = ItemType();
    return NS_OK;
 }
 

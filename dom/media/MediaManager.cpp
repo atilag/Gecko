@@ -105,7 +105,7 @@ static nsresult CompareDictionaries(JSContext* aCx, JSObject *aA,
     if (bprop.isUndefined()) {
       // Unknown property found in A. Bail with name
       JS::Rooted<JS::Value> nameval(aCx);
-      bool success = JS_IdToValue(aCx, props[i], nameval.address());
+      bool success = JS_IdToValue(aCx, props[i], &nameval);
       NS_ENSURE_TRUE(success, NS_ERROR_UNEXPECTED);
 
       JS::Rooted<JSString*> namestr(aCx, JS::ToString(aCx, nameval));
@@ -878,6 +878,7 @@ public:
     if (NS_IsMainThread()) {
       // This is safe since we're on main-thread, and the window can only
       // be invalidated from the main-thread (see OnNavigation)
+      nsCOMPtr<nsIDOMGetUserMediaSuccessCallback> success(mSuccess);
       nsCOMPtr<nsIDOMGetUserMediaErrorCallback> error(mError);
       error->OnError(aErrorMsg);
 
@@ -1848,14 +1849,13 @@ MediaManager::MediaCaptureWindowStateInternal(nsIDOMWindow* aWindow, bool* aVide
     }
 
     // iterate any children of *this* window (iframes, etc)
-    nsCOMPtr<nsIDocShellTreeNode> node =
-      do_QueryInterface(piWin->GetDocShell());
-    if (node) {
+    nsCOMPtr<nsIDocShell> docShell = piWin->GetDocShell();
+    if (docShell) {
       int32_t i, count;
-      node->GetChildCount(&count);
+      docShell->GetChildCount(&count);
       for (i = 0; i < count; ++i) {
         nsCOMPtr<nsIDocShellTreeItem> item;
-        node->GetChildAt(i, getter_AddRefs(item));
+        docShell->GetChildAt(i, getter_AddRefs(item));
         nsCOMPtr<nsPIDOMWindow> win = do_GetInterface(item);
 
         MediaCaptureWindowStateInternal(win, aVideo, aAudio);

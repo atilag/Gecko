@@ -29,8 +29,6 @@
 #include "AutoMaskData.h"
 #include "gfx2DGlue.h"
 
-struct gfxMatrix;
-
 using namespace mozilla::gfx;
 
 namespace mozilla {
@@ -99,7 +97,7 @@ BasicThebesLayer::PaintThebes(gfxContext* aContext,
         groupContext = aContext;
       }
       SetAntialiasingFlags(this, groupContext);
-      aCallback(this, groupContext, toDraw, CLIP_NONE, nsIntRegion(), aCallbackData);
+      aCallback(this, groupContext, toDraw, DrawRegionClip::CLIP_NONE, nsIntRegion(), aCallbackData);
       if (needsGroup) {
         BasicManager()->PopGroupToSourceWithCachedSurface(aContext, groupContext);
         if (needsClipToVisibleRegion) {
@@ -126,16 +124,16 @@ BasicThebesLayer::PaintThebes(gfxContext* aContext,
   // is internal to basic layers
   AutoMaskData mask;
   gfxASurface* maskSurface = nullptr;
-  const gfxMatrix* maskTransform = nullptr;
+  Matrix maskTransform;
   if (GetMaskData(aMaskLayer, &mask)) {
     maskSurface = mask.GetSurface();
-    maskTransform = &mask.GetTransform();
+    maskTransform = mask.GetTransform();
   }
 
   if (!IsHidden() && !clipExtents.IsEmpty()) {
     mContentClient->DrawTo(this, aContext->GetDrawTarget(), opacity,
                            CompositionOpForOp(GetOperator()),
-                           maskSurface, maskTransform);
+                           maskSurface, &maskTransform);
   }
 
   for (uint32_t i = 0; i < readbackUpdates.Length(); ++i) {
@@ -149,7 +147,7 @@ BasicThebesLayer::PaintThebes(gfxContext* aContext,
       ctx->Translate(gfxPoint(offset.x, offset.y));
       mContentClient->DrawTo(this, ctx->GetDrawTarget(), 1.0,
                              CompositionOpForOp(ctx->CurrentOperator()),
-                             maskSurface, maskTransform);
+                             maskSurface, &maskTransform);
       update.mLayer->GetSink()->EndUpdate(ctx, update.mUpdateRect + offset);
     }
   }
@@ -169,11 +167,6 @@ BasicThebesLayer::Validate(LayerManager::DrawThebesLayerCallback aCallback,
     return;
   }
 
-  bool canUseOpaqueSurface = CanUseOpaqueSurface();
-  ContentType contentType =
-    canUseOpaqueSurface ? GFX_CONTENT_COLOR :
-                          GFX_CONTENT_COLOR_ALPHA;
-
   uint32_t flags = 0;
 #ifndef MOZ_WIDGET_ANDROID
   if (BasicManager()->CompositorMightResample()) {
@@ -189,31 +182,30 @@ BasicThebesLayer::Validate(LayerManager::DrawThebesLayerCallback aCallback,
     flags |= RotatedContentBuffer::PAINT_NO_ROTATION;
   }
   PaintState state =
-    mContentClient->BeginPaintBuffer(this, contentType, flags);
+    mContentClient->BeginPaintBuffer(this, flags);
   mValidRegion.Sub(mValidRegion, state.mRegionToInvalidate);
 
-  if (state.mTarget) {
+  if (DrawTarget* target = mContentClient->BorrowDrawTargetForPainting(this, state)) {
     // The area that became invalid and is visible needs to be repainted
     // (this could be the whole visible area if our buffer switched
     // from RGB to RGBA, because we might need to repaint with
     // subpixel AA)
     state.mRegionToInvalidate.And(state.mRegionToInvalidate,
                                   GetEffectiveVisibleRegion());
-    nsIntRegion extendedDrawRegion = state.mRegionToDraw;
-    SetAntialiasingFlags(this, state.mTarget);
+    SetAntialiasingFlags(this, target);
 
     RenderTraceInvalidateStart(this, "FFFF00", state.mRegionToDraw.GetBounds());
 
-    nsRefPtr<gfxContext> ctx = gfxContext::ContextForDrawTarget(state.mTarget);
+    nsRefPtr<gfxContext> ctx = gfxContext::ContextForDrawTarget(target);
     PaintBuffer(ctx,
-                state.mRegionToDraw, extendedDrawRegion, state.mRegionToInvalidate,
+                state.mRegionToDraw, state.mRegionToDraw, state.mRegionToInvalidate,
                 state.mDidSelfCopy,
                 state.mClip,
                 aCallback, aCallbackData);
     MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) PaintThebes", this));
     Mutated();
     ctx = nullptr;
-    mContentClient->ReturnDrawTarget(state.mTarget);
+    mContentClient->ReturnDrawTargetToBuffer(target);
 
     RenderTraceInvalidateEnd(this, "FFFF00");
   } else {

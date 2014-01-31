@@ -82,7 +82,7 @@ MakeContext ()
 
    surface = gfxPlatform::GetPlatform()->
        CreateOffscreenSurface(gfxIntSize(size, size),
-                              gfxASurface::ContentFromFormat(gfxImageFormatRGB24));
+                              gfxASurface::ContentFromFormat(gfxImageFormat::RGB24));
    nsRefPtr<gfxContext> ctx = new gfxContext(surface);
    return ctx.forget();
 }
@@ -92,7 +92,7 @@ TEST(Gfx, WordCache) {
 
    nsRefPtr<gfxContext> ctx = MakeContext();
    {
-       gfxFontStyle style (mozilla::gfx::FONT_STYLE_NORMAL,
+       gfxFontStyle style (mozilla::gfx::FontStyle::NORMAL,
                            139,
                            10.0,
                            0,

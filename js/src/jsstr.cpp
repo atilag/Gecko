@@ -28,7 +28,6 @@
 #include "jsapi.h"
 #include "jsarray.h"
 #include "jsatom.h"
-#include "jsautooplen.h"
 #include "jsbool.h"
 #include "jscntxt.h"
 #include "jsgc.h"
@@ -42,6 +41,7 @@
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
 #include "vm/NumericConversions.h"
+#include "vm/Opcodes.h"
 #include "vm/RegExpObject.h"
 #include "vm/RegExpStatics.h"
 #include "vm/ScopeObject.h"
@@ -426,7 +426,7 @@ const Class StringObject::class_ = {
  * calling CheckObjectCoercible(this), then returning ToString(this), as all
  * String.prototype.* methods do (other than toString and valueOf).
  */
-static JS_ALWAYS_INLINE JSString *
+static MOZ_ALWAYS_INLINE JSString *
 ThisToStringForStringProto(JSContext *cx, CallReceiver call)
 {
     JS_CHECK_RECURSION(cx, return nullptr);
@@ -458,7 +458,7 @@ ThisToStringForStringProto(JSContext *cx, CallReceiver call)
     return str;
 }
 
-JS_ALWAYS_INLINE bool
+MOZ_ALWAYS_INLINE bool
 IsString(HandleValue v)
 {
     return v.isString() || (v.isObject() && v.toObject().is<StringObject>());
@@ -484,7 +484,7 @@ str_quote(JSContext *cx, unsigned argc, Value *vp)
     return true;
 }
 
-JS_ALWAYS_INLINE bool
+MOZ_ALWAYS_INLINE bool
 str_toSource_impl(JSContext *cx, CallArgs args)
 {
     JS_ASSERT(IsString(args.thisv()));
@@ -517,7 +517,7 @@ str_toSource(JSContext *cx, unsigned argc, Value *vp)
 
 #endif /* JS_HAS_TOSOURCE */
 
-JS_ALWAYS_INLINE bool
+MOZ_ALWAYS_INLINE bool
 str_toString_impl(JSContext *cx, CallArgs args)
 {
     JS_ASSERT(IsString(args.thisv()));
@@ -539,7 +539,7 @@ js_str_toString(JSContext *cx, unsigned argc, Value *vp)
  * Java-like string native methods.
  */
 
-static JS_ALWAYS_INLINE bool
+static MOZ_ALWAYS_INLINE bool
 ValueToIntegerRange(JSContext *cx, HandleValue v, int32_t *out)
 {
     if (v.isInt32()) {
@@ -954,20 +954,20 @@ js_BoyerMooreHorspool(const jschar *text, uint32_t textlen,
 
 struct MemCmp {
     typedef uint32_t Extent;
-    static JS_ALWAYS_INLINE Extent computeExtent(const jschar *, uint32_t patlen) {
+    static MOZ_ALWAYS_INLINE Extent computeExtent(const jschar *, uint32_t patlen) {
         return (patlen - 1) * sizeof(jschar);
     }
-    static JS_ALWAYS_INLINE bool match(const jschar *p, const jschar *t, Extent extent) {
+    static MOZ_ALWAYS_INLINE bool match(const jschar *p, const jschar *t, Extent extent) {
         return memcmp(p, t, extent) == 0;
     }
 };
 
 struct ManualCmp {
     typedef const jschar *Extent;
-    static JS_ALWAYS_INLINE Extent computeExtent(const jschar *pat, uint32_t patlen) {
+    static MOZ_ALWAYS_INLINE Extent computeExtent(const jschar *pat, uint32_t patlen) {
         return pat + patlen;
     }
-    static JS_ALWAYS_INLINE bool match(const jschar *p, const jschar *t, Extent extent) {
+    static MOZ_ALWAYS_INLINE bool match(const jschar *p, const jschar *t, Extent extent) {
         for (; p != extent; ++p, ++t) {
             if (*p != *t)
                 return false;
@@ -1022,7 +1022,7 @@ UnrolledMatch(const jschar *text, uint32_t textlen, const jschar *pat, uint32_t 
     return -1;
 }
 
-static JS_ALWAYS_INLINE int
+static MOZ_ALWAYS_INLINE int
 StringMatch(const jschar *text, uint32_t textlen,
             const jschar *pat, uint32_t patlen)
 {
@@ -1114,7 +1114,7 @@ class StringSegmentRange
       : stack(cx), cur(cx)
     {}
 
-    JS_WARN_UNUSED_RESULT bool init(JSString *str) {
+    MOZ_WARN_UNUSED_RESULT bool init(JSString *str) {
         JS_ASSERT(stack.empty());
         return settle(str);
     }
@@ -1128,7 +1128,7 @@ class StringSegmentRange
         return cur;
     }
 
-    JS_WARN_UNUSED_RESULT bool popFront() {
+    MOZ_WARN_UNUSED_RESULT bool popFront() {
         JS_ASSERT(!empty());
         if (stack.empty()) {
             cur = nullptr;
@@ -1422,7 +1422,7 @@ str_lastIndexOf(JSContext *cx, unsigned argc, Value *vp)
     return true;
 }
 
-/* ES6 20120927 draft 15.5.4.22. */
+/* ES6 20131108 draft 21.1.3.18. */
 static bool
 str_startsWith(JSContext *cx, unsigned argc, Value *vp)
 {
@@ -1433,12 +1433,19 @@ str_startsWith(JSContext *cx, unsigned argc, Value *vp)
     if (!str)
         return false;
 
-    // Steps 4 and 5
+    // Step 4
+    if (args.get(0).isObject() && IsObjectWithClass(args[0], ESClass_RegExp, cx)) {
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INVALID_ARG_TYPE,
+                             "first", "", "Regular Expression");
+        return false;
+    }
+
+    // Steps 5 and 6
     Rooted<JSLinearString*> searchStr(cx, ArgToRootedString(cx, args, 0));
     if (!searchStr)
         return false;
 
-    // Steps 6 and 7
+    // Steps 7 and 8
     uint32_t pos = 0;
     if (args.hasDefined(1)) {
         if (args[1].isInt32()) {
@@ -1452,31 +1459,31 @@ str_startsWith(JSContext *cx, unsigned argc, Value *vp)
         }
     }
 
-    // Step 8
+    // Step 9
     uint32_t textLen = str->length();
     const jschar *textChars = str->getChars(cx);
     if (!textChars)
         return false;
 
-    // Step 9
+    // Step 10
     uint32_t start = Min(Max(pos, 0U), textLen);
 
-    // Step 10
+    // Step 11
     uint32_t searchLen = searchStr->length();
     const jschar *searchChars = searchStr->chars();
 
-    // Step 11
+    // Step 12
     if (searchLen + start < searchLen || searchLen + start > textLen) {
         args.rval().setBoolean(false);
         return true;
     }
 
-    // Steps 12 and 13
+    // Steps 13 and 14
     args.rval().setBoolean(PodEqual(textChars + start, searchChars, searchLen));
     return true;
 }
 
-/* ES6 20120708 draft 15.5.4.23. */
+/* ES6 20131108 draft 21.1.3.7. */
 static bool
 str_endsWith(JSContext *cx, unsigned argc, Value *vp)
 {
@@ -1487,15 +1494,25 @@ str_endsWith(JSContext *cx, unsigned argc, Value *vp)
     if (!str)
         return false;
 
-    // Steps 4 and 5
+    // Step 4
+    if (args.get(0).isObject() && IsObjectWithClass(args[0], ESClass_RegExp, cx)) {
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INVALID_ARG_TYPE,
+                             "first", "", "Regular Expression");
+        return false;
+    }
+
+    // Steps 5 and 6
     Rooted<JSLinearString *> searchStr(cx, ArgToRootedString(cx, args, 0));
     if (!searchStr)
         return false;
 
-    // Step 6
+    // Step 7
     uint32_t textLen = str->length();
+    const jschar *textChars = str->getChars(cx);
+    if (!textChars)
+        return false;
 
-    // Steps 7 and 8
+    // Steps 8 and 9
     uint32_t pos = textLen;
     if (args.hasDefined(1)) {
         if (args[1].isInt32()) {
@@ -1509,28 +1526,23 @@ str_endsWith(JSContext *cx, unsigned argc, Value *vp)
         }
     }
 
-    // Step 6
-    const jschar *textChars = str->getChars(cx);
-    if (!textChars)
-        return false;
-
-    // Step 9
+    // Step 10
     uint32_t end = Min(Max(pos, 0U), textLen);
 
-    // Step 10
+    // Step 11
     uint32_t searchLen = searchStr->length();
     const jschar *searchChars = searchStr->chars();
 
-    // Step 12
+    // Step 13 (reordered)
     if (searchLen > end) {
         args.rval().setBoolean(false);
         return true;
     }
 
-    // Step 11
+    // Step 12
     uint32_t start = end - searchLen;
 
-    // Steps 13 and 14
+    // Steps 14 and 15
     args.rval().setBoolean(PodEqual(textChars + start, searchChars, searchLen));
     return true;
 }
@@ -1715,6 +1727,13 @@ class MOZ_STACK_CLASS StringRegExpGuard
         JS_ASSERT(ObjectClassIs(obj_, ESClass_RegExp, cx));
 
         if (!RegExpToShared(cx, obj_, &re_))
+            return false;
+        return true;
+    }
+
+    bool init(JSContext *cx, HandleString pattern) {
+        fm.patstr = AtomizeString(cx, pattern);
+        if (!fm.patstr)
             return false;
         return true;
     }
@@ -2437,7 +2456,7 @@ ReplaceRegExp(JSContext *cx, RegExpStatics *res, ReplaceData &rdata)
 
 static bool
 BuildFlatReplacement(JSContext *cx, HandleString textstr, HandleString repstr,
-                     const FlatMatch &fm, CallArgs *args)
+                     const FlatMatch &fm, MutableHandleValue rval)
 {
     RopeBuilder builder(cx);
     size_t match = fm.match();
@@ -2509,7 +2528,7 @@ BuildFlatReplacement(JSContext *cx, HandleString textstr, HandleString repstr,
         }
     }
 
-    args->rval().setString(builder.result());
+    rval.setString(builder.result());
     return true;
 }
 
@@ -2521,7 +2540,7 @@ BuildFlatReplacement(JSContext *cx, HandleString textstr, HandleString repstr,
  */
 static inline bool
 BuildDollarReplacement(JSContext *cx, JSString *textstrArg, JSLinearString *repstr,
-                       const jschar *firstDollar, const FlatMatch &fm, CallArgs *args)
+                       const jschar *firstDollar, const FlatMatch &fm, MutableHandleValue rval)
 {
     Rooted<JSLinearString*> textstr(cx, textstrArg->ensureLinear(cx));
     if (!textstr)
@@ -2593,7 +2612,7 @@ BuildDollarReplacement(JSContext *cx, JSString *textstrArg, JSLinearString *reps
            builder.append(rightSide));
 #undef ENSURE
 
-    args->rval().setString(builder.result());
+    rval.setString(builder.result());
     return true;
 }
 
@@ -2849,10 +2868,46 @@ js::str_replace_regexp_raw(JSContext *cx, HandleString string, HandleObject rege
 }
 
 static inline bool
+StrReplaceString(JSContext *cx, ReplaceData &rdata, const FlatMatch &fm, MutableHandleValue rval)
+{
+    /*
+     * Note: we could optimize the text.length == pattern.length case if we wanted,
+     * even in the presence of dollar metachars.
+     */
+    if (rdata.dollar)
+        return BuildDollarReplacement(cx, rdata.str, rdata.repstr, rdata.dollar, fm, rval);
+    return BuildFlatReplacement(cx, rdata.str, rdata.repstr, fm, rval);
+}
+
+static const uint32_t ReplaceOptArg = 2;
+
+bool
+js::str_replace_string_raw(JSContext *cx, HandleString string, HandleString pattern,
+                          HandleString replacement, MutableHandleValue rval)
+{
+    ReplaceData rdata(cx);
+
+    rdata.str = string;
+    JSLinearString *repl = replacement->ensureLinear(cx);
+    if (!repl)
+        return false;
+    rdata.setReplacementString(repl);
+
+    if (!rdata.g.init(cx, pattern))
+        return false;
+    const FlatMatch *fm = rdata.g.tryFlatMatch(cx, rdata.str, ReplaceOptArg, ReplaceOptArg, false);
+
+    if (fm->match() < 0) {
+        rval.setString(string);
+        return true;
+    }
+
+    return StrReplaceString(cx, rdata, *fm, rval);
+}
+
+static inline bool
 str_replace_flat_lambda(JSContext *cx, CallArgs outerArgs, ReplaceData &rdata, const FlatMatch &fm)
 {
-    JS_ASSERT(fm.match() >= 0);
-
     RootedString matchStr(cx, js_NewDependentString(cx, rdata.str, fm.match(), fm.patternLength()));
     if (!matchStr)
         return false;
@@ -2899,8 +2954,6 @@ str_replace_flat_lambda(JSContext *cx, CallArgs outerArgs, ReplaceData &rdata, c
     return true;
 }
 
-static const uint32_t ReplaceOptArg = 2;
-
 /*
  * Pattern match the script to check if it is is indexing into a particular
  * object, e.g. 'function(a) { return b[a]; }'. Avoid calling the script in
@@ -2933,13 +2986,13 @@ LambdaIsGetElem(JSContext *cx, JSObject &lambda, MutableHandleObject pobj)
         return true;
     ScopeCoordinate sc(pc);
     ScopeObject *scope = &fun->environment()->as<ScopeObject>();
-    for (unsigned i = 0; i < sc.hops; ++i)
+    for (unsigned i = 0; i < sc.hops(); ++i)
         scope = &scope->enclosingScope().as<ScopeObject>();
     Value b = scope->aliasedVar(sc);
     pc += JSOP_GETALIASEDVAR_LENGTH;
 
     /* Look for 'a' to be the lambda's first argument. */
-    if (JSOp(*pc) != JSOP_GETARG || GET_SLOTNO(pc) != 0)
+    if (JSOp(*pc) != JSOP_GETARG || GET_ARGNO(pc) != 0)
         return true;
     pc += JSOP_GETARG_LENGTH;
 
@@ -3005,6 +3058,7 @@ js::str_replace(JSContext *cx, unsigned argc, Value *vp)
      */
 
     const FlatMatch *fm = rdata.g.tryFlatMatch(cx, rdata.str, ReplaceOptArg, args.length(), false);
+
     if (!fm) {
         if (cx->isExceptionPending())  /* oom in RopeMatch in tryFlatMatch */
             return false;
@@ -3018,15 +3072,7 @@ js::str_replace(JSContext *cx, unsigned argc, Value *vp)
 
     if (rdata.lambda)
         return str_replace_flat_lambda(cx, args, rdata, *fm);
-
-    /*
-     * Note: we could optimize the text.length == pattern.length case if we wanted,
-     * even in the presence of dollar metachars.
-     */
-    if (rdata.dollar)
-        return BuildDollarReplacement(cx, rdata.str, rdata.repstr, rdata.dollar, *fm, &args);
-
-    return BuildFlatReplacement(cx, rdata.str, rdata.repstr, *fm, &args);
+    return StrReplaceString(cx, rdata, *fm, args.rval());
 }
 
 namespace {

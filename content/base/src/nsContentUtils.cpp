@@ -3219,13 +3219,12 @@ nsContentUtils::IsInChromeDocshell(nsIDocument *aDocument)
     return IsInChromeDocshell(aDocument->GetDisplayDocument());
   }
 
-  nsCOMPtr<nsIDocShellTreeItem> docShell(aDocument->GetDocShell());
-  int32_t itemType = nsIDocShellTreeItem::typeContent;
-  if (docShell) {
-    docShell->GetItemType(&itemType);
+  nsCOMPtr<nsIDocShellTreeItem> docShell = aDocument->GetDocShell();
+  if (!docShell) {
+    return false;
   }
 
-  return itemType == nsIDocShellTreeItem::typeChrome;
+  return docShell->ItemType() == nsIDocShellTreeItem::typeChrome;
 }
 
 // static
@@ -5042,13 +5041,8 @@ nsContentUtils::CheckForSubFrameDrop(nsIDragSession* aDragSession,
     return true;
   }
 
-  int32_t type = -1;
-  if (NS_FAILED(tdsti->GetItemType(&type))) {
-    return true;
-  }
-
   // Always allow dropping onto chrome shells.
-  if (type == nsIDocShellTreeItem::typeChrome) {
+  if (tdsti->ItemType() == nsIDocShellTreeItem::typeChrome) {
     return false;
   }
 
@@ -5635,7 +5629,7 @@ nsContentUtils::WrapNative(JSContext *cx, JS::Handle<JSObject*> scope,
   nsresult rv = NS_OK;
   AutoPushJSContext context(cx);
   rv = sXPConnect->WrapNativeToJSVal(context, scope, native, cache, aIID,
-                                     aAllowWrapping, vp.address());
+                                     aAllowWrapping, vp);
   return rv;
 }
 
@@ -5881,14 +5875,13 @@ nsContentUtils::FlushLayoutForTree(nsIDOMWindow* aWindow)
         doc->FlushPendingNotifications(Flush_Layout);
     }
 
-    nsCOMPtr<nsIDocShellTreeNode> node =
-        do_QueryInterface(piWin->GetDocShell());
-    if (node) {
+    nsCOMPtr<nsIDocShell> docShell = piWin->GetDocShell();
+    if (docShell) {
         int32_t i = 0, i_end;
-        node->GetChildCount(&i_end);
+        docShell->GetChildCount(&i_end);
         for (; i < i_end; ++i) {
             nsCOMPtr<nsIDocShellTreeItem> item;
-            node->GetChildAt(i, getter_AddRefs(item));
+            docShell->GetChildAt(i, getter_AddRefs(item));
             nsCOMPtr<nsIDOMWindow> win = do_GetInterface(item);
             if (win) {
                 FlushLayoutForTree(win);

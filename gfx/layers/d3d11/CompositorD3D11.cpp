@@ -65,7 +65,7 @@ CompositorD3D11::CompositorD3D11(nsIWidget* aWidget)
   , mHwnd(nullptr)
   , mDisableSequenceForNextFrame(false)
 {
-  sBackend = LAYERS_D3D11;
+  sBackend = LayersBackend::LAYERS_D3D11;
 }
 
 CompositorD3D11::~CompositorD3D11()
@@ -341,7 +341,7 @@ CompositorD3D11::Initialize()
 TemporaryRef<DataTextureSource>
 CompositorD3D11::CreateDataTextureSource(TextureFlags aFlags)
 {
-  RefPtr<DataTextureSource> result = new DataTextureSourceD3D11(gfx::FORMAT_UNKNOWN,
+  RefPtr<DataTextureSource> result = new DataTextureSourceD3D11(gfx::SurfaceFormat::UNKNOWN,
                                                                 this);
   return result.forget();
 }
@@ -352,7 +352,7 @@ CompositorD3D11::GetTextureFactoryIdentifier()
   TextureFactoryIdentifier ident;
   ident.mMaxTextureSize = GetMaxTextureSize();
   ident.mParentProcessId = XRE_GetProcessType();
-  ident.mParentBackend = LAYERS_D3D11;
+  ident.mParentBackend = LayersBackend::LAYERS_D3D11;
   return ident;
 }
 
@@ -457,7 +457,7 @@ CompositorD3D11::SetRenderTarget(CompositingRenderTarget* aRenderTarget)
   ID3D11RenderTargetView* view = newRT->mRTView;
   mCurrentRT = newRT;
   mContext->OMSetRenderTargets(1, &view, nullptr);
-  PrepareViewport(newRT->GetSize(), gfxMatrix());
+  PrepareViewport(newRT->GetSize(), gfx::Matrix());
 }
 
 void
@@ -592,7 +592,7 @@ CompositorD3D11::DrawQuad(const gfx::Rect& aRect,
       EffectYCbCr* ycbcrEffect =
         static_cast<EffectYCbCr*>(aEffectChain.mPrimaryEffect.get());
 
-      SetSamplerForFilter(FILTER_LINEAR);
+      SetSamplerForFilter(Filter::LINEAR);
 
       mVSConstants.textureCoords = ycbcrEffect->mTextureCoords;
 
@@ -669,7 +669,7 @@ CompositorD3D11::DrawQuad(const gfx::Rect& aRect,
 void
 CompositorD3D11::BeginFrame(const nsIntRegion& aInvalidRegion,
                             const Rect* aClipRectIn,
-                            const gfxMatrix& aTransform,
+                            const gfx::Matrix& aTransform,
                             const Rect& aRenderBounds,
                             Rect* aClipRectOut,
                             Rect* aRenderBoundsOut)
@@ -685,8 +685,8 @@ CompositorD3D11::BeginFrame(const nsIntRegion& aInvalidRegion,
 
   UpdateRenderTarget();
 
-  // Failed to create a render target.
-  if (!mDefaultRT ||
+  // Failed to create a render target or the view.
+  if (!mDefaultRT || !mDefaultRT->mRTView ||
       mSize.width == 0 || mSize.height == 0) {
     *aRenderBoundsOut = Rect();
     return;
@@ -748,7 +748,7 @@ CompositorD3D11::EndFrame()
 
 void
 CompositorD3D11::PrepareViewport(const gfx::IntSize& aSize,
-                                 const gfxMatrix& aWorldTransform)
+                                 const gfx::Matrix& aWorldTransform)
 {
   D3D11_VIEWPORT viewport;
   viewport.MaxDepth = 1.0f;
@@ -760,14 +760,14 @@ CompositorD3D11::PrepareViewport(const gfx::IntSize& aSize,
 
   mContext->RSSetViewports(1, &viewport);
 
-  gfxMatrix viewMatrix;
-  viewMatrix.Translate(-gfxPoint(1.0, -1.0));
+  Matrix viewMatrix;
+  viewMatrix.Translate(-1.0, 1.0);
   viewMatrix.Scale(2.0f / float(aSize.width), 2.0f / float(aSize.height));
   viewMatrix.Scale(1.0f, -1.0f);
 
   viewMatrix = aWorldTransform * viewMatrix;
 
-  gfx3DMatrix projection = gfx3DMatrix::From2D(viewMatrix);
+  Matrix4x4 projection = Matrix4x4::From2D(viewMatrix);
   projection._33 = 0.0f;
 
   memcpy(&mVSConstants.projection, &projection, sizeof(mVSConstants.projection));
@@ -919,10 +919,10 @@ CompositorD3D11::SetSamplerForFilter(Filter aFilter)
   ID3D11SamplerState *sampler;
   switch (aFilter) {
   default:
-  case FILTER_LINEAR:
+  case Filter::LINEAR:
     sampler = mAttachments->mLinearSamplerState;
     break;
-  case FILTER_POINT:
+  case Filter::POINT:
     sampler = mAttachments->mPointSamplerState;
     break;
   }
@@ -957,7 +957,7 @@ CompositorD3D11::PaintToTarget()
     Factory::CreateWrappingDataSourceSurface((uint8_t*)map.pData,
                                              map.RowPitch,
                                              IntSize(bbDesc.Width, bbDesc.Height),
-                                             FORMAT_B8G8R8A8);
+                                             SurfaceFormat::B8G8R8A8);
   mTarget->CopySurface(sourceSurface,
                        IntRect(0, 0, bbDesc.Width, bbDesc.Height),
                        IntPoint());

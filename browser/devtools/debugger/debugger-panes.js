@@ -1868,7 +1868,11 @@ VariableBubbleView.prototype = {
     if (VariablesView.isPrimitive({ value: objectActor })) {
       let className = VariablesView.getClass(objectActor);
       let textContent = VariablesView.getString(objectActor);
-      this._tooltip.setTextContent([textContent], className, "plain");
+      this._tooltip.setTextContent({
+        messages: [textContent],
+        messagesClass: className,
+        containerClass: "plain"
+      });
     } else {
       this._tooltip.setVariableContent(objectActor, {
         searchPlaceholder: L10N.getStr("emptyPropertiesFilterText"),
@@ -1902,6 +1906,16 @@ VariableBubbleView.prototype = {
   hideContents: function() {
     clearNamedTimeout("editor-mouse-move");
     this._tooltip.hide();
+  },
+
+  /**
+   * Checks whether the inspection popup is shown.
+   *
+   * @return boolean
+   *         True if the panel is shown or showing, false otherwise.
+   */
+  contentsShown: function() {
+    return this._tooltip.isShown();
   },
 
   /**
@@ -2479,7 +2493,7 @@ EventListenersView.prototype = Heritage.extend(WidgetMethods, {
 
     // Check all the event items in this group.
     this.items
-      .filter(e => e.description == description)
+      .filter(e => e.attachment.group == description)
       .forEach(e => this.callMethod("checkItem", e.target, checked));
   },
 

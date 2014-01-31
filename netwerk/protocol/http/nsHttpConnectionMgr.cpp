@@ -23,6 +23,7 @@
 #include "nsITransport.h"
 #include "nsISocketTransportService.h"
 #include <algorithm>
+#include "Http2Compression.h"
 
 // defined by the socket transport service while active
 extern PRThread *gSocketThread;
@@ -153,6 +154,7 @@ nsHttpConnectionMgr::Shutdown()
     // wait for shutdown event to complete
     while (!shutdown)
         NS_ProcessNextEvent(NS_GetCurrentThread());
+    Http2CompressionCleanup();
 
     return NS_OK;
 }
@@ -2598,7 +2600,8 @@ nsHttpConnectionMgr::OnMsgSpeculativeConnect(int32_t, void *param)
     }
 
     if (mNumHalfOpenConns < parallelSpeculativeConnectLimit &&
-        (ignoreIdle || !ent->mIdleConns.Length()) &&
+        ((ignoreIdle && (ent->mIdleConns.Length() < parallelSpeculativeConnectLimit)) ||
+         !ent->mIdleConns.Length()) &&
         !RestrictConnections(ent, ignorePossibleSpdyConnections) &&
         !AtActiveConnectionLimit(ent, args->mTrans->Caps())) {
         CreateTransport(ent, args->mTrans, args->mTrans->Caps(), true);

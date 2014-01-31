@@ -64,7 +64,7 @@ CodeGeneratorShared::CodeGeneratorShared(MIRGenerator *gen, LIRGraph *graph, Mac
         // An MAsmJSCall does not align the stack pointer at calls sites but instead
         // relies on the a priori stack adjustment (in the prologue) on platforms
         // (like x64) which require the stack to be aligned.
-#ifdef JS_CPU_ARM
+#ifdef JS_CODEGEN_ARM
         bool forceAlign = true;
 #else
         bool forceAlign = false;
@@ -261,7 +261,7 @@ CodeGeneratorShared::encode(LSnapshot *snapshot)
     {
         MResumePoint *mir = *it;
         MBasicBlock *block = mir->block();
-        JSFunction *fun = block->info().fun();
+        JSFunction *fun = block->info().funMaybeLazy();
         JSScript *script = block->info().script();
         jsbytecode *pc = mir->pc();
         uint32_t exprStack = mir->stackDepth() - block->info().ninvoke();

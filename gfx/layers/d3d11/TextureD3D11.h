@@ -41,6 +41,8 @@ public:
 
   virtual void Unlock() MOZ_OVERRIDE;
 
+  virtual bool IsLocked() const MOZ_OVERRIDE { return mIsLocked; }
+
   virtual bool ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor) MOZ_OVERRIDE;
 
   virtual gfx::IntSize GetSize() const MOZ_OVERRIDE { return mSize; }
@@ -64,6 +66,7 @@ protected:
   RefPtr<gfx::DrawTarget> mDrawTarget;
   gfx::SurfaceFormat mFormat;
   bool mIsLocked;
+  bool mNeedsClear;
 };
 
 /**
@@ -235,7 +238,7 @@ public:
   virtual gfx::DrawTarget* LockDrawTarget() MOZ_OVERRIDE;
   virtual gfx::BackendType BackendType() MOZ_OVERRIDE
   {
-    return gfx::BACKEND_DIRECT2D;
+    return gfx::BackendType::DIRECT2D;
   }
 
   virtual void Unlock() MOZ_OVERRIDE;

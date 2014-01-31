@@ -105,7 +105,8 @@ class GlobalObject : public JSObject
     static const unsigned DATE_TIME_FORMAT_PROTO  = NUMBER_FORMAT_PROTO + 1;
     static const unsigned REGEXP_STATICS          = DATE_TIME_FORMAT_PROTO + 1;
     static const unsigned WARNED_WATCH_DEPRECATED = REGEXP_STATICS + 1;
-    static const unsigned RUNTIME_CODEGEN_ENABLED = WARNED_WATCH_DEPRECATED + 1;
+    static const unsigned WARNED_PROTO_SETTING_SLOW = WARNED_WATCH_DEPRECATED + 1;
+    static const unsigned RUNTIME_CODEGEN_ENABLED = WARNED_PROTO_SETTING_SLOW + 1;
     static const unsigned DEBUGGERS               = RUNTIME_CODEGEN_ENABLED + 1;
     static const unsigned INTRINSICS              = DEBUGGERS + 1;
     static const unsigned FLOAT32X4_TYPE_OBJECT   = INTRINSICS + 1;
@@ -151,11 +152,19 @@ class GlobalObject : public JSObject
         setSlot(INTRINSICS, ObjectValue(*obj));
     }
 
+    // Emit the specified warning if the given slot in |obj|'s global isn't
+    // true, then set the slot to true.  Thus calling this method warns once
+    // for each global object it's called on, and every other call does
+    // nothing.
+    static bool
+    warnOnceAbout(JSContext *cx, HandleObject obj, uint32_t slot, unsigned errorNumber);
+
   public:
     Value getConstructor(JSProtoKey key) const {
         JS_ASSERT(key <= JSProto_LIMIT);
         return getSlotForCompilation(APPLICATION_SLOTS + key);
     }
+    bool ensureConstructor(JSContext *cx, JSProtoKey key);
 
     void setConstructor(JSProtoKey key, const Value &v) {
         JS_ASSERT(key <= JSProto_LIMIT);
@@ -207,13 +216,16 @@ class GlobalObject : public JSObject
      * Note: A few builtin objects, like JSON and Math, are not constructors,
      * so getConstructor is a bit of a misnomer.
      */
-    bool isStandardClassResolved(const js::Class *clasp) const {
-        JSProtoKey key = JSCLASS_CACHED_PROTO_KEY(clasp);
-
+    bool isStandardClassResolved(JSProtoKey key) const {
         // If the constructor is undefined, then it hasn't been initialized.
         MOZ_ASSERT(getConstructor(key).isUndefined() ||
                    getConstructor(key).isObject());
         return !getConstructor(key).isUndefined();
+    }
+
+    bool isStandardClassResolved(const js::Class *clasp) const {
+        JSProtoKey key = JSCLASS_CACHED_PROTO_KEY(clasp);
+        return isStandardClassResolved(key);
     }
 
   private:
@@ -605,7 +617,20 @@ class GlobalObject : public JSObject
 
     // Warn about use of the deprecated watch/unwatch functions in the global
     // in which |obj| was created, if no prior warning was given.
-    static bool warnOnceAboutWatch(JSContext *cx, HandleObject obj);
+    static bool warnOnceAboutWatch(JSContext *cx, HandleObject obj) {
+        // Temporarily disabled until we've provided a watch/unwatch workaround for
+        // debuggers like Firebug (bug 934669).
+        //return warnOnceAbout(cx, obj, WARNED_WATCH_DEPRECATED, JSMSG_OBJECT_WATCH_DEPRECATED);
+        return true;
+    }
+
+    // Warn about use of the given __proto__ setter to attempt to mutate an
+    // object's [[Prototype]], if no prior warning was given.
+    static bool warnOnceAboutPrototypeMutation(JSContext *cx, HandleObject protoSetter) {
+        // Temporarily disabled until the second half of bug 948583 lands.
+        //return warnOnceAbout(cx, protoSetter, WARNED_PROTO_SETTING_SLOW, JSMSG_PROTO_SETTING_SLOW);
+        return true;
+    }
 
     static bool getOrCreateEval(JSContext *cx, Handle<GlobalObject*> global,
                                 MutableHandleObject eval);

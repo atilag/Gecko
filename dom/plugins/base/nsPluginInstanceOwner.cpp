@@ -168,6 +168,14 @@ nsPluginInstanceOwner::GetImageContainer()
   // for what we do on other versions.
   if (AndroidBridge::Bridge()->GetAPIVersion() < 11)
     return nullptr;
+
+  LayoutDeviceRect r = GetPluginRect();
+
+  // NotifySize() causes Flash to do a bunch of stuff like ask for surfaces to render
+  // into, set y-flip flags, etc, so we do this at the beginning.
+  gfxSize resolution = mObjectFrame->PresContext()->PresShell()->GetCumulativeResolution();
+  ScreenSize screenSize = (r * LayoutDeviceToScreenScale(resolution.width, resolution.height)).Size();
+  mInstance->NotifySize(nsIntSize(screenSize.width, screenSize.height));
   
   container = LayerManager::CreateImageContainer();
 
@@ -175,22 +183,15 @@ nsPluginInstanceOwner::GetImageContainer()
   nsRefPtr<Image> img = container->CreateImage(&format, 1);
 
   SharedTextureImage::Data data;
-  data.mHandle = mInstance->CreateSharedHandle();
-  data.mShareType = mozilla::gl::SameProcess;
-  data.mInverted = mInstance->Inverted();
-
-  LayoutDeviceRect r = GetPluginRect();
   data.mSize = gfx::IntSize(r.width, r.height);
+  data.mHandle = mInstance->CreateSharedHandle();
+  data.mShareType = mozilla::gl::SharedTextureShareType::SameProcess;
+  data.mInverted = mInstance->Inverted();
 
   SharedTextureImage* pluginImage = static_cast<SharedTextureImage*>(img.get());
   pluginImage->SetData(data);
 
   container->SetCurrentImageInTransaction(img);
-
-  float xResolution = mObjectFrame->PresContext()->GetRootPresContext()->PresShell()->GetXResolution();
-  float yResolution = mObjectFrame->PresContext()->GetRootPresContext()->PresShell()->GetYResolution();
-  ScreenSize screenSize = (r * LayoutDeviceToScreenScale(xResolution, yResolution)).Size();
-  mInstance->NotifySize(nsIntSize(screenSize.width, screenSize.height));
 
   return container.forget();
 #endif
@@ -1503,11 +1504,11 @@ already_AddRefed<ImageContainer> nsPluginInstanceOwner::GetImageContainerForVide
 
   SharedTextureImage::Data data;
 
-  data.mShareType = gl::SameProcess;
+  data.mShareType = gl::SharedTextureShareType::SameProcess;
   data.mHandle = gl::CreateSharedHandle(mInstance->GLContext(),
                                         data.mShareType,
                                         aVideoInfo->mSurfaceTexture,
-                                        gl::SurfaceTexture);
+                                        gl::SharedTextureBufferType::SurfaceTexture);
 
   // The logic below for Honeycomb is just a guess, but seems to work. We don't have a separate
   // inverted flag for video.
@@ -1568,10 +1569,10 @@ void nsPluginInstanceOwner::ExitFullScreen() {
 void nsPluginInstanceOwner::ExitFullScreen(jobject view) {
   JNIEnv* env = AndroidBridge::GetJNIEnv();
 
-  if (env && sFullScreenInstance && sFullScreenInstance->mInstance &&
+  if (sFullScreenInstance && sFullScreenInstance->mInstance &&
       env->IsSameObject(view, (jobject)sFullScreenInstance->mInstance->GetJavaSurface())) {
     sFullScreenInstance->ExitFullScreen();
-  } 
+  }
 }
 
 #endif
@@ -2506,7 +2507,7 @@ void nsPluginInstanceOwner::Paint(gfxContext* aContext,
       aFrameRect.height != pluginSurface->Height()) {
 
     pluginSurface = new gfxImageSurface(gfxIntSize(aFrameRect.width, aFrameRect.height), 
-                                        gfxImageFormatARGB32);
+                                        gfxImageFormat::ARGB32);
     if (!pluginSurface)
       return;
   }

@@ -9,7 +9,7 @@
 #include "gfx2DGlue.h"                  // for Moz2D transition helpers
 #include "ISurfaceAllocator.h"          // for ISurfaceAllocator, etc
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
-#include "mozilla/gfx/Types.h"          // for SurfaceFormat::FORMAT_YUV
+#include "mozilla/gfx/Types.h"          // for SurfaceFormat::SurfaceFormat::YUV
 #include "mozilla/ipc/SharedMemory.h"   // for SharedMemory, etc
 #include "mozilla/layers/ImageClient.h"  // for ImageClient
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor, etc
@@ -31,7 +31,7 @@ SharedPlanarYCbCrImage::SharedPlanarYCbCrImage(ImageClient* aCompositable)
 : PlanarYCbCrImage(nullptr)
 , mCompositable(aCompositable)
 {
-  mTextureClient = aCompositable->CreateBufferTextureClient(gfx::FORMAT_YUV);
+  mTextureClient = aCompositable->CreateBufferTextureClient(gfx::SurfaceFormat::YUV);
   MOZ_COUNT_CTOR(SharedPlanarYCbCrImage);
 }
 
@@ -75,13 +75,23 @@ SharedPlanarYCbCrImage::GetBuffer()
 }
 
 already_AddRefed<gfxASurface>
-SharedPlanarYCbCrImage::GetAsSurface()
+SharedPlanarYCbCrImage::DeprecatedGetAsSurface()
 {
   if (!mTextureClient->IsAllocated()) {
     NS_WARNING("Can't get as surface");
     return nullptr;
   }
-  return PlanarYCbCrImage::GetAsSurface();
+  return PlanarYCbCrImage::DeprecatedGetAsSurface();
+}
+
+TemporaryRef<gfx::SourceSurface>
+SharedPlanarYCbCrImage::GetAsSourceSurface()
+{
+  if (!mTextureClient->IsAllocated()) {
+    NS_WARNING("Can't get as surface");
+    return nullptr;
+  }
+  return PlanarYCbCrImage::GetAsSourceSurface();
 }
 
 void

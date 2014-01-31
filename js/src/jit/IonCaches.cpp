@@ -43,7 +43,7 @@ CodeLocationJump::repoint(JitCode *code, MacroAssembler *masm)
     size_t jumpTableEntryOffset = reinterpret_cast<size_t>(jumpTableEntry_);
 #endif
     if (masm != nullptr) {
-#ifdef JS_CPU_X64
+#ifdef JS_CODEGEN_X64
         JS_ASSERT((uint64_t)raw_ <= UINT32_MAX);
 #endif
         new_off = masm->actualOffset((uintptr_t)raw_);
@@ -64,7 +64,7 @@ CodeLocationLabel::repoint(JitCode *code, MacroAssembler *masm)
      JS_ASSERT(state_ == Relative);
      size_t new_off = (size_t)raw_;
      if (masm != nullptr) {
-#ifdef JS_CPU_X64
+#ifdef JS_CODEGEN_X64
         JS_ASSERT((uint64_t)raw_ <= UINT32_MAX);
 #endif
         new_off = masm->actualOffset((uintptr_t)raw_);
@@ -1528,17 +1528,10 @@ static void
 GenerateProxyClassGuards(MacroAssembler &masm, Register object, Register scratchReg,
                          Label *failures)
 {
-    Label success;
-    // Ensure that the incoming object has one of the magic class pointers, i.e,
-    // that it is one of an ObjectProxy, FunctionProxy, or OuterWindowProxy.
-    // This is equivalent to obj->is<ProxyObject>().
-    masm.branchTestObjClass(Assembler::Equal, object, scratchReg,
-                            CallableProxyClassPtr, &success);
-    masm.branchTestObjClass(Assembler::Equal, object, scratchReg,
-                            UncallableProxyClassPtr, &success);
-    masm.branchTestObjClass(Assembler::NotEqual, object, scratchReg,
-                            OuterWindowProxyClassPtr, failures);
-    masm.bind(&success);
+    masm.loadObjClass(object, scratchReg);
+    masm.branchTest32(Assembler::Zero,
+                      Address(scratchReg, Class::offsetOfFlags()),
+                      Imm32(JSCLASS_IS_PROXY), failures);
 }
 
 bool
@@ -1742,7 +1735,7 @@ GetPropertyIC::update(JSContext *cx, size_t cacheIndex,
 
 #if JS_HAS_NO_SUCH_METHOD
         // Handle objects with __noSuchMethod__.
-        if (JSOp(*pc) == JSOP_CALLPROP && JS_UNLIKELY(vp.isUndefined())) {
+        if (JSOp(*pc) == JSOP_CALLPROP && MOZ_UNLIKELY(vp.isUndefined())) {
             if (!OnUnknownMethod(cx, obj, IdToValue(id), vp))
                 return false;
         }
@@ -3528,6 +3521,60 @@ IsTypedArrayElementSetInlineable(JSObject *obj, const Value &idval, const Value 
             !value.isString() && !value.isObject());
 }
 
+static void
+StoreDenseElement(MacroAssembler &masm, ConstantOrRegister value, Register elements,
+                  BaseIndex target)
+{
+    // If the ObjectElements::CONVERT_DOUBLE_ELEMENTS flag is set, int32 values
+    // have to be converted to double first. If the value is not int32, it can
+    // always be stored directly.
+
+    Address elementsFlags(elements, ObjectElements::offsetOfFlags());
+    if (value.constant()) {
+        Value v = value.value();
+        Label done;
+        if (v.isInt32()) {
+            Label dontConvert;
+            masm.branchTest32(Assembler::Zero, elementsFlags,
+                              Imm32(ObjectElements::CONVERT_DOUBLE_ELEMENTS),
+                              &dontConvert);
+            masm.storeValue(DoubleValue(v.toInt32()), target);
+            masm.jump(&done);
+            masm.bind(&dontConvert);
+        }
+        masm.storeValue(v, target);
+        masm.bind(&done);
+        return;
+    }
+
+    TypedOrValueRegister reg = value.reg();
+    if (reg.hasTyped() && reg.type() != MIRType_Int32) {
+        masm.storeTypedOrValue(reg, target);
+        return;
+    }
+
+    Label convert, storeValue, done;
+    masm.branchTest32(Assembler::NonZero, elementsFlags,
+                      Imm32(ObjectElements::CONVERT_DOUBLE_ELEMENTS),
+                      &convert);
+    masm.bind(&storeValue);
+    masm.storeTypedOrValue(reg, target);
+    masm.jump(&done);
+
+    masm.bind(&convert);
+    if (reg.hasValue()) {
+        masm.branchTestInt32(Assembler::NotEqual, reg.valueReg(), &storeValue);
+        masm.int32ValueToDouble(reg.valueReg(), ScratchFloatReg);
+        masm.storeDouble(ScratchFloatReg, target);
+    } else {
+        JS_ASSERT(reg.type() == MIRType_Int32);
+        masm.convertInt32ToDouble(reg.typedReg().gpr(), ScratchFloatReg);
+        masm.storeDouble(ScratchFloatReg, target);
+    }
+
+    masm.bind(&done);
+}
+
 static bool
 GenerateSetDenseElement(JSContext *cx, MacroAssembler &masm, IonCache::StubAttacher &attacher,
                         JSObject *obj, const Value &idval, bool guardHoles, Register object,
@@ -3609,7 +3656,7 @@ GenerateSetDenseElement(JSContext *cx, MacroAssembler &masm, IonCache::StubAttac
             masm.branchTestMagic(Assembler::Equal, target, &failures);
         else
             masm.bind(&storeElement);
-        masm.storeConstantOrRegister(value, target);
+        StoreDenseElement(masm, value, elements, target);
     }
     attacher.jumpRejoin(masm);
 
@@ -3988,9 +4035,14 @@ GenerateScopeChainGuard(MacroAssembler &masm, JSObject *scopeObj,
         CallObject *callObj = &scopeObj->as<CallObject>();
         if (!callObj->isForEval()) {
             JSFunction *fun = &callObj->callee();
-            JSScript *script = fun->nonLazyScript();
-            if (!script->funHasExtensibleScope())
-                return;
+            // The function might have been relazified under rare conditions.
+            // In that case, we pessimistically create the guard, as we'd
+            // need to root various pointers to delazify,
+            if (fun->hasScript()) {
+                JSScript *script = fun->nonLazyScript();
+                if (!script->funHasExtensibleScope())
+                    return;
+            }
         }
     } else if (scopeObj->is<GlobalObject>()) {
         // If this is the last object on the scope walk, and the property we've

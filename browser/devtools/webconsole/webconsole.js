@@ -14,7 +14,7 @@ loader.lazyServiceGetter(this, "clipboardHelper",
                          "@mozilla.org/widget/clipboardhelper;1",
                          "nsIClipboardHelper");
 loader.lazyImporter(this, "Services", "resource://gre/modules/Services.jsm");
-loader.lazyGetter(this, "promise", () => require("sdk/core/promise"));
+loader.lazyImporter(this, "promise", "resource://gre/modules/Promise.jsm", "Promise");
 loader.lazyGetter(this, "EventEmitter", () => require("devtools/shared/event-emitter"));
 loader.lazyGetter(this, "AutocompletePopup",
                   () => require("devtools/shared/autocomplete-popup").AutocompletePopup);
@@ -569,6 +569,19 @@ WebConsoleFrame.prototype = {
       toolbox.on("webconsole-selected", this._onPanelSelected);
     }
 
+    /*
+     * Focus input line whenever the output area is clicked.
+     * Only focus when the target node (or parent, as in source links) is
+     * not an anchor.
+     */
+    this.outputNode.addEventListener("click", (e) => {
+      if ((e.button == 0) &&
+          (e.target.nodeName.toLowerCase() != "a") &&
+          (e.target.parentNode.nodeName.toLowerCase() != "a")) {
+        this.jsterm.inputNode.focus();
+      }
+    });
+
     // Toggle the timestamp on preference change
     gDevTools.on("pref-changed", this._onToolboxPrefChanged);
     this._onToolboxPrefChanged("pref-changed", {
@@ -1043,7 +1056,7 @@ WebConsoleFrame.prototype = {
   mergeFilteredMessageNode:
   function WCF_mergeFilteredMessageNode(aOriginal, aFiltered)
   {
-    let repeatNode = aOriginal.getElementsByClassName("repeats")[0];
+    let repeatNode = aOriginal.getElementsByClassName("message-repeats")[0];
     if (!repeatNode) {
       return; // no repeat node, return early.
     }
@@ -1068,7 +1081,7 @@ WebConsoleFrame.prototype = {
    */
   _filterRepeatedMessage: function WCF__filterRepeatedMessage(aNode)
   {
-    let repeatNode = aNode.getElementsByClassName("repeats")[0];
+    let repeatNode = aNode.getElementsByClassName("message-repeats")[0];
     if (!repeatNode) {
       return null;
     }
@@ -1092,7 +1105,7 @@ WebConsoleFrame.prototype = {
         return null;
       }
 
-      let lastRepeatNode = lastMessage.getElementsByClassName("repeats")[0];
+      let lastRepeatNode = lastMessage.getElementsByClassName("message-repeats")[0];
       if (lastRepeatNode && lastRepeatNode._uid == uid) {
         dupeNode = lastMessage;
       }
@@ -1178,6 +1191,11 @@ WebConsoleFrame.prototype = {
         node = msg.init(this.output).render().element;
         break;
       }
+      case "trace": {
+        let msg = new Messages.ConsoleTrace(aMessage);
+        node = msg.init(this.output).render().element;
+        break;
+      }
       case "dir": {
         body = { arguments: args };
         let clipboardArray = [];
@@ -1185,38 +1203,6 @@ WebConsoleFrame.prototype = {
           clipboardArray.push(VariablesView.getString(aValue));
         });
         clipboardText = clipboardArray.join(" ");
-        break;
-      }
-
-      case "trace": {
-        let filename = WebConsoleUtils.abbreviateSourceURL(aMessage.filename);
-        let functionName = aMessage.functionName ||
-                           l10n.getStr("stacktrace.anonymousFunction");
-
-        body = this.document.createElementNS(XHTML_NS, "a");
-        body.setAttribute("aria-haspopup", true);
-        body.href = "#";
-        body.draggable = false;
-        body.textContent = l10n.getFormatStr("stacktrace.outputMessage",
-                                             [filename, functionName,
-                                              sourceLine]);
-
-        this._addMessageLinkCallback(body, () => {
-          this.jsterm.openVariablesView({
-            rawObject: aMessage.stacktrace,
-            autofocus: true,
-          });
-        });
-
-        clipboardText = body.textContent + "\n";
-
-        aMessage.stacktrace.forEach(function(aFrame) {
-          clipboardText += aFrame.filename + " :: " +
-                           aFrame.functionName + " :: " +
-                           aFrame.lineNumber + "\n";
-        });
-
-        clipboardText = clipboardText.trimRight();
         break;
       }
 
@@ -1268,7 +1254,6 @@ WebConsoleFrame.prototype = {
       case "group":
       case "groupCollapsed":
       case "groupEnd":
-      case "trace":
       case "time":
       case "timeEnd":
         for (let actor of objectActors) {
@@ -1294,13 +1279,9 @@ WebConsoleFrame.prototype = {
       node._objectActors = objectActors;
 
       if (!node._messageObject) {
-        let repeatNode = node.getElementsByClassName("repeats")[0];
+        let repeatNode = node.getElementsByClassName("message-repeats")[0];
         repeatNode._uid += [...objectActors].join("-");
       }
-    }
-
-    if (level == "trace") {
-      node._stacktrace = aMessage.stacktrace;
     }
 
     return node;
@@ -2375,7 +2356,7 @@ WebConsoleFrame.prototype = {
 
     if (aNode.category == CATEGORY_CSS ||
         aNode.category == CATEGORY_SECURITY) {
-      let repeatNode = aNode.getElementsByClassName("repeats")[0];
+      let repeatNode = aNode.getElementsByClassName("message-repeats")[0];
       if (repeatNode && repeatNode._uid) {
         delete this._repeatNodes[repeatNode._uid];
       }
@@ -2488,7 +2469,7 @@ WebConsoleFrame.prototype = {
         !(aCategory == CATEGORY_CSS && aSeverity == SEVERITY_LOG)) {
       repeatNode = this.document.createElementNS(XHTML_NS, "span");
       repeatNode.setAttribute("value", "1");
-      repeatNode.className = "repeats";
+      repeatNode.className = "message-repeats";
       repeatNode.textContent = 1;
       repeatNode._uid = [bodyNode.textContent, aCategory, aSeverity, aLevel,
                          aSourceURL, aSourceLine].join(":");
@@ -2554,11 +2535,18 @@ WebConsoleFrame.prototype = {
    * @param number aSourceLine [optional]
    *        The line number on which the error occurred. If zero or omitted,
    *        there is no line number associated with this message.
+   * @param string aTarget [optional]
+   *        Tells which tool to open the link with, on click. Supported tools:
+   *        jsdebugger, styleeditor, scratchpad.
    * @return nsIDOMNode
    *         The new anchor element, ready to be added to the message node.
    */
-  createLocationNode: function WCF_createLocationNode(aSourceURL, aSourceLine)
+  createLocationNode:
+  function WCF_createLocationNode(aSourceURL, aSourceLine, aTarget)
   {
+    if (!aSourceURL) {
+      aSourceURL = "";
+    }
     let locationNode = this.document.createElementNS(XHTML_NS, "a");
     let filenameNode = this.document.createElementNS(XHTML_NS, "span");
 
@@ -2579,30 +2567,39 @@ WebConsoleFrame.prototype = {
     }
 
     filenameNode.className = "filename";
-    filenameNode.textContent = " " + filename;
+    filenameNode.textContent = " " + (filename || l10n.getStr("unknownLocation"));
     locationNode.appendChild(filenameNode);
 
-    locationNode.href = isScratchpad ? "#" : fullURL;
+    locationNode.href = isScratchpad || !fullURL ? "#" : fullURL;
     locationNode.draggable = false;
+    locationNode.target = aTarget;
     locationNode.setAttribute("title", aSourceURL);
-    locationNode.className = "location theme-link devtools-monospace";
+    locationNode.className = "message-location theme-link devtools-monospace";
 
     // Make the location clickable.
-    this._addMessageLinkCallback(locationNode, () => {
-      if (isScratchpad) {
+    let onClick = () => {
+      let target = locationNode.target;
+      if (target == "scratchpad" || isScratchpad) {
         this.owner.viewSourceInScratchpad(aSourceURL);
+        return;
       }
-      else if (locationNode.parentNode.category == CATEGORY_CSS) {
+
+      let category = locationNode.parentNode.category;
+      if (target == "styleeditor" || category == CATEGORY_CSS) {
         this.owner.viewSourceInStyleEditor(fullURL, aSourceLine);
       }
-      else if (locationNode.parentNode.category == CATEGORY_JS ||
-               locationNode.parentNode.category == CATEGORY_WEBDEV) {
+      else if (target == "jsdebugger" ||
+               category == CATEGORY_JS || category == CATEGORY_WEBDEV) {
         this.owner.viewSourceInDebugger(fullURL, aSourceLine);
       }
       else {
         this.owner.viewSource(fullURL, aSourceLine);
       }
-    });
+    };
+
+    if (fullURL) {
+      this._addMessageLinkCallback(locationNode, onClick);
+    }
 
     if (aSourceLine) {
       let lineNumberNode = this.document.createElementNS(XHTML_NS, "span");
@@ -4078,12 +4075,16 @@ JSTerm.prototype = {
     // If the inputNode has no value, then don't try to complete on it.
     if (!inputValue) {
       this.clearCompletion();
+      aCallback && aCallback(this);
+      this.emit("autocomplete-updated");
       return false;
     }
 
     // Only complete if the selection is empty.
     if (inputNode.selectionStart != inputNode.selectionEnd) {
       this.clearCompletion();
+      aCallback && aCallback(this);
+      this.emit("autocomplete-updated");
       return false;
     }
 
@@ -4108,6 +4109,7 @@ JSTerm.prototype = {
     }
 
     aCallback && aCallback(this);
+    this.emit("autocomplete-updated");
     return accepted || popup.itemCount > 0;
   },
 
@@ -4206,7 +4208,6 @@ JSTerm.prototype = {
         aRequestId != this.lastCompletion.requestId) {
       return;
     }
-
     // Cache whatever came from the server if the last char is alphanumeric or '.'
     let cursor = inputNode.selectionStart;
     let inputUntilCursor = inputValue.substring(0, cursor);
@@ -4220,6 +4221,8 @@ JSTerm.prototype = {
     let lastPart = aMessage.matchProp;
     if (!matches.length) {
       this.clearCompletion();
+      aCallback && aCallback(this);
+      this.emit("autocomplete-updated");
       return;
     }
 
@@ -4264,8 +4267,8 @@ JSTerm.prototype = {
       popup.selectNextItem();
     }
 
-    this.emit("autocomplete-updated");
     aCallback && aCallback(this);
+    this.emit("autocomplete-updated");
   },
 
   onAutocompleteSelect: function JSTF_onAutocompleteSelect()

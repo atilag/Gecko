@@ -121,7 +121,8 @@ Dump(JSContext *cx, unsigned argc, Value *vp)
     if (!chars)
         return false;
 
-    NS_ConvertUTF16toUTF8 utf8str(reinterpret_cast<const char16_t*>(chars));
+    NS_ConvertUTF16toUTF8 utf8str(reinterpret_cast<const char16_t*>(chars),
+                                  length);
 #ifdef ANDROID
     __android_log_print(ANDROID_LOG_INFO, "Gecko", "%s", utf8str.get());
 #endif
@@ -171,13 +172,13 @@ File(JSContext *cx, unsigned argc, Value *vp)
         return false;
     }
 
-    nsXPConnect* xpc = nsXPConnect::XPConnect();
-    JSObject* glob = CurrentGlobalOrNull(cx);
+    nsXPConnect *xpc = nsXPConnect::XPConnect();
+    JSObject *glob = CurrentGlobalOrNull(cx);
 
     nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
     rv = xpc->WrapNativeToJSVal(cx, glob, native, nullptr,
                                 &NS_GET_IID(nsISupports),
-                                true, args.rval().address());
+                                true, args.rval());
     if (NS_FAILED(rv)) {
         XPCThrower::Throw(rv, cx);
         return false;
@@ -206,13 +207,13 @@ Blob(JSContext *cx, unsigned argc, Value *vp)
         return false;
     }
 
-    nsXPConnect* xpc = nsXPConnect::XPConnect();
-    JSObject* glob = CurrentGlobalOrNull(cx);
+    nsXPConnect *xpc = nsXPConnect::XPConnect();
+    JSObject *glob = CurrentGlobalOrNull(cx);
 
     nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
     rv = xpc->WrapNativeToJSVal(cx, glob, native, nullptr,
                                 &NS_GET_IID(nsISupports),
-                                true, args.rval().address());
+                                true, args.rval());
     if (NS_FAILED(rv)) {
         XPCThrower::Throw(rv, cx);
         return false;
@@ -688,7 +689,7 @@ mozJSComponentLoader::PrepareObjectForLocation(JSCLContextHelper& aCx,
     if (aReuseLoaderGlobal) {
         // If we're reusing the loader global, we don't actually use the
         // global, but rather we use a different object as the 'this' object.
-        obj = JS_NewObject(aCx, &kFakeBackstagePassJSClass, nullptr, nullptr);
+        obj = JS_NewObject(aCx, &kFakeBackstagePassJSClass, NullPtr(), NullPtr());
         NS_ENSURE_TRUE(obj, nullptr);
     }
 
@@ -1013,8 +1014,8 @@ mozJSComponentLoader::ObjectForLocation(nsIFile *aComponentFile,
         if (script) {
             ok = JS_ExecuteScriptVersion(cx, obj, script, nullptr, JSVERSION_LATEST);
         } else {
-            jsval rval;
-            ok = JS_CallFunction(cx, obj, function, 0, nullptr, &rval);
+            RootedValue rval(cx);
+            ok = JS_CallFunction(cx, obj, function, 0, nullptr, rval.address());
         }
      }
 
@@ -1084,10 +1085,10 @@ mozJSComponentLoader::UnloadModules()
 
 NS_IMETHODIMP
 mozJSComponentLoader::Import(const nsACString& registryLocation,
-                             const Value& targetValArg,
-                             JSContext* cx,
+                             HandleValue targetValArg,
+                             JSContext *cx,
                              uint8_t optionalArgc,
-                             Value* retval)
+                             MutableHandleValue retval)
 {
     MOZ_ASSERT(nsContentUtils::IsCallerChrome());
 
@@ -1133,7 +1134,7 @@ mozJSComponentLoader::Import(const nsACString& registryLocation,
             return NS_ERROR_FAILURE;
         }
 
-        *retval = ObjectValue(*global);
+        retval.setObject(*global);
     }
     return rv;
 }
@@ -1141,9 +1142,9 @@ mozJSComponentLoader::Import(const nsACString& registryLocation,
 /* [noscript] JSObjectPtr importInto(in AUTF8String registryLocation,
                                      in JSObjectPtr targetObj); */
 NS_IMETHODIMP
-mozJSComponentLoader::ImportInto(const nsACString & aLocation,
+mozJSComponentLoader::ImportInto(const nsACString &aLocation,
                                  JSObject *aTargetObj,
-                                 nsAXPCNativeCallContext * cc,
+                                 nsAXPCNativeCallContext *cc,
                                  JSObject **_retval)
 {
     JSContext *callercx;
@@ -1270,8 +1271,7 @@ mozJSComponentLoader::ImportInto(const nsACString &aLocation,
                                   PromiseFlatCString(aLocation).get());
         }
 
-        if (!symbols.isObject() ||
-            !JS_IsArrayObject(mContext, &symbols.toObject())) {
+        if (!JS_IsArrayObject(mContext, symbols)) {
             return ReportOnCaller(cxhelper, ERROR_NOT_AN_ARRAY,
                                   PromiseFlatCString(aLocation).get());
         }
@@ -1295,7 +1295,7 @@ mozJSComponentLoader::ImportInto(const nsACString &aLocation,
         for (uint32_t i = 0; i < symbolCount; ++i) {
             if (!JS_GetElement(mContext, symbolsObj, i, &value) ||
                 !value.isString() ||
-                !JS_ValueToId(mContext, value, symbolId.address())) {
+                !JS_ValueToId(mContext, value, &symbolId)) {
                 return ReportOnCaller(cxhelper, ERROR_ARRAY_ELEMENT,
                                       PromiseFlatCString(aLocation).get(), i);
             }

@@ -5,6 +5,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "TransportSecurityInfo.h"
+
+#include "insanity/pkixtypes.h"
 #include "nsNSSComponent.h"
 #include "nsIWebProgressListener.h"
 #include "nsNSSCertificate.h"
@@ -20,7 +22,6 @@
 #include "nsComponentManagerUtils.h"
 #include "nsServiceManagerUtils.h"
 #include "PSMRunnable.h"
-#include "ScopedNSSTypes.h"
 
 #include "secerr.h"
 
@@ -43,8 +44,7 @@ TransportSecurityInfo::TransportSecurityInfo()
     mSubRequestsNoSecurity(0),
     mErrorCode(0),
     mErrorMessageType(PlainErrorMessage),
-    mPort(0),
-    mIsCertIssuerBlacklisted(false)
+    mPort(0)
 {
 }
 
@@ -705,7 +705,7 @@ GetSubjectAltNames(CERTCertificate *nssCert,
       case certDNSName:
         name.AssignASCII((char*)current->name.other.data, current->name.other.len);
         if (!allNames.IsEmpty()) {
-          allNames.Append(NS_LITERAL_STRING(" , "));
+          allNames.Append(NS_LITERAL_STRING(", "));
         }
         ++nameCount;
         allNames.Append(name);
@@ -730,7 +730,7 @@ GetSubjectAltNames(CERTCertificate *nssCert,
           }
           if (!name.IsEmpty()) {
             if (!allNames.IsEmpty()) {
-              allNames.Append(NS_LITERAL_STRING(" , "));
+              allNames.Append(NS_LITERAL_STRING(", "));
             }
             ++nameCount;
             allNames.Append(name);
@@ -758,7 +758,7 @@ AppendErrorTextMismatch(const nsString &host,
   const char16_t *params[1];
   nsresult rv;
 
-  ScopedCERTCertificate nssCert;
+  insanity::pkix::ScopedCERTCertificate nssCert;
 
   nsCOMPtr<nsIX509Cert2> cert2 = do_QueryInterface(ix509, &rv);
   if (cert2)
@@ -783,7 +783,7 @@ AppendErrorTextMismatch(const nsString &host,
   bool useSAN = false;
 
   if (nssCert)
-    useSAN = GetSubjectAltNames(nssCert, component, allNames, nameCount);
+    useSAN = GetSubjectAltNames(nssCert.get(), component, allNames, nameCount);
 
   if (!useSAN) {
     char *certName = nullptr;

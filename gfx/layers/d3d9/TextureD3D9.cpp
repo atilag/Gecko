@@ -88,26 +88,26 @@ D3D9FormatToSurfaceFormat(_D3DFORMAT format)
 {
   switch (format) {
   case D3DFMT_X8R8G8B8:
-    return FORMAT_B8G8R8X8;
+    return SurfaceFormat::B8G8R8X8;
   case D3DFMT_A8R8G8B8:
-    return FORMAT_B8G8R8A8;
+    return SurfaceFormat::B8G8R8A8;
   case D3DFMT_A8:
-    return FORMAT_A8;
+    return SurfaceFormat::A8;
   default:
     NS_ERROR("Bad texture format");
   }
-  return FORMAT_UNKNOWN;
+  return SurfaceFormat::UNKNOWN;
 }
 
 static _D3DFORMAT
 SurfaceFormatToD3D9Format(SurfaceFormat format)
 {
   switch (format) {
-  case FORMAT_B8G8R8X8:
+  case SurfaceFormat::B8G8R8X8:
     return D3DFMT_X8R8G8B8;
-  case FORMAT_B8G8R8A8:
+  case SurfaceFormat::B8G8R8A8:
     return D3DFMT_A8R8G8B8;
-  case FORMAT_A8:
+  case SurfaceFormat::A8:
     return D3DFMT_A8;
   default:
     NS_ERROR("Bad texture format");
@@ -332,18 +332,18 @@ DeprecatedTextureHostShmemD3D9::UpdateImpl(const SurfaceDescriptor& aImage,
 
   _D3DFORMAT format = D3DFMT_A8R8G8B8;
   switch (surf->Format()) {
-  case gfxImageFormatRGB24:
-    mFormat = FORMAT_B8G8R8X8;
+  case gfxImageFormat::RGB24:
+    mFormat = SurfaceFormat::B8G8R8X8;
     format = D3DFMT_X8R8G8B8;
     bpp = 4;
     break;
-  case gfxImageFormatARGB32:
-    mFormat = FORMAT_B8G8R8A8;
+  case gfxImageFormat::ARGB32:
+    mFormat = SurfaceFormat::B8G8R8A8;
     format = D3DFMT_A8R8G8B8;
     bpp = 4;
     break;
-  case gfxImageFormatA8:
-    mFormat = FORMAT_A8;
+  case gfxImageFormat::A8:
+    mFormat = SurfaceFormat::A8;
     format = D3DFMT_A8;
     bpp = 1;
     break;
@@ -407,7 +407,7 @@ DeprecatedTextureHostD3D9::GetTileRect(uint32_t aID) const
 DeprecatedTextureHostYCbCrD3D9::DeprecatedTextureHostYCbCrD3D9()
   : mCompositor(nullptr)
 {
-  mFormat = FORMAT_YUV;
+  mFormat = SurfaceFormat::YUV;
 
   MOZ_COUNT_CTOR(DeprecatedTextureHostYCbCrD3D9);
 }
@@ -451,11 +451,11 @@ DeprecatedTextureHostYCbCrD3D9::UpdateImpl(const SurfaceDescriptor& aImage,
   RefPtr<DataTextureSource> srcCb;
   RefPtr<DataTextureSource> srcCr;
   if (!mFirstSource) {
-    srcY  = new DataTextureSourceD3D9(FORMAT_A8, mCompositor,
+    srcY  = new DataTextureSourceD3D9(SurfaceFormat::A8, mCompositor,
                                       TEXTURE_DISALLOW_BIGIMAGE, mStereoMode);
-    srcCb = new DataTextureSourceD3D9(FORMAT_A8, mCompositor,
+    srcCb = new DataTextureSourceD3D9(SurfaceFormat::A8, mCompositor,
                                       TEXTURE_DISALLOW_BIGIMAGE, mStereoMode);
-    srcCr = new DataTextureSourceD3D9(FORMAT_A8, mCompositor,
+    srcCr = new DataTextureSourceD3D9(SurfaceFormat::A8, mCompositor,
                                       TEXTURE_DISALLOW_BIGIMAGE, mStereoMode);
     mFirstSource = srcY;
     srcY->SetNextSibling(srcCb);
@@ -472,17 +472,17 @@ DeprecatedTextureHostYCbCrD3D9::UpdateImpl(const SurfaceDescriptor& aImage,
     Factory::CreateWrappingDataSourceSurface(yuvDeserializer.GetYData(),
                                              yuvDeserializer.GetYStride(),
                                              yuvDeserializer.GetYSize(),
-                                             FORMAT_A8);
+                                             SurfaceFormat::A8);
   RefPtr<DataSourceSurface> wrapperCb =
     Factory::CreateWrappingDataSourceSurface(yuvDeserializer.GetCbData(),
                                              yuvDeserializer.GetCbCrStride(),
                                              yuvDeserializer.GetCbCrSize(),
-                                             FORMAT_A8);
+                                             SurfaceFormat::A8);
   RefPtr<DataSourceSurface> wrapperCr =
     Factory::CreateWrappingDataSourceSurface(yuvDeserializer.GetCrData(),
                                              yuvDeserializer.GetCbCrStride(),
                                              yuvDeserializer.GetCbCrSize(),
-                                             FORMAT_A8);
+                                             SurfaceFormat::A8);
   // We don't support partial updates for YCbCr textures
   NS_ASSERTION(!aRegion, "Unsupported partial updates for YCbCr textures");
   if (!srcY->Update(wrapperY) ||
@@ -555,15 +555,15 @@ DeprecatedTextureHostSystemMemD3D9::UpdateImpl(const SurfaceDescriptor& aImage,
   uint32_t bpp = 0;
   switch (format) {
   case D3DFMT_X8R8G8B8:
-    mFormat = FORMAT_B8G8R8X8;
+    mFormat = SurfaceFormat::B8G8R8X8;
     bpp = 4;
     break;
   case D3DFMT_A8R8G8B8:
-    mFormat = FORMAT_B8G8R8A8;
+    mFormat = SurfaceFormat::B8G8R8A8;
     bpp = 4;
     break;
   case D3DFMT_A8:
-    mFormat = FORMAT_A8;
+    mFormat = SurfaceFormat::A8;
     bpp = 1;
     break;
   default:
@@ -666,18 +666,18 @@ DeprecatedTextureHostDIB::UpdateImpl(const SurfaceDescriptor& aImage,
 
   _D3DFORMAT format = D3DFMT_A8R8G8B8;
   switch (gfxPlatform::GetPlatform()->OptimalFormatForContent(surf->GetContentType())) {
-  case gfxImageFormatRGB24:
-    mFormat = FORMAT_B8G8R8X8;
+  case gfxImageFormat::RGB24:
+    mFormat = SurfaceFormat::B8G8R8X8;
     format = D3DFMT_X8R8G8B8;
     bpp = 4;
     break;
-  case gfxImageFormatARGB32:
-    mFormat = FORMAT_B8G8R8A8;
+  case gfxImageFormat::ARGB32:
+    mFormat = SurfaceFormat::B8G8R8A8;
     format = D3DFMT_A8R8G8B8;
     bpp = 4;
     break;
-  case gfxImageFormatA8:
-    mFormat = FORMAT_A8;
+  case gfxImageFormat::A8:
+    mFormat = SurfaceFormat::A8;
     format = D3DFMT_A8;
     bpp = 1;
     break;
@@ -761,13 +761,13 @@ DeprecatedTextureClientD3D9::EnsureAllocated(gfx::IntSize aSize,
 
   _D3DFORMAT format = D3DFMT_A8R8G8B8;
   switch (aType) {
-  case GFX_CONTENT_COLOR:
+  case gfxContentType::COLOR:
     format = D3DFMT_X8R8G8B8;
     break;
-  case GFX_CONTENT_COLOR_ALPHA:
+  case gfxContentType::COLOR_ALPHA:
     // fallback to DIB texture client
     return false;
-  case GFX_CONTENT_ALPHA:
+  case gfxContentType::ALPHA:
     format = D3DFMT_A8;
     break;
   default:
@@ -1024,6 +1024,7 @@ DataTextureSourceD3D9::DataTextureSourceD3D9(gfx::SurfaceFormat aFormat,
 }
 
 DataTextureSourceD3D9::DataTextureSourceD3D9(gfx::SurfaceFormat aFormat,
+                                             gfx::IntSize aSize,
                                              CompositorD3D9* aCompositor,
                                              IDirect3DTexture9* aTexture,
                                              TextureFlags aFlags)
@@ -1034,6 +1035,7 @@ DataTextureSourceD3D9::DataTextureSourceD3D9(gfx::SurfaceFormat aFormat,
   , mIsTiled(false)
   , mIterating(false)
 {
+  mSize = aSize;
   mTexture = aTexture;
   mStereoMode = STEREO_MODE_MONO;
   MOZ_COUNT_CTOR(DataTextureSourceD3D9);
@@ -1072,15 +1074,15 @@ DataTextureSourceD3D9::Update(gfx::DataSourceSurface* aSurface,
   _D3DFORMAT format = D3DFMT_A8R8G8B8;
   mFormat = aSurface->GetFormat();
   switch (mFormat) {
-  case FORMAT_B8G8R8X8:
+  case SurfaceFormat::B8G8R8X8:
     format = D3DFMT_X8R8G8B8;
     bpp = 4;
     break;
-  case FORMAT_B8G8R8A8:
+  case SurfaceFormat::B8G8R8A8:
     format = D3DFMT_A8R8G8B8;
     bpp = 4;
     break;
-  case FORMAT_A8:
+  case SurfaceFormat::A8:
     format = D3DFMT_A8;
     bpp = 1;
     break;
@@ -1147,15 +1149,15 @@ DataTextureSourceD3D9::Update(gfxWindowsSurface* aSurface)
   mFormat = ImageFormatToSurfaceFormat(
     gfxPlatform::GetPlatform()->OptimalFormatForContent(aSurface->GetContentType()));
   switch (mFormat) {
-  case FORMAT_B8G8R8X8:
+  case SurfaceFormat::B8G8R8X8:
     format = D3DFMT_X8R8G8B8;
     bpp = 4;
     break;
-  case FORMAT_B8G8R8A8:
+  case SurfaceFormat::B8G8R8A8:
     format = D3DFMT_A8R8G8B8;
     bpp = 4;
     break;
-  case FORMAT_A8:
+  case SurfaceFormat::A8:
     format = D3DFMT_A8;
     bpp = 1;
     break;
@@ -1266,7 +1268,7 @@ bool
 CairoTextureClientD3D9::Lock(OpenMode)
 {
   MOZ_ASSERT(!mIsLocked);
-  if (!IsValid()) {
+  if (!IsValid() || !IsAllocated()) {
     return false;
   }
   mIsLocked = true;
@@ -1349,6 +1351,14 @@ CairoTextureClientD3D9::AllocateForSurface(gfx::IntSize aSize, TextureAllocation
       !(mTexture = deviceManager->CreateTexture(mSize, format, D3DPOOL_SYSTEMMEM, nullptr))) {
     NS_WARNING("Could not create d3d9 texture");
     return false;
+  }
+
+  if (aFlags & ALLOC_CLEAR_BUFFER) {
+    DebugOnly<bool> locked = Lock(OPEN_WRITE_ONLY);
+    MOZ_ASSERT(locked);
+    RefPtr<DrawTarget> dt = GetAsDrawTarget();
+    dt->ClearRect(Rect(0, 0, GetSize().width, GetSize().height));
+    Unlock();
   }
 
   MOZ_ASSERT(mTexture);
@@ -1510,7 +1520,7 @@ SharedTextureClientD3D9::ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor)
 TextureHostD3D9::TextureHostD3D9(TextureFlags aFlags,
                                  const SurfaceDescriptorD3D9& aDescriptor)
   : TextureHost(aFlags)
-  , mFormat(FORMAT_UNKNOWN)
+  , mFormat(SurfaceFormat::UNKNOWN)
   , mIsLocked(false)
 {
   mTexture = reinterpret_cast<IDirect3DTexture9*>(aDescriptor.texture());
@@ -1524,11 +1534,78 @@ TextureHostD3D9::TextureHostD3D9(TextureFlags aFlags,
   }
 }
 
-TextureHostD3D9::TextureHostD3D9(TextureFlags aFlags)
-  : TextureHost(aFlags)
-  , mFormat(FORMAT_UNKNOWN)
-  , mIsLocked(false)
-{}
+bool
+DataTextureSourceD3D9::UpdateFromTexture(IDirect3DTexture9* aTexture,
+                                         const nsIntRegion* aRegion)
+{
+  MOZ_ASSERT(aTexture);
+
+  D3DSURFACE_DESC desc;
+  HRESULT hr = aTexture->GetLevelDesc(0, &desc);
+  if (!FAILED(hr)) {
+    MOZ_ASSERT(mFormat == D3D9FormatToSurfaceFormat(desc.Format));
+    MOZ_ASSERT(mSize.width == desc.Width);
+    MOZ_ASSERT(mSize.height == desc.Height);
+  }
+
+  DeviceManagerD3D9* dm = gfxWindowsPlatform::GetPlatform()->GetD3D9DeviceManager();
+  if (!mTexture) {
+    mTexture = dm->CreateTexture(mSize, SurfaceFormatToD3D9Format(mFormat),
+                                 D3DPOOL_DEFAULT, this);
+    if (!mTexture) {
+      NS_WARNING("Failed to create a texture");
+      return false;
+    }
+  }
+
+  RefPtr<IDirect3DSurface9> srcSurface;
+  RefPtr<IDirect3DSurface9> dstSurface;
+
+  hr = aTexture->GetSurfaceLevel(0, byRef(srcSurface));
+  if (FAILED(hr)) {
+    return false;
+  }
+  hr = mTexture->GetSurfaceLevel(0, byRef(dstSurface));
+  if (FAILED(hr)) {
+    return false;
+  }
+
+  if (aRegion) {
+    nsIntRegionRectIterator iter(*aRegion);
+    const nsIntRect *iterRect;
+    while ((iterRect = iter.Next())) {
+      RECT rect;
+      rect.left = iterRect->x;
+      rect.top = iterRect->y;
+      rect.right = iterRect->XMost();
+      rect.bottom = iterRect->YMost();
+
+      POINT point;
+      point.x = iterRect->x;
+      point.y = iterRect->y;
+      dm->device()->UpdateSurface(srcSurface, &rect, dstSurface, &point);
+    }
+  } else {
+    dm->device()->UpdateSurface(srcSurface, nullptr, dstSurface, nullptr);
+  }
+  mIsTiled = false;
+  return true;
+}
+
+void
+TextureHostD3D9::Updated(const nsIntRegion* aRegion)
+{
+  if (!mTexture) {
+    return;
+  }
+
+  if (!mTextureSource) {
+    mTextureSource = new DataTextureSourceD3D9(mFormat, mSize, mCompositor,
+                                               nullptr, mFlags);
+  }
+
+  mTextureSource->UpdateFromTexture(mTexture, aRegion);
+}
 
 IDirect3DDevice9*
 TextureHostD3D9::GetDevice()
@@ -1548,9 +1625,7 @@ TextureHostD3D9::SetCompositor(Compositor* aCompositor)
 NewTextureSource*
 TextureHostD3D9::GetTextureSources()
 {
-  if (!mTextureSource) {
-    mTextureSource = new DataTextureSourceD3D9(mFormat, mCompositor, mTexture, mFlags);
-  }
+  MOZ_ASSERT(mIsLocked);
   return mTextureSource;
 }
 

@@ -169,12 +169,12 @@ TextureClient::InitIPDLActor(CompositableForwarder* aForwarder)
     return false;
   }
 
-  mActor = static_cast<TextureChild*>(aForwarder->CreateEmptyTextureChild());
+  mActor = static_cast<TextureChild*>(aForwarder->CreateTexture(desc, GetFlags()));
+  MOZ_ASSERT(mActor);
   mActor->mForwarder = aForwarder;
   mActor->mTextureClient = this;
   mShared = true;
-  return mActor->IPCOpen() &&
-         mActor->SendInit(desc, GetFlags());
+  return mActor->IPCOpen();
 }
 
 PTextureChild*
@@ -319,7 +319,7 @@ bool
 ShmemTextureClient::ToSurfaceDescriptor(SurfaceDescriptor& aDescriptor)
 {
   MOZ_ASSERT(IsValid());
-  if (!IsAllocated() || GetFormat() == gfx::FORMAT_UNKNOWN) {
+  if (!IsAllocated() || GetFormat() == gfx::SurfaceFormat::UNKNOWN) {
     return false;
   }
 
@@ -383,7 +383,7 @@ bool
 MemoryTextureClient::ToSurfaceDescriptor(SurfaceDescriptor& aDescriptor)
 {
   MOZ_ASSERT(IsValid());
-  if (!IsAllocated() || GetFormat() == gfx::FORMAT_UNKNOWN) {
+  if (!IsAllocated() || GetFormat() == gfx::SurfaceFormat::UNKNOWN) {
     return false;
   }
   aDescriptor = SurfaceDescriptorMemory(reinterpret_cast<uintptr_t>(mBuffer),
@@ -499,7 +499,7 @@ bool
 BufferTextureClient::AllocateForSurface(gfx::IntSize aSize, TextureAllocationFlags aFlags)
 {
   MOZ_ASSERT(IsValid());
-  MOZ_ASSERT(mFormat != gfx::FORMAT_YUV, "This textureClient cannot use YCbCr data");
+  MOZ_ASSERT(mFormat != gfx::SurfaceFormat::YUV, "This textureClient cannot use YCbCr data");
   MOZ_ASSERT(aSize.width * aSize.height);
 
   int bufSize
@@ -522,8 +522,8 @@ TemporaryRef<gfx::DrawTarget>
 BufferTextureClient::GetAsDrawTarget()
 {
   MOZ_ASSERT(IsValid());
-  // XXX - uncomment when ContentClient's locking is fixed
-  // MOZ_ASSERT(mLocked);
+  // XXX - Turn this into a fatal assertion as soon as Bug 952507 is fixed
+  NS_WARN_IF_FALSE(mLocked, "GetAsDrawTarget should be called on locked textures only");
 
   if (mDrawTarget) {
     return mDrawTarget;
@@ -560,16 +560,18 @@ BufferTextureClient::GetAsDrawTarget()
 bool
 BufferTextureClient::Lock(OpenMode aMode)
 {
-  MOZ_ASSERT(!mLocked);
+  // XXX - Turn this into a fatal assertion as soon as Bug 952507 is fixed
+  NS_WARN_IF_FALSE(!mLocked, "The TextureClient is already Locked!");
   mOpenMode = aMode;
   mLocked = true;
-  return true;
+  return IsValid() && IsAllocated();
 }
 
 void
 BufferTextureClient::Unlock()
 {
-  MOZ_ASSERT(mLocked);
+  // XXX - Turn this into a fatal assertion as soon as Bug 952507 is fixed
+  NS_WARN_IF_FALSE(mLocked, "The TextureClient is already Unlocked!");
   mLocked = false;
   if (!mDrawTarget) {
     mUsingFallbackDrawTarget = false;
@@ -607,7 +609,7 @@ BufferTextureClient::Unlock()
 bool
 BufferTextureClient::UpdateYCbCr(const PlanarYCbCrData& aData)
 {
-  MOZ_ASSERT(mFormat == gfx::FORMAT_YUV, "This textureClient can only use YCbCr data");
+  MOZ_ASSERT(mFormat == gfx::SurfaceFormat::YUV, "This textureClient can only use YCbCr data");
   MOZ_ASSERT(!IsImmutable());
   MOZ_ASSERT(IsValid());
   MOZ_ASSERT(aData.mCbSkip == aData.mCrSkip);
@@ -721,7 +723,7 @@ DeprecatedTextureClientShmem::EnsureAllocated(gfx::IntSize aSize,
                                             &mDescriptor)) {
       NS_WARNING("creating SurfaceDescriptor failed!");
     }
-    if (mContentType == GFX_CONTENT_COLOR_ALPHA) {
+    if (mContentType == gfxContentType::COLOR_ALPHA) {
       gfxASurface* surface = GetSurface();
       if (!surface) {
         return false;
@@ -884,7 +886,7 @@ DeprecatedTextureClientTile::EnsureAllocated(gfx::IntSize aSize, gfxContentType 
     // performance regression.
     gfxImageSurface* tmpTile = new gfxImageSurface(gfxIntSize(aSize.width, aSize.height),
                                                    gfxPlatform::GetPlatform()->OptimalFormatForContent(aType),
-                                                   aType != GFX_CONTENT_COLOR);
+                                                   aType != gfxContentType::COLOR);
     mSurface = new gfxReusableImageSurfaceWrapper(tmpTile);
 #else
     nsRefPtr<gfxSharedImageSurface> sharedImage =
@@ -925,9 +927,9 @@ bool AutoLockShmemClient::Update(Image* aImage,
 
   gfxContentType contentType = aSurface->GetContentType();
   bool isOpaque = (aContentFlags & Layer::CONTENT_OPAQUE);
-  if (contentType != GFX_CONTENT_ALPHA &&
+  if (contentType != gfxContentType::ALPHA &&
       isOpaque) {
-    contentType = GFX_CONTENT_COLOR;
+    contentType = gfxContentType::COLOR;
   }
   mDeprecatedTextureClient->EnsureAllocated(size, contentType);
 

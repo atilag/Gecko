@@ -30,10 +30,10 @@ CreateTextureImage(GLContext* gl,
 {
     switch (gl->GetContextType()) {
 #ifdef XP_MACOSX
-        case ContextTypeCGL:
+        case GLContextType::CGL:
             return CreateTextureImageCGL(gl, aSize, aContentType, aWrapMode, aFlags, aImageFormat);
 #endif
-        case ContextTypeEGL:
+        case GLContextType::EGL:
             return CreateTextureImageEGL(gl, aSize, aContentType, aWrapMode, aFlags, aImageFormat);
         default:
             return CreateBasicTextureImage(gl, aSize, aContentType, aWrapMode, aFlags, aImageFormat);
@@ -50,10 +50,10 @@ TileGenFunc(GLContext* gl,
 {
     switch (gl->GetContextType()) {
 #ifdef XP_MACOSX
-        case ContextTypeCGL:
+        case GLContextType::CGL:
             return TileGenFuncCGL(gl, aSize, aContentType, aFlags, aImageFormat);
 #endif
-        case ContextTypeEGL:
+        case GLContextType::EGL:
             return TileGenFuncEGL(gl, aSize, aContentType, aFlags, aImageFormat);
         default:
             return nullptr;
@@ -145,8 +145,8 @@ BasicTextureImage::BeginUpdate(nsIntRegion& aRegion)
     }
 
     ImageFormat format =
-        (GetContentType() == GFX_CONTENT_COLOR) ?
-        gfxImageFormatRGB24 : gfxImageFormatARGB32;
+        (GetContentType() == gfxContentType::COLOR) ?
+        gfxImageFormat::RGB24 : gfxImageFormat::ARGB32;
     mUpdateSurface =
         GetSurfaceForUpdate(gfxIntSize(rgnSize.width, rgnSize.height), format);
 
@@ -288,7 +288,7 @@ BasicTextureImage::BasicTextureImage(GLuint aTexture,
                                      ContentType aContentType,
                                      GLContext* aContext,
                                      TextureImage::Flags aFlags /* = TextureImage::NoFlags */,
-                                     TextureImage::ImageFormat aImageFormat /* = gfxImageFormatUnknown */)
+                                     TextureImage::ImageFormat aImageFormat /* = gfxImageFormat::Unknown */)
     : TextureImage(aSize, aWrapMode, aContentType, aFlags, aImageFormat)
     , mTexture(aTexture)
     , mTextureState(Created)
@@ -321,7 +321,7 @@ WantsSmallTiles(GLContext* gl)
 
     // We can't use small tiles on the SGX 540, because of races in texture upload.
     if (gl->WorkAroundDriverBugs() &&
-        gl->Renderer() == GLContext::RendererSGX540)
+        gl->Renderer() == GLRenderer::SGX540)
         return false;
 
     // Don't use small tiles otherwise. (If we implement incremental texture upload,
@@ -509,8 +509,8 @@ TiledTextureImage::BeginUpdate(nsIntRegion& aRegion)
 
     // update covers multiple Images - create a temp surface to paint in
     gfxImageFormat format =
-        (GetContentType() == GFX_CONTENT_COLOR) ?
-        gfxImageFormatRGB24 : gfxImageFormatARGB32;
+        (GetContentType() == gfxContentType::COLOR) ?
+        gfxImageFormat::RGB24 : gfxImageFormat::ARGB32;
     mUpdateSurface = gfxPlatform::GetPlatform()->
         CreateOffscreenSurface(gfxIntSize(bounds.width, bounds.height), gfxASurface::ContentFromFormat(format));
     mUpdateSurface->SetDeviceOffset(gfxPoint(-bounds.x, -bounds.y));

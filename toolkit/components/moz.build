@@ -45,7 +45,11 @@ PARALLEL_DIRS += [
     'viewconfig',
     'viewsource',
     'workerloader',
+    'workerlz4',
 ]
+
+if CONFIG['MOZ_CRASHREPORTER']:
+    PARALLEL_DIRS += ['crashes']
 
 if CONFIG['MOZ_SOCIAL']:
     PARALLEL_DIRS += ['social']

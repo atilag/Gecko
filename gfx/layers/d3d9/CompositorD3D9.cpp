@@ -26,7 +26,7 @@ CompositorD3D9::CompositorD3D9(PCompositorParent* aParent, nsIWidget *aWidget)
   , mWidget(aWidget)
   , mDeviceResetCount(0)
 {
-  sBackend = LAYERS_D3D9;
+  sBackend = LayersBackend::LAYERS_D3D9;
 }
 
 CompositorD3D9::~CompositorD3D9()
@@ -63,7 +63,7 @@ CompositorD3D9::GetTextureFactoryIdentifier()
 {
   TextureFactoryIdentifier ident;
   ident.mMaxTextureSize = GetMaxTextureSize();
-  ident.mParentBackend = LAYERS_D3D9;
+  ident.mParentBackend = LayersBackend::LAYERS_D3D9;
   ident.mParentProcessId = XRE_GetProcessType();
   return ident;
 }
@@ -89,7 +89,7 @@ CompositorD3D9::GetMaxTextureSize() const
 TemporaryRef<DataTextureSource>
 CompositorD3D9::CreateDataTextureSource(TextureFlags aFlags)
 {
-  return new DataTextureSourceD3D9(FORMAT_UNKNOWN, this,
+  return new DataTextureSourceD3D9(SurfaceFormat::UNKNOWN, this,
                                    !(aFlags & TEXTURE_DISALLOW_BIGIMAGE));
 }
 
@@ -188,7 +188,7 @@ CompositorD3D9::SetRenderTarget(CompositingRenderTarget *aRenderTarget)
   RefPtr<CompositingRenderTargetD3D9> oldRT = mCurrentRT;
   mCurrentRT = static_cast<CompositingRenderTargetD3D9*>(aRenderTarget);
   mCurrentRT->BindRenderTarget(device());
-  PrepareViewport(mCurrentRT->GetSize(), gfxMatrix());
+  PrepareViewport(mCurrentRT->GetSize(), Matrix());
 }
 
 static DeviceManagerD3D9::ShaderMode
@@ -320,7 +320,7 @@ CompositorD3D9::DrawQuad(const gfx::Rect &aRect,
       EffectYCbCr* ycbcrEffect =
         static_cast<EffectYCbCr*>(aEffectChain.mPrimaryEffect.get());
 
-      SetSamplerForFilter(FILTER_LINEAR);
+      SetSamplerForFilter(Filter::LINEAR);
 
       Rect textureCoords = ycbcrEffect->mTextureCoords;
       d3d9Device->SetVertexShaderConstantF(CBvTextureCoords,
@@ -511,29 +511,29 @@ CompositorD3D9::EnsureSwapChain()
   if (!mSwapChain) {
     mSwapChain = mDeviceManager->
       CreateSwapChain((HWND)mWidget->GetNativeData(NS_NATIVE_WINDOW));
+    // We could not create a swap chain, return false
     if (!mSwapChain) {
+      // Check the state of the device too
       DeviceManagerState state = mDeviceManager->VerifyReadyForRendering();
       if (state == DeviceMustRecreate) {
         mDeviceManager = nullptr;
-        mParent->SendInvalidateAll();
-      } else if (state == DeviceRetry) {
-        mParent->SendInvalidateAll();
       }
+      mParent->SendInvalidateAll();
       return false;
     }
   }
 
+  // We have a swap chain, lets initialise it
   DeviceManagerState state = mSwapChain->PrepareForRendering();
   if (state == DeviceOK) {
     return true;
   }
+  // Swap chain could not be initialised, handle the failure
   if (state == DeviceMustRecreate) {
     mDeviceManager = nullptr;
     mSwapChain = nullptr;
-    mParent->SendInvalidateAll();
-  } else if (state == DeviceRetry) {
-    mParent->SendInvalidateAll();
   }
+  mParent->SendInvalidateAll();
   return false;
 }
 
@@ -553,6 +553,7 @@ CompositorD3D9::Ready()
     if (EnsureSwapChain()) {
       // We don't need to call VerifyReadyForRendering because that is
       // called by mSwapChain->PrepareForRendering() via EnsureSwapChain().
+
       CheckResetCount();
       return true;
     }
@@ -560,7 +561,7 @@ CompositorD3D9::Ready()
   }
 
   NS_ASSERTION(!mCurrentRT && !mDefaultRT,
-                "Shouldn't have any render targets around, they must be released before our device");
+               "Shouldn't have any render targets around, they must be released before our device");
   mSwapChain = nullptr;
 
   mDeviceManager = gfxWindowsPlatform::GetPlatform()->GetD3D9DeviceManager();
@@ -586,7 +587,7 @@ CancelCompositing(Rect* aRenderBoundsOut)
 void
 CompositorD3D9::BeginFrame(const nsIntRegion& aInvalidRegion,
                            const Rect *aClipRectIn,
-                           const gfxMatrix& aTransform,
+                           const gfx::Matrix& aTransform,
                            const Rect& aRenderBounds,
                            Rect *aClipRectOut,
                            Rect *aRenderBoundsOut)
@@ -650,9 +651,9 @@ CompositorD3D9::EndFrame()
 
 void
 CompositorD3D9::PrepareViewport(const gfx::IntSize& aSize,
-                                const gfxMatrix &aWorldTransform)
+                                const Matrix &aWorldTransform)
 {
-  gfx3DMatrix viewMatrix;
+  Matrix4x4 viewMatrix;
   /*
    * Matrix to transform to viewport space ( <-1.0, 1.0> topleft,
    * <1.0, -1.0> bottomright)
@@ -662,7 +663,7 @@ CompositorD3D9::PrepareViewport(const gfx::IntSize& aSize,
   viewMatrix._41 = -1.0f;
   viewMatrix._42 = 1.0f;
 
-  viewMatrix = gfx3DMatrix::From2D(aWorldTransform) * viewMatrix;
+  viewMatrix = Matrix4x4::From2D(aWorldTransform) * viewMatrix;
 
   HRESULT hr = device()->SetVertexShaderConstantF(CBmProjection, &viewMatrix._11, 4);
 
@@ -684,11 +685,11 @@ void
 CompositorD3D9::SetSamplerForFilter(Filter aFilter)
 {
   switch (aFilter) {
-  case FILTER_LINEAR:
+  case Filter::LINEAR:
     device()->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
     device()->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
     return;
-  case FILTER_POINT:
+  case Filter::POINT:
     device()->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
     device()->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
     return;
@@ -724,7 +725,7 @@ CompositorD3D9::PaintToTarget()
     Factory::CreateWrappingDataSourceSurface((uint8_t*)rect.pBits,
                                              rect.Pitch,
                                              IntSize(desc.Width, desc.Height),
-                                             FORMAT_B8G8R8A8);
+                                             SurfaceFormat::B8G8R8A8);
   mTarget->CopySurface(sourceSurface,
                        IntRect(0, 0, desc.Width, desc.Height),
                        IntPoint());

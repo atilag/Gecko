@@ -495,10 +495,20 @@ var gCSSProperties = {
 		other_values: [ "center", "end", "justify" ],
 		invalid_values: []
 	},
+	"box-sizing": {
+		domProp: "boxSizing",
+		inherited: false,
+		type: CSS_TYPE_LONGHAND,
+		initial_values: [ "content-box" ],
+		other_values: [ "border-box", "padding-box" ],
+		invalid_values: [ "margin-box", "content", "padding", "border", "margin" ]
+	},
 	"-moz-box-sizing": {
 		domProp: "MozBoxSizing",
 		inherited: false,
-		type: CSS_TYPE_LONGHAND,
+		type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+		alias_for: "box-sizing",
+		subproperties: [ "box-sizing" ],
 		initial_values: [ "content-box" ],
 		other_values: [ "border-box", "padding-box" ],
 		invalid_values: [ "margin-box", "content", "padding", "border", "margin" ]
@@ -4330,6 +4340,19 @@ function get_computed_value(cs, property)
 	return cs.getPropertyValue(property);
 }
 
+if (SpecialPowers.getBoolPref("layout.css.touch_action.enabled")) {
+    gCSSProperties["touch-action"] = {
+        domProp: "touchAction",
+        inherited: false,
+        type: CSS_TYPE_LONGHAND,
+        initial_values: ["auto"],
+        other_values: ["none", "pan-x", "pan-y", "pan-x pan-y", "pan-y pan-x"],
+        invalid_values: ["zoom", "pinch", "tap", "10px", "2", "auto pan-x", "pan-x auto", "none pan-x", "pan-x none",
+        				 "auto pan-y", "pan-y auto", "none pan-y", "pan-y none",
+        				 "pan-x pan-y none", "none pan-x pan-y", "pan-x pan-y auto", "auto pan-x pan-y"]
+    };
+}
+
 if (SpecialPowers.getBoolPref("layout.css.vertical-text.enabled")) {
 	var verticalTextProperties = {
 		"writing-mode": {
@@ -4858,6 +4881,17 @@ if (SpecialPowers.getBoolPref("layout.css.background-blend-mode.enabled")) {
 		other_values: [ "multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn",
 			"hard-light", "soft-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity" ],
 		invalid_values: []
+	};
+}
+
+if (SpecialPowers.getBoolPref("layout.css.will-change.enabled")) {
+	gCSSProperties["will-change"] = {
+		domProp: "willChange",
+		inherited: false,
+		type: CSS_TYPE_LONGHAND,
+		initial_values: [ "auto" ],
+		other_values: [ "scroll-position", "contents", "transform", "opacity", "scroll-position, transform", "transform, opacity", "contents, transform", "property-that-doesnt-exist-yet" ],
+		invalid_values: [ "none", "all", "default", "auto, scroll-position", "scroll-position, auto", "transform scroll-position", ",", "trailing," ]
 	};
 }
 

@@ -10,6 +10,7 @@
 #define PL_ARENA_CONST_ALIGN_MASK (sizeof(void*)-1)
 #include "nsLineLayout.h"
 
+#include "SVGTextFrame.h"
 #include "nsBlockFrame.h"
 #include "nsStyleConsts.h"
 #include "nsContainerFrame.h"
@@ -56,7 +57,7 @@ nsLineLayout::nsLineLayout(nsPresContext* aPresContext,
     mLastOptionalBreakContent(nullptr),
     mForceBreakContent(nullptr),
     mBlockRS(nullptr),/* XXX temporary */
-    mLastOptionalBreakPriority(eNoBreak),
+    mLastOptionalBreakPriority(gfxBreakPriority::eNoBreak),
     mLastOptionalBreakContentOffset(-1),
     mForceBreakContentOffset(-1),
     mMinLineHeight(0),
@@ -1024,7 +1025,7 @@ nsLineLayout::ReflowFrame(nsIFrame* aFrame,
           // record soft break opportunity after this content that can't be
           // part of a text run. This is not a text frame so we know
           // that offset INT32_MAX means "after the content".
-          if (NotifyOptionalBreakPosition(aFrame->GetContent(), INT32_MAX, optionalBreakAfterFits, eNormalBreak)) {
+          if (NotifyOptionalBreakPosition(aFrame->GetContent(), INT32_MAX, optionalBreakAfterFits, gfxBreakPriority::eNormalBreak)) {
             // If this returns true then we are being told to actually break here.
             aReflowStatus = NS_INLINE_LINE_BREAK_AFTER(aReflowStatus);
           }
@@ -1534,6 +1535,20 @@ nsLineLayout::PlaceTopBottomFrames(PerSpanData* psd,
   }
 }
 
+static float
+GetInflationForVerticalAlignment(nsIFrame* aFrame,
+                                 nscoord aInflationMinFontSize)
+{
+  if (aFrame->IsSVGText()) {
+    const nsIFrame* container =
+      nsLayoutUtils::GetClosestFrameOfType(aFrame, nsGkAtoms::svgTextFrame);
+    NS_ASSERTION(container, "expected to find an ancestor SVGTextFrame");
+    return
+      static_cast<const SVGTextFrame*>(container)->GetFontSizeScaleFactor();
+  }
+  return nsLayoutUtils::FontSizeInflationInner(aFrame, aInflationMinFontSize);
+}
+
 #define VERTICAL_ALIGN_FRAMES_NO_MINIMUM nscoord_MAX
 #define VERTICAL_ALIGN_FRAMES_NO_MAXIMUM nscoord_MIN
 
@@ -1551,7 +1566,7 @@ nsLineLayout::VerticalAlignFrames(PerSpanData* psd)
   // Get the parent frame's font for all of the frames in this span
   nsRefPtr<nsFontMetrics> fm;
   float inflation =
-    nsLayoutUtils::FontSizeInflationInner(spanFrame, mInflationMinFontSize);
+    GetInflationForVerticalAlignment(spanFrame, mInflationMinFontSize);
   nsLayoutUtils::GetFontMetricsForFrame(spanFrame, getter_AddRefs(fm),
                                         inflation);
   mBlockReflowState->rendContext->SetFont(fm);
@@ -1685,7 +1700,7 @@ nsLineLayout::VerticalAlignFrames(PerSpanData* psd)
     // is based on the line-height value, not the font-size. Also
     // compute the top leading.
     float inflation =
-      nsLayoutUtils::FontSizeInflationInner(spanFrame, mInflationMinFontSize);
+      GetInflationForVerticalAlignment(spanFrame, mInflationMinFontSize);
     nscoord logicalHeight = nsHTMLReflowState::
       CalcLineHeight(spanFrame->StyleContext(),
                      mBlockReflowState->ComputedHeight(),
@@ -1934,7 +1949,7 @@ nsLineLayout::VerticalAlignFrames(PerSpanData* psd)
         // Percentages are like lengths, except treated as a percentage
         // of the elements line-height value.
         float inflation =
-          nsLayoutUtils::FontSizeInflationInner(frame, mInflationMinFontSize);
+          GetInflationForVerticalAlignment(frame, mInflationMinFontSize);
         pctBasis = nsHTMLReflowState::CalcLineHeight(
           frame->StyleContext(), mBlockReflowState->ComputedHeight(),
           inflation);

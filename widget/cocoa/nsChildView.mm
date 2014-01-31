@@ -376,6 +376,7 @@ nsChildView::nsChildView() : nsBaseWidget()
 , mShowsResizeIndicator(false)
 , mHasRoundedBottomCorners(false)
 , mIsCoveringTitlebar(false)
+, mIsFullscreen(false)
 , mTitlebarCGContext(nullptr)
 , mBackingScaleFactor(0.0)
 , mVisible(false)
@@ -1563,7 +1564,7 @@ NS_IMETHODIMP nsChildView::Invalidate(const nsIntRect &aRect)
   if (!mView || !mVisible)
     return NS_OK;
 
-  NS_ASSERTION(GetLayerManager()->GetBackendType() != LAYERS_CLIENT,
+  NS_ASSERTION(GetLayerManager()->GetBackendType() != LayersBackend::LAYERS_CLIENT,
                "Shouldn't need to invalidate with accelerated OMTC layers!");
 
   if ([NSView focusView]) {
@@ -1578,6 +1579,18 @@ NS_IMETHODIMP nsChildView::Invalidate(const nsIntRect &aRect)
   return NS_OK;
 
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
+}
+
+void
+nsChildView::Update()
+{
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
+  if (!ShouldUseOffMainThreadCompositing() && mView) {
+    [mView displayIfNeeded];
+  }
+
+  NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
 bool
@@ -1959,8 +1972,7 @@ nsChildView::GetInputContext()
 nsIMEUpdatePreference
 nsChildView::GetIMEUpdatePreference()
 {
-  return nsIMEUpdatePreference(nsIMEUpdatePreference::NOTIFY_SELECTION_CHANGE,
-                               false);
+  return nsIMEUpdatePreference(nsIMEUpdatePreference::NOTIFY_SELECTION_CHANGE);
 }
 
 NS_IMETHODIMP nsChildView::GetToggledKeyState(uint32_t aKeyCode,
@@ -2021,7 +2033,7 @@ gfxASurface*
 nsChildView::GetThebesSurface()
 {
   if (!mTempThebesSurface) {
-    mTempThebesSurface = new gfxQuartzSurface(gfxSize(1, 1), gfxImageFormatARGB32);
+    mTempThebesSurface = new gfxQuartzSurface(gfxSize(1, 1), gfxImageFormat::ARGB32);
   }
 
   return mTempThebesSurface;
@@ -2059,6 +2071,7 @@ nsChildView::PrepareWindowEffects()
   CGFloat cornerRadius = [(ChildView*)mView cornerRadius];
   mDevPixelCornerRadius = cornerRadius * BackingScaleFactor();
   mIsCoveringTitlebar = [(ChildView*)mView isCoveringTitlebar];
+  mIsFullscreen = ([[mView window] styleMask] & NSFullScreenWindowMask) != 0;
   if (mIsCoveringTitlebar) {
     mTitlebarRect = RectContainingTitlebarControls();
     UpdateTitlebarCGContext();
@@ -2363,7 +2376,7 @@ void
 nsChildView::MaybeDrawTitlebar(GLManager* aManager, const nsIntRect& aRect)
 {
   MutexAutoLock lock(mEffectsLock);
-  if (!mIsCoveringTitlebar) {
+  if (!mIsCoveringTitlebar || mIsFullscreen) {
     return;
   }
 
@@ -2406,7 +2419,7 @@ nsChildView::MaybeDrawRoundedCorners(GLManager* aManager, const nsIntRect& aRect
     RefPtr<gfx::Path> path = builder->Finish();
     drawTarget->Fill(path,
                      gfx::ColorPattern(gfx::Color(1.0, 1.0, 1.0, 1.0)),
-                     gfx::DrawOptions(1.0f, gfx::OP_SOURCE));
+                     gfx::DrawOptions(1.0f, gfx::CompositionOp::OP_SOURCE));
   });
 
   // Use operator destination in: multiply all 4 channels with source alpha.
@@ -2416,13 +2429,13 @@ nsChildView::MaybeDrawRoundedCorners(GLManager* aManager, const nsIntRect& aRect
   gfx3DMatrix flipX = gfx3DMatrix::ScalingMatrix(-1, 1, 1);
   gfx3DMatrix flipY = gfx3DMatrix::ScalingMatrix(1, -1, 1);
 
-  if (mIsCoveringTitlebar) {
+  if (mIsCoveringTitlebar && !mIsFullscreen) {
     // Mask the top corners.
     mCornerMaskImage->Draw(aManager, aRect.TopLeft());
     mCornerMaskImage->Draw(aManager, aRect.TopRight(), flipX);
   }
 
-  if (mHasRoundedBottomCorners) {
+  if (mHasRoundedBottomCorners && !mIsFullscreen) {
     // Mask the bottom corners.
     mCornerMaskImage->Draw(aManager, aRect.BottomLeft(), flipY);
     mCornerMaskImage->Draw(aManager, aRect.BottomRight(), flipY * flipX);
@@ -2634,8 +2647,8 @@ RectTextureImage::BeginUpdate(const nsIntSize& aNewSize,
   if (!mUpdateDrawTarget || mBufferSize != neededBufferSize) {
     gfx::IntSize size(neededBufferSize.width, neededBufferSize.height);
     mUpdateDrawTarget =
-      gfx::Factory::CreateDrawTarget(gfx::BACKEND_COREGRAPHICS, size,
-                                     gfx::FORMAT_B8G8R8A8);
+      gfx::Factory::CreateDrawTarget(gfx::BackendType::COREGRAPHICS, size,
+                                     gfx::SurfaceFormat::B8G8R8A8);
     mBufferSize = neededBufferSize;
   }
 
@@ -2705,10 +2718,10 @@ RectTextureImage::UpdateFromCGContext(const nsIntSize& aNewSize,
       dt->CreateSourceSurfaceFromData(static_cast<uint8_t *>(CGBitmapContextGetData(aCGContext)),
                                       size,
                                       CGBitmapContextGetBytesPerRow(aCGContext),
-                                      gfx::FORMAT_B8G8R8A8);
+                                      gfx::SurfaceFormat::B8G8R8A8);
     dt->DrawSurface(sourceSurface, rect, rect,
                     gfx::DrawSurfaceOptions(),
-                    gfx::DrawOptions(1.0, gfx::OP_SOURCE));
+                    gfx::DrawOptions(1.0, gfx::CompositionOp::OP_SOURCE));
     dt->PopClip();
     EndUpdate();
   }
@@ -2729,7 +2742,7 @@ RectTextureImage::UpdateFromDrawTarget(const nsIntSize& aNewSize,
       gfxUtils::ClipToRegion(drawTarget, GetUpdateRegion());
       drawTarget->DrawSurface(source, rect, rect,
                               gfx::DrawSurfaceOptions(),
-                              gfx::DrawOptions(1.0, gfx::OP_SOURCE));
+                              gfx::DrawOptions(1.0, gfx::CompositionOp::OP_SOURCE));
       drawTarget->PopClip();
     }
     EndUpdate();
@@ -2748,8 +2761,10 @@ RectTextureImage::Draw(GLManager* aManager,
 
   program->Activate();
   program->SetLayerQuadRect(nsIntRect(nsIntPoint(0, 0), mUsedSize));
-  program->SetLayerTransform(aTransform * gfx3DMatrix::Translation(aLocation.x, aLocation.y, 0));
-  program->SetTextureTransform(gfx3DMatrix());
+  gfx::Matrix4x4 transform;
+  gfx::ToMatrix4x4(aTransform, transform);
+  program->SetLayerTransform(transform * gfx::Matrix4x4().Translate(aLocation.x, aLocation.y, 0));
+  program->SetTextureTransform(gfx::Matrix4x4());
   program->SetLayerOpacity(1.0);
   program->SetRenderOffset(nsIntPoint(0, 0));
   program->SetTexCoordMultiplier(mUsedSize.width, mUsedSize.height);
@@ -2823,15 +2838,16 @@ GLPresenter::BeginFrame(nsIntSize aRenderSize)
 
   // Matrix to transform (0, 0, width, height) to viewport space (-1.0, 1.0,
   // 2, 2) and flip the contents.
-  gfxMatrix viewMatrix;
-  viewMatrix.Translate(-gfxPoint(1.0, -1.0));
+  gfx::Matrix viewMatrix;
+  viewMatrix.Translate(-1.0, 1.0);
   viewMatrix.Scale(2.0f / float(aRenderSize.width), 2.0f / float(aRenderSize.height));
   viewMatrix.Scale(1.0f, -1.0f);
 
-  gfx3DMatrix matrix3d = gfx3DMatrix::From2D(viewMatrix);
+  gfx::Matrix4x4 matrix3d = gfx::Matrix4x4::From2D(viewMatrix);
   matrix3d._33 = 0.0f;
 
-  mRGBARectProgram->CheckAndSetProjectionMatrix(matrix3d);
+  // set the projection matrix for the next time the program is activated
+  mRGBARectProgram->DelayedSetProjectionMatrix(matrix3d);
 
   // Default blend function implements "OVER"
   mGLContext->fBlendFuncSeparate(LOCAL_GL_ONE, LOCAL_GL_ONE_MINUS_SRC_ALPHA,
@@ -3525,14 +3541,14 @@ NSEvent* gLastDragMouseDownEvent = nil;
   targetSurface->SetAllowUseAsSource(false);
 
   nsRefPtr<gfxContext> targetContext;
-  if (gfxPlatform::GetPlatform()->SupportsAzureContentForType(gfx::BACKEND_CAIRO)) {
+  if (gfxPlatform::GetPlatform()->SupportsAzureContentForType(gfx::BackendType::CAIRO)) {
     RefPtr<gfx::DrawTarget> dt =
       gfxPlatform::GetPlatform()->CreateDrawTargetForSurface(targetSurface,
                                                              gfx::IntSize(backingSize.width,
                                                                           backingSize.height));
     dt->AddUserData(&gfxContext::sDontUseAsSourceKey, dt, nullptr);
     targetContext = new gfxContext(dt);
-  } else if (gfxPlatform::GetPlatform()->SupportsAzureContentForType(gfx::BACKEND_COREGRAPHICS)) {
+  } else if (gfxPlatform::GetPlatform()->SupportsAzureContentForType(gfx::BackendType::COREGRAPHICS)) {
     RefPtr<gfx::DrawTarget> dt =
       gfx::Factory::CreateDrawTargetForCairoCGContext(aContext,
                                                       gfx::IntSize(backingSize.width,
@@ -3556,11 +3572,11 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
   nsAutoRetainCocoaObject kungFuDeathGrip(self);
   bool painted = false;
-  if (mGeckoChild->GetLayerManager()->GetBackendType() == LAYERS_BASIC) {
+  if (mGeckoChild->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_BASIC) {
     nsBaseWidget::AutoLayerManagerSetup
-      setupLayerManager(mGeckoChild, targetContext, BUFFER_NONE);
+      setupLayerManager(mGeckoChild, targetContext, BufferMode::BUFFER_NONE);
     painted = mGeckoChild->PaintWindow(region);
-  } else if (mGeckoChild->GetLayerManager()->GetBackendType() == LAYERS_CLIENT) {
+  } else if (mGeckoChild->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_CLIENT) {
     // We only need this so that we actually get DidPaintWindow fired
     painted = mGeckoChild->PaintWindow(region);
   }
@@ -3608,7 +3624,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
   if (!mGeckoChild || ![self window])
     return NO;
 
-  return mGeckoChild->GetLayerManager(nullptr)->GetBackendType() == mozilla::layers::LAYERS_OPENGL;
+  return mGeckoChild->GetLayerManager(nullptr)->GetBackendType() == mozilla::layers::LayersBackend::LAYERS_OPENGL;
 }
 
 - (BOOL)isUsingOpenGL
@@ -3817,7 +3833,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
       // So we notify our nsChildView about any areas needing repainting.
       mGeckoChild->NotifyDirtyRegion([self nativeDirtyRegionWithBoundingRect:[self bounds]]);
 
-      if (mGeckoChild->GetLayerManager()->GetBackendType() == LAYERS_CLIENT) {
+      if (mGeckoChild->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_CLIENT) {
         ClientLayerManager *manager = static_cast<ClientLayerManager*>(mGeckoChild->GetLayerManager());
         manager->AsShadowForwarder()->WindowOverlayChanged();
       }

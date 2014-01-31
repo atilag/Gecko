@@ -12,9 +12,13 @@
  */
 
 #include "builtin/SIMD.h"
+
 #include "jsapi.h"
 #include "jsfriendapi.h"
+
 #include "builtin/TypedObject.h"
+#include "js/Value.h"
+
 #include "jsobjinlines.h"
 
 using namespace js;
@@ -30,48 +34,6 @@ extern const JSFunctionSpec Int32x4Methods[];
 
 ///////////////////////////////////////////////////////////////////////////
 // X4
-
-namespace js {
-struct Float32x4 {
-    typedef float Elem;
-    static const int32_t lanes = 4;
-    static const X4TypeRepresentation::Type type =
-        X4TypeRepresentation::TYPE_FLOAT32;
-
-    static JSObject &GetTypeObject(GlobalObject &global) {
-        return global.float32x4TypeObject();
-    }
-    static Elem toType(Elem a) {
-        return a;
-    }
-    static void toType2(JSContext *cx, JS::Handle<JS::Value> v, Elem *out) {
-        *out = v.toNumber();
-    }
-    static void setReturn(CallArgs &args, float value) {
-        args.rval().setDouble(value);
-    }
-};
-
-struct Int32x4 {
-    typedef int32_t Elem;
-    static const int32_t lanes = 4;
-    static const X4TypeRepresentation::Type type =
-        X4TypeRepresentation::TYPE_INT32;
-
-    static JSObject &GetTypeObject(GlobalObject &global) {
-        return global.int32x4TypeObject();
-    }
-    static Elem toType(Elem a) {
-        return ToInt32(a);
-    }
-    static void toType2(JSContext *cx, JS::Handle<JS::Value> v, Elem *out) {
-        ToInt32(cx,v,out);
-    }
-    static void setReturn(CallArgs &args, int32_t value) {
-        args.rval().setInt32(value);
-    }
-};
-} // namespace js
 
 #define LANE_ACCESSOR(Type32x4, lane) \
     bool Type32x4##Lane##lane(JSContext *cx, unsigned argc, Value *vp) { \
@@ -146,7 +108,6 @@ const Class X4Type::class_ = {
     JS_ResolveStub,
     JS_ConvertStub,
     nullptr,             /* finalize    */
-    nullptr,             /* checkAccess */
     call,                /* call        */
     nullptr,             /* hasInstance */
     nullptr,             /* construct   */
@@ -325,7 +286,6 @@ const Class SIMDObject::class_ = {
         JS_ResolveStub,
         JS_ConvertStub,
         nullptr,             /* finalize    */
-        nullptr,             /* checkAccess */
         nullptr,             /* call        */
         nullptr,             /* hasInstance */
         nullptr,             /* construct   */
@@ -358,8 +318,6 @@ SIMDObject::initClass(JSContext *cx, Handle<GlobalObject *> global)
     if (!float32x4Object)
         return nullptr;
 
-    // Define float32x4 functions and install as a property of the SIMD object.
-    global->setFloat32x4TypeObject(*float32x4Object);
     RootedValue float32x4Value(cx, ObjectValue(*float32x4Object));
     if (!JS_DefineFunctions(cx, float32x4Object, Float32x4Methods) ||
         !JSObject::defineProperty(cx, SIMD, cx->names().float32x4,
@@ -375,8 +333,6 @@ SIMDObject::initClass(JSContext *cx, Handle<GlobalObject *> global)
     if (!int32x4Object)
         return nullptr;
 
-    // Define int32x4 functions and install as a property of the SIMD object.
-    global->setInt32x4TypeObject(*int32x4Object);
     RootedValue int32x4Value(cx, ObjectValue(*int32x4Object));
     if (!JS_DefineFunctions(cx, int32x4Object, Int32x4Methods) ||
         !JSObject::defineProperty(cx, SIMD, cx->names().int32x4,
@@ -387,12 +343,19 @@ SIMDObject::initClass(JSContext *cx, Handle<GlobalObject *> global)
     }
 
     RootedValue SIMDValue(cx, ObjectValue(*SIMD));
-    global->setConstructor(JSProto_SIMD, SIMDValue);
 
     // Everything is set up, install SIMD on the global object.
     if (!JSObject::defineProperty(cx, global, cx->names().SIMD,  SIMDValue, nullptr, nullptr, 0)) {
         return nullptr;
     }
+
+    global->setConstructor(JSProto_SIMD, SIMDValue);
+
+    // Define float32x4 functions and install as a property of the SIMD object.
+    global->setFloat32x4TypeObject(*float32x4Object);
+
+    // Define int32x4 functions and install as a property of the SIMD object.
+    global->setInt32x4TypeObject(*int32x4Object);
 
     return SIMD;
 }
@@ -417,8 +380,8 @@ ObjectIsVector(JSObject &obj) {
 }
 
 template<typename V>
-static JSObject *
-Create(JSContext *cx, typename V::Elem *data)
+JSObject *
+js::Create(JSContext *cx, typename V::Elem *data)
 {
     RootedObject typeObj(cx, &V::GetTypeObject(*cx->global()));
     JS_ASSERT(typeObj);
@@ -431,6 +394,9 @@ Create(JSContext *cx, typename V::Elem *data)
     memcpy(resultMem, data, sizeof(typename V::Elem) * V::lanes);
     return result;
 }
+
+template JSObject *js::Create<Float32x4>(JSContext *cx, Float32x4::Elem *data);
+template JSObject *js::Create<Int32x4>(JSContext *cx, Int32x4::Elem *data);
 
 namespace js {
 template<typename T, typename V>

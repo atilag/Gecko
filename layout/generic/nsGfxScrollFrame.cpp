@@ -467,7 +467,7 @@ nsHTMLScrollFrame::ReflowScrolledFrame(ScrollReflowState* aState,
   // which will usually be different from the scrollport height;
   // invalidating the difference will cause unnecessary repainting.
   FinishReflowChild(mHelper.mScrolledFrame, presContext,
-                    &kidReflowState, *aMetrics, 0, 0,
+                    *aMetrics, &kidReflowState, 0, 0,
                     NS_FRAME_NO_MOVE_FRAME | NS_FRAME_NO_SIZE_VIEW);
 
   // XXX Some frames (e.g., nsObjectFrame, nsFrameFrame, nsTextFrame) don't bother
@@ -1804,6 +1804,11 @@ bool ScrollFrameHelper::IsAlwaysActive() const
     return true;
   }
 
+  const nsStyleDisplay* disp = mOuter->StyleDisplay();
+  if (disp && (disp->mWillChangeBitField & NS_STYLE_WILL_CHANGE_SCROLL)) {
+    return true;
+  }
+
   // Unless this is the root scrollframe for a non-chrome document
   // which is the direct child of a chrome document, we default to not
   // being "active".
@@ -2183,8 +2188,17 @@ public:
   virtual nsDisplayItem* WrapItem(nsDisplayListBuilder* aBuilder,
                                   nsDisplayItem* aItem) {
 
-    SetCount(++mCount);
-    return new (aBuilder) nsDisplayScrollLayer(aBuilder, aItem, aItem->Frame(), mScrolledFrame, mScrollFrame);
+    // If the display item is for a frame that is absolutely positioned, it
+    // should only scroll with the scrolled content if its frame its contained
+    // within the scrolled content's frame.
+    bool shouldWrap = !aItem->Frame()->IsAbsolutelyPositioned() ||
+                      nsLayoutUtils::IsProperAncestorFrame(mScrolledFrame, aItem->Frame(), nullptr);
+    if (shouldWrap) {
+      SetCount(++mCount);
+      return new (aBuilder) nsDisplayScrollLayer(aBuilder, aItem, aItem->Frame(), mScrolledFrame, mScrollFrame);
+    } else {
+      return aItem;
+    }
   }
 
 protected:

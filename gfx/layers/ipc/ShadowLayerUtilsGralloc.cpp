@@ -44,13 +44,33 @@ void
 ParamTraits<MagicGrallocBufferHandle>::Write(Message* aMsg,
                                              const paramType& aParam)
 {
+#if ANDROID_VERSION >= 19
+  sp<GraphicBuffer> flattenable = aParam.mGraphicBuffer;
+#else
   Flattenable *flattenable = aParam.mGraphicBuffer.get();
+#endif
   size_t nbytes = flattenable->getFlattenedSize();
   size_t nfds = flattenable->getFdCount();
 
   char data[nbytes];
   int fds[nfds];
+
+#if ANDROID_VERSION >= 19
+  // Make a copy of "data" and "fds" for flatten() to avoid casting problem
+  void *pdata = (void *)data;
+  int *pfds = fds;
+
+  flattenable->flatten(pdata, nbytes, pfds, nfds);
+
+  // In Kitkat, flatten() will change the value of nbytes and nfds, which dues
+  // to multiple parcelable object consumption. The actual size and fd count
+  // which returned by getFlattenedSize() and getFdCount() are not changed.
+  // So we change nbytes and nfds back by call corresponding calls.
+  nbytes = flattenable->getFlattenedSize();
+  nfds = flattenable->getFdCount();
+#else
   flattenable->flatten(data, nbytes, fds, nfds);
+#endif
 
   aMsg->WriteSize(nbytes);
   aMsg->WriteSize(nfds);
@@ -96,9 +116,17 @@ ParamTraits<MagicGrallocBufferHandle>::Read(const Message* aMsg,
   }
 
   sp<GraphicBuffer> buffer(new GraphicBuffer());
+#if ANDROID_VERSION >= 19
+  // Make a copy of "data" and "fds" for unflatten() to avoid casting problem
+  void const *pdata = (void const *)data;
+  int const *pfds = fds;
+
+  if (NO_ERROR == buffer->unflatten(pdata, nbytes, pfds, nfds)) {
+#else
   Flattenable *flattenable = buffer.get();
 
   if (NO_ERROR == flattenable->unflatten(data, nbytes, fds, nfds)) {
+#endif
     aResult->mGraphicBuffer = buffer;
     return true;
   }
@@ -123,35 +151,34 @@ ImageFormatForPixelFormat(android::PixelFormat aFormat)
 {
   switch (aFormat) {
   case PIXEL_FORMAT_RGBA_8888:
-    return gfxImageFormatARGB32;
+    return gfxImageFormat::ARGB32;
   case PIXEL_FORMAT_RGBX_8888:
-    return gfxImageFormatRGB24;
+    return gfxImageFormat::RGB24;
   case PIXEL_FORMAT_RGB_565:
-    return gfxImageFormatRGB16_565;
-  case PIXEL_FORMAT_A_8:
-    return gfxImageFormatA8;
+    return gfxImageFormat::RGB16_565;
   default:
     MOZ_CRASH("Unknown gralloc pixel format");
   }
-  return gfxImageFormatARGB32;
+  return gfxImageFormat::ARGB32;
 }
 
 static android::PixelFormat
 PixelFormatForImageFormat(gfxImageFormat aFormat)
 {
   switch (aFormat) {
-  case gfxImageFormatARGB32:
+  case gfxImageFormat::ARGB32:
     return android::PIXEL_FORMAT_RGBA_8888;
-  case gfxImageFormatRGB24:
+  case gfxImageFormat::RGB24:
     return android::PIXEL_FORMAT_RGBX_8888;
-  case gfxImageFormatRGB16_565:
+  case gfxImageFormat::RGB16_565:
     return android::PIXEL_FORMAT_RGB_565;
-  case gfxImageFormatA8:
-    return android::PIXEL_FORMAT_A_8;
+  case gfxImageFormat::A8:
+    NS_WARNING("gralloc does not support gfxImageFormat::A8");
+    return android::PIXEL_FORMAT_UNKNOWN;
   default:
     MOZ_CRASH("Unknown gralloc pixel format");
   }
-  return gfxImageFormatARGB32;
+  return android::PIXEL_FORMAT_RGBA_8888;
 }
 
 static size_t
@@ -168,8 +195,6 @@ BytesPerPixelForPixelFormat(android::PixelFormat aFormat)
   case PIXEL_FORMAT_RGBA_5551:
   case PIXEL_FORMAT_RGBA_4444:
     return 2;
-  case PIXEL_FORMAT_A_8:
-    return 1;
   default:
     return 0;
   }
@@ -407,6 +432,10 @@ ISurfaceAllocator::PlatformAllocSurfaceDescriptor(const gfx::IntSize& aSize,
   MaybeMagicGrallocBufferHandle handle;
   PGrallocBufferChild* gc;
   bool defaultRBSwap;
+
+  if (PixelFormatForContentType(aContent) == android::PIXEL_FORMAT_UNKNOWN) {
+    return false;
+  }
 
   if (aCaps & USING_GL_RENDERING_ONLY) {
     gc = AllocGrallocBuffer(aSize,

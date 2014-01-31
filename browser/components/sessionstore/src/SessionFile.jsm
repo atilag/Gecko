@@ -59,11 +59,20 @@ this.SessionFile = {
     return SessionFileInternal.write(aData);
   },
   /**
-   * Writes the initial state to disk again only to change the session's load
-   * state. This must only be called once, it will throw an error otherwise.
+   * Gather telemetry statistics.
+   *
+   *
+   * Most of the work is done off the main thread but there is a main
+   * thread cost involved to send data to the worker thread. This method
+   * should therefore be called only when we know that it will not disrupt
+   * the user's experience, e.g. on idle-daily.
+   *
+   * @return {Promise}
+   * @promise {object} An object holding all the information to be submitted
+   * to Telemetry.
    */
-  writeLoadStateOnceAfterStartup: function (aLoadState) {
-    SessionFileInternal.writeLoadStateOnceAfterStartup(aLoadState);
+  gatherTelemetry: function(aData) {
+    return SessionFileInternal.gatherTelemetry(aData);
   },
   /**
    * Create a backup copy, asynchronously.
@@ -122,6 +131,14 @@ let SessionFileInternal = {
     });
   },
 
+  gatherTelemetry: function(aStateString) {
+    return Task.spawn(function() {
+      let msg = yield SessionWorker.post("gatherTelemetry", [aStateString]);
+      this._recordTelemetry(msg.telemetry);
+      throw new Task.Result(msg.telemetry);
+    }.bind(this));
+  },
+
   write: function (aData) {
     if (this._isClosed) {
       return Promise.reject(new Error("SessionFile is closed"));
@@ -157,13 +174,6 @@ let SessionFileInternal = {
     }.bind(this));
   },
 
-  writeLoadStateOnceAfterStartup: function (aLoadState) {
-    SessionWorker.post("writeLoadStateOnceAfterStartup", [aLoadState]).then(msg => {
-      this._recordTelemetry(msg.telemetry);
-      return msg;
-    }, console.error);
-  },
-
   createBackupCopy: function (ext) {
     return SessionWorker.post("createBackupCopy", [ext]);
   },
@@ -177,8 +187,18 @@ let SessionFileInternal = {
   },
 
   _recordTelemetry: function(telemetry) {
-    for (let histogramId in telemetry){
-      Telemetry.getHistogramById(histogramId).add(telemetry[histogramId]);
+    for (let id of Object.keys(telemetry)){
+      let value = telemetry[id];
+      let samples = [];
+      if (Array.isArray(value)) {
+        samples.push(...value);
+      } else {
+        samples.push(value);
+      }
+      let histogram = Telemetry.getHistogramById(id);
+      for (let sample of samples) {
+        histogram.add(sample);
+      }
     }
   }
 };
@@ -196,9 +216,12 @@ let SessionWorker = (function () {
           // Decode any serialized error
           if (error instanceof PromiseWorker.WorkerError) {
             throw OS.File.Error.fromMsg(error.data);
-          } else {
-            throw error;
           }
+          // Extract something meaningful from ErrorEvent
+          if (error instanceof ErrorEvent) {
+            throw new Error(error.message, error.filename, error.lineno);
+          }
+          throw error;
         }
       );
     }

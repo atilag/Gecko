@@ -137,6 +137,7 @@ public:
                                      bool aUpdateNCArea = false,
                                      bool aIncludeChildren = false);
   NS_IMETHOD              Invalidate(const nsIntRect & aRect);
+  virtual void            Update() MOZ_OVERRIDE;
   virtual void*           GetNativeData(uint32_t aDataType);
   virtual void            FreeNativeData(void * data, uint32_t aDataType);
   NS_IMETHOD              SetTitle(const nsAString& aTitle);
@@ -152,7 +153,7 @@ public:
   NS_IMETHOD              GetAttention(int32_t aCycleCount);
   virtual bool            HasPendingInputEvent();
   virtual LayerManager*   GetLayerManager(PLayerTransactionChild* aShadowManager = nullptr,
-                                          LayersBackend aBackendHint = mozilla::layers::LAYERS_NONE,
+                                          LayersBackend aBackendHint = mozilla::layers::LayersBackend::LAYERS_NONE,
                                           LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
                                           bool* aAllowRetaining = nullptr);
   gfxASurface             *GetThebesSurface();

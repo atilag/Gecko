@@ -23,7 +23,7 @@ public:
                          SurfaceFormat aFormat);
   ~SourceSurfaceD2DTarget();
 
-  virtual SurfaceType GetType() const { return SURFACE_D2D1_DRAWTARGET; }
+  virtual SurfaceType GetType() const { return SurfaceType::D2D1_DRAWTARGET; }
   virtual IntSize GetSize() const;
   virtual SurfaceFormat GetFormat() const;
   virtual TemporaryRef<DataSourceSurface> GetDataSurface();
@@ -63,11 +63,13 @@ public:
   DataSourceSurfaceD2DTarget(SurfaceFormat aFormat);
   ~DataSourceSurfaceD2DTarget();
 
-  virtual SurfaceType GetType() const { return SURFACE_DATA; }
+  virtual SurfaceType GetType() const { return SurfaceType::DATA; }
   virtual IntSize GetSize() const;
   virtual SurfaceFormat GetFormat() const;
   virtual uint8_t *GetData();
   virtual int32_t Stride();
+  virtual bool Map(MapType, MappedSurface *aMappedSurface);
+  virtual void Unmap();
 
 private:
   friend class SourceSurfaceD2DTarget;

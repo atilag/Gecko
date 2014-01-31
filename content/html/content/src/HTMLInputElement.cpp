@@ -2078,7 +2078,9 @@ HTMLInputElement::GetStepBase() const
 }
 
 nsresult
-HTMLInputElement::GetValueIfStepped(int32_t aStep, Decimal* aNextStep)
+HTMLInputElement::GetValueIfStepped(int32_t aStep,
+                                    StepCallerType aCallerType,
+                                    Decimal* aNextStep)
 {
   if (!DoStepDownStepUpApply()) {
     return NS_ERROR_DOM_INVALID_STATE_ERR;
@@ -2086,7 +2088,11 @@ HTMLInputElement::GetValueIfStepped(int32_t aStep, Decimal* aNextStep)
 
   Decimal step = GetStep();
   if (step == kStepAny) {
-    return NS_ERROR_DOM_INVALID_STATE_ERR;
+    if (aCallerType != CALLED_FOR_USER_EVENT) {
+      return NS_ERROR_DOM_INVALID_STATE_ERR;
+    }
+    // Allow the spin buttons and up/down arrow keys to do something sensible:
+    step = GetDefaultStep();
   }
 
   Decimal value = GetValueAsDecimal();
@@ -2168,7 +2174,7 @@ HTMLInputElement::ApplyStep(int32_t aStep)
 {
   Decimal nextStep = Decimal::nan(); // unchanged if value will not change
 
-  nsresult rv = GetValueIfStepped(aStep, &nextStep);
+  nsresult rv = GetValueIfStepped(aStep, CALLED_FOR_SCRIPT, &nextStep);
 
   if (NS_SUCCEEDED(rv) && nextStep.isFinite()) {
     SetValue(nextStep);
@@ -3395,26 +3401,25 @@ HTMLInputElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
     }
     if (aVisitor.mEvent->message == NS_FOCUS_CONTENT ||
         aVisitor.mEvent->message == NS_BLUR_CONTENT) {
+      if (aVisitor.mEvent->message == NS_FOCUS_CONTENT) {
+        // Tell our frame it's getting focus so that it can make sure focus
+        // is moved to our anonymous text control.
+        nsNumberControlFrame* numberControlFrame =
+          do_QueryFrame(GetPrimaryFrame());
+        if (numberControlFrame) {
+          // This could kill the frame!
+          numberControlFrame->HandleFocusEvent(aVisitor.mEvent);
+        }
+      }
       nsIFrame* frame = GetPrimaryFrame();
-      if (frame) {
-        if (aVisitor.mEvent->message == NS_FOCUS_CONTENT) {
-          // Tell our frame it's getting focus so that it can make sure focus
-          // is moved to our anonymous text control.
-          nsNumberControlFrame* numberControlFrame =
-            do_QueryFrame(GetPrimaryFrame());
-          if (numberControlFrame) {
-            numberControlFrame->HandleFocusEvent(aVisitor.mEvent);
-          }
-        }
-        if (frame->IsThemed()) {
-          // Our frame's nested <input type=text> will be invalidated when it
-          // loses focus, but since we are also native themed we need to make
-          // sure that our entire area is repainted since any focus highlight
-          // from the theme should be removed from us (the repainting of the
-          // sub-area occupied by the anon text control is not enough to do
-          // that).
-          frame->InvalidateFrame();
-        }
+      if (frame && frame->IsThemed()) {
+        // Our frame's nested <input type=text> will be invalidated when it
+        // loses focus, but since we are also native themed we need to make
+        // sure that our entire area is repainted since any focus highlight
+        // from the theme should be removed from us (the repainting of the
+        // sub-area occupied by the anon text control is not enough to do
+        // that).
+        frame->InvalidateFrame();
       }
     } else if (aVisitor.mEvent->message == NS_KEY_UP) {
       WidgetKeyboardEvent* keyEvent = aVisitor.mEvent->AsKeyboardEvent();
@@ -3453,8 +3458,11 @@ HTMLInputElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
         numberControlFrame->HandlingInputEvent(true);
         nsAutoString value;
         textControl->GetValue(value);
+        nsWeakFrame weakNumberControlFrame(numberControlFrame);
         SetValueInternal(value, false, true);
-        numberControlFrame->HandlingInputEvent(false);
+        if (weakNumberControlFrame.IsAlive()) {
+          numberControlFrame->HandlingInputEvent(false);
+        }
       }
       else if (aVisitor.mEvent->message == NS_FORM_CHANGE) {
         // We cancel the DOM 'change' event that is fired for any change to our
@@ -3601,7 +3609,7 @@ HTMLInputElement::StepNumberControlForUserEvent(int32_t aDirection)
 {
   Decimal newValue = Decimal::nan(); // unchanged if value will not change
 
-  nsresult rv = GetValueIfStepped(aDirection, &newValue);
+  nsresult rv = GetValueIfStepped(aDirection, CALLED_FOR_USER_EVENT, &newValue);
 
   if (NS_FAILED(rv) || !newValue.isFinite()) {
     return; // value should not or will not change

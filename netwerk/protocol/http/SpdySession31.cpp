@@ -746,7 +746,7 @@ SpdySession31::GenerateSettings()
   // 2nd entry is bytes 20 to 27
   // 3rd entry is bytes 28 to 35
 
-  if (!gHttpHandler->AllowSpdyPush()) {
+  if (!gHttpHandler->AllowPush()) {
     // announcing that we accept 0 incoming streams is done to
     // disable server push
     packet[15 + 8 * numberOfEntries] = SETTINGS_TYPE_MAX_CONCURRENT;
@@ -803,7 +803,7 @@ SpdySession31::GenerateSettings()
 
   LOG3(("Session Window increase at start of session %p %u\n",
         this, PR_ntohl(sessionWindowBump)));
-  LogIO(this, nullptr, "Session Window Bump ", packet, 12);
+  LogIO(this, nullptr, "Session Window Bump ", packet, 16);
 
 generateSettings_complete:
   FlushOutputQueue();
@@ -874,7 +874,10 @@ SpdySession31::CleanupStream(SpdyStream31 *aStream, nsresult aResult,
 {
   MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
   LOG3(("SpdySession31::CleanupStream %p %p 0x%X %X\n",
-        this, aStream, aStream->StreamID(), aResult));
+        this, aStream, aStream ? aStream->StreamID() : 0, aResult));
+  if (!aStream) {
+    return;
+  }
 
   SpdyPushedStream31 *pushSource = nullptr;
 
@@ -1017,7 +1020,7 @@ SpdySession31::HandleSynStream(SpdySession31 *self)
     LOG3(("SpdySession31::HandleSynStream %p associated ID of 0 failed.\n", self));
     self->GenerateRstStream(RST_PROTOCOL_ERROR, streamID);
 
-  } else if (!gHttpHandler->AllowSpdyPush()) {
+  } else if (!gHttpHandler->AllowPush()) {
     // MAX_CONCURRENT_STREAMS of 0 in settings should have disabled push,
     // but some servers are buggy about that.. or the config could have
     // been updated after the settings frame was sent. In both cases just

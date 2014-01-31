@@ -125,23 +125,36 @@ var SelectionHandler = {
           this._ignoreSelectionChanges = true;
           // Check to see if the handles should be reversed.
           let isStartHandle = JSON.parse(aData).handleType == this.HANDLE_TYPE_START;
-          let selectionReversed = this._updateCacheForSelection(isStartHandle);
-          if (selectionReversed) {
-            // Reverse the anchor and focus to correspond to the new start and end handles.
-            let selection = this._getSelection();
-            let anchorNode = selection.anchorNode;
-            let anchorOffset = selection.anchorOffset;
-            selection.collapse(selection.focusNode, selection.focusOffset);
-            selection.extend(anchorNode, anchorOffset);
+
+          try {
+            let selectionReversed = this._updateCacheForSelection(isStartHandle);
+            if (selectionReversed) {
+              // Reverse the anchor and focus to correspond to the new start and end handles.
+              let selection = this._getSelection();
+              let anchorNode = selection.anchorNode;
+              let anchorOffset = selection.anchorOffset;
+              selection.collapse(selection.focusNode, selection.focusOffset);
+              selection.extend(anchorNode, anchorOffset);
+            }
+          } catch (e) {
+            // User finished handle positioning with one end off the screen
+            this._closeSelection();
+            break;
           }
+
           // Act on selectionChange notifications after handle movement ends
           this._ignoreSelectionChanges = false;
+          this._positionHandles();
 
         } else if (this._activeType == this.TYPE_CURSOR) {
           // Act on IMM composition notifications after caret movement ends
           this._ignoreCompositionChanges = false;
+          this._positionHandles();
+
+        } else {
+          Cu.reportError("Ignored \"TextSelection:Position\" message during invalid selection status");
         }
-        this._positionHandles();
+
         break;
       }
 
@@ -274,23 +287,40 @@ var SelectionHandler = {
    * Called to perform a selection operation, given a target element, selection method, starting point etc.
    */
   _performSelection: function sh_performSelection(aOptions) {
-    if (aOptions.mode == this.SELECT_ALL) {
-      if (this._targetElement instanceof HTMLPreElement)  {
-        // Use SELECT_PARAGRAPH else we default to entire page including trailing whitespace
-        return this._domWinUtils.selectAtPoint(1, 1, Ci.nsIDOMWindowUtils.SELECT_PARAGRAPH);
-      } else {
-        // Else default to selectALL Document
-        this._getSelectionController().selectAll();
-        return true;
-      }
-    }
-
     if (aOptions.mode == this.SELECT_AT_POINT) {
       return this._domWinUtils.selectAtPoint(aOptions.x, aOptions.y, Ci.nsIDOMWindowUtils.SELECT_WORDNOSPACE);
     }
 
-    Services.console.logStringMessage("Invalid selection mode " + aOptions.mode);
-    return false;
+    if (aOptions.mode != this.SELECT_ALL) {
+      Cu.reportError("SelectionHandler.js: _performSelection() Invalid selection mode " + aOptions.mode);
+      return false;
+    }
+
+    // HTMLPreElement is a #text node, SELECT_ALL implies entire paragraph
+    if (this._targetElement instanceof HTMLPreElement)  {
+      return this._domWinUtils.selectAtPoint(1, 1, Ci.nsIDOMWindowUtils.SELECT_PARAGRAPH);
+    }
+
+    // Else default to selectALL Document
+    this._getSelectionController().selectAll();
+
+    // Selection is entire HTMLHtmlElement, remove any trailing document whitespace
+    let selection = this._getSelection();
+    let lastNode = selection.focusNode;
+    while (lastNode && lastNode.lastChild) {
+      lastNode = lastNode.lastChild;
+    }
+
+    if (lastNode instanceof Text) {
+      try {
+        selection.extend(lastNode, lastNode.length);
+      } catch (e) {
+        Cu.reportError("SelectionHandler.js: _performSelection() whitespace trim fails: lastNode[" + lastNode +
+          "] lastNode.length[" + lastNode.length + "]");
+      }
+    }
+
+    return true;
   },
 
   /* Return true if the current selection (given by aPositions) is near to where the coordinates passed in */
@@ -375,18 +405,18 @@ var SelectionHandler = {
     SELECT_ALL: {
       label: Strings.browser.GetStringFromName("contextmenu.selectAll"),
       id: "selectall_action",
-      icon: "drawable://select_all",
+      icon: "drawable://ab_select_all",
       action: function(aElement) {
         SelectionHandler.selectAll(aElement);
       },
       selector: ClipboardHelper.selectAllContext,
-      order: 1,
+      order: 5,
     },
 
     CUT: {
       label: Strings.browser.GetStringFromName("contextmenu.cut"),
       id: "cut_action",
-      icon: "drawable://cut",
+      icon: "drawable://ab_cut",
       action: function(aElement) {
         let start = aElement.selectionStart;
         let end   = aElement.selectionEnd;
@@ -397,31 +427,30 @@ var SelectionHandler = {
         // copySelection closes the selection. Show a caret where we just cut the text.
         SelectionHandler.attachCaret(aElement);
       },
-      order: 1,
+      order: 4,
       selector: ClipboardHelper.cutContext,
     },
 
     COPY: {
       label: Strings.browser.GetStringFromName("contextmenu.copy"),
       id: "copy_action",
-      icon: "drawable://copy",
+      icon: "drawable://ab_copy",
       action: function() {
         SelectionHandler.copySelection();
       },
-      order: 1,
+      order: 3,
       selector: ClipboardHelper.getCopyContext(false)
     },
 
     PASTE: {
       label: Strings.browser.GetStringFromName("contextmenu.paste"),
       id: "paste_action",
-      icon: "drawable://paste",
+      icon: "drawable://ab_paste",
       action: function(aElement) {
         ClipboardHelper.paste(aElement);
-        SelectionHandler._positionHandles();
-        SelectionHandler._updateMenu();
+        SelectionHandler._closeSelection();
       },
-      order: 1,
+      order: 2,
       selector: ClipboardHelper.pasteContext,
     },
 
@@ -440,11 +469,12 @@ var SelectionHandler = {
         return Strings.browser.formatStringFromName("contextmenu.search", [Services.search.defaultEngine.name], 1);
       },
       id: "search_action",
-      icon: "drawable://ic_url_bar_search",
+      icon: "drawable://ab_search",
       action: function() {
         SelectionHandler.searchSelection();
         SelectionHandler._closeSelection();
       },
+      order: 1,
       selector: ClipboardHelper.searchWithContext,
     },
 
@@ -531,6 +561,23 @@ var SelectionHandler = {
   },
 
   /*
+   * Helper function for moving the selection inside an editable element.
+   *
+   * @param aAnchorX the stationary handle's x-coordinate in client coordinates
+   * @param aX the moved handle's x-coordinate in client coordinates
+   * @param aCaretPos the current position of the caret
+   */
+  _moveSelectionInEditable: function sh_moveSelectionInEditable(aAnchorX, aX, aCaretPos) {
+    let anchorOffset = aX < aAnchorX ? this._targetElement.selectionEnd
+                                     : this._targetElement.selectionStart;
+    let newOffset = aCaretPos.offset;
+    let [start, end] = anchorOffset <= newOffset ?
+                       [anchorOffset, newOffset] :
+                       [newOffset, anchorOffset];
+    this._targetElement.setSelectionRange(start, end);
+  },
+
+  /*
    * Moves the selection as the user drags a selection handle.
    *
    * @param aIsStartHandle whether the user is moving the start handle (as opposed to the end handle)
@@ -567,8 +614,8 @@ var SelectionHandler = {
     // are reversed, so we need to reverse the logic to extend the selection.
     if ((aIsStartHandle && !this._isRTL) || (!aIsStartHandle && this._isRTL)) {
       if (targetIsEditable) {
-        // XXX This will just collapse the selection if the start handle goes past the end handle.
-        this._targetElement.selectionStart = caretPos.offset;
+        let anchorX = this._isRTL ? this._cache.start.x : this._cache.end.x;
+        this._moveSelectionInEditable(anchorX, aX, caretPos);
       } else {
         let focusNode = selection.focusNode;
         let focusOffset = selection.focusOffset;
@@ -577,8 +624,8 @@ var SelectionHandler = {
       }
     } else {
       if (targetIsEditable) {
-        // XXX This will just collapse the selection if the end handle goes past the start handle.
-        this._targetElement.selectionEnd = caretPos.offset;
+        let anchorX = this._isRTL ? this._cache.end.x : this._cache.start.x;
+        this._moveSelectionInEditable(anchorX, aX, caretPos);
       } else {
         selection.extend(caretPos.offsetNode, caretPos.offset);
       }
@@ -743,8 +790,12 @@ var SelectionHandler = {
   // Returns true if the selection has been reversed. Takes optional aIsStartHandle
   // param to decide whether the selection has been reversed.
   _updateCacheForSelection: function sh_updateCacheForSelection(aIsStartHandle) {
-    let selection = this._getSelection();
-    let rects = selection.getRangeAt(0).getClientRects();
+    let rects = this._getSelection().getRangeAt(0).getClientRects();
+    if (!rects[0]) {
+      // nsISelection object exists, but there's nothing actually selected
+      throw "Failed to update cache for invalid selection";
+    }
+
     let start = { x: this._isRTL ? rects[0].right : rects[0].left, y: rects[0].bottom };
     let end = { x: this._isRTL ? rects[rects.length - 1].left : rects[rects.length - 1].right, y: rects[rects.length - 1].bottom };
 

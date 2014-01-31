@@ -373,7 +373,6 @@ const Class js::ScalarType::class_ = {
     JS_ResolveStub,
     JS_ConvertStub,
     nullptr,
-    nullptr,
     ScalarType::call,
     nullptr,
     nullptr,
@@ -443,7 +442,6 @@ const Class js::ReferenceType::class_ = {
     JS_EnumerateStub,
     JS_ResolveStub,
     JS_ConvertStub,
-    nullptr,
     nullptr,
     ReferenceType::call,
     nullptr,
@@ -566,7 +564,6 @@ const Class ArrayType::class_ = {
     nullptr,
     nullptr,
     nullptr,
-    nullptr,
     TypedObject::construct,
     nullptr
 };
@@ -581,6 +578,10 @@ const JSFunctionSpec ArrayType::typeObjectMethods[] = {
     JS_FN("dimension", ArrayType::dimension, 1, 0),
     JS_FN("toSource", TypeObjectToSource, 0, 0),
     {"equivalent", {nullptr, nullptr}, 1, 0, "TypeObjectEquivalent"},
+    JS_SELF_HOSTED_FN("build",    "TypedObjectArrayTypeBuild", 3, 0),
+    JS_SELF_HOSTED_FN("buildPar", "TypedObjectArrayTypeBuildPar", 3, 0),
+    JS_SELF_HOSTED_FN("from",     "TypedObjectArrayTypeFrom", 3, 0),
+    JS_SELF_HOSTED_FN("fromPar",  "TypedObjectArrayTypeFromPar", 3, 0),
     JS_FS_END
 };
 
@@ -591,6 +592,14 @@ const JSPropertySpec ArrayType::typedObjectProperties[] = {
 const JSFunctionSpec ArrayType::typedObjectMethods[] = {
     {"forEach", {nullptr, nullptr}, 1, 0, "ArrayForEach"},
     {"redimension", {nullptr, nullptr}, 1, 0, "TypedArrayRedimension"},
+    JS_SELF_HOSTED_FN("map",        "TypedArrayMap",        2, 0),
+    JS_SELF_HOSTED_FN("mapPar",     "TypedArrayMapPar",     2, 0),
+    JS_SELF_HOSTED_FN("reduce",     "TypedArrayReduce",     2, 0),
+    JS_SELF_HOSTED_FN("reducePar",  "TypedArrayReducePar",  2, 0),
+    JS_SELF_HOSTED_FN("scatter",    "TypedArrayScatter",    4, 0),
+    JS_SELF_HOSTED_FN("scatterPar", "TypedArrayScatterPar", 4, 0),
+    JS_SELF_HOSTED_FN("filter",     "TypedArrayFilter",     1, 0),
+    JS_SELF_HOSTED_FN("filterPar",  "TypedArrayFilterPar",  1, 0),
     JS_FS_END
 };
 
@@ -835,7 +844,6 @@ const Class StructType::class_ = {
     JS_ResolveStub,
     JS_ConvertStub,
     nullptr, /* finalize */
-    nullptr, /* checkAccess */
     nullptr, /* call */
     nullptr, /* hasInstance */
     TypedObject::construct,
@@ -886,7 +894,7 @@ StructType::layout(JSContext *cx, HandleObject structType, HandleObject fields)
         // Check that all the property names are non-numeric strings.
         uint32_t unused;
         if (!JSID_IS_ATOM(id) || JSID_TO_ATOM(id)->isIndex(&unused)) {
-            RootedValue idValue(cx, IdToJsval(id));
+            RootedValue idValue(cx, IdToValue(id));
             ReportCannotConvertTo(cx, idValue, "StructType field name");
             return false;
         }
@@ -1463,14 +1471,14 @@ TypedDatum::createUnattachedWithClass(JSContext *cx,
     return static_cast<TypedDatum*>(&*obj);
 }
 
-/*static*/ void
+void
 TypedDatum::attach(uint8_t *memory)
 {
     setPrivate(memory);
     setReservedSlot(JS_DATUM_SLOT_OWNER, ObjectValue(*this));
 }
 
-/*static*/ void
+void
 TypedDatum::attach(JSObject &datum, uint32_t offset)
 {
     JS_ASSERT(IsTypedDatum(datum));
@@ -2232,6 +2240,15 @@ TypedDatum::typedMem() const
     return TypedMem(*this);
 }
 
+TypedDatum *
+TypedDatum::owner() const
+{
+    JSObject *owner = getReservedSlot(JS_DATUM_SLOT_OWNER).toObjectOrNull();
+    if (!owner)
+        return nullptr;
+    return &AsTypedDatum(*owner);
+}
+
 /******************************************************************************
  * Typed Objects
  */
@@ -2250,7 +2267,6 @@ const Class TypedObject::class_ = {
     JS_ResolveStub,
     JS_ConvertStub,
     TypedDatum::obj_finalize,
-    nullptr,        /* checkAccess */
     nullptr,        /* call        */
     nullptr,        /* construct   */
     nullptr,        /* hasInstance */
@@ -2418,7 +2434,6 @@ const Class TypedHandle::class_ = {
     JS_ResolveStub,
     JS_ConvertStub,
     TypedDatum::obj_finalize,
-    nullptr,        /* checkAccess */
     nullptr,        /* call        */
     nullptr,        /* construct   */
     nullptr,        /* hasInstance */
@@ -2518,9 +2533,8 @@ js::AttachHandle(ThreadSafeContext *, unsigned argc, Value *vp)
     return true;
 }
 
-const JSJitInfo js::AttachHandleJitInfo =
-    JS_JITINFO_NATIVE_PARALLEL(
-        JSParallelNativeThreadSafeWrapper<js::AttachHandle>);
+JS_JITINFO_NATIVE_PARALLEL_THREADSAFE(js::AttachHandleJitInfo, AttachHandleJitInfo,
+                                      js::AttachHandle);
 
 bool
 js::ObjectIsTypeObject(ThreadSafeContext *, unsigned argc, Value *vp)
@@ -2532,9 +2546,8 @@ js::ObjectIsTypeObject(ThreadSafeContext *, unsigned argc, Value *vp)
     return true;
 }
 
-const JSJitInfo js::ObjectIsTypeObjectJitInfo =
-    JS_JITINFO_NATIVE_PARALLEL(
-        JSParallelNativeThreadSafeWrapper<js::ObjectIsTypeObject>);
+JS_JITINFO_NATIVE_PARALLEL_THREADSAFE(js::ObjectIsTypeObjectJitInfo, ObjectIsTypeObjectJitInfo,
+                                      js::ObjectIsTypeObject);
 
 bool
 js::ObjectIsTypeRepresentation(ThreadSafeContext *, unsigned argc, Value *vp)
@@ -2546,9 +2559,9 @@ js::ObjectIsTypeRepresentation(ThreadSafeContext *, unsigned argc, Value *vp)
     return true;
 }
 
-const JSJitInfo js::ObjectIsTypeRepresentationJitInfo =
-    JS_JITINFO_NATIVE_PARALLEL(
-        JSParallelNativeThreadSafeWrapper<js::ObjectIsTypeRepresentation>);
+JS_JITINFO_NATIVE_PARALLEL_THREADSAFE(js::ObjectIsTypeRepresentationJitInfo,
+                                      ObjectIsTypeRepresentationJitInfo,
+                                      js::ObjectIsTypeRepresentation);
 
 bool
 js::ObjectIsTypedHandle(ThreadSafeContext *, unsigned argc, Value *vp)
@@ -2560,9 +2573,8 @@ js::ObjectIsTypedHandle(ThreadSafeContext *, unsigned argc, Value *vp)
     return true;
 }
 
-const JSJitInfo js::ObjectIsTypedHandleJitInfo =
-    JS_JITINFO_NATIVE_PARALLEL(
-        JSParallelNativeThreadSafeWrapper<js::ObjectIsTypedHandle>);
+JS_JITINFO_NATIVE_PARALLEL_THREADSAFE(js::ObjectIsTypedHandleJitInfo, ObjectIsTypedHandleJitInfo,
+                                      js::ObjectIsTypedHandle);
 
 bool
 js::ObjectIsTypedObject(ThreadSafeContext *, unsigned argc, Value *vp)
@@ -2574,9 +2586,8 @@ js::ObjectIsTypedObject(ThreadSafeContext *, unsigned argc, Value *vp)
     return true;
 }
 
-const JSJitInfo js::ObjectIsTypedObjectJitInfo =
-    JS_JITINFO_NATIVE_PARALLEL(
-        JSParallelNativeThreadSafeWrapper<js::ObjectIsTypedObject>);
+JS_JITINFO_NATIVE_PARALLEL_THREADSAFE(js::ObjectIsTypedObjectJitInfo, ObjectIsTypedObjectJitInfo,
+                                      js::ObjectIsTypedObject);
 
 bool
 js::IsAttached(ThreadSafeContext *cx, unsigned argc, Value *vp)
@@ -2587,9 +2598,7 @@ js::IsAttached(ThreadSafeContext *cx, unsigned argc, Value *vp)
     return true;
 }
 
-const JSJitInfo js::IsAttachedJitInfo =
-    JS_JITINFO_NATIVE_PARALLEL(
-        JSParallelNativeThreadSafeWrapper<js::IsAttached>);
+JS_JITINFO_NATIVE_PARALLEL_THREADSAFE(js::IsAttachedJitInfo, IsAttachedJitInfo, js::IsAttached);
 
 bool
 js::ClampToUint8(ThreadSafeContext *, unsigned argc, Value *vp)
@@ -2601,9 +2610,8 @@ js::ClampToUint8(ThreadSafeContext *, unsigned argc, Value *vp)
     return true;
 }
 
-const JSJitInfo js::ClampToUint8JitInfo =
-    JS_JITINFO_NATIVE_PARALLEL(
-        JSParallelNativeThreadSafeWrapper<js::ClampToUint8>);
+JS_JITINFO_NATIVE_PARALLEL_THREADSAFE(js::ClampToUint8JitInfo, ClampToUint8JitInfo,
+                                      js::ClampToUint8);
 
 bool
 js::Memcpy(ThreadSafeContext *, unsigned argc, Value *vp)
@@ -2624,9 +2632,7 @@ js::Memcpy(ThreadSafeContext *, unsigned argc, Value *vp)
     return true;
 }
 
-const JSJitInfo js::MemcpyJitInfo =
-    JS_JITINFO_NATIVE_PARALLEL(
-        JSParallelNativeThreadSafeWrapper<js::Memcpy>);
+JS_JITINFO_NATIVE_PARALLEL_THREADSAFE(js::MemcpyJitInfo, MemcpyJitInfo, js::Memcpy);
 
 bool
 js::GetTypedObjectModule(JSContext *cx, unsigned argc, Value *vp)
@@ -2680,10 +2686,8 @@ js::StoreScalar##T::Func(ThreadSafeContext *, unsigned argc, Value *vp)       \
     return true;                                                              \
 }                                                                             \
                                                                               \
-const JSJitInfo                                                               \
-js::StoreScalar##T::JitInfo =                                                 \
-    JS_JITINFO_NATIVE_PARALLEL(                                               \
-        JSParallelNativeThreadSafeWrapper<Func>);
+ JS_JITINFO_NATIVE_PARALLEL_THREADSAFE(js::StoreScalar##T::JitInfo, StoreScalar##T, \
+                                       js::StoreScalar##T::Func);
 
 #define JS_STORE_REFERENCE_CLASS_IMPL(_constant, T, _name)                      \
 bool                                                                            \
@@ -2706,10 +2710,8 @@ js::StoreReference##T::Func(ThreadSafeContext *, unsigned argc, Value *vp)      
     return true;                                                                \
 }                                                                               \
                                                                                 \
-const JSJitInfo                                                                 \
-js::StoreReference##T::JitInfo =                                                \
-    JS_JITINFO_NATIVE_PARALLEL(                                                 \
-        JSParallelNativeThreadSafeWrapper<Func>);
+ JS_JITINFO_NATIVE_PARALLEL_THREADSAFE(js::StoreReference##T::JitInfo, StoreReference##T, \
+                                       js::StoreReference##T::Func);
 
 #define JS_LOAD_SCALAR_CLASS_IMPL(_constant, T, _name)                        \
 bool                                                                          \
@@ -2730,10 +2732,8 @@ js::LoadScalar##T::Func(ThreadSafeContext *, unsigned argc, Value *vp)        \
     return true;                                                              \
 }                                                                             \
                                                                               \
-const JSJitInfo                                                               \
-js::LoadScalar##T::JitInfo =                                                  \
-    JS_JITINFO_NATIVE_PARALLEL(                                               \
-        JSParallelNativeThreadSafeWrapper<Func>);
+ JS_JITINFO_NATIVE_PARALLEL_THREADSAFE(js::LoadScalar##T::JitInfo, LoadScalar##T, \
+                                       js::LoadScalar##T::Func);
 
 #define JS_LOAD_REFERENCE_CLASS_IMPL(_constant, T, _name)                     \
 bool                                                                          \
@@ -2755,10 +2755,8 @@ js::LoadReference##T::Func(ThreadSafeContext *, unsigned argc, Value *vp)     \
     return true;                                                              \
 }                                                                             \
                                                                               \
-const JSJitInfo                                                               \
-js::LoadReference##T::JitInfo =                                               \
-    JS_JITINFO_NATIVE_PARALLEL(                                               \
-        JSParallelNativeThreadSafeWrapper<Func>);
+ JS_JITINFO_NATIVE_PARALLEL_THREADSAFE(js::LoadReference##T::JitInfo, LoadReference##T, \
+                                       js::LoadReference##T::Func);
 
 // Because the precise syntax for storing values/objects/strings
 // differs, we abstract it away using specialized variants of the

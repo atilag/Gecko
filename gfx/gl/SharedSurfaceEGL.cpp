@@ -171,18 +171,21 @@ SharedSurface_EGLImage::Fence()
 
         if (!mPixels) {
             SurfaceFormat format =
-                  HasAlpha() ? FORMAT_B8G8R8A8
-                             : FORMAT_B8G8R8X8;
+                  HasAlpha() ? SurfaceFormat::B8G8R8A8
+                             : SurfaceFormat::B8G8R8X8;
             mPixels = Factory::CreateDataSourceSurface(Size(), format);
         }
 
+        DataSourceSurface::MappedSurface map;
+        mPixels->Map(DataSourceSurface::MapType::WRITE, &map);
+
         nsRefPtr<gfxImageSurface> wrappedData =
-            new gfxImageSurface(mPixels->GetData(),
+            new gfxImageSurface(map.mData,
                                 ThebesIntSize(mPixels->GetSize()),
-                                mPixels->Stride(),
+                                map.mStride,
                                 SurfaceFormatToImageFormat(mPixels->GetFormat()));
         ReadScreenIntoImageSurface(mGL, wrappedData);
-        mPixels->MarkDirty();
+        mPixels->Unmap();
         return;
     }
     MOZ_ASSERT(mPipeActive);

@@ -47,17 +47,38 @@ import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
 
+/**
+* {@code ToolbarDisplayLayout} is the UI for when the toolbar is in
+* display state. It's used to display the state of the currently selected
+* tab. It should always be updated through a single entry point
+* (updateFromTab) and should never track any tab events or gecko messages
+* on its own to keep it as dumb as possible.
+*
+* The UI has two possible modes: progress and display which are triggered
+* when UpdateFlags.PROGRESS is used depending on the current tab state.
+* The progress mode is triggered when the tab is loading a page. Display mode
+* is used otherwise.
+*
+* {@code ToolbarDisplayLayout} is meant to be owned by {@code BrowserToolbar}
+* which is the main event bus for the toolbar subsystem.
+*/
 public class ToolbarDisplayLayout extends GeckoLinearLayout
                                   implements Animation.AnimationListener {
 
     private static final String LOGTAG = "GeckoToolbarDisplayLayout";
 
+    // To be used with updateFromTab() to allow the caller
+    // to give enough context for the requested state change.
     enum UpdateFlags {
         TITLE,
         FAVICON,
         PROGRESS,
         SITE_IDENTITY,
         PRIVATE_MODE,
+
+        // Disable any animation that might be
+        // triggered from this state change. Mostly
+        // used on tab switches, see BrowserToolbar.
         DISABLE_ANIMATIONS
     }
 
@@ -95,8 +116,6 @@ public class ToolbarDisplayLayout extends GeckoLinearLayout
     private OnStopListener mStopListener;
 
     private PageActionLayout mPageActionLayout;
-
-    private Animation mProgressSpinner;
 
     private AlphaAnimation mLockFadeIn;
     private TranslateAnimation mTitleSlideLeft;
@@ -144,8 +163,6 @@ public class ToolbarDisplayLayout extends GeckoLinearLayout
 
         mSiteIdentityPopup = new SiteIdentityPopup(mActivity);
         mSiteIdentityPopup.setAnchor(mSiteSecurity);
-
-        mProgressSpinner = AnimationUtils.loadAnimation(mActivity, R.anim.progress_spinner);
 
         mStop = (ImageButton) findViewById(R.id.stop);
         mPageActionLayout = (PageActionLayout) findViewById(R.id.page_action_layout);
@@ -336,12 +353,9 @@ public class ToolbarDisplayLayout extends GeckoLinearLayout
             return;
         }
 
-        if (tab.getState() == Tab.STATE_LOADING) {
-            return;
-        }
-
         Bitmap image = tab.getFavicon();
-        if (image == mLastFavicon) {
+
+        if (image != null && image == mLastFavicon) {
             Log.d(LOGTAG, "Ignoring favicon: new image is identical to previous one.");
             return;
         }
@@ -355,7 +369,7 @@ public class ToolbarDisplayLayout extends GeckoLinearLayout
             image = Bitmap.createScaledBitmap(image, mFaviconSize, mFaviconSize, false);
             mFavicon.setImageBitmap(image);
         } else {
-            mFavicon.setImageDrawable(null);            
+            mFavicon.setImageResource(R.drawable.favicon);
         }
     }
 
@@ -401,17 +415,8 @@ public class ToolbarDisplayLayout extends GeckoLinearLayout
         // are needed by S1/S2 tests (http://mrcote.info/phonedash/#).
         // See discussion in Bug 804457. Bug 805124 tracks paring these down.
         if (mUiMode == UIMode.PROGRESS) {
-            mLastFavicon = null;
-            mFavicon.setImageResource(R.drawable.progress_spinner);
-            mFavicon.setAnimation(mProgressSpinner);
-            mProgressSpinner.start();
-
             Log.i(LOGTAG, "zerdatime " + SystemClock.uptimeMillis() + " - Throbber start");
         } else {
-            updateFavicon(tab);
-            mFavicon.setAnimation(null);
-            mProgressSpinner.cancel();
-
             Log.i(LOGTAG, "zerdatime " + SystemClock.uptimeMillis() + " - Throbber stop");
         }
 

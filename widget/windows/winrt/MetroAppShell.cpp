@@ -17,6 +17,10 @@
 #include "nsIAppStartup.h"
 #include "nsToolkitCompsCID.h"
 #include <shellapi.h>
+#include "nsIDOMWakeLockListener.h"
+#include "nsIPowerManagerService.h"
+#include "mozilla/StaticPtr.h"
+#include <windows.system.display.h>
 
 using namespace mozilla;
 using namespace mozilla::widget;
@@ -46,6 +50,33 @@ namespace widget {
 extern UINT sAppShellGeckoMsgId;
 } }
 
+class WakeLockListener : public nsIDOMMozWakeLockListener {
+public:
+  NS_DECL_ISUPPORTS;
+
+private:
+  ComPtr<ABI::Windows::System::Display::IDisplayRequest> mDisplayRequest;
+
+  NS_IMETHOD Callback(const nsAString& aTopic, const nsAString& aState) {
+    if (!mDisplayRequest) {
+      if (FAILED(ActivateGenericInstance(RuntimeClass_Windows_System_Display_DisplayRequest, mDisplayRequest))) {
+        NS_WARNING("Failed to instantiate IDisplayRequest, wakelocks will be broken!");
+        return NS_OK;
+      }
+    }
+
+    if (aState.Equals(NS_LITERAL_STRING("locked-foreground"))) {
+      mDisplayRequest->RequestActive();
+    } else {
+      mDisplayRequest->RequestRelease();
+    }
+
+    return NS_OK;
+  }
+};
+
+NS_IMPL_ISUPPORTS1(WakeLockListener, nsIDOMMozWakeLockListener)
+StaticRefPtr<WakeLockListener> sWakeLockListener;
 static ComPtr<ICoreWindowStatic> sCoreStatic;
 static bool sIsDispatching = false;
 static bool sShouldPurgeThreadQueue = false;
@@ -196,10 +227,26 @@ MetroAppShell::Run(void)
       rv = NS_ERROR_NOT_IMPLEMENTED;
     break;
     case GeckoProcessType_Default: {
+      nsCOMPtr<nsIPowerManagerService> sPowerManagerService = do_GetService(POWERMANAGERSERVICE_CONTRACTID);
+      if (sPowerManagerService) {
+        sWakeLockListener = new WakeLockListener();
+        sPowerManagerService->AddWakeLockListener(sWakeLockListener);
+      }
+      else {
+        NS_WARNING("Failed to retrieve PowerManagerService, wakelocks will be broken!");
+      }
+
       mozilla::widget::StartAudioSession();
       sFrameworkView->ActivateView();
       rv = nsBaseAppShell::Run();
       mozilla::widget::StopAudioSession();
+
+      if (sPowerManagerService) {
+        sPowerManagerService->RemoveWakeLockListener(sWakeLockListener);
+
+        sPowerManagerService = nullptr;
+        sWakeLockListener = nullptr;
+      }
 
       nsCOMPtr<nsIAppStartup> appStartup (do_GetService(NS_APPSTARTUP_CONTRACTID));
       bool restartingInMetro = false, restartingInDesktop = false;
@@ -215,7 +262,7 @@ MetroAppShell::Run(void)
 
       // This calls XRE_metroShutdown() in xre. Shuts down gecko, including
       // releasing the profile, and destroys MessagePump.
-      sMetroApp->ShutdownXPCOM();
+      sMetroApp->Shutdown();
 
       // Handle update restart or browser switch requests
       if (restartingInDesktop) {
@@ -277,8 +324,8 @@ MetroAppShell::InputEventsDispatched()
 void
 MetroAppShell::DispatchAllGeckoEvents()
 {
-  // Only do this if requested
-  if (!sShouldPurgeThreadQueue) {
+  // Only do this if requested and when we're not shutting down
+  if (!sShouldPurgeThreadQueue || MetroApp::sGeckoShuttingDown) {
     return;
   }
 
@@ -367,6 +414,15 @@ void
 MetroAppShell::NativeCallback()
 {
   NS_ASSERTION(NS_IsMainThread(), "Native callbacks must be on the metro main thread");
+
+  // We shouldn't process native events during xpcom shutdown - this can
+  // trigger unexpected xpcom event dispatching for the main thread when
+  // the thread manager is in the process of shutting down non-main threads,
+  // resulting in shutdown hangs.
+  if (MetroApp::sGeckoShuttingDown) {
+    return;
+  }
+
   NativeEventCallback();
 }
 

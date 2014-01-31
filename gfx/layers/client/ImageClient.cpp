@@ -103,7 +103,7 @@ void
 ImageClientSingle::FlushAllImages(bool aExceptFront)
 {
   if (!aExceptFront && mFrontBuffer) {
-    mFrontBuffer->ForceRemove();
+    GetForwarder()->AddForceRemovingTexture(mFrontBuffer);
     mFrontBuffer = nullptr;
   }
 }
@@ -112,11 +112,11 @@ void
 ImageClientBuffered::FlushAllImages(bool aExceptFront)
 {
   if (!aExceptFront && mFrontBuffer) {
-    mFrontBuffer->ForceRemove();
+    GetForwarder()->AddForceRemovingTexture(mFrontBuffer);
     mFrontBuffer = nullptr;
   }
   if (mBackBuffer) {
-    mBackBuffer->ForceRemove();
+    GetForwarder()->AddForceRemovingTexture(mBackBuffer);
     mBackBuffer = nullptr;
   }
 }
@@ -147,7 +147,7 @@ ImageClientSingle::UpdateImage(ImageContainer* aContainer,
     }
 
     if (mFrontBuffer) {
-      mFrontBuffer->ForceRemove();
+      GetForwarder()->AddForceRemovingTexture(mFrontBuffer);
     }
     mFrontBuffer = texture;
     if (!AddTextureClient(texture)) {
@@ -164,13 +164,13 @@ ImageClientSingle::UpdateImage(ImageContainer* aContainer,
     }
 
     if (mFrontBuffer && mFrontBuffer->IsImmutable()) {
-      mFrontBuffer->ForceRemove();
+      GetForwarder()->AddForceRemovingTexture(mFrontBuffer);
       mFrontBuffer = nullptr;
     }
 
     bool bufferCreated = false;
     if (!mFrontBuffer) {
-      mFrontBuffer = CreateBufferTextureClient(gfx::FORMAT_YUV, TEXTURE_FLAGS_DEFAULT);
+      mFrontBuffer = CreateBufferTextureClient(gfx::SurfaceFormat::YUV, TEXTURE_FLAGS_DEFAULT);
       gfx::IntSize ySize(data->mYSize.width, data->mYSize.height);
       gfx::IntSize cbCrSize(data->mCbCrSize.width, data->mCbCrSize.height);
       if (!mFrontBuffer->AsTextureClientYCbCr()->AllocateForYCbCr(ySize, cbCrSize, data->mStereoMode)) {
@@ -207,7 +207,7 @@ ImageClientSingle::UpdateImage(ImageContainer* aContainer,
     gfx::IntSize size = gfx::IntSize(image->GetSize().width, image->GetSize().height);
 
     if (mFrontBuffer) {
-      mFrontBuffer->ForceRemove();
+      GetForwarder()->AddForceRemovingTexture(mFrontBuffer);
       mFrontBuffer = nullptr;
     }
 
@@ -221,14 +221,14 @@ ImageClientSingle::UpdateImage(ImageContainer* aContainer,
 
     GetForwarder()->UseTexture(this, mFrontBuffer);
   } else {
-    nsRefPtr<gfxASurface> surface = image->GetAsSurface();
+    nsRefPtr<gfxASurface> surface = image->DeprecatedGetAsSurface();
     MOZ_ASSERT(surface);
 
     gfx::IntSize size = gfx::IntSize(image->GetSize().width, image->GetSize().height);
 
     if (mFrontBuffer &&
         (mFrontBuffer->IsImmutable() || mFrontBuffer->GetSize() != size)) {
-      mFrontBuffer->ForceRemove();
+      GetForwarder()->AddForceRemovingTexture(mFrontBuffer);
       mFrontBuffer = nullptr;
     }
 
@@ -435,7 +435,7 @@ DeprecatedImageClientSingle::UpdateImage(ImageContainer* aContainer,
     mDeprecatedTextureClient->SetDescriptor(desc);
 #endif
   } else {
-    nsRefPtr<gfxASurface> surface = image->GetAsSurface();
+    nsRefPtr<gfxASurface> surface = image->DeprecatedGetAsSurface();
     MOZ_ASSERT(surface);
 
     EnsureDeprecatedTextureClient(TEXTURE_SHMEM);

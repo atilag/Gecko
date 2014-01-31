@@ -27,9 +27,6 @@ namespace gl {
 void ReadPixelsIntoImageSurface(GLContext* aGL, gfxImageSurface* aSurface);
 void ReadScreenIntoImageSurface(GLContext* aGL, gfxImageSurface* aSurface);
 
-already_AddRefed<gfxImageSurface>
-GetTexImage(GLContext* gl, GLuint aTexture, bool aYInvert, gfx::SurfaceFormat aFormat);
-
 TemporaryRef<gfx::DataSourceSurface>
 ReadBackSurface(GLContext* gl, GLuint aTexture, bool aYInvert, gfx::SurfaceFormat aFormat);
 
@@ -51,10 +48,10 @@ public:
 
     /**
       * Read the image data contained in aTexture, and return it as an ImageSurface.
-      * If GL_RGBA is given as the format, a gfxImageFormatARGB32 surface is returned.
+      * If GL_RGBA is given as the format, a gfxImageFormat::ARGB32 surface is returned.
       * Not implemented yet:
-      * If GL_RGB is given as the format, a gfxImageFormatRGB24 surface is returned.
-      * If GL_LUMINANCE is given as the format, a gfxImageFormatA8 surface is returned.
+      * If GL_RGB is given as the format, a gfxImageFormat::RGB24 surface is returned.
+      * If GL_LUMINANCE is given as the format, a gfxImageFormat::A8 surface is returned.
       *
       * THIS IS EXPENSIVE.  It is ridiculously expensive.  Only do this
       * if you absolutely positively must, and never in any performance

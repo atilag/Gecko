@@ -24,11 +24,11 @@ static DXGI_FORMAT
 SurfaceFormatToDXGIFormat(gfx::SurfaceFormat aFormat)
 {
   switch (aFormat) {
-    case FORMAT_B8G8R8A8:
+    case SurfaceFormat::B8G8R8A8:
       return DXGI_FORMAT_B8G8R8A8_UNORM;
-    case FORMAT_B8G8R8X8:
+    case SurfaceFormat::B8G8R8X8:
       return DXGI_FORMAT_B8G8R8A8_UNORM;
-    case FORMAT_A8:
+    case SurfaceFormat::A8:
       return DXGI_FORMAT_A8_UNORM;
     default:
       MOZ_ASSERT(false, "unsupported format");
@@ -146,6 +146,7 @@ TextureClientD3D11::TextureClientD3D11(gfx::SurfaceFormat aFormat, TextureFlags 
   : TextureClient(aFlags)
   , mFormat(aFormat)
   , mIsLocked(false)
+  , mNeedsClear(false)
 {}
 
 TextureClientD3D11::~TextureClientD3D11()
@@ -154,8 +155,17 @@ TextureClientD3D11::~TextureClientD3D11()
 bool
 TextureClientD3D11::Lock(OpenMode aMode)
 {
+  if (!IsValid() || !IsAllocated()) {
+    return false;
+  }
   MOZ_ASSERT(!mIsLocked, "The Texture is already locked!");
   LockD3DTexture(mTexture.get());
+
+  if (mNeedsClear) {
+    mDrawTarget->ClearRect(Rect(0, 0, GetSize().width, GetSize().height));
+    mNeedsClear = false;
+  }
+
   mIsLocked = true;
   return true;
 }
@@ -166,7 +176,6 @@ TextureClientD3D11::Unlock()
   MOZ_ASSERT(mIsLocked, "Unlocked called while the texture is not locked!");
   if (mDrawTarget) {
     mDrawTarget->Flush();
-    mDrawTarget = nullptr;
   }
   UnlockD3DTexture(mTexture.get());
   mIsLocked = false;
@@ -181,12 +190,14 @@ TextureClientD3D11::GetAsDrawTarget()
     return mDrawTarget;
   }
 
+  // The DrawTarget is created only once, and is only usable between calls
+  // to Lock and Unlock.
   mDrawTarget = Factory::CreateDrawTargetForD3D10Texture(mTexture, mFormat);
   return mDrawTarget;
 }
 
 bool
-TextureClientD3D11::AllocateForSurface(gfx::IntSize aSize, TextureAllocationFlags)
+TextureClientD3D11::AllocateForSurface(gfx::IntSize aSize, TextureAllocationFlags aFlags)
 {
   mSize = aSize;
   ID3D10Device* device = gfxWindowsPlatform::GetPlatform()->GetD3D10Device();
@@ -203,6 +214,9 @@ TextureClientD3D11::AllocateForSurface(gfx::IntSize aSize, TextureAllocationFlag
     LOGD3D11("Error creating texture for client!");
     return false;
   }
+
+  // Defer clearing to the next time we lock to avoid an extra (expensive) lock.
+  mNeedsClear = aFlags & ALLOC_CLEAR_BUFFER;
 
   return true;
 }
@@ -586,17 +600,17 @@ DeprecatedTextureClientD3D11::EnsureDrawTarget()
 
   SurfaceFormat format;
   switch (mContentType) {
-  case GFX_CONTENT_ALPHA:
-    format = FORMAT_A8;
+  case gfxContentType::ALPHA:
+    format = SurfaceFormat::A8;
     break;
-  case GFX_CONTENT_COLOR:
-    format = FORMAT_B8G8R8X8;
+  case gfxContentType::COLOR:
+    format = SurfaceFormat::B8G8R8X8;
     break;
-  case GFX_CONTENT_COLOR_ALPHA:
-    format = FORMAT_B8G8R8A8;
+  case gfxContentType::COLOR_ALPHA:
+    format = SurfaceFormat::B8G8R8A8;
     break;
   default:
-    format = FORMAT_B8G8R8A8;
+    format = SurfaceFormat::B8G8R8A8;
   }
 
   mDrawTarget = Factory::CreateDrawTargetForD3D10Texture(mTexture, format);
@@ -690,18 +704,18 @@ DeprecatedTextureHostShmemD3D11::UpdateImpl(const SurfaceDescriptor& aImage,
 
   DXGI_FORMAT dxgiFormat;
   switch (surf->Format()) {
-  case gfxImageFormatRGB24:
-    mFormat = FORMAT_B8G8R8X8;
+  case gfxImageFormat::RGB24:
+    mFormat = SurfaceFormat::B8G8R8X8;
     dxgiFormat = DXGI_FORMAT_B8G8R8X8_UNORM;
     bpp = 4;
     break;
-  case gfxImageFormatARGB32:
-    mFormat = FORMAT_B8G8R8A8;
+  case gfxImageFormat::ARGB32:
+    mFormat = SurfaceFormat::B8G8R8A8;
     dxgiFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
     bpp = 4;
     break;
-  case gfxImageFormatA8:
-    mFormat = FORMAT_A8;
+  case gfxImageFormat::A8:
+    mFormat = SurfaceFormat::A8;
     dxgiFormat = DXGI_FORMAT_A8_UNORM;
     bpp = 1;
     break;
@@ -831,7 +845,7 @@ DeprecatedTextureHostDXGID3D11::ReleaseTexture()
 DeprecatedTextureHostYCbCrD3D11::DeprecatedTextureHostYCbCrD3D11()
   : mCompositor(nullptr)
 {
-  mFormat = FORMAT_YUV;
+  mFormat = SurfaceFormat::YUV;
 }
 
 DeprecatedTextureHostYCbCrD3D11::~DeprecatedTextureHostYCbCrD3D11()
@@ -877,9 +891,9 @@ DeprecatedTextureHostYCbCrD3D11::UpdateImpl(const SurfaceDescriptor& aImage,
   RefPtr<DataTextureSource> srcCb;
   RefPtr<DataTextureSource> srcCr;
   if (!mFirstSource) {
-    srcY  = new DataTextureSourceD3D11(FORMAT_A8, mCompositor);
-    srcCb = new DataTextureSourceD3D11(FORMAT_A8, mCompositor);
-    srcCr = new DataTextureSourceD3D11(FORMAT_A8, mCompositor);
+    srcY  = new DataTextureSourceD3D11(SurfaceFormat::A8, mCompositor);
+    srcCb = new DataTextureSourceD3D11(SurfaceFormat::A8, mCompositor);
+    srcCr = new DataTextureSourceD3D11(SurfaceFormat::A8, mCompositor);
     mFirstSource = srcY;
     srcY->SetNextSibling(srcCb);
     srcCb->SetNextSibling(srcCr);
@@ -894,17 +908,17 @@ DeprecatedTextureHostYCbCrD3D11::UpdateImpl(const SurfaceDescriptor& aImage,
     gfx::Factory::CreateWrappingDataSourceSurface(yuvDeserializer.GetYData(),
                                                   yuvDeserializer.GetYStride(),
                                                   yuvDeserializer.GetYSize(),
-                                                  FORMAT_A8);
+                                                  SurfaceFormat::A8);
   RefPtr<gfx::DataSourceSurface> wrapperCb =
     gfx::Factory::CreateWrappingDataSourceSurface(yuvDeserializer.GetCbData(),
                                                   yuvDeserializer.GetCbCrStride(),
                                                   yuvDeserializer.GetCbCrSize(),
-                                                  FORMAT_A8);
+                                                  SurfaceFormat::A8);
   RefPtr<gfx::DataSourceSurface> wrapperCr =
     gfx::Factory::CreateWrappingDataSourceSurface(yuvDeserializer.GetCrData(),
                                                   yuvDeserializer.GetCbCrStride(),
                                                   yuvDeserializer.GetCbCrSize(),
-                                                  FORMAT_A8);
+                                                  SurfaceFormat::A8);
   // We don't support partial updates for YCbCr textures
   NS_ASSERTION(!aRegion, "Unsupported partial updates for YCbCr textures");
   if (!srcY->Update(wrapperY) ||

@@ -789,7 +789,7 @@ CodeGenerator::visitRegExpTest(LRegExpTest *lir)
 }
 
 typedef JSString *(*RegExpReplaceFn)(JSContext *, HandleString, HandleObject, HandleString);
-static const VMFunction RegExpReplaceInfo = FunctionInfo<RegExpReplaceFn>(regexp_replace);
+static const VMFunction RegExpReplaceInfo = FunctionInfo<RegExpReplaceFn>(RegExpReplace);
 
 bool
 CodeGenerator::visitRegExpReplace(LRegExpReplace *lir)
@@ -799,7 +799,7 @@ CodeGenerator::visitRegExpReplace(LRegExpReplace *lir)
     else
         pushArg(ToRegister(lir->replacement()));
 
-    pushArg(ToRegister(lir->regexp()));
+    pushArg(ToRegister(lir->pattern()));
 
     if (lir->string()->isConstant())
         pushArg(ImmGCPtr(lir->string()->toConstant()->toString()));
@@ -808,6 +808,31 @@ CodeGenerator::visitRegExpReplace(LRegExpReplace *lir)
 
     return callVM(RegExpReplaceInfo, lir);
 }
+
+typedef JSString *(*StringReplaceFn)(JSContext *, HandleString, HandleString, HandleString);
+static const VMFunction StringReplaceInfo = FunctionInfo<StringReplaceFn>(StringReplace);
+
+bool
+CodeGenerator::visitStringReplace(LStringReplace *lir)
+{
+    if (lir->replacement()->isConstant())
+        pushArg(ImmGCPtr(lir->replacement()->toConstant()->toString()));
+    else
+        pushArg(ToRegister(lir->replacement()));
+
+    if (lir->pattern()->isConstant())
+        pushArg(ImmGCPtr(lir->pattern()->toConstant()->toString()));
+    else
+        pushArg(ToRegister(lir->pattern()));
+
+    if (lir->string()->isConstant())
+        pushArg(ImmGCPtr(lir->string()->toConstant()->toString()));
+    else
+        pushArg(ToRegister(lir->string()));
+
+    return callVM(StringReplaceInfo, lir);
+}
+
 
 typedef JSObject *(*LambdaFn)(JSContext *, HandleFunction, HandleObject);
 static const VMFunction LambdaInfo =
@@ -1051,6 +1076,18 @@ CodeGenerator::visitTableSwitchV(LTableSwitchV *ins)
     masm.bind(&isInt);
 
     return emitTableSwitchDispatch(mir, index, ToRegisterOrInvalid(ins->tempPointer()));
+}
+
+typedef JSObject *(*DeepCloneObjectLiteralFn)(JSContext *, HandleObject, NewObjectKind);
+static const VMFunction DeepCloneObjectLiteralInfo =
+    FunctionInfo<DeepCloneObjectLiteralFn>(DeepCloneObjectLiteral);
+
+bool
+CodeGenerator::visitCloneLiteral(LCloneLiteral *lir)
+{
+    pushArg(ImmWord(js::MaybeSingletonObject));
+    pushArg(ToRegister(lir->output()));
+    return callVM(DeepCloneObjectLiteralInfo, lir);
 }
 
 bool
@@ -1496,7 +1533,7 @@ CodeGenerator::visitForkJoinSlice(LForkJoinSlice *lir)
 }
 
 bool
-CodeGenerator::visitGuardThreadLocalObject(LGuardThreadLocalObject *lir)
+CodeGenerator::visitGuardThreadExclusive(LGuardThreadExclusive *lir)
 {
     JS_ASSERT(gen->info().executionMode() == ParallelExecution);
 
@@ -1504,7 +1541,7 @@ CodeGenerator::visitGuardThreadLocalObject(LGuardThreadLocalObject *lir)
     masm.setupUnalignedABICall(2, tempReg);
     masm.passABIArg(ToRegister(lir->forkJoinSlice()));
     masm.passABIArg(ToRegister(lir->object()));
-    masm.callWithABI(JS_FUNC_TO_DATA_PTR(void *, IsThreadLocalObject));
+    masm.callWithABI(JS_FUNC_TO_DATA_PTR(void *, ParallelWriteGuard));
 
     OutOfLineAbortPar *bail = oolAbortPar(ParallelBailoutIllegalWrite, lir);
     if (!bail)
@@ -3401,7 +3438,8 @@ CodeGenerator::visitNewDeclEnvObject(LNewDeclEnvObject *lir)
 
     // If we have a template object, we can inline call object creation.
     OutOfLineCode *ool = oolCallVM(NewDeclEnvObjectInfo, lir,
-                                   (ArgList(), ImmGCPtr(info.fun()), Imm32(gc::DefaultHeap)),
+                                   (ArgList(), ImmGCPtr(info.funMaybeLazy()),
+                                    Imm32(gc::DefaultHeap)),
                                    StoreRegisterTo(obj));
     if (!ool)
         return false;
@@ -3667,6 +3705,21 @@ CodeGenerator::visitInitElemGetterSetter(LInitElemGetterSetter *lir)
     pushArg(ImmPtr(lir->mir()->resumePoint()->pc()));
 
     return callVM(InitElemGetterSetterInfo, lir);
+}
+
+typedef bool(*MutatePrototypeFn)(JSContext *cx, HandleObject obj, HandleValue value);
+static const VMFunction MutatePrototypeInfo =
+    FunctionInfo<MutatePrototypeFn>(MutatePrototype);
+
+bool
+CodeGenerator::visitMutateProto(LMutateProto *lir)
+{
+    Register objReg = ToRegister(lir->getObject());
+
+    pushArg(ToValue(lir, LMutateProto::ValueIndex));
+    pushArg(objReg);
+
+    return callVM(MutatePrototypeInfo, lir);
 }
 
 typedef bool(*InitPropFn)(JSContext *cx, HandleObject obj,
@@ -7425,11 +7478,11 @@ CodeGenerator::visitInstanceOfV(LInstanceOfV *ins)
     return emitInstanceOf(ins, ins->mir()->prototypeObject());
 }
 
-// Wrap IsDelegate, which takes a Value for the lhs of an instanceof.
+// Wrap IsDelegateOfObject, which takes a JSObject*, not a HandleObject
 static bool
 IsDelegateObject(JSContext *cx, HandleObject protoObj, HandleObject obj, bool *res)
 {
-    return IsDelegate(cx, protoObj, ObjectValue(*obj), res);
+    return IsDelegateOfObject(cx, protoObj, obj, res);
 }
 
 typedef bool (*IsDelegateObjectFn)(JSContext *, HandleObject, HandleObject, bool *);
@@ -7701,7 +7754,7 @@ CodeGenerator::visitFunctionBoundary(LFunctionBoundary *lir)
             // fallthrough
 
         case MFunctionBoundary::Enter:
-            if (sps_.slowAssertions()) {
+            if (gen->options.spsSlowAssertionsEnabled()) {
                 saveLive(lir);
                 pushArg(ImmGCPtr(lir->script()));
                 if (!callVM(SPSEnterInfo, lir))
@@ -7711,7 +7764,7 @@ CodeGenerator::visitFunctionBoundary(LFunctionBoundary *lir)
                 return true;
             }
 
-            return sps_.push(GetIonContext()->cx, lir->script(), masm, temp);
+            return sps_.push(lir->script(), masm, temp);
 
         case MFunctionBoundary::Inline_Exit:
             // all inline returns were covered with ::Exit, so we just need to
@@ -7722,7 +7775,7 @@ CodeGenerator::visitFunctionBoundary(LFunctionBoundary *lir)
             return true;
 
         case MFunctionBoundary::Exit:
-            if (sps_.slowAssertions()) {
+            if (gen->options.spsSlowAssertionsEnabled()) {
                 saveLive(lir);
                 pushArg(ImmGCPtr(lir->script()));
                 // Once we've exited, then we shouldn't emit instrumentation for
@@ -7847,7 +7900,7 @@ CodeGenerator::visitAsmJSCall(LAsmJSCall *ins)
 {
     MAsmJSCall *mir = ins->mir();
 
-#if defined(JS_CPU_ARM) && !defined(JS_CPU_ARM_HARDFP)
+#if defined(JS_CODEGEN_ARM) && !defined(JS_CODEGEN_ARM_HARDFP)
     if (mir->callee().which() == MAsmJSCall::Callee::Builtin) {
         for (unsigned i = 0, e = ins->numOperands(); i < e; i++) {
             LAllocation *a = ins->getOperand(i);

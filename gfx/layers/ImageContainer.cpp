@@ -21,6 +21,7 @@
 #ifdef MOZ_WIDGET_GONK
 #include "GrallocImages.h"
 #endif
+#include "gfx2DGlue.h"
 
 #ifdef XP_MACOSX
 #include "mozilla/gfx/QuartzSupport.h"
@@ -48,6 +49,13 @@ class DataSourceSurface;
 class SourceSurface;
 
 Atomic<int32_t> Image::sSerialCounter(0);
+
+TemporaryRef<gfx::SourceSurface>
+Image::GetAsSourceSurface()
+{
+  nsRefPtr<gfxASurface> surface = DeprecatedGetAsSurface();
+  return gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(nullptr, surface);
+}
 
 already_AddRefed<Image>
 ImageFactory::CreateImage(const ImageFormat *aFormats,
@@ -289,7 +297,7 @@ ImageContainer::LockCurrentImage()
 }
 
 already_AddRefed<gfxASurface>
-ImageContainer::LockCurrentAsSurface(gfx::IntSize *aSize, Image** aCurrentImage)
+ImageContainer::DeprecatedLockCurrentAsSurface(gfx::IntSize *aSize, Image** aCurrentImage)
 {
   ReentrantMonitorAutoEnter mon(mReentrantMonitor);
 
@@ -314,8 +322,8 @@ ImageContainer::LockCurrentAsSurface(gfx::IntSize *aSize, Image** aCurrentImage)
                             ThebesIntSize(mRemoteData->mSize),
                             mRemoteData->mBitmap.mStride,
                             mRemoteData->mFormat == RemoteImageData::BGRX32 ?
-                                                   gfxImageFormatARGB32 :
-                                                   gfxImageFormatRGB24);
+                                                   gfxImageFormat::ARGB32 :
+                                                   gfxImageFormat::RGB24);
 
       *aSize = newSurf->GetSize().ToIntSize();
     
@@ -323,7 +331,7 @@ ImageContainer::LockCurrentAsSurface(gfx::IntSize *aSize, Image** aCurrentImage)
     }
 
     *aSize = mActiveImage->GetSize();
-    return mActiveImage->GetAsSurface();
+    return mActiveImage->DeprecatedGetAsSurface();
   }
 
   if (aCurrentImage) {
@@ -336,7 +344,59 @@ ImageContainer::LockCurrentAsSurface(gfx::IntSize *aSize, Image** aCurrentImage)
   }
 
   *aSize = mActiveImage->GetSize();
-  return mActiveImage->GetAsSurface();
+  return mActiveImage->DeprecatedGetAsSurface();
+}
+
+TemporaryRef<gfx::SourceSurface>
+ImageContainer::LockCurrentAsSourceSurface(gfx::IntSize *aSize, Image** aCurrentImage)
+{
+  ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+
+  if (mRemoteData) {
+    NS_ASSERTION(mRemoteDataMutex, "Should have remote data mutex when having remote data!");
+    mRemoteDataMutex->Lock();
+
+    EnsureActiveImage();
+
+    if (aCurrentImage) {
+      NS_IF_ADDREF(mActiveImage);
+      *aCurrentImage = mActiveImage.get();
+    }
+
+    if (!mActiveImage) {
+      return nullptr;
+    }
+
+    if (mActiveImage->GetFormat() == REMOTE_IMAGE_BITMAP) {
+      gfxImageFormat fmt = mRemoteData->mFormat == RemoteImageData::BGRX32
+                           ? gfxImageFormat::ARGB32
+                           : gfxImageFormat::RGB24;
+
+      RefPtr<gfx::DataSourceSurface> newSurf
+        = gfx::Factory::CreateWrappingDataSourceSurface(mRemoteData->mBitmap.mData,
+                                                        mRemoteData->mBitmap.mStride,
+                                                        mRemoteData->mSize,
+                                                        gfx::ImageFormatToSurfaceFormat(fmt));
+      *aSize = newSurf->GetSize();
+
+      return newSurf;
+    }
+
+    *aSize = mActiveImage->GetSize();
+    return mActiveImage->GetAsSourceSurface();
+  }
+
+  if (aCurrentImage) {
+    NS_IF_ADDREF(mActiveImage);
+    *aCurrentImage = mActiveImage.get();
+  }
+
+  if (!mActiveImage) {
+    return nullptr;
+  }
+
+  *aSize = mActiveImage->GetSize();
+  return mActiveImage->GetAsSourceSurface();
 }
 
 void
@@ -349,7 +409,7 @@ ImageContainer::UnlockCurrentImage()
 }
 
 already_AddRefed<gfxASurface>
-ImageContainer::GetCurrentAsSurface(gfx::IntSize *aSize)
+ImageContainer::DeprecatedGetCurrentAsSurface(gfx::IntSize *aSize)
 {
   ReentrantMonitorAutoEnter mon(mReentrantMonitor);
 
@@ -365,7 +425,27 @@ ImageContainer::GetCurrentAsSurface(gfx::IntSize *aSize)
       return nullptr;
     *aSize = mActiveImage->GetSize();
   }
-  return mActiveImage->GetAsSurface();
+  return mActiveImage->DeprecatedGetAsSurface();
+}
+
+TemporaryRef<gfx::SourceSurface>
+ImageContainer::GetCurrentAsSourceSurface(gfx::IntSize *aSize)
+{
+  ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+
+  if (mRemoteData) {
+    CrossProcessMutexAutoLock autoLock(*mRemoteDataMutex);
+    EnsureActiveImage();
+
+    if (!mActiveImage)
+      return nullptr;
+    *aSize = mRemoteData->mSize;
+  } else {
+    if (!mActiveImage)
+      return nullptr;
+    *aSize = mActiveImage->GetSize();
+  }
+  return mActiveImage->GetAsSourceSurface();
 }
 
 gfx::IntSize
@@ -446,7 +526,7 @@ ImageContainer::EnsureActiveImage()
 PlanarYCbCrImage::PlanarYCbCrImage(BufferRecycleBin *aRecycleBin)
   : Image(nullptr, PLANAR_YCBCR)
   , mBufferSize(0)
-  , mOffscreenFormat(gfxImageFormatUnknown)
+  , mOffscreenFormat(gfxImageFormat::Unknown)
   , mRecycleBin(aRecycleBin)
 {
 }
@@ -528,7 +608,7 @@ PlanarYCbCrImage::SetData(const Data &aData)
 gfxImageFormat
 PlanarYCbCrImage::GetOffscreenFormat()
 {
-  return mOffscreenFormat == gfxImageFormatUnknown ?
+  return mOffscreenFormat == gfxImageFormat::Unknown ?
     gfxPlatform::GetPlatform()->GetOffscreenFormat() :
     mOffscreenFormat;
 }
@@ -553,10 +633,10 @@ PlanarYCbCrImage::AllocateAndGetNewBuffer(uint32_t aSize)
 }
 
 already_AddRefed<gfxASurface>
-PlanarYCbCrImage::GetAsSurface()
+PlanarYCbCrImage::DeprecatedGetAsSurface()
 {
-  if (mSurface) {
-    nsRefPtr<gfxASurface> result = mSurface.get();
+  if (mDeprecatedSurface) {
+    nsRefPtr<gfxASurface> result = mDeprecatedSurface.get();
     return result.forget();
   }
 
@@ -574,17 +654,42 @@ PlanarYCbCrImage::GetAsSurface()
 
   gfx::ConvertYCbCrToRGB(mData, format, mSize, imageSurface->Data(), imageSurface->Stride());
 
-  mSurface = imageSurface;
+  mDeprecatedSurface = imageSurface;
 
   return imageSurface.forget();
 }
 
+TemporaryRef<gfx::SourceSurface>
+PlanarYCbCrImage::GetAsSourceSurface()
+{
+  if (mSourceSurface) {
+    return mSourceSurface.get();
+  }
+
+  gfx::IntSize size(mSize);
+  gfx::SurfaceFormat format = gfx::ImageFormatToSurfaceFormat(GetOffscreenFormat());
+  gfx::GetYCbCrToRGBDestFormatAndSize(mData, format, size);
+  if (mSize.width > PlanarYCbCrImage::MAX_DIMENSION ||
+      mSize.height > PlanarYCbCrImage::MAX_DIMENSION) {
+    NS_ERROR("Illegal image dest width or height");
+    return nullptr;
+  }
+
+  RefPtr<gfx::DataSourceSurface> surface = gfx::Factory::CreateDataSourceSurface(size, format);
+
+  gfx::ConvertYCbCrToRGB(mData, format, size, surface->GetData(), surface->Stride());
+
+  mSourceSurface = surface;
+
+  return surface.forget();
+}
+
 already_AddRefed<gfxASurface>
-RemoteBitmapImage::GetAsSurface()
+RemoteBitmapImage::DeprecatedGetAsSurface()
 {
   nsRefPtr<gfxImageSurface> newSurf =
     new gfxImageSurface(ThebesIntSize(mSize),
-    mFormat == RemoteImageData::BGRX32 ? gfxImageFormatRGB24 : gfxImageFormatARGB32);
+    mFormat == RemoteImageData::BGRX32 ? gfxImageFormat::RGB24 : gfxImageFormat::ARGB32);
 
   for (int y = 0; y < mSize.height; y++) {
     memcpy(newSurf->Data() + newSurf->Stride() * y,
@@ -593,6 +698,23 @@ RemoteBitmapImage::GetAsSurface()
   }
 
   return newSurf.forget();
+}
+
+TemporaryRef<gfx::SourceSurface>
+RemoteBitmapImage::GetAsSourceSurface()
+{
+  gfx::SurfaceFormat fmt = mFormat == RemoteImageData::BGRX32
+                         ? gfx::SurfaceFormat::B8G8R8X8
+                         : gfx::SurfaceFormat::B8G8R8A8;
+  RefPtr<gfx::DataSourceSurface> newSurf = gfx::Factory::CreateDataSourceSurface(mSize, fmt);
+
+  for (int y = 0; y < mSize.height; y++) {
+    memcpy(newSurf->GetData() + newSurf->Stride() * y,
+           mData + mStride * y,
+           mSize.width * 4);
+  }
+
+  return newSurf;
 }
 
 } // namespace

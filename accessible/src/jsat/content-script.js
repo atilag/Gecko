@@ -343,13 +343,22 @@ function scroll(aMessage) {
 
 function adjustRange(aMessage) {
   function sendUpDownKey(aAccessible) {
-    let evt = content.document.createEvent('KeyboardEvent');
-    let keycode = aMessage.json.direction == 'forward' ?
-      content.KeyEvent.DOM_VK_DOWN : content.KeyEvent.DOM_VK_UP;
-    evt.initKeyEvent(
-      "keypress", false, true, null, false, false, false, false, keycode, 0);
-    if (aAccessible.DOMNode) {
-      aAccessible.DOMNode.dispatchEvent(evt);
+    let acc = Utils.getEmbeddedControl(aAccessible) || aAccessible;
+    let elem = acc.DOMNode;
+    if (elem) {
+      if (elem.tagName === 'INPUT' && elem.type === 'range') {
+        elem[aMessage.json.direction === 'forward' ? 'stepDown' : 'stepUp']();
+        let changeEvent = content.document.createEvent('UIEvent');
+        changeEvent.initEvent('change', true, true);
+        elem.dispatchEvent(changeEvent);
+      } else {
+        let evt = content.document.createEvent('KeyboardEvent');
+        let keycode = aMessage.json.direction == 'forward' ?
+              content.KeyEvent.DOM_VK_DOWN : content.KeyEvent.DOM_VK_UP;
+        evt.initKeyEvent(
+          "keypress", false, true, null, false, false, false, false, keycode, 0);
+        elem.dispatchEvent(evt);
+      }
     }
   }
 

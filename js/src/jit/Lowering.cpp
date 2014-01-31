@@ -17,6 +17,7 @@
 
 #include "jsinferinlines.h"
 #include "jsobjinlines.h"
+#include "jsopcodeinlines.h"
 
 #include "jit/shared/Lowering-shared-inl.h"
 
@@ -25,6 +26,16 @@ using namespace jit;
 
 using mozilla::DebugOnly;
 using JS::GenericNaN;
+
+bool
+LIRGenerator::visitCloneLiteral(MCloneLiteral *ins)
+{
+    JS_ASSERT(ins->type() == MIRType_Object);
+    JS_ASSERT(ins->input()->type() == MIRType_Object);
+
+    LCloneLiteral *lir = new(alloc()) LCloneLiteral(useRegisterAtStart(ins->input()));
+    return defineReturn(lir, ins) && assignSafepoint(lir, ins);
+}
 
 bool
 LIRGenerator::visitParameter(MParameter *param)
@@ -269,6 +280,16 @@ LIRGenerator::visitInitElemGetterSetter(MInitElemGetterSetter *ins)
 }
 
 bool
+LIRGenerator::visitMutateProto(MMutateProto *ins)
+{
+    LMutateProto *lir = new(alloc()) LMutateProto(useRegisterAtStart(ins->getObject()));
+    if (!useBoxAtStart(lir, LMutateProto::ValueIndex, ins->getValue()))
+        return false;
+
+    return add(lir, ins) && assignSafepoint(lir, ins);
+}
+
+bool
 LIRGenerator::visitInitProp(MInitProp *ins)
 {
     LInitProp *lir = new(alloc()) LInitProp(useRegisterAtStart(ins->getObject()));
@@ -404,7 +425,6 @@ LIRGenerator::visitCall(MCall *call)
         return false;
 
     // Height of the current argument vector.
-    uint32_t argslot = call->numStackArgs();
     JSFunction *target = call->getSingleTarget();
 
     // Call DOM functions.
@@ -416,10 +436,9 @@ LIRGenerator::visitCall(MCall *call)
         GetTempRegForIntArg(2, 0, &privReg);
         mozilla::DebugOnly<bool> ok = GetTempRegForIntArg(3, 0, &argsReg);
         MOZ_ASSERT(ok, "How can we not have four temp registers?");
-        LCallDOMNative *lir = new(alloc()) LCallDOMNative(argslot, tempFixed(cxReg),
-                                                          tempFixed(objReg), tempFixed(privReg),
-                                                          tempFixed(argsReg));
-        return (defineReturn(lir, call) && assignSafepoint(lir, call));
+        LCallDOMNative *lir = new(alloc()) LCallDOMNative(tempFixed(cxReg), tempFixed(objReg),
+                                                          tempFixed(privReg), tempFixed(argsReg));
+        return defineReturn(lir, call) && assignSafepoint(lir, call);
     }
 
     // Call known functions.
@@ -435,21 +454,20 @@ LIRGenerator::visitCall(MCall *call)
             mozilla::DebugOnly<bool> ok = GetTempRegForIntArg(3, 0, &tmpReg);
             MOZ_ASSERT(ok, "How can we not have four temp registers?");
 
-            LCallNative *lir = new(alloc()) LCallNative(argslot, tempFixed(cxReg),
-                                                        tempFixed(numReg),
-                                                        tempFixed(vpReg),
-                                                        tempFixed(tmpReg));
+            LCallNative *lir = new(alloc()) LCallNative(tempFixed(cxReg), tempFixed(numReg),
+                                                        tempFixed(vpReg), tempFixed(tmpReg));
             return (defineReturn(lir, call) && assignSafepoint(lir, call));
         }
 
         LCallKnown *lir = new(alloc()) LCallKnown(useFixed(call->getFunction(), CallTempReg0),
-                                                  argslot, tempFixed(CallTempReg2));
-        return (defineReturn(lir, call) && assignSafepoint(lir, call));
+                                                  tempFixed(CallTempReg2));
+        return defineReturn(lir, call) && assignSafepoint(lir, call);
     }
 
     // Call anything, using the most generic code.
     LCallGeneric *lir = new(alloc()) LCallGeneric(useFixed(call->getFunction(), CallTempReg0),
-        argslot, tempFixed(ArgumentsRectifierReg), tempFixed(CallTempReg2));
+                                                  tempFixed(ArgumentsRectifierReg),
+                                                  tempFixed(CallTempReg2));
     return defineReturn(lir, call) && assignSafepoint(lir, call);
 }
 
@@ -595,7 +613,7 @@ ReorderComparison(JSOp op, MDefinition **lhsp, MDefinition **rhsp)
     if (lhs->isConstant()) {
         *rhsp = lhs;
         *lhsp = rhs;
-        return js::analyze::ReverseCompareOp(op);
+        return ReverseCompareOp(op);
     }
     return op;
 }
@@ -1941,12 +1959,25 @@ LIRGenerator::visitRegExpTest(MRegExpTest *ins)
 bool
 LIRGenerator::visitRegExpReplace(MRegExpReplace *ins)
 {
-    JS_ASSERT(ins->regexp()->type() == MIRType_Object);
+    JS_ASSERT(ins->pattern()->type() == MIRType_Object);
     JS_ASSERT(ins->string()->type() == MIRType_String);
     JS_ASSERT(ins->replacement()->type() == MIRType_String);
 
     LRegExpReplace *lir = new(alloc()) LRegExpReplace(useRegisterOrConstantAtStart(ins->string()),
-                                                      useRegisterAtStart(ins->regexp()),
+                                                      useRegisterAtStart(ins->pattern()),
+                                                      useRegisterOrConstantAtStart(ins->replacement()));
+    return defineReturn(lir, ins) && assignSafepoint(lir, ins);
+}
+
+bool
+LIRGenerator::visitStringReplace(MStringReplace *ins)
+{
+    JS_ASSERT(ins->pattern()->type() == MIRType_String);
+    JS_ASSERT(ins->string()->type() == MIRType_String);
+    JS_ASSERT(ins->replacement()->type() == MIRType_String);
+
+    LStringReplace *lir = new(alloc()) LStringReplace(useRegisterOrConstantAtStart(ins->string()),
+                                                      useRegisterAtStart(ins->pattern()),
                                                       useRegisterOrConstantAtStart(ins->replacement()));
     return defineReturn(lir, ins) && assignSafepoint(lir, ins);
 }
@@ -2055,12 +2086,16 @@ LIRGenerator::visitForkJoinSlice(MForkJoinSlice *ins)
 }
 
 bool
-LIRGenerator::visitGuardThreadLocalObject(MGuardThreadLocalObject *ins)
+LIRGenerator::visitGuardThreadExclusive(MGuardThreadExclusive *ins)
 {
-    LGuardThreadLocalObject *lir =
-        new(alloc()) LGuardThreadLocalObject(useFixed(ins->forkJoinSlice(), CallTempReg0),
-                                             useFixed(ins->object(), CallTempReg1),
-                                             tempFixed(CallTempReg2));
+    // FIXME (Bug 956281) -- For now, we always generate the most
+    // general form of write guard check. we could employ TI feedback
+    // to optimize this if we know that the object being tested is a
+    // typed object or know that it is definitely NOT a typed object.
+    LGuardThreadExclusive *lir =
+        new(alloc()) LGuardThreadExclusive(useFixed(ins->forkJoinSlice(), CallTempReg0),
+                                           useFixed(ins->object(), CallTempReg1),
+                                           tempFixed(CallTempReg2));
     lir->setMir(ins);
     return add(lir, ins);
 }
@@ -2071,7 +2106,7 @@ LIRGenerator::visitInterruptCheck(MInterruptCheck *ins)
     // Implicit interrupt checks require asm.js signal handlers to be
     // installed. ARM does not yet use implicit interrupt checks, see
     // bug 864220.
-#ifndef JS_CPU_ARM
+#ifndef JS_CODEGEN_ARM
     if (GetIonContext()->runtime->signalHandlersInstalled()) {
         LInterruptCheckImplicit *lir = new(alloc()) LInterruptCheckImplicit();
         return add(lir, ins) && assignSafepoint(lir, ins);
@@ -3240,8 +3275,7 @@ LIRGenerator::visitFunctionBoundary(MFunctionBoundary *ins)
         return false;
     // If slow assertions are enabled, then this node will result in a callVM
     // out to a C++ function for the assertions, so we will need a safepoint.
-    return !GetIonContext()->runtime->spsProfiler().slowAssertionsEnabled() ||
-           assignSafepoint(lir, ins);
+    return !gen->options.spsSlowAssertionsEnabled() || assignSafepoint(lir, ins);
 }
 
 bool

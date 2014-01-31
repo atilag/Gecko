@@ -94,6 +94,13 @@ struct DeviceStorageAddParams
   PBlob blob;
 };
 
+struct DeviceStorageCreateFdParams
+{
+  nsString type;
+  nsString storageName;
+  nsString relpath;
+};
+
 struct DeviceStorageGetParams
 {
   nsString type;
@@ -120,6 +127,7 @@ struct DeviceStorageEnumerationParams
 union DeviceStorageParams
 {
   DeviceStorageAddParams;
+  DeviceStorageCreateFdParams;
   DeviceStorageGetParams;
   DeviceStorageDeleteParams;
   DeviceStorageEnumerationParams;
@@ -506,6 +514,8 @@ parent:
                                 nsString pageURL,
                                 bool isAudio,
                                 bool isVideo);
+
+    sync GetGraphicsFeatureStatus(int32_t aFeature) returns (int32_t aStatus, bool aSuccess);
 
     AddIdleObserver(uint64_t observerId, uint32_t idleTimeInS);
     RemoveIdleObserver(uint64_t observerId, uint32_t idleTimeInS);

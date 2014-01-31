@@ -39,6 +39,7 @@ namespace jit {
 
 class BreakpointSite;
 class BindingIter;
+class LazyScript;
 class RegExpObject;
 struct SourceCompressionTask;
 class Shape;
@@ -73,8 +74,7 @@ typedef enum JSTryNoteKind {
  */
 struct JSTryNote {
     uint8_t         kind;       /* one of JSTryNoteKind */
-    uint8_t         padding;    /* explicit padding on uint16_t boundary */
-    uint16_t        stackDepth; /* stack depth upon exception handler entry */
+    uint32_t        stackDepth; /* stack depth upon exception handler entry */
     uint32_t        start;      /* start of the try statement or loop
                                    relative to script->main */
     uint32_t        length;     /* length of the try statement or loop */
@@ -188,7 +188,7 @@ class Bindings
     HeapPtr<Shape> callObjShape_;
     uintptr_t bindingArrayAndFlag_;
     uint16_t numArgs_;
-    uint16_t numVars_;
+    uint32_t numVars_;
 
     /*
      * During parsing, bindings are allocated out of a temporary LifoAlloc.
@@ -219,7 +219,7 @@ class Bindings
      * pointer into the Binding array stored in script->data.
      */
     static bool initWithTemporaryStorage(ExclusiveContext *cx, InternalBindingsHandle self,
-                                         unsigned numArgs, unsigned numVars,
+                                         unsigned numArgs, uint32_t numVars,
                                          Binding *bindingArray);
 
     uint8_t *switchToScriptStorage(Binding *newStorage);
@@ -232,17 +232,17 @@ class Bindings
                       HandleScript srcScript);
 
     unsigned numArgs() const { return numArgs_; }
-    unsigned numVars() const { return numVars_; }
-    unsigned count() const { return numArgs() + numVars(); }
+    uint32_t numVars() const { return numVars_; }
+    uint32_t count() const { return numArgs() + numVars(); }
 
     /* Return the initial shape of call objects created for this scope. */
     Shape *callObjShape() const { return callObjShape_; }
 
     /* Convenience method to get the var index of 'arguments'. */
-    static unsigned argumentsVarIndex(ExclusiveContext *cx, InternalBindingsHandle);
+    static uint32_t argumentsVarIndex(ExclusiveContext *cx, InternalBindingsHandle);
 
     /* Return whether the binding at bindingIndex is aliased. */
-    bool bindingIsAliased(unsigned bindingIndex);
+    bool bindingIsAliased(uint32_t bindingIndex);
 
     /* Return whether this scope has any aliased bindings. */
     bool hasAnyAliasedBindings() const {
@@ -353,6 +353,8 @@ class SourceDataCache
     bool put(ScriptSource *ss, const jschar *chars, const AutoSuppressPurge &asp);
 
     void purge();
+
+    size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf);
 };
 
 class ScriptSource
@@ -497,7 +499,8 @@ class ScriptSourceObject : public JSObject
     void setSource(ScriptSource *source);
 
     JSObject *element() const;
-    const Value &elementProperty() const;
+    void initElement(HandleObject element);
+    const Value &elementAttributeName() const;
 
   private:
     static const uint32_t SOURCE_SLOT = 0;
@@ -624,6 +627,9 @@ class JSScript : public js::gc::BarrieredCell<JSScript>
     /* Information attached by Ion for parallel mode execution */
     js::jit::IonScript *parallelIon;
 
+    /* Information used to re-lazify a lazily-parsed interpreted function. */
+    js::LazyScript *lazyScript;
+
     /*
      * Pointer to either baseline->method()->raw() or ion->method()->raw(), or
      * nullptr if there's no Baseline or Ion script.
@@ -643,6 +649,7 @@ class JSScript : public js::gc::BarrieredCell<JSScript>
                                    predef'ing prolog */
 
     uint32_t        natoms_;    /* length of atoms array */
+    uint32_t        nslots_;    /* vars plus maximum stack depth */
 
     /* Range of characters in scriptSource which contains this script's source. */
     uint32_t        sourceStart_;
@@ -663,18 +670,13 @@ class JSScript : public js::gc::BarrieredCell<JSScript>
 
     // 16-bit fields.
 
-    uint16_t        PADDING16;
     uint16_t        version;    /* JS version under which script was compiled */
 
     uint16_t        funLength_; /* ES6 function length */
 
-    uint16_t        nfixed_;    /* number of slots besides stack operands in
-                                   slot array */
-
     uint16_t        nTypeSets_; /* number of type sets used in this script for
                                    dynamic type monitoring */
 
-    uint16_t        nslots_;    /* vars plus maximum stack depth */
     uint16_t        staticLevel_;/* static level for display maintenance */
 
     // Bit fields.
@@ -868,7 +870,7 @@ class JSScript : public js::gc::BarrieredCell<JSScript>
 
     size_t nfixed() const {
         js::AutoThreadSafeAccess ts(this);
-        return nfixed_;
+        return function_ ? bindings.numVars() : 0;
     }
 
     size_t nslots() const {
@@ -1183,15 +1185,37 @@ class JSScript : public js::gc::BarrieredCell<JSScript>
         return offsetof(JSScript, baselineOrIonSkipArgCheck);
     }
 
+    bool isRelazifiable() const {
+        return (selfHosted() || lazyScript) &&
+               !isGenerator() && !hasBaselineScript() && !hasAnyIonScript();
+    }
+    void setLazyScript(js::LazyScript *lazy) {
+        lazyScript = lazy;
+    }
+    js::LazyScript *maybeLazyScript() {
+        return lazyScript;
+    }
+
     /*
      * Original compiled function for the script, if it has a function.
      * nullptr for global and eval scripts.
+     * The delazifying variant ensures that the function isn't lazy, but can
+     * only be used under a compilation lock. The non-delazifying variant
+     * can be used off-thread and without the lock, but must only be used
+     * after earlier code has called ensureNonLazyCanonicalFunction and
+     * while the function can't have been relazified.
      */
-    JSFunction *function() const {
+    inline JSFunction *functionDelazifying() const;
+    JSFunction *functionNonDelazifying() const {
         js::AutoThreadSafeAccess ts(this);
         return function_;
     }
     inline void setFunction(JSFunction *fun);
+    /*
+     * Takes a compilation lock and de-lazifies the canonical function. Must
+     * be called before entering code that expects the function to be non-lazy.
+     */
+    inline void ensureNonLazyCanonicalFunction(JSContext *cx);
 
     JSFunction *originalFunction() const;
     void setIsCallsiteClone(JSObject *fun);
@@ -1415,7 +1439,7 @@ class JSScript : public js::gc::BarrieredCell<JSScript>
         return JSOp(*pc) == JSOP_RETRVAL;
     }
 
-    bool varIsAliased(unsigned varSlot);
+    bool varIsAliased(uint32_t varSlot);
     bool formalIsAliased(unsigned argSlot);
     bool formalLivesInArgumentsObject(unsigned argSlot);
 
@@ -1496,7 +1520,7 @@ namespace js {
 class BindingIter
 {
     const InternalBindingsHandle bindings_;
-    unsigned i_;
+    uint32_t i_;
 
     friend class Bindings;
 
@@ -1509,7 +1533,7 @@ class BindingIter
     void operator++(int) { JS_ASSERT(!done()); i_++; }
     BindingIter &operator++() { (*this)++; return *this; }
 
-    unsigned frameIndex() const {
+    uint32_t frameIndex() const {
         JS_ASSERT(!done());
         return i_ < bindings_->numArgs() ? i_ : i_ - bindings_->numArgs();
     }
@@ -1615,11 +1639,13 @@ class LazyScript : public gc::BarrieredCell<LazyScript>
                               JSVersion version, uint32_t begin, uint32_t end,
                               uint32_t lineno, uint32_t column);
 
-    JSFunction *function() const {
+    inline JSFunction *functionDelazifying(JSContext *cx) const;
+    JSFunction *functionNonDelazifying() const {
         return function_;
     }
 
     void initScript(JSScript *script);
+    void resetScript();
     JSScript *maybeScript() {
         return script_;
     }

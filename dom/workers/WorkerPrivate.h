@@ -34,6 +34,7 @@ class nsIEventTarget;
 class nsIPrincipal;
 class nsIScriptContext;
 class nsIThread;
+class nsIThreadInternal;
 class nsITimer;
 class nsIURI;
 
@@ -158,13 +159,27 @@ public:
     void
     StealFrom(LoadInfo& aOther)
     {
-      mBaseURI = aOther.mBaseURI.forget();
-      mResolvedScriptURI = aOther.mResolvedScriptURI.forget();
-      mPrincipal = aOther.mPrincipal.forget();
-      mScriptContext = aOther.mScriptContext.forget();
-      mWindow = aOther.mWindow.forget();
-      mCSP = aOther.mCSP.forget();
-      mChannel = aOther.mChannel.forget();
+      MOZ_ASSERT(!mBaseURI);
+      aOther.mBaseURI.swap(mBaseURI);
+
+      MOZ_ASSERT(!mResolvedScriptURI);
+      aOther.mResolvedScriptURI.swap(mResolvedScriptURI);
+
+      MOZ_ASSERT(!mPrincipal);
+      aOther.mPrincipal.swap(mPrincipal);
+
+      MOZ_ASSERT(!mScriptContext);
+      aOther.mScriptContext.swap(mScriptContext);
+
+      MOZ_ASSERT(!mWindow);
+      aOther.mWindow.swap(mWindow);
+
+      MOZ_ASSERT(!mCSP);
+      aOther.mCSP.swap(mCSP);
+
+      MOZ_ASSERT(!mChannel);
+      aOther.mChannel.swap(mChannel);
+
       mDomain = aOther.mDomain;
       mEvalAllowed = aOther.mEvalAllowed;
       mReportCSPViolations = aOther.mReportCSPViolations;
@@ -382,9 +397,6 @@ public:
   void
   UpdateGCZeal(JSContext* aCx, uint8_t aGCZeal, uint32_t aFrequency);
 #endif
-
-  void
-  UpdateJITHardening(JSContext* aCx, bool aJITHardening);
 
   void
   GarbageCollect(JSContext* aCx, bool aShrinking);
@@ -897,9 +909,6 @@ public:
 #endif
 
   void
-  UpdateJITHardeningInternal(JSContext* aCx, bool aJITHardening);
-
-  void
   GarbageCollectInternal(JSContext* aCx, bool aShrinking,
                          bool aCollectChildren);
 
@@ -1098,6 +1107,9 @@ private:
   bool
   RunCurrentSyncLoop();
 
+  bool
+  DestroySyncLoop(uint32_t aLoopIndex, nsIThreadInternal* aThread = nullptr);
+
   void
   InitializeGCTimers();
 
@@ -1157,10 +1169,13 @@ class AutoSyncLoopHolder
 {
   WorkerPrivate* mWorkerPrivate;
   nsCOMPtr<nsIEventTarget> mTarget;
+  uint32_t mIndex;
 
 public:
   AutoSyncLoopHolder(WorkerPrivate* aWorkerPrivate)
-  : mWorkerPrivate(aWorkerPrivate), mTarget(aWorkerPrivate->CreateNewSyncLoop())
+  : mWorkerPrivate(aWorkerPrivate)
+  , mTarget(aWorkerPrivate->CreateNewSyncLoop())
+  , mIndex(aWorkerPrivate->mSyncLoopStack.Length() - 1)
   {
     aWorkerPrivate->AssertIsOnWorkerThread();
   }
@@ -1170,6 +1185,7 @@ public:
     if (mWorkerPrivate) {
       mWorkerPrivate->AssertIsOnWorkerThread();
       mWorkerPrivate->StopSyncLoop(mTarget, false);
+      mWorkerPrivate->DestroySyncLoop(mIndex);
     }
   }
 

@@ -236,7 +236,7 @@ nsDisplayCanvasBackgroundImage::Paint(nsDisplayListBuilder* aBuilder,
         return;
       }
       surf = destSurf->CreateSimilarSurface(
-          GFX_CONTENT_COLOR_ALPHA,
+          gfxContentType::COLOR_ALPHA,
           gfxIntSize(ceil(destRect.width), ceil(destRect.height)));
     } else {
       dt = static_cast<DrawTarget*>(Frame()->Properties().Get(nsIFrame::CachedBackgroundImageDT()));
@@ -245,7 +245,7 @@ nsDisplayCanvasBackgroundImage::Paint(nsDisplayListBuilder* aBuilder,
         BlitSurface(destDT, destRect, dt);
         return;
       }
-      dt = destDT->CreateSimilarDrawTarget(IntSize(ceil(destRect.width), ceil(destRect.height)), FORMAT_B8G8R8A8);
+      dt = destDT->CreateSimilarDrawTarget(IntSize(ceil(destRect.width), ceil(destRect.height)), SurfaceFormat::B8G8R8A8);
     }
     if (surf || dt) {
       if (surf) {
@@ -521,7 +521,7 @@ nsCanvasFrame::Reflow(nsPresContext*           aPresContext,
                 kidPt.x, kidPt.y, 0, aStatus);
 
     // Complete the reflow and position and size the child frame
-    FinishReflowChild(kidFrame, aPresContext, &kidReflowState, kidDesiredSize,
+    FinishReflowChild(kidFrame, aPresContext, kidDesiredSize, &kidReflowState,
                       kidPt.x, kidPt.y, 0);
 
     if (!NS_FRAME_IS_FULLY_COMPLETE(aStatus)) {

@@ -125,13 +125,13 @@ ToClampedIndex(JSContext *cx, HandleValue v, uint32_t length, uint32_t *out)
  * can be created implicitly by constructing a TypedArrayObject with a size.
  */
 
-JS_ALWAYS_INLINE bool
+MOZ_ALWAYS_INLINE bool
 IsArrayBuffer(HandleValue v)
 {
     return v.isObject() && v.toObject().hasClass(&ArrayBufferObject::class_);
 }
 
-JS_ALWAYS_INLINE bool
+MOZ_ALWAYS_INLINE bool
 ArrayBufferObject::byteLengthGetterImpl(JSContext *cx, CallArgs args)
 {
     JS_ASSERT(IsArrayBuffer(args.thisv()));
@@ -182,6 +182,18 @@ ArrayBufferObject::fun_slice(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     return CallNonGenericMethod<IsArrayBuffer, fun_slice_impl>(cx, args);
+}
+
+/*
+ * ArrayBuffer.isView(obj); ES6 (Dec 2013 draft) 24.1.3.1
+ */
+bool
+ArrayBufferObject::fun_isView(JSContext *cx, unsigned argc, Value *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    args.rval().setBoolean(args.get(0).isObject() &&
+                           JS_IsArrayBufferViewObject(&args.get(0).toObject()));
+    return true;
 }
 
 /*
@@ -265,6 +277,11 @@ ArrayBufferObject::allocateSlots(JSContext *maybecx, uint32_t bytes, bool clear)
         if (!header)
             return false;
         elements = header->elements();
+
+#ifdef JSGC_GENERATIONAL
+        JSRuntime *rt = runtimeFromMainThread();
+        rt->gcNursery.notifyNewElements(this, header);
+#endif
     } else {
         setFixedElements();
         if (clear)
@@ -371,7 +388,7 @@ ArrayBufferObject::neuterViews(JSContext *cx, Handle<ArrayBufferObject*> buffer)
 void
 ArrayBufferObject::changeContents(JSContext *maybecx, ObjectElements *newHeader)
 {
-   JS_ASSERT(!isAsmJSArrayBuffer());
+    JS_ASSERT(!isAsmJSArrayBuffer());
 
     // Grab out data before invalidating it.
     uint32_t byteLengthCopy = byteLength();
@@ -393,7 +410,20 @@ ArrayBufferObject::changeContents(JSContext *maybecx, ObjectElements *newHeader)
     // being transferred, so null it out
     SetViewList(this, nullptr);
 
+#ifdef JSGC_GENERATIONAL
+    ObjectElements *oldHeader = ObjectElements::fromElements(elements);
+    JS_ASSERT(oldHeader != newHeader);
+    JSRuntime *rt = runtimeFromMainThread();
+    if (hasDynamicElements())
+        rt->gcNursery.notifyRemovedElements(this, oldHeader);
+#endif
+
     elements = newHeader->elements();
+
+#ifdef JSGC_GENERATIONAL
+    if (hasDynamicElements())
+        rt->gcNursery.notifyNewElements(this, newHeader);
+#endif
 
     initElementsHeader(newHeader, byteLengthCopy);
     InitViewList(this, viewListHead);
@@ -2254,7 +2284,7 @@ class TypedArrayObjectTemplate : public TypedArrayObject
     static NativeType
     nativeFromDouble(double d)
     {
-        if (!ArrayTypeIsFloatingPoint() && JS_UNLIKELY(IsNaN(d)))
+        if (!ArrayTypeIsFloatingPoint() && MOZ_UNLIKELY(IsNaN(d)))
             return NativeType(int32_t(0));
         if (TypeIsFloatingPoint<NativeType>())
             return NativeType(d);
@@ -3432,7 +3462,6 @@ const Class ArrayBufferObject::class_ = {
     JS_ResolveStub,
     JS_ConvertStub,
     nullptr,        /* finalize    */
-    nullptr,        /* checkAccess */
     nullptr,        /* call        */
     nullptr,        /* hasInstance */
     nullptr,        /* construct   */
@@ -3472,6 +3501,11 @@ const JSFunctionSpec ArrayBufferObject::jsfuncs[] = {
     JS_FS_END
 };
 
+const JSFunctionSpec ArrayBufferObject::jsstaticfuncs[] = {
+    JS_FN("isView", ArrayBufferObject::fun_isView, 1, 0),
+    JS_FS_END
+};
+
 /*
  * TypedArrayObject boilerplate
  */
@@ -3495,29 +3529,26 @@ const JSFunctionSpec _typedArray##Object::jsfuncs[] = {                         
 }
 #endif
 
-#define IMPL_TYPED_ARRAY_JSAPI_CONSTRUCTORS(Name,NativeType)                                 \
-  JS_FRIEND_API(JSObject *) JS_New ## Name ## Array(JSContext *cx, uint32_t nelements)       \
-  {                                                                                          \
-      return TypedArrayObjectTemplate<NativeType>::fromLength(cx, nelements);                \
-  }                                                                                          \
-  JS_FRIEND_API(JSObject *) JS_New ## Name ## ArrayFromArray(JSContext *cx, JSObject *other_)\
-  {                                                                                          \
-      Rooted<JSObject*> other(cx, other_);                                                   \
-      return TypedArrayObjectTemplate<NativeType>::fromArray(cx, other);                     \
-  }                                                                                          \
-  JS_FRIEND_API(JSObject *) JS_New ## Name ## ArrayWithBuffer(JSContext *cx,                 \
-                               JSObject *arrayBuffer_, uint32_t byteOffset, int32_t length)  \
-  {                                                                                          \
-      Rooted<JSObject*> arrayBuffer(cx, arrayBuffer_);                                       \
-      Rooted<JSObject*> proto(cx, nullptr);                                                  \
-      return TypedArrayObjectTemplate<NativeType>::fromBuffer(cx, arrayBuffer, byteOffset,   \
-                                                              length, proto);                \
-  }                                                                                          \
-  JS_FRIEND_API(bool) JS_Is ## Name ## Array(JSObject *obj)                                  \
-  {                                                                                          \
-      if (!(obj = CheckedUnwrap(obj)))                                                       \
-          return false;                                                                      \
-      const Class *clasp = obj->getClass();                                                  \
+#define IMPL_TYPED_ARRAY_JSAPI_CONSTRUCTORS(Name,NativeType)                                    \
+  JS_FRIEND_API(JSObject *) JS_New ## Name ## Array(JSContext *cx, uint32_t nelements)          \
+  {                                                                                             \
+      return TypedArrayObjectTemplate<NativeType>::fromLength(cx, nelements);                   \
+  }                                                                                             \
+  JS_FRIEND_API(JSObject *) JS_New ## Name ## ArrayFromArray(JSContext *cx, HandleObject other) \
+  {                                                                                             \
+      return TypedArrayObjectTemplate<NativeType>::fromArray(cx, other);                        \
+  }                                                                                             \
+  JS_FRIEND_API(JSObject *) JS_New ## Name ## ArrayWithBuffer(JSContext *cx,                    \
+                               HandleObject arrayBuffer, uint32_t byteOffset, int32_t length)   \
+  {                                                                                             \
+      return TypedArrayObjectTemplate<NativeType>::fromBuffer(cx, arrayBuffer, byteOffset,      \
+                                                              length, js::NullPtr());           \
+  }                                                                                             \
+  JS_FRIEND_API(bool) JS_Is ## Name ## Array(JSObject *obj)                                     \
+  {                                                                                             \
+      if (!(obj = CheckedUnwrap(obj)))                                                          \
+          return false;                                                                         \
+      const Class *clasp = obj->getClass();                                                     \
       return (clasp == &TypedArrayObject::classes[TypedArrayObjectTemplate<NativeType>::ArrayTypeID()]); \
   }
 
@@ -3590,7 +3621,6 @@ IMPL_TYPED_ARRAY_COMBINED_UNWRAPPERS(Float64, double, double)
     JS_ResolveStub,                                                            \
     JS_ConvertStub,                                                            \
     nullptr,                 /* finalize */                                    \
-    nullptr,                 /* checkAccess */                                 \
     nullptr,                 /* call        */                                 \
     nullptr,                 /* hasInstance */                                 \
     nullptr,                 /* construct   */                                 \
@@ -3763,6 +3793,9 @@ InitArrayBufferClass(JSContext *cx)
                               JS_DATA_TO_FUNC_PTR(PropertyOp, getter), nullptr, flags, 0, 0))
         return nullptr;
 
+    if (!JS_DefineFunctions(cx, ctor, ArrayBufferObject::jsstaticfuncs))
+        return nullptr;
+
     if (!JS_DefineFunctions(cx, arrayBufferProto, ArrayBufferObject::jsfuncs))
         return nullptr;
 
@@ -3801,7 +3834,6 @@ const Class DataViewObject::class_ = {
     JS_ResolveStub,
     JS_ConvertStub,
     nullptr,                 /* finalize */
-    nullptr,                 /* checkAccess */
     nullptr,                 /* call        */
     nullptr,                 /* hasInstance */
     nullptr,                 /* construct   */
@@ -3923,11 +3955,12 @@ JSObject *
 js_InitTypedArrayClasses(JSContext *cx, HandleObject obj)
 {
     JS_ASSERT(obj->isNative());
+    assertSameCompartment(cx, obj);
     Rooted<GlobalObject*> global(cx, &obj->as<GlobalObject>());
 
     /* Idempotency required: we initialize several things, possibly lazily. */
     RootedObject stop(cx);
-    if (!js_GetClassObject(cx, global, JSProto_ArrayBuffer, &stop))
+    if (!js_GetClassObject(cx, JSProto_ArrayBuffer, &stop))
         return nullptr;
     if (stop)
         return stop;
@@ -4052,8 +4085,13 @@ JS_NewArrayBufferWithContents(JSContext *cx, void *contents)
     JSObject *obj = ArrayBufferObject::create(cx, 0);
     if (!obj)
         return nullptr;
-    obj->setDynamicElements(reinterpret_cast<js::ObjectElements *>(contents));
+    js::ObjectElements *elements = reinterpret_cast<js::ObjectElements *>(contents);
+    obj->setDynamicElements(elements);
     JS_ASSERT(GetViewList(&obj->as<ArrayBufferObject>()) == nullptr);
+
+#ifdef JSGC_GENERATIONAL
+    cx->runtime()->gcNursery.notifyNewElements(obj, elements);
+#endif
     return obj;
 }
 

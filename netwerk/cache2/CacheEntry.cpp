@@ -371,8 +371,15 @@ NS_IMETHODIMP CacheEntry::OnFileReady(nsresult aResult, bool aIsNew)
 
   mFileStatus = aResult;
 
-  if (mState == READY)
+  if (mState == READY) {
     mHasData = true;
+
+    uint32_t frecency;
+    mFile->GetFrecency(&frecency);
+    // mFrecency is held in a double to increase computance precision.
+    // It is ok to persist frecency only as a uint32 with some math involved.
+    mFrecency = INT2FRECENCY(frecency);
+  }
 
   InvokeCallbacks();
   return NS_OK;
@@ -1126,11 +1133,14 @@ NS_IMETHODIMP CacheEntry::AsyncDoom(nsICacheEntryDoomCallback *aCallback)
 
     mIsDoomed = true;
     mDoomCallback = aCallback;
-    BackgroundOp(Ops::DOOM);
   }
 
-  // Immediately remove the entry from the storage hash table
-  CacheStorageService::Self()->RemoveEntry(this);
+  // This immediately removes the entry from the master hashtable and also
+  // immediately dooms the file.  This way we make sure that any consumer
+  // after this point asking for the same entry won't get
+  //   a) this entry
+  //   b) a new entry with the same file
+  PurgeAndDoom();
 
   return NS_OK;
 }
@@ -1396,8 +1406,6 @@ void CacheEntry::PurgeAndDoom()
 {
   LOG(("CacheEntry::PurgeAndDoom [this=%p]", this));
 
-  MOZ_ASSERT(CacheStorageService::IsOnManagementThread());
-
   CacheStorageService::Self()->RemoveEntry(this);
   DoomAlreadyRemoved();
 }
@@ -1406,36 +1414,45 @@ void CacheEntry::DoomAlreadyRemoved()
 {
   LOG(("CacheEntry::DoomAlreadyRemoved [this=%p]", this));
 
+  mozilla::MutexAutoLock lock(mLock);
+
   mIsDoomed = true;
 
-  if (!CacheStorageService::IsOnManagementThread()) {
-    mozilla::MutexAutoLock lock(mLock);
+  // This schedules dooming of the file, dooming is ensured to happen
+  // sooner than demand to open the same file made after this point
+  // so that we don't get this file for any newer opened entry(s).
+  DoomFile();
 
-    BackgroundOp(Ops::DOOM);
-    return;
-  }
+  // Must force post here since may be indirectly called from
+  // InvokeCallbacks of this entry and we don't want reentrancy here.
+  BackgroundOp(Ops::CALLBACKS, true);
+  // Process immediately when on the management thread.
+  BackgroundOp(Ops::UNREGISTER);
+}
 
-  CacheStorageService::Self()->UnregisterEntry(this);
-
-  {
-    mozilla::MutexAutoLock lock(mLock);
-
-    if (mCallbacks.Length()) {
-      // Must force post here since may be indirectly called from
-      // InvokeCallbacks of this entry and we don't want reentrancy here.
-      BackgroundOp(Ops::CALLBACKS, true);
-    }
-  }
+void CacheEntry::DoomFile()
+{
+  nsresult rv = NS_ERROR_NOT_AVAILABLE;
 
   if (NS_SUCCEEDED(mFileStatus)) {
-    nsresult rv = mFile->Doom(mDoomCallback ? this : nullptr);
+    // Always calls the callback asynchronously.
+    rv = mFile->Doom(mDoomCallback ? this : nullptr);
     if (NS_SUCCEEDED(rv)) {
       LOG(("  file doomed"));
       return;
     }
+    
+    if (NS_ERROR_FILE_NOT_FOUND == rv) {
+      // File is set to be just memory-only, notify the callbacks
+      // and pretend dooming has succeeded.  From point of view of
+      // the entry it actually did - the data is gone and cannot be
+      // reused.
+      rv = NS_OK;
+    }
   }
 
-  OnFileDoomed(NS_OK);
+  // Always posts to the main thread.
+  OnFileDoomed(rv);
 }
 
 void CacheEntry::BackgroundOp(uint32_t aOperations, bool aForceAsync)
@@ -1459,8 +1476,8 @@ void CacheEntry::BackgroundOp(uint32_t aOperations, bool aForceAsync)
     #define M_LN2 0.69314718055994530942
     #endif
 
-    // Half-life is 90 days.
-    static double const half_life = 90.0 * (24 * 60 * 60);
+    // Half-life is dynamic, in seconds.
+     static double half_life = CacheObserver::HalfLifeSeconds();
     // Must convert from seconds to milliseconds since PR_Now() gives usecs.
     static double const decay = (M_LN2 / half_life) / static_cast<double>(PR_USEC_PER_SEC);
 
@@ -1475,6 +1492,12 @@ void CacheEntry::BackgroundOp(uint32_t aOperations, bool aForceAsync)
       mFrecency = log(exp(mFrecency - now_decay) + 1) + now_decay;
     }
     LOG(("CacheEntry FRECENCYUPDATE [this=%p, frecency=%1.10f]", this, mFrecency));
+
+    // Because CacheFile::Set*() are not thread-safe to use (uses WeakReference that
+    // is not thread-safe) we must post to the main thread...
+    nsRefPtr<nsRunnableMethod<CacheEntry> > event =
+      NS_NewRunnableMethod(this, &CacheEntry::StoreFrecency);
+    NS_DispatchToMainThread(event);
   }
 
   if (aOperations & Ops::REGISTER) {
@@ -1483,10 +1506,10 @@ void CacheEntry::BackgroundOp(uint32_t aOperations, bool aForceAsync)
     CacheStorageService::Self()->RegisterEntry(this);
   }
 
-  if (aOperations & Ops::DOOM) {
-    LOG(("CacheEntry DOOM [this=%p]", this));
+  if (aOperations & Ops::UNREGISTER) {
+    LOG(("CacheEntry UNREGISTER [this=%p]", this));
 
-    DoomAlreadyRemoved();
+    CacheStorageService::Self()->UnregisterEntry(this);
   }
 
   if (aOperations & Ops::CALLBACKS) {
@@ -1495,6 +1518,14 @@ void CacheEntry::BackgroundOp(uint32_t aOperations, bool aForceAsync)
     mozilla::MutexAutoLock lock(mLock);
     InvokeCallbacks();
   }
+}
+
+void CacheEntry::StoreFrecency()
+{
+  // No need for thread safety over mFrecency, it will be rewriten
+  // correctly on following invocation if broken by concurrency.
+  MOZ_ASSERT(NS_IsMainThread());
+  mFile->SetFrecency(FRECENCY2INT(mFrecency));
 }
 
 // CacheOutputCloseListener

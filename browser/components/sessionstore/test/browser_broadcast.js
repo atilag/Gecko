@@ -3,7 +3,7 @@
 
 "use strict";
 
-const INITIAL_VALUE = "initial-value-" + Date.now();
+const INITIAL_VALUE = "browser_broadcast.js-initial-value-" + Date.now();
 
 /**
  * This test ensures we won't lose tab data queued in the content script when
@@ -138,12 +138,7 @@ add_task(function flush_on_tabclose_racy() {
 
 function promiseNewWindow() {
   let deferred = Promise.defer();
-
-  whenNewWindowLoaded({private: false}, function (win) {
-    win.messageManager.loadFrameScript(FRAME_SCRIPT, true);
-    deferred.resolve(win);
-  });
-
+  whenNewWindowLoaded({private: false}, deferred.resolve);
   return deferred.promise;
 }
 

@@ -15,15 +15,15 @@ function newUint8Worker() {
   let index = 0; // index for read
   let buf = [];
 
-  worker.Buf.writeUint8 = function (value) {
+  worker.Buf.writeUint8 = function(value) {
     buf.push(value);
   };
 
-  worker.Buf.readUint8 = function () {
+  worker.Buf.readUint8 = function() {
     return buf[index++];
   };
 
-  worker.Buf.seekIncoming = function (offset) {
+  worker.Buf.seekIncoming = function(offset) {
     index += offset;
   };
 
@@ -80,11 +80,11 @@ add_test(function test_read_dialling_number() {
   let iccHelper = worker.ICCPDUHelper;
   let str = "123456789";
 
-  helper.readHexOctet = function () {
+  helper.readHexOctet = function() {
     return 0x81;
   };
 
-  helper.readSwappedNibbleBcdString = function (len) {
+  helper.readSwappedNibbleBcdString = function(len) {
     return str.substring(0, len);
   };
 
@@ -347,11 +347,11 @@ add_test(function test_read_alpha_id_dialling_number() {
   const recordSize = 32;
 
   function testReadAlphaIdDiallingNumber(contact) {
-    iccHelper.readAlphaIdentifier = function () {
+    iccHelper.readAlphaIdentifier = function() {
       return contact.alphaId;
     };
 
-    iccHelper.readNumberWithLength = function () {
+    iccHelper.readNumberWithLength = function() {
       return contact.number;
     };
 
@@ -474,7 +474,7 @@ add_test(function test_read_number_with_length() {
   let iccHelper = worker.ICCPDUHelper;
   let number = "123456789";
 
-  iccHelper.readDiallingNumber = function (numLen) {
+  iccHelper.readDiallingNumber = function(numLen) {
     return number.substring(0, numLen);
   };
 
@@ -496,27 +496,35 @@ add_test(function test_write_number_with_length() {
   let helper = worker.GsmPDUHelper;
   let iccHelper = worker.ICCPDUHelper;
 
-  // without +
-  let number_1 = "123456789";
-  iccHelper.writeNumberWithLength(number_1);
-  let numLen = helper.readHexOctet();
-  do_check_eq(number_1, iccHelper.readDiallingNumber(numLen));
-  for (let i = 0; i < (ADN_MAX_BCD_NUMBER_BYTES - numLen); i++) {
-    do_check_eq(0xff, helper.readHexOctet());
+  function test(number, expectedNumber) {
+    expectedNumber = expectedNumber || number;
+    iccHelper.writeNumberWithLength(number);
+    let numLen = helper.readHexOctet();
+    do_check_eq(expectedNumber, iccHelper.readDiallingNumber(numLen));
+    for (let i = 0; i < (ADN_MAX_BCD_NUMBER_BYTES - numLen); i++) {
+      do_check_eq(0xff, helper.readHexOctet());
+    }
   }
+
+  // without +
+  test("123456789");
 
   // with +
-  let number_2 = "+987654321";
-  iccHelper.writeNumberWithLength(number_2);
-  numLen = helper.readHexOctet();
-  do_check_eq(number_2, iccHelper.readDiallingNumber(numLen));
-  for (let i = 0; i < (ADN_MAX_BCD_NUMBER_BYTES - numLen); i++) {
-    do_check_eq(0xff, helper.readHexOctet());
-  }
+  test("+987654321");
+
+  // extended BCD coding
+  test("1*2#3,4*5#6,");
+
+  // with + and extended BCD coding
+  test("+1*2#3,4*5#6,");
+
+  // non-supported characters should not be written.
+  test("(1)23-456+789", "123456789");
+
+  test("++(01)2*3-4#5,6+7(8)9*0#1,", "+012*34#5,6789*0#1,");
 
   // null
-  let number_3;
-  iccHelper.writeNumberWithLength(number_3);
+  iccHelper.writeNumberWithLength(null);
   for (let i = 0; i < (ADN_MAX_BCD_NUMBER_BYTES + 1); i++) {
     do_check_eq(0xff, helper.readHexOctet());
   }
@@ -639,7 +647,7 @@ add_test(function test_icc_get_card_lock_state_fdn() {
   let ril = worker.RIL;
   let buf = worker.Buf;
 
-  buf.sendParcel = function () {
+  buf.sendParcel = function() {
     // Request Type.
     do_check_eq(this.readInt32(), REQUEST_QUERY_FACILITY_LOCK)
 
@@ -766,10 +774,10 @@ add_test(function test_get_network_name_from_icc() {
 
 add_test(function test_path_id_for_spid_and_spn() {
   let worker = newWorker({
-    postRILMessage: function fakePostRILMessage(data) {
+    postRILMessage: function(data) {
       // Do nothing
     },
-    postMessage: function fakePostMessage(message) {
+    postMessage: function(message) {
       // Do nothing
     }});
   let RIL = worker.RIL;
@@ -998,7 +1006,7 @@ add_test(function test_read_email() {
     let recordNumber = 1;
 
     // fileId and recordNumber are dummy arguments.
-    record.readEmail(fileId, type, recordNumber, function (email) {
+    record.readEmail(fileId, type, recordNumber, function(email) {
       do_check_eq(email, expectedResult);
     });
   };
@@ -1031,7 +1039,7 @@ add_test(function test_update_email() {
   let count = 0;
 
   // Override.
-  ioHelper.updateLinearFixedEF = function (options) {
+  ioHelper.updateLinearFixedEF = function(options) {
     options.pathId = worker.ICCFileHelper.getEFPath(options.fileId);
     options.command = ICC_COMMAND_UPDATE_RECORD;
     options.p1 = options.recordNumber;
@@ -1041,7 +1049,7 @@ add_test(function test_update_email() {
   };
 
   function do_test(pbr, expectedEmail, expectedAdnRecordId) {
-    buf.sendParcel = function () {
+    buf.sendParcel = function() {
       count++;
 
       // Request Type.
@@ -1141,7 +1149,7 @@ add_test(function test_read_anr() {
     let recordNumber = 1;
 
     // fileId and recordNumber are dummy arguments.
-    record.readANR(fileId, fileType, recordNumber, function (anr) {
+    record.readANR(fileId, fileType, recordNumber, function(anr) {
       do_check_eq(anr, expectedResult);
     });
   };
@@ -1173,7 +1181,7 @@ add_test(function test_update_anr() {
   let count = 0;
 
   // Override.
-  ioHelper.updateLinearFixedEF = function (options) {
+  ioHelper.updateLinearFixedEF = function(options) {
     options.pathId = worker.ICCFileHelper.getEFPath(options.fileId);
     options.command = ICC_COMMAND_UPDATE_RECORD;
     options.p1 = options.recordNumber;
@@ -1183,7 +1191,7 @@ add_test(function test_update_anr() {
   };
 
   function do_test(pbr, expectedANR, expectedAdnRecordId) {
-    buf.sendParcel = function () {
+    buf.sendParcel = function() {
       count++;
 
       // Request Type.
@@ -1318,7 +1326,7 @@ add_test(function test_update_iap() {
   let count = 0;
 
   // Override.
-  ioHelper.updateLinearFixedEF = function (options) {
+  ioHelper.updateLinearFixedEF = function(options) {
     options.pathId = worker.ICCFileHelper.getEFPath(options.fileId);
     options.command = ICC_COMMAND_UPDATE_RECORD;
     options.p1 = options.recordNumber;
@@ -1328,7 +1336,7 @@ add_test(function test_update_iap() {
   };
 
   function do_test(expectedIAP) {
-    buf.sendParcel = function () {
+    buf.sendParcel = function() {
       // Request Type.
       do_check_eq(this.readInt32(), REQUEST_SIM_IO);
 
@@ -1393,7 +1401,7 @@ add_test(function test_update_adn_like() {
   let fileId;
 
   // Override.
-  io.updateLinearFixedEF = function (options) {
+  io.updateLinearFixedEF = function(options) {
     options.pathId = worker.ICCFileHelper.getEFPath(options.fileId);
     options.command = ICC_COMMAND_UPDATE_RECORD;
     options.p1 = options.recordNumber;
@@ -1402,7 +1410,7 @@ add_test(function test_update_adn_like() {
     ril.iccIO(options);
   };
 
-  buf.sendParcel = function () {
+  buf.sendParcel = function() {
     // Request Type.
     do_check_eq(this.readInt32(), REQUEST_SIM_IO);
 
@@ -1505,11 +1513,11 @@ add_test(function test_find_free_record_id() {
   let fileId = 0x0000; // Dummy.
   recordHelper.findFreeRecordId(
     fileId,
-    function (recordId) {
+    function(recordId) {
       do_check_eq(recordId, 2);
       run_next_test();
     }.bind(this),
-    function (errorMsg) {
+    function(errorMsg) {
       do_print(errorMsg);
       do_check_true(false);
       run_next_test();
@@ -1532,7 +1540,7 @@ add_test(function test_read_icc_contacts() {
                                     [0x0, 0x00, 0x0, 0x0, 0x0];
 
     // Override some functions to test.
-    contactHelper.getContactFieldRecordId = function (pbr, contact, field, onsuccess, onerror) {
+    contactHelper.getContactFieldRecordId = function(pbr, contact, field, onsuccess, onerror) {
       onsuccess(1);
     };
 
@@ -1642,7 +1650,7 @@ add_test(function test_update_icc_contact() {
                                     [0x0, 0x0C, 0x0, 0x0, 0x0]:
                                     [0x0, 0x00, 0x0, 0x0, 0x0];
 
-    recordHelper.readPBR = function (onsuccess, onerror) {
+    recordHelper.readPBR = function(onsuccess, onerror) {
       if (aFileType === ICC_USIM_TYPE1_TAG) {
         onsuccess([{
           adn:   {fileId: ICC_EF_ADN},
@@ -1666,7 +1674,7 @@ add_test(function test_update_icc_contact() {
       }
     };
 
-    recordHelper.updateADNLike = function (fileId, contact, pin2, onsuccess, onerror) {
+    recordHelper.updateADNLike = function(fileId, contact, pin2, onsuccess, onerror) {
       if (aContactType === "fdn") {
         do_check_eq(fileId, ICC_EF_FDN);
       } else if (aContactType === "adn") {
@@ -1678,13 +1686,13 @@ add_test(function test_update_icc_contact() {
       onsuccess();
     };
 
-    recordHelper.readIAP = function (fileId, recordNumber, onsuccess, onerror) {
+    recordHelper.readIAP = function(fileId, recordNumber, onsuccess, onerror) {
       do_check_eq(fileId, IAP_FILE_ID);
       do_check_eq(recordNumber, ADN_RECORD_ID);
       onsuccess([EMAIL_RECORD_ID, ANR0_RECORD_ID]);
     };
 
-    recordHelper.updateEmail = function (pbr, recordNumber, email, adnRecordId, onsuccess, onerror) {
+    recordHelper.updateEmail = function(pbr, recordNumber, email, adnRecordId, onsuccess, onerror) {
       do_check_eq(pbr.email.fileId, EMAIL_FILE_ID);
       if (pbr.email.fileType === ICC_USIM_TYPE1_TAG) {
         do_check_eq(recordNumber, ADN_RECORD_ID);
@@ -1695,14 +1703,16 @@ add_test(function test_update_icc_contact() {
       onsuccess();
     };
 
-    recordHelper.updateANR = function (pbr, recordNumber, number, adnRecordId, onsuccess, onerror) {
+    recordHelper.updateANR = function(pbr, recordNumber, number, adnRecordId, onsuccess, onerror) {
       do_check_eq(pbr.anr0.fileId, ANR0_FILE_ID);
       if (pbr.anr0.fileType === ICC_USIM_TYPE1_TAG) {
         do_check_eq(recordNumber, ADN_RECORD_ID);
       } else if (pbr.anr0.fileType === ICC_USIM_TYPE2_TAG) {
         do_check_eq(recordNumber, ANR0_RECORD_ID);
       }
-      do_check_eq(number, aContact.anr[0]);
+      if (Array.isArray(aContact.anr)) {
+        do_check_eq(number, aContact.anr[0]);
+      }
       onsuccess();
     };
 
@@ -1772,6 +1782,86 @@ add_test(function test_update_icc_contact() {
 });
 
 /**
+ * Verify updateICCContact with removal of anr and email with File Type 1.
+ */
+add_test(function test_update_icc_contact_with_remove_type1_attr() {
+  const ADN_RECORD_ID   = 100;
+  const IAP_FILE_ID     = 0x4f17;
+  const EMAIL_FILE_ID   = 0x4f50;
+  const EMAIL_RECORD_ID = 20;
+  const ANR0_FILE_ID    = 0x4f11;
+  const ANR0_RECORD_ID  = 30;
+
+  let worker = newUint8Worker();
+  let recordHelper = worker.ICCRecordHelper;
+  let contactHelper = worker.ICCContactHelper;
+
+  recordHelper.updateADNLike = function(fileId, contact, pin2, onsuccess, onerror) {
+    onsuccess();
+  };
+
+  let contact = {
+    pbrIndex: 0,
+    recordId: ADN_RECORD_ID,
+    alphaId:  "test2",
+    number:   "123456",
+  };
+
+  recordHelper.readIAP = function(fileId, recordNumber, onsuccess, onerror) {
+    onsuccess([EMAIL_RECORD_ID, ANR0_RECORD_ID]);
+  };
+
+  recordHelper.updateEmail = function(pbr, recordNumber, email, adnRecordId, onsuccess, onerror) {
+    do_check_true(email == null);
+    onsuccess();
+  };
+
+  recordHelper.updateANR = function(pbr, recordNumber, number, adnRecordId, onsuccess, onerror) {
+    do_check_true(number == null);
+    onsuccess();
+  };
+
+  function do_test(type) {
+    recordHelper.readPBR = function(onsuccess, onerror) {
+      if (type == ICC_USIM_TYPE1_TAG) {
+        onsuccess([{
+          adn:   {fileId: ICC_EF_ADN},
+          email: {fileId: EMAIL_FILE_ID,
+                  fileType: ICC_USIM_TYPE1_TAG},
+          anr0:  {fileId: ANR0_FILE_ID,
+                  fileType: ICC_USIM_TYPE1_TAG}}]);
+      } else {
+        onsuccess([{
+          adn:   {fileId: ICC_EF_ADN},
+          iap:   {fileId: IAP_FILE_ID},
+          email: {fileId: EMAIL_FILE_ID,
+                  fileType: ICC_USIM_TYPE2_TAG,
+                  indexInIAP: 0},
+          anr0:  {fileId: ANR0_FILE_ID,
+                  fileType: ICC_USIM_TYPE2_TAG,
+                  indexInIAP: 1}}]);
+      }
+    };
+
+    let successCb = function() {
+      do_check_true(true);
+    };
+
+    let errorCb = function(errorMsg) {
+      do_print(errorMsg);
+      do_check_true(false);
+    };
+
+    contactHelper.updateICCContact(CARD_APPTYPE_USIM, "adn", contact, null, successCb, errorCb);
+  }
+
+  do_test(ICC_USIM_TYPE1_TAG);
+  do_test(ICC_USIM_TYPE2_TAG);
+
+  run_next_test();
+});
+
+/**
  * Verify ICCContactHelper.findFreeICCContact in SIM
  */
 add_test(function test_find_free_icc_contact_sim() {
@@ -1783,7 +1873,7 @@ add_test(function test_find_free_icc_contact_sim() {
   const MAX_RECORDS = 3;
   const PBR_INDEX = 0;
 
-  recordHelper.findFreeRecordId = function (fileId, onsuccess, onerror) {
+  recordHelper.findFreeRecordId = function(fileId, onsuccess, onerror) {
     if (records.length > MAX_RECORDS) {
       onerror("No free record found.");
       return;
@@ -1792,12 +1882,12 @@ add_test(function test_find_free_icc_contact_sim() {
     onsuccess(records.length);
   };
 
-  let successCb = function (pbrIndex, recordId) {
+  let successCb = function(pbrIndex, recordId) {
     do_check_eq(pbrIndex, PBR_INDEX);
     records[recordId] = {};
   };
 
-  let errorCb = function (errorMsg) {
+  let errorCb = function(errorMsg) {
     do_print(errorMsg);
     do_check_true(false);
   };
@@ -1809,11 +1899,11 @@ add_test(function test_find_free_icc_contact_sim() {
   do_check_eq(records.length - 1, MAX_RECORDS);
 
   // Now the EF is full, so finding a free one should result failure.
-  successCb = function (pbrIndex, recordId) {
+  successCb = function(pbrIndex, recordId) {
     do_check_true(false);
   };
 
-  errorCb = function (errorMsg) {
+  errorCb = function(errorMsg) {
     do_check_true(errorMsg === "No free record found.");
   };
   contactHelper.findFreeICCContact(CARD_APPTYPE_SIM, "adn", successCb, errorCb);
@@ -1841,7 +1931,7 @@ add_test(function test_find_free_icc_contact_usim() {
     onsuccess(pbrs);
   };
 
-  recordHelper.findFreeRecordId = function (fileId, onsuccess, onerror) {
+  recordHelper.findFreeRecordId = function(fileId, onsuccess, onerror) {
     let pbr = (fileId == ADN1_FILE_ID ? pbrs[0]: pbrs[1]);
     if (pbr.adn.records.length > MAX_RECORDS) {
       onerror("No free record found.");
@@ -1851,12 +1941,12 @@ add_test(function test_find_free_icc_contact_usim() {
     onsuccess(pbr.adn.records.length);
   };
 
-  let successCb = function (pbrIndex, recordId) {
+  let successCb = function(pbrIndex, recordId) {
     do_check_eq(pbrIndex, 0);
     pbrs[pbrIndex].adn.records[recordId] = {};
   };
 
-  let errorCb = function (errorMsg) {
+  let errorCb = function(errorMsg) {
     do_check_true(false);
   };
 
@@ -1864,7 +1954,7 @@ add_test(function test_find_free_icc_contact_usim() {
 
   // Now the EF_ADN in the 1st phonebook set is full, so the next free contact
   // will come from the 2nd phonebook set.
-  successCb = function (pbrIndex, recordId) {
+  successCb = function(pbrIndex, recordId) {
     do_check_eq(pbrIndex, 1);
     do_check_eq(recordId, 1);
   }
@@ -1881,7 +1971,7 @@ add_test(function test_error_message_read_icc_contact () {
   let ril = worker.RIL;
 
   function do_test(options, expectedErrorMsg) {
-    ril.sendChromeMessage = function (message) {
+    ril.sendChromeMessage = function(message) {
       do_check_eq(message.errorMsg, expectedErrorMsg);
     }
     ril.readICCContacts(options);
@@ -1913,7 +2003,7 @@ add_test(function test_error_message_update_icc_contact() {
   ril.iccInfo.iccid = ICCID;
 
   function do_test(options, expectedErrorMsg) {
-    ril.sendChromeMessage = function (message) {
+    ril.sendChromeMessage = function(message) {
       do_check_eq(message.errorMsg, expectedErrorMsg);
     }
     ril.updateICCContact(options);
@@ -1934,12 +2024,12 @@ add_test(function test_error_message_update_icc_contact() {
 
   // Error 5, No free record found in EF_ADN.
   let record = worker.ICCRecordHelper;
-  record.readPBR = function (onsuccess, onerror) {
+  record.readPBR = function(onsuccess, onerror) {
     onsuccess([{adn: {fileId: 0x4f3a}}]);
   };
 
   let io = worker.ICCIOHelper;
-  io.loadLinearFixedEF = function (options) {
+  io.loadLinearFixedEF = function(options) {
     options.totalRecords = 1;
     options.p1 = 1;
     options.callback(options);
@@ -1948,7 +2038,7 @@ add_test(function test_error_message_update_icc_contact() {
   do_test({contactType: "adn", contact: {}}, CONTACT_ERR_NO_FREE_RECORD_FOUND);
 
   // Error 6, ICC IO Error.
-  io.loadLinearFixedEF = function (options) {
+  io.loadLinearFixedEF = function(options) {
     ril[REQUEST_SIM_IO](0, {rilRequestError: ERROR_GENERIC_FAILURE});
   };
   do_test({contactType: "adn", contact: {contactId: ICCID + "1"}},
@@ -1961,7 +2051,7 @@ add_test(function test_error_message_update_icc_contact() {
           CONTACT_ERR_FIELD_NOT_SUPPORTED);
 
   // Error 8, EF_PBR doesn't exist.
-  record.readPBR = function (onsuccess, onerror) {
+  record.readPBR = function(onsuccess, onerror) {
     onsuccess([]);
   };
 
@@ -2381,15 +2471,15 @@ add_test(function test_fetch_sim_recodes() {
   function testFetchSimRecordes(expectCalled) {
     let ifCalled = [];
 
-    RIL.getIMSI = function () {
+    RIL.getIMSI = function() {
       ifCalled.push("getIMSI");
     };
 
-    simRecord.readAD = function () {
+    simRecord.readAD = function() {
       ifCalled.push("readAD");
     };
 
-    simRecord.readSST = function () {
+    simRecord.readSST = function() {
       ifCalled.push("readSST");
     };
 
@@ -2417,11 +2507,11 @@ add_test(function test_fetch_icc_recodes() {
   let ruimRecord = worker.RuimRecordHelper;
   let fetchTag = 0x00;
 
-  simRecord.fetchSimRecords = function () {
+  simRecord.fetchSimRecords = function() {
     fetchTag = 0x01;
   };
 
-  ruimRecord.fetchRuimRecords = function () {
+  ruimRecord.fetchRuimRecords = function() {
     fetchTag = 0x02;
   };
 
@@ -2524,7 +2614,7 @@ add_test(function test_update_mwis() {
   let recordSize = ril.iccInfoPrivate.mwis.length;
   let recordNum = 1;
 
-  ioHelper.updateLinearFixedEF = function (options) {
+  ioHelper.updateLinearFixedEF = function(options) {
     options.pathId = worker.ICCFileHelper.getEFPath(options.fileId);
     options.command = ICC_COMMAND_UPDATE_RECORD;
     options.p1 = options.recordNumber;
@@ -2545,7 +2635,7 @@ add_test(function test_update_mwis() {
       return result;
     }
 
-    buf.sendParcel = function () {
+    buf.sendParcel = function() {
       isUpdated = true;
 
       // Request Type.
@@ -2629,9 +2719,9 @@ add_test(function test_read_new_sms_on_sim() {
   function newSmsOnSimWorkerHelper() {
     let _postedMessage;
     let _worker = newWorker({
-      postRILMessage: function fakePostRILMessage(data) {
+      postRILMessage: function(data) {
       },
-      postMessage: function fakePostMessage(message) {
+      postMessage: function(message) {
         _postedMessage = message;
       }
     });
@@ -2645,19 +2735,19 @@ add_test(function test_read_new_sms_on_sim() {
       get worker() {
         return _worker;
       },
-      fakeWokerBuffer: function fakeWokerBuffer() {
+      fakeWokerBuffer: function() {
         let index = 0; // index for read
         let buf = [];
-        _worker.Buf.writeUint8 = function (value) {
+        _worker.Buf.writeUint8 = function(value) {
           buf.push(value);
         };
-        _worker.Buf.readUint8 = function () {
+        _worker.Buf.readUint8 = function() {
           return buf[index++];
         };
-        _worker.Buf.seekIncoming = function (offset) {
+        _worker.Buf.seekIncoming = function(offset) {
           index += offset;
         };
-        _worker.Buf.getReadAvailable = function () {
+        _worker.Buf.getReadAvailable = function() {
           return buf.length - index;
         };
       }

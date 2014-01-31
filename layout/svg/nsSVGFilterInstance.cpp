@@ -302,14 +302,14 @@ nsSVGFilterInstance::BuildSourcePaint(SourceInfo *aSource,
   nsRefPtr<gfxContext> ctx;
   if (aTargetSurface) {
     offscreenSurface = gfxPlatform::GetPlatform()->CreateOffscreenSurface(
-      neededRect.Size(), GFX_CONTENT_COLOR_ALPHA);
+      neededRect.Size(), gfxContentType::COLOR_ALPHA);
     if (!offscreenSurface || offscreenSurface->CairoStatus()) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
     ctx = new gfxContext(offscreenSurface);
   } else {
     offscreenDT = gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(
-      ToIntSize(neededRect.Size()), FORMAT_B8G8R8A8);
+      ToIntSize(neededRect.Size()), SurfaceFormat::B8G8R8A8);
     if (!offscreenDT) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
@@ -389,14 +389,14 @@ nsSVGFilterInstance::BuildSourceImage(gfxASurface* aTargetSurface,
   nsRefPtr<gfxContext> ctx;
   if (aTargetSurface) {
     offscreenSurface = gfxPlatform::GetPlatform()->CreateOffscreenSurface(
-      neededRect.Size(), GFX_CONTENT_COLOR_ALPHA);
+      neededRect.Size(), gfxContentType::COLOR_ALPHA);
     if (!offscreenSurface || offscreenSurface->CairoStatus()) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
     ctx = new gfxContext(offscreenSurface);
   } else {
     offscreenDT = gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(
-      ToIntSize(neededRect.Size()), FORMAT_B8G8R8A8);
+      ToIntSize(neededRect.Size()), SurfaceFormat::B8G8R8A8);
     if (!offscreenDT) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
@@ -471,7 +471,7 @@ nsSVGFilterInstance::Render(gfxContext* aContext)
   if (aContext->IsCairo()) {
     resultImage =
       gfxPlatform::GetPlatform()->CreateOffscreenSurface(filterRect.Size(),
-                                                         GFX_CONTENT_COLOR_ALPHA);
+                                                         gfxContentType::COLOR_ALPHA);
     if (!resultImage || resultImage->CairoStatus())
       return NS_ERROR_OUT_OF_MEMORY;
 

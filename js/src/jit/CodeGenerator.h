@@ -12,11 +12,11 @@
 # include "jit/PerfSpewer.h"
 #endif
 
-#if defined(JS_CPU_X86)
+#if defined(JS_CODEGEN_X86)
 # include "jit/x86/CodeGenerator-x86.h"
-#elif defined(JS_CPU_X64)
+#elif defined(JS_CODEGEN_X64)
 # include "jit/x64/CodeGenerator-x64.h"
-#elif defined(JS_CPU_ARM)
+#elif defined(JS_CODEGEN_ARM)
 # include "jit/arm/CodeGenerator-arm.h"
 #else
 #error "CPU Not Supported"
@@ -60,6 +60,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitGoto(LGoto *lir);
     bool visitTableSwitch(LTableSwitch *ins);
     bool visitTableSwitchV(LTableSwitchV *ins);
+    bool visitCloneLiteral(LCloneLiteral *lir);
     bool visitParameter(LParameter *lir);
     bool visitCallee(LCallee *lir);
     bool visitStart(LStart *lir);
@@ -93,6 +94,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitRegExpExec(LRegExpExec *lir);
     bool visitRegExpTest(LRegExpTest *lir);
     bool visitRegExpReplace(LRegExpReplace *lir);
+    bool visitStringReplace(LStringReplace *lir);
     bool visitLambda(LLambda *lir);
     bool visitLambdaForSingleton(LLambdaForSingleton *lir);
     bool visitLambdaPar(LLambdaPar *lir);
@@ -144,6 +146,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitAbortPar(LAbortPar *lir);
     bool visitInitElem(LInitElem *lir);
     bool visitInitElemGetterSetter(LInitElemGetterSetter *lir);
+    bool visitMutateProto(LMutateProto *lir);
     bool visitInitProp(LInitProp *lir);
     bool visitInitPropGetterSetter(LInitPropGetterSetter *lir);
     bool visitCreateThis(LCreateThis *lir);
@@ -207,7 +210,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitStringSplit(LStringSplit *lir);
     bool visitFunctionEnvironment(LFunctionEnvironment *lir);
     bool visitForkJoinSlice(LForkJoinSlice *lir);
-    bool visitGuardThreadLocalObject(LGuardThreadLocalObject *lir);
+    bool visitGuardThreadExclusive(LGuardThreadExclusive *lir);
     bool visitCallGetProperty(LCallGetProperty *lir);
     bool visitCallGetElement(LCallGetElement *lir);
     bool visitCallSetElement(LCallSetElement *lir);

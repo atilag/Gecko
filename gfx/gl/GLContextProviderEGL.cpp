@@ -366,6 +366,9 @@ GLContextEGL::MakeCurrentImpl(bool aForce) {
         EGLSurface surface = mSurfaceOverride != EGL_NO_SURFACE
                               ? mSurfaceOverride
                               : mSurface;
+        if (surface == EGL_NO_SURFACE) {
+            return false;
+        }
         succeeded = sEGLLibrary.fMakeCurrent(EGL_DISPLAY(),
                                               surface, surface,
                                               mContext);
@@ -414,7 +417,7 @@ GLContextEGL::RenewSurface() {
 void
 GLContextEGL::ReleaseSurface() {
     DestroySurface(mSurface);
-    mSurface = nullptr;
+    mSurface = EGL_NO_SURFACE;
 }
 
 bool
@@ -799,8 +802,7 @@ GLContextEGL::CreateEGLPixmapOffscreenContext(const gfxIntSize& size)
 // often without the ability to texture from them directly.
 already_AddRefed<GLContext>
 GLContextProviderEGL::CreateOffscreen(const gfxIntSize& size,
-                                      const SurfaceCaps& caps,
-                                      ContextFlags flags)
+                                      const SurfaceCaps& caps)
 {
     if (!sEGLLibrary.EnsureInitialized()) {
         return nullptr;
@@ -823,7 +825,7 @@ GLContextProviderEGL::CreateOffscreen(const gfxIntSize& size,
 // and 2) some mobile devices have a very strict limit on global number of GL contexts (bug 754257)
 // and 3) each EGL context eats 750k on B2G (bug 813783)
 GLContext *
-GLContextProviderEGL::GetGlobalContext(const ContextFlags)
+GLContextProviderEGL::GetGlobalContext()
 {
     return nullptr;
 }

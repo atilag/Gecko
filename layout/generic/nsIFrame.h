@@ -256,7 +256,7 @@ typedef uint64_t nsFrameState;
 // split, and this piece is the continuation, or (2) the entire float
 // didn't fit on the page.
 // Note that this bit is also shared by text frames for
-// TEXT_FORCE_TRIM_WHITESPACE.  That's OK because we only check the
+// TEXT_IS_IN_TOKEN_MATHML.  That's OK because we only check the
 // NS_FRAME_IS_PUSHED_FLOAT bit on frames which we already know are
 // out-of-flow.
 #define NS_FRAME_IS_PUSHED_FLOAT                    NS_FRAME_STATE_BIT(32)
@@ -337,6 +337,15 @@ typedef uint64_t nsFrameState;
 
 // Frame has a LayerActivityProperty property
 #define NS_FRAME_HAS_LAYER_ACTIVITY_PROPERTY        NS_FRAME_STATE_BIT(54)
+
+// Set for all descendants of MathML sub/supscript elements (other than the
+// base frame) to indicate that the SSTY font feature should be used.
+#define NS_FRAME_MATHML_SCRIPT_DESCENDANT           NS_FRAME_STATE_BIT(58)
+
+// This state bit is set on token MathML elements if the token represents an
+// <mi> tag whose inner HTML consists of a single non-whitespace character
+// to allow special rendering behaviour.
+#define NS_FRAME_IS_IN_SINGLE_CHAR_MI               NS_FRAME_STATE_BIT(59)
 
 // Box layout bits
 #define NS_STATE_IS_HORIZONTAL                      NS_FRAME_STATE_BIT(22)
@@ -2219,12 +2228,6 @@ public:
   virtual bool IsLeaf() const;
 
   /**
-   * Is this a flex item? (Is the parent a flex container frame?)
-   */
-  bool IsFlexItem() const
-  { return mParent && mParent->GetType() == nsGkAtoms::flexContainerFrame; }
-
-  /**
    * Marks all display items created by this frame as needing a repaint,
    * and calls SchedulePaint() if requested and one is not already pending.
    *
@@ -2325,15 +2328,18 @@ public:
    * do not trigger a reflow should have this called for them by
    * DoApplyRenderingChangeToTree.
    *
-   * @param aFlags PAINT_COMPOSITE_ONLY : No changes have been made
+   * @param aType PAINT_COMPOSITE_ONLY : No changes have been made
    * that require a layer tree update, so only schedule a layer
    * tree composite.
+   * PAINT_DELAYED_COMPRESS : Schedule a paint to be executed after a delay, and
+   * put FrameLayerBuilder in 'compressed' mode that avoids short cut optimizations.
    */
-  enum {
+  enum PaintType {
     PAINT_DEFAULT = 0,
-    PAINT_COMPOSITE_ONLY = 1 << 0
+    PAINT_COMPOSITE_ONLY,
+    PAINT_DELAYED_COMPRESS
   };
-  void SchedulePaint(uint32_t aFlags = PAINT_DEFAULT);
+  void SchedulePaint(PaintType aType = PAINT_DEFAULT);
 
   /**
    * Checks if the layer tree includes a dedicated layer for this 
@@ -2963,6 +2969,11 @@ NS_PTR_TO_INT32(frame->Properties().Get(nsIFrame::ParagraphDepthProperty()))
   virtual void FindCloserFrameForSelection(nsPoint aPoint,
                                            FrameWithDistance* aCurrentBestFrame);
 
+  /**
+   * Is this a flex item? (i.e. a non-abs-pos child of a flex container)
+   */
+  inline bool IsFlexItem() const;
+
   inline bool IsBlockInside() const;
   inline bool IsBlockOutside() const;
   inline bool IsInlineOutside() const;
@@ -3244,23 +3255,25 @@ public:
     ListTag(out, this);
   }
   static void ListTag(FILE* out, const nsIFrame* aFrame) {
-    nsAutoString tmp;
-    aFrame->GetFrameName(tmp);
-    fputs(NS_LossyConvertUTF16toASCII(tmp).get(), out);
-    fprintf(out, "@%p", static_cast<const void*>(aFrame));
+    nsAutoCString t;
+    ListTag(t, aFrame);
+    fputs(t.get(), out);
   }
-  void ListGeneric(FILE* out, int32_t aIndent, uint32_t aFlags) const;
+  void ListTag(nsACString& aTo) const;
+  static void ListTag(nsACString& aTo, const nsIFrame* aFrame);
+  void ListGeneric(nsACString& aTo, const char* aPrefix = "", uint32_t aFlags = 0) const;
   enum {
     TRAVERSE_SUBDOCUMENT_FRAMES = 0x01
   };
-  virtual void List(FILE* out, int32_t aIndent, uint32_t aFlags = 0) const;
+  virtual void List(FILE* out = stderr, const char* aPrefix = "", uint32_t aFlags = 0) const;
   /**
    * lists the frames beginning from the root frame
    * - calls root frame's List(...)
    */
   static void RootFrameList(nsPresContext* aPresContext,
-                            FILE* out, int32_t aIndent);
+                            FILE* out = stderr, const char* aPrefix = "");
   virtual void DumpFrameTree();
+  void DumpFrameTreeLimited();
 
   NS_IMETHOD  GetFrameName(nsAString& aResult) const = 0;
 #endif

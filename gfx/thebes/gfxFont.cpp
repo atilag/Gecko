@@ -225,7 +225,7 @@ uint16_t gfxFontEntry::GetUVSGlyph(uint32_t aCh, uint32_t aVS)
     return 0;
 }
 
-nsresult gfxFontEntry::ReadCMAP()
+nsresult gfxFontEntry::ReadCMAP(FontInfoData *aFontInfoData)
 {
     NS_ASSERTION(false, "using default no-op implementation of ReadCMAP");
     mCharacterMap = new gfxCharacterMap();
@@ -562,6 +562,18 @@ gfxFontEntry::GetTableFromFontData(const void* aFontData, uint32_t aTableTag)
 
     }
     return nullptr;
+}
+
+already_AddRefed<gfxCharacterMap>
+gfxFontEntry::GetCMAPFromFontInfo(FontInfoData *aFontInfoData,
+                                  uint32_t& aUVSOffset,
+                                  bool& aSymbolFont)
+{
+    if (!aFontInfoData || !aFontInfoData->mLoadCmaps) {
+        return nullptr;
+    }
+
+    return aFontInfoData->GetCMAP(mName, aUVSOffset, aSymbolFont);
 }
 
 hb_blob_t *
@@ -905,6 +917,11 @@ gfxFontFamily::FindFontForStyle(const gfxFontStyle& aFontStyle,
 void
 gfxFontFamily::CheckForSimpleFamily()
 {
+    // already checked this family
+    if (mIsSimpleFamily) {
+        return;
+    };
+
     uint32_t count = mAvailableFonts.Length();
     if (count > 4 || count == 0) {
         return; // can't be "simple" if there are >4 faces;
@@ -1147,6 +1164,54 @@ gfxFontFamily::SearchAllFontsForChar(GlobalFontMatch *aMatchData)
     }
 }
 
+/*static*/ void
+gfxFontFamily::ReadOtherFamilyNamesForFace(const nsAString& aFamilyName,
+                                           const char *aNameData,
+                                           uint32_t aDataLength,
+                                           nsTArray<nsString>& aOtherFamilyNames,
+                                           bool useFullName)
+{
+    const gfxFontUtils::NameHeader *nameHeader =
+        reinterpret_cast<const gfxFontUtils::NameHeader*>(aNameData);
+
+    uint32_t nameCount = nameHeader->count;
+    if (nameCount * sizeof(gfxFontUtils::NameRecord) > aDataLength) {
+        NS_WARNING("invalid font (name records)");
+        return;
+    }
+    
+    const gfxFontUtils::NameRecord *nameRecord =
+        reinterpret_cast<const gfxFontUtils::NameRecord*>(aNameData + sizeof(gfxFontUtils::NameHeader));
+    uint32_t stringsBase = uint32_t(nameHeader->stringOffset);
+
+    for (uint32_t i = 0; i < nameCount; i++, nameRecord++) {
+        uint32_t nameLen = nameRecord->length;
+        uint32_t nameOff = nameRecord->offset;  // offset from base of string storage
+
+        if (stringsBase + nameOff + nameLen > aDataLength) {
+            NS_WARNING("invalid font (name table strings)");
+            return;
+        }
+
+        uint16_t nameID = nameRecord->nameID;
+        if ((useFullName && nameID == gfxFontUtils::NAME_ID_FULL) ||
+            (!useFullName && (nameID == gfxFontUtils::NAME_ID_FAMILY ||
+                              nameID == gfxFontUtils::NAME_ID_PREFERRED_FAMILY))) {
+            nsAutoString otherFamilyName;
+            bool ok = gfxFontUtils::DecodeFontName(aNameData + stringsBase + nameOff,
+                                                     nameLen,
+                                                     uint32_t(nameRecord->platformID),
+                                                     uint32_t(nameRecord->encodingID),
+                                                     uint32_t(nameRecord->languageID),
+                                                     otherFamilyName);
+            // add if not same as canonical family name
+            if (ok && otherFamilyName != aFamilyName) {
+                aOtherFamilyNames.AppendElement(otherFamilyName);
+            }
+        }
+    }
+}
+
 // returns true if other names were found, false otherwise
 bool
 gfxFontFamily::ReadOtherFamilyNamesForFace(gfxPlatformFontList *aPlatformFontList,
@@ -1155,51 +1220,18 @@ gfxFontFamily::ReadOtherFamilyNamesForFace(gfxPlatformFontList *aPlatformFontLis
 {
     uint32_t dataLength;
     const char *nameData = hb_blob_get_data(aNameTable, &dataLength);
-    const gfxFontUtils::NameHeader *nameHeader =
-        reinterpret_cast<const gfxFontUtils::NameHeader*>(nameData);
+    nsAutoTArray<nsString,4> otherFamilyNames;
 
-    uint32_t nameCount = nameHeader->count;
-    if (nameCount * sizeof(gfxFontUtils::NameRecord) > dataLength) {
-        NS_WARNING("invalid font (name records)");
-        return false;
-    }
-    
-    const gfxFontUtils::NameRecord *nameRecord =
-        reinterpret_cast<const gfxFontUtils::NameRecord*>(nameData + sizeof(gfxFontUtils::NameHeader));
-    uint32_t stringsBase = uint32_t(nameHeader->stringOffset);
+    ReadOtherFamilyNamesForFace(mName, nameData, dataLength,
+                                otherFamilyNames, useFullName);
 
-    bool foundNames = false;
-    for (uint32_t i = 0; i < nameCount; i++, nameRecord++) {
-        uint32_t nameLen = nameRecord->length;
-        uint32_t nameOff = nameRecord->offset;  // offset from base of string storage
-
-        if (stringsBase + nameOff + nameLen > dataLength) {
-            NS_WARNING("invalid font (name table strings)");
-            return false;
-        }
-
-        uint16_t nameID = nameRecord->nameID;
-        if ((useFullName && nameID == gfxFontUtils::NAME_ID_FULL) ||
-            (!useFullName && (nameID == gfxFontUtils::NAME_ID_FAMILY ||
-                              nameID == gfxFontUtils::NAME_ID_PREFERRED_FAMILY))) {
-            nsAutoString otherFamilyName;
-            bool ok = gfxFontUtils::DecodeFontName(nameData + stringsBase + nameOff,
-                                                     nameLen,
-                                                     uint32_t(nameRecord->platformID),
-                                                     uint32_t(nameRecord->encodingID),
-                                                     uint32_t(nameRecord->languageID),
-                                                     otherFamilyName);
-            // add if not same as canonical family name
-            if (ok && otherFamilyName != mName) {
-                aPlatformFontList->AddOtherFamilyName(this, otherFamilyName);
-                foundNames = true;
-            }
-        }
+    uint32_t n = otherFamilyNames.Length();
+    for (uint32_t i = 0; i < n; i++) {
+        aPlatformFontList->AddOtherFamilyName(this, otherFamilyNames[i]);
     }
 
-    return foundNames;
+    return n != 0;
 }
-
 
 void
 gfxFontFamily::ReadOtherFamilyNames(gfxPlatformFontList *aPlatformFontList)
@@ -1251,18 +1283,46 @@ gfxFontFamily::ReadOtherFamilyNames(gfxPlatformFontList *aPlatformFontList)
 
 void
 gfxFontFamily::ReadFaceNames(gfxPlatformFontList *aPlatformFontList, 
-                             bool aNeedFullnamePostscriptNames)
+                             bool aNeedFullnamePostscriptNames,
+                             FontInfoData *aFontInfoData)
 {
     // if all needed names have already been read, skip
     if (mOtherFamilyNamesInitialized &&
         (mFaceNamesInitialized || !aNeedFullnamePostscriptNames))
         return;
 
-    FindStyleVariations();
+    if (!mOtherFamilyNamesInitialized &&
+        aFontInfoData &&
+        aFontInfoData->mLoadOtherNames)
+    {
+        nsAutoTArray<nsString,4> otherFamilyNames;
+        bool foundOtherNames =
+            aFontInfoData->GetOtherFamilyNames(mName, otherFamilyNames);
+        if (foundOtherNames) {
+            uint32_t i, n = otherFamilyNames.Length();
+            for (i = 0; i < n; i++) {
+                aPlatformFontList->AddOtherFamilyName(this, otherFamilyNames[i]);
+            }
+        }
+        mOtherFamilyNamesInitialized = true;
+    }
+
+    // if all needed data has been initialized, return
+    if (mOtherFamilyNamesInitialized &&
+        (mFaceNamesInitialized || !aNeedFullnamePostscriptNames)) {
+        return;
+    }
+
+    FindStyleVariations(aFontInfoData);
+
+    // check again, as style enumeration code may have loaded names
+    if (mOtherFamilyNamesInitialized &&
+        (mFaceNamesInitialized || !aNeedFullnamePostscriptNames)) {
+        return;
+    }
 
     uint32_t i, numFonts = mAvailableFonts.Length();
     const uint32_t kNAME = TRUETYPE_TAG('n','a','m','e');
-    nsAutoString fullname, psname;
 
     bool firstTime = true, readAllFaces = false;
     for (i = 0; i < numFonts; ++i) {
@@ -1270,11 +1330,35 @@ gfxFontFamily::ReadFaceNames(gfxPlatformFontList *aPlatformFontList,
         if (!fe) {
             continue;
         }
+
+        nsAutoString fullname, psname;
+        bool foundFaceNames = false;
+        if (!mFaceNamesInitialized &&
+            aNeedFullnamePostscriptNames &&
+            aFontInfoData &&
+            aFontInfoData->mLoadFaceNames) {
+            aFontInfoData->GetFaceNames(fe->Name(), fullname, psname);
+            if (!fullname.IsEmpty()) {
+                aPlatformFontList->AddFullname(fe, fullname);
+            }
+            if (!psname.IsEmpty()) {
+                aPlatformFontList->AddPostscriptName(fe, psname);
+            }
+            foundFaceNames = true;
+
+            // found everything needed? skip to next font
+            if (mOtherFamilyNamesInitialized) {
+                continue;
+            }
+        }
+
+        // load directly from the name table
         gfxFontEntry::AutoTable nameTable(fe, kNAME);
         if (!nameTable) {
             continue;
         }
-        if (aNeedFullnamePostscriptNames) {
+
+        if (aNeedFullnamePostscriptNames && !foundFaceNames) {
             if (gfxFontUtils::ReadCanonicalName(
                     nameTable, gfxFontUtils::NAME_ID_FULL, fullname) == NS_OK)
             {
@@ -1323,6 +1407,25 @@ gfxFontFamily::FindFont(const nsAString& aPostscriptName)
             return fe;
     }
     return nullptr;
+}
+
+void
+gfxFontFamily::ReadAllCMAPs(FontInfoData *aFontInfoData)
+{
+    FindStyleVariations(aFontInfoData);
+
+    uint32_t i, numFonts = mAvailableFonts.Length();
+    for (i = 0; i < numFonts; i++) {
+        gfxFontEntry *fe = mAvailableFonts[i];
+        // don't try to load cmaps for downloadable fonts not yet loaded
+        if (!fe || fe->mIsProxy) {
+            continue;
+        }
+        fe->ReadCMAP(aFontInfoData);
+        mFamilyCharacterMap.Union(*(fe->mCharacterMap));
+    }
+    mFamilyCharacterMap.Compact();
+    mFamilyCharacterMapInitialized = true;
 }
 
 void
@@ -2216,13 +2319,13 @@ private:
 static AntialiasMode Get2DAAMode(gfxFont::AntialiasOption aAAOption) {
   switch (aAAOption) {
   case gfxFont::kAntialiasSubpixel:
-    return AA_SUBPIXEL;
+    return AntialiasMode::SUBPIXEL;
   case gfxFont::kAntialiasGrayscale:
-    return AA_GRAY;
+    return AntialiasMode::GRAY;
   case gfxFont::kAntialiasNone:
-    return AA_NONE;
+    return AntialiasMode::NONE;
   default:
-    return AA_DEFAULT;
+    return AntialiasMode::DEFAULT;
   }
 }
 
@@ -2289,11 +2392,11 @@ struct GlyphBufferAzure {
 
                         // This relies on the returned Pattern not to be reused by
                         // others, but regenerated on GetPattern calls. This is true!
-                        if (pat->GetType() == PATTERN_LINEAR_GRADIENT) {
+                        if (pat->GetType() == PatternType::LINEAR_GRADIENT) {
                             mat = &static_cast<LinearGradientPattern*>(pat)->mMatrix;
-                        } else if (pat->GetType() == PATTERN_RADIAL_GRADIENT) {
+                        } else if (pat->GetType() == PatternType::RADIAL_GRADIENT) {
                             mat = &static_cast<RadialGradientPattern*>(pat)->mMatrix;
-                        } else if (pat->GetType() == PATTERN_SURFACE) {
+                        } else if (pat->GetType() == PatternType::SURFACE) {
                             mat = &static_cast<SurfacePattern*>(pat)->mMatrix;
                         }
 
@@ -2312,7 +2415,7 @@ struct GlyphBufferAzure {
                 }
             } else if (state.sourceSurface) {
                 aDT->FillGlyphs(aFont, buf, SurfacePattern(state.sourceSurface,
-                                                           EXTEND_CLAMP,
+                                                           ExtendMode::CLAMP,
                                                            state.surfTransform),
                                 aDrawOptions, aOptions);
             } else {
@@ -2641,7 +2744,7 @@ gfxFont::Draw(gfxTextRun *aTextRun, uint32_t aStart, uint32_t aEnd,
       // The cairo DrawTarget backend uses the cairo_scaled_font directly
       // and so has the font skew matrix applied already.
       if (mScaledFont &&
-          dt->GetType() != BACKEND_CAIRO) {
+          dt->GetType() != BackendType::CAIRO) {
         cairo_matrix_t matrix;
         cairo_scaled_font_get_font_matrix(mScaledFont, &matrix);
         if (matrix.xy != 0) {
@@ -3442,7 +3545,8 @@ gfxFont::SplitAndInitTextRun(gfxContext *aContext,
     // the only flags we care about for ShapedWord construction/caching
     uint32_t flags = aTextRun->GetFlags();
     flags &= (gfxTextRunFactory::TEXT_IS_RTL |
-              gfxTextRunFactory::TEXT_DISABLE_OPTIONAL_LIGATURES);
+              gfxTextRunFactory::TEXT_DISABLE_OPTIONAL_LIGATURES |
+              gfxTextRunFactory::TEXT_USE_MATH_SCRIPT);
     if (sizeof(T) == sizeof(uint8_t)) {
         flags |= gfxTextRunFactory::TEXT_IS_8BIT;
     }
@@ -6013,7 +6117,7 @@ struct BufferAlphaColor {
                     aBounds.Height() / appsPerDevUnit), true);
         mContext->Clip();
         mContext->SetColor(gfxRGBA(aAlphaColor.r, aAlphaColor.g, aAlphaColor.b));
-        mContext->PushGroup(GFX_CONTENT_COLOR_ALPHA);
+        mContext->PushGroup(gfxContentType::COLOR_ALPHA);
         mAlpha = aAlphaColor.a;
     }
 
@@ -6289,15 +6393,17 @@ gfxTextRun::BreakAndMeasureText(uint32_t aStart, uint32_t aMaxLength,
         // could be the first and last break opportunity on the line, and that
         // would trigger an infinite loop.
         if (!aSuppressInitialBreak || i > aStart) {
-            bool lineBreakHere = mCharacterGlyphs[i].CanBreakBefore() == 1;
-            bool hyphenation = haveHyphenation && hyphenBuffer[i - bufferStart];
+            bool atNaturalBreak = mCharacterGlyphs[i].CanBreakBefore() == 1;
+            bool atHyphenationBreak =
+                !atNaturalBreak && haveHyphenation && hyphenBuffer[i - bufferStart];
+            bool atBreak = atNaturalBreak || atHyphenationBreak;
             bool wordWrapping =
                 aCanWordWrap && mCharacterGlyphs[i].IsClusterStart() &&
-                *aBreakPriority <= eWordWrapBreak;
+                *aBreakPriority <= gfxBreakPriority::eWordWrapBreak;
 
-            if (lineBreakHere || hyphenation || wordWrapping) {
+            if (atBreak || wordWrapping) {
                 gfxFloat hyphenatedAdvance = advance;
-                if (!lineBreakHere && !wordWrapping) {
+                if (atHyphenationBreak) {
                     hyphenatedAdvance += aProvider->GetHyphenWidth();
                 }
             
@@ -6306,9 +6412,9 @@ gfxTextRun::BreakAndMeasureText(uint32_t aStart, uint32_t aMaxLength,
                     lastBreak = i;
                     lastBreakTrimmableChars = trimmableChars;
                     lastBreakTrimmableAdvance = trimmableAdvance;
-                    lastBreakUsedHyphenation = !lineBreakHere && !wordWrapping;
-                    *aBreakPriority = hyphenation || lineBreakHere ?
-                        eNormalBreak : eWordWrapBreak;
+                    lastBreakUsedHyphenation = atHyphenationBreak;
+                    *aBreakPriority = atBreak ? gfxBreakPriority::eNormalBreak
+                                              : gfxBreakPriority::eWordWrapBreak;
                 }
 
                 width += advance;

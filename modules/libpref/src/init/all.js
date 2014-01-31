@@ -161,13 +161,6 @@ pref("browser.helperApps.neverAsk.saveToDisk", "");
 pref("browser.helperApps.neverAsk.openFile", "");
 pref("browser.helperApps.deleteTempFileOnExit", false);
 
-#ifdef XP_WIN
-// By default, security zone information is stored in the Alternate Data Stream
-// of downloaded executable files on Windows.  This preference allows disabling
-// this feature, and thus the associated system-level execution prompts.
-pref("browser.download.saveZoneInformation", true);
-#endif
-
 // xxxbsmedberg: where should prefs for the toolkit go?
 pref("browser.chrome.toolbar_tips",         true);
 // 0 = Pictures Only, 1 = Text Only, 2 = Pictures and Text
@@ -236,8 +229,8 @@ pref("media.navigator.video.default_height",480);
 pref("media.navigator.video.default_fps",30);
 pref("media.navigator.video.default_minfps",10);
 #ifdef MOZ_WIDGET_GONK
-pref("media.peerconnection.enabled", false);
-pref("media.peerconnection.video.enabled", false);
+pref("media.peerconnection.enabled", true);
+pref("media.peerconnection.video.enabled", true);
 pref("media.navigator.video.max_fs", 1200); // 640x480 == 1200mb
 pref("media.navigator.video.max_fr", 30);
 #else
@@ -278,6 +271,12 @@ pref("media.mediasource.enabled", false);
 
 #ifdef MOZ_WEBSPEECH
 pref("media.webspeech.recognition.enable", false);
+#endif
+#ifdef MOZ_WEBM_ENCODER
+pref("media.encoder.webm.enabled", true);
+#endif
+#ifdef MOZ_OMX_ENCODER
+pref("media.encoder.omx.enabled", true);
 #endif
 
 // Whether to enable Web Audio support
@@ -366,17 +365,9 @@ pref("gfx.font_rendering.graphite.enabled", true);
 // (see http://mxr.mozilla.org/mozilla-central/ident?i=ShapingType)
 // Scripts not listed are grouped in the default category.
 // Set the pref to 255 to have all text shaped via the harfbuzz backend.
-#ifdef XP_WIN
-// Use harfbuzz for everything except Hangul (0x08). Harfbuzz doesn't yet
-// have a Hangul shaper, which means that the marks U+302E/302F would not
-// reorder properly in Malgun Gothic or similar fonts.
-pref("gfx.font_rendering.harfbuzz.scripts", 247);
-#else
-// Use harfbuzz for all scripts (except when using AAT fonts on OS X).
-// AFAICT, Core Text doesn't support full OpenType Hangul shaping anyway,
-// so there's no benefit to excluding it here.
+// Default setting:
+// We use harfbuzz for all scripts (except when using AAT fonts on OS X).
 pref("gfx.font_rendering.harfbuzz.scripts", 255);
-#endif
 
 #ifdef XP_WIN
 pref("gfx.font_rendering.directwrite.enabled", false);
@@ -437,6 +428,7 @@ pref("accessibility.tabfocus_applies_to_xul", true);
 
 // provide ability to turn on support for canvas focus rings
 pref("canvas.focusring.enabled", false);
+pref("canvas.customfocusring.enabled", false);
 
 // We want the ability to forcibly disable platform a11y, because
 // some non-a11y-related components attempt to bring it up.  See bug
@@ -749,7 +741,6 @@ pref("javascript.options.ion.chrome",       false);
 pref("javascript.options.asmjs",            true);
 pref("javascript.options.parallel_parsing", true);
 pref("javascript.options.ion.parallel_compilation", true);
-pref("javascript.options.jit_hardening", true);
 pref("javascript.options.typeinference.content", true);
 pref("javascript.options.typeinference.chrome", false);
 // This preference limits the memory usage of javascript.
@@ -797,11 +788,6 @@ pref("security.fileuri.strict_origin_policy", true);
 // telemetry is also enabled as otherwise there is no way to report
 // the results
 pref("network.allow-experiments", true);
-#if defined(EARLY_BETA_OR_EARLIER)
-pref("network.dns.allow-srv-experiment", true);
-#else
-pref("network.dns.allow-srv-experiment", false);
-#endif
 
 // Transmit UDP busy-work to the LAN when anticipating low latency
 // network reads and on wifi to mitigate 802.11 Power Save Polling delays
@@ -1003,6 +989,8 @@ pref("network.http.bypass-cachelock-threshold", 250);
 pref("network.http.spdy.enabled", true);
 pref("network.http.spdy.enabled.v3", true);
 pref("network.http.spdy.enabled.v3-1", true);
+pref("network.http.spdy.enabled.http2draft", false);
+pref("network.http.spdy.enforce-tls-profile", true);
 pref("network.http.spdy.chunk-size", 4096);
 pref("network.http.spdy.timeout", 180);
 pref("network.http.spdy.coalesce-hostnames", true);
@@ -1011,7 +999,7 @@ pref("network.http.spdy.ping-threshold", 58);
 pref("network.http.spdy.ping-timeout", 8);
 pref("network.http.spdy.send-buffer-size", 131072);
 pref("network.http.spdy.allow-push", true);
-pref("network.http.spdy.push-allowance", 65536);
+pref("network.http.spdy.push-allowance", 131072);
 
 pref("network.http.diagnostics", false);
 
@@ -1277,6 +1265,8 @@ pref("network.seer.preconnect-min-confidence", 90);
 pref("network.seer.preresolve-min-confidence", 60);
 pref("network.seer.redirect-likely-confidence", 75);
 pref("network.seer.max-queue-size", 50);
+pref("network.seer.max-db-size", 157286400); // bytes
+pref("network.seer.preserve", 80); // percentage of seer data to keep when cleaning up
 
 
 // The following prefs pertain to the negotiate-auth extension (see bug 17578),
@@ -1411,6 +1401,7 @@ pref("font.language.group",                 "chrome://global/locale/intl.propert
 pref("intl.uidirection.ar", "rtl");
 pref("intl.uidirection.he", "rtl");
 pref("intl.uidirection.fa", "rtl");
+pref("intl.uidirection.ug", "rtl");
 pref("intl.uidirection.ur", "rtl");
 
 // use en-US hyphenation by default for content tagged with plain lang="en"
@@ -1763,6 +1754,9 @@ pref("layout.css.sticky.enabled", false);
 #else
 pref("layout.css.sticky.enabled", true);
 #endif
+
+// Is support for CSS "will-change" enabled?
+pref("layout.css.will-change.enabled", false);
 
 // Is support for CSS "text-align: true X" enabled?
 pref("layout.css.text-align-true-value.enabled", false);
@@ -2561,7 +2555,10 @@ pref("intl.keyboard.per_window_layout", false);
 
 #ifdef NS_ENABLE_TSF
 // Enable/Disable TSF support
-pref("intl.enable_tsf_support", false);
+pref("intl.tsf.enable", false);
+
+// Support IMEs implemented with IMM in TSF mode.
+pref("intl.tsf.support_imm", true);
 
 // We need to notify the layout change to TSF, but we cannot check the actual
 // change now, therefore, we always notify it by this fequency.
@@ -3845,6 +3842,12 @@ pref("mousewheel.system_scroll_override_on_root_content.enabled", false);
 
 pref("ui.key.menuAccessKeyFocuses", true);
 
+#if MOZ_WIDGET_GTK == 2
+pref("intl.ime.use_simple_context_on_password_field", true);
+#else
+pref("intl.ime.use_simple_context_on_password_field", false);
+#endif
+
 # XP_UNIX
 #endif
 #endif
@@ -4082,6 +4085,11 @@ pref("layers.scroll-graph", false);
 
 // Set the default values, and then override per-platform as needed
 pref("layers.offmainthreadcomposition.enabled", false);
+// Compositor target frame rate. NOTE: If vsync is enabled the compositor
+// frame rate will still be capped.
+// -1 -> default (match layout.frame_rate or 60 FPS)
+// 0  -> full-tilt mode: Recomposite even if not transaction occured.
+pref("layers.offmainthreadcomposition.frame-rate", -1);
 // Whether to use the deprecated texture architecture rather than the new one.
 pref("layers.use-deprecated-textures", true);
 #ifndef XP_WIN
@@ -4089,6 +4097,12 @@ pref("layers.use-deprecated-textures", true);
 // requires off-main-thread compositing.
 // Never works on Windows, so no point pref'ing it on.
 pref("layers.async-video.enabled",false);
+#endif
+
+#ifdef MOZ_X11
+// OMTC off by default on Linux, but if activated, use new textures and async-video.
+pref("layers.use-deprecated-textures", false);
+pref("layers.async-video.enabled", true);
 #endif
 
 #ifdef XP_MACOSX
@@ -4247,6 +4261,9 @@ pref("dom.w3c_touch_events.enabled", 2);
 // W3C draft pointer events
 pref("dom.w3c_pointer_events.enabled", false);
 
+// W3C touch-action css property (related to touch and pointer events)
+pref("layout.css.touch_action.enabled", false);
+
 // enable JS dump() function.
 pref("browser.dom.window.dump.enabled", false);
 
@@ -4290,6 +4307,9 @@ pref("memory.free_dirty_pages", false);
 #ifdef XP_LINUX
 pref("memory.system_memory_reporter", false);
 #endif
+
+// Number of stack frames to capture in createObjectURL for about:memory.
+pref("memory.blob_report.stack_frames", 0);
 
 pref("social.enabled", false);
 // comma separated list of domain origins (e.g. https://domain.com) for

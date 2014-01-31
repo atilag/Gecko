@@ -101,6 +101,14 @@ function getErrorClass(errorCode) {
   return null;
 }
 
+const OBSERVED_EVENTS = [
+  'fullscreen-origin-change',
+  'ask-parent-to-exit-fullscreen',
+  'ask-parent-to-rollback-fullscreen',
+  'xpcom-shutdown',
+  'activity-done'
+];
+
 /**
  * The BrowserElementChild implements one half of <iframe mozbrowser>.
  * (The other half is, unsurprisingly, BrowserElementParent.)
@@ -253,25 +261,9 @@ BrowserElementChild.prototype = {
                                this._scrollEventHandler.bind(this),
                                /* useCapture = */ false);
 
-    Services.obs.addObserver(this,
-                             "fullscreen-origin-change",
-                             /* ownsWeak = */ true);
-
-    Services.obs.addObserver(this,
-                             'ask-parent-to-exit-fullscreen',
-                             /* ownsWeak = */ true);
-
-    Services.obs.addObserver(this,
-                             'ask-parent-to-rollback-fullscreen',
-                             /* ownsWeak = */ true);
-
-    Services.obs.addObserver(this,
-                             'xpcom-shutdown',
-                             /* ownsWeak = */ true);
-
-    Services.obs.addObserver(this,
-                             'activity-done',
-                             /* ownsWeak = */ true);
+    OBSERVED_EVENTS.forEach((aTopic) => {
+      Services.obs.addObserver(this, aTopic, false);
+    });
   },
 
   observe: function(subject, topic, data) {
@@ -306,6 +298,9 @@ BrowserElementChild.prototype = {
    */
   _unloadHandler: function() {
     this._shuttingDown = true;
+    OBSERVED_EVENTS.forEach((aTopic) => {
+      Services.obs.removeObserver(this, aTopic);
+    });
   },
 
   _tryGetInnerWindowID: function(win) {
@@ -688,10 +683,11 @@ BrowserElementChild.prototype = {
     let self = this;
     let maxWidth = data.json.args.width;
     let maxHeight = data.json.args.height;
+    let mimeType = data.json.args.mimeType;
     let domRequestID = data.json.id;
 
     let takeScreenshotClosure = function() {
-      self._takeScreenshot(maxWidth, maxHeight, domRequestID);
+      self._takeScreenshot(maxWidth, maxHeight, mimeType, domRequestID);
     };
 
     let maxDelayMS = 2000;
@@ -712,7 +708,7 @@ BrowserElementChild.prototype = {
    * the desired maxWidth and maxHeight, and given the DOMRequest ID associated
    * with the request from the parent.
    */
-  _takeScreenshot: function(maxWidth, maxHeight, domRequestID) {
+  _takeScreenshot: function(maxWidth, maxHeight, mimeType, domRequestID) {
     // You can think of the screenshotting algorithm as carrying out the
     // following steps:
     //
@@ -728,10 +724,14 @@ BrowserElementChild.prototype = {
     // - Crop the viewport so its width is no larger than maxWidth and its
     //   height is no larger than maxHeight.
     //
+    // - Set mozOpaque to true and background color to solid white
+    //   if we are taking a JPEG screenshot, keep transparent if otherwise.
+    //
     // - Return a screenshot of the page's viewport scaled and cropped per
     //   above.
     debug("Taking a screenshot: maxWidth=" + maxWidth +
           ", maxHeight=" + maxHeight +
+          ", mimeType=" + mimeType +
           ", domRequestID=" + domRequestID + ".");
 
     if (!content) {
@@ -749,19 +749,22 @@ BrowserElementChild.prototype = {
     let canvasWidth = Math.min(maxWidth, Math.round(content.innerWidth * scale));
     let canvasHeight = Math.min(maxHeight, Math.round(content.innerHeight * scale));
 
+    let transparent = (mimeType !== 'image/jpeg');
+
     var canvas = content.document
       .createElementNS("http://www.w3.org/1999/xhtml", "canvas");
-    canvas.mozOpaque = true;
+    if (!transparent)
+      canvas.mozOpaque = true;
     canvas.width = canvasWidth;
     canvas.height = canvasHeight;
 
     var ctx = canvas.getContext("2d");
     ctx.scale(scale, scale);
     ctx.drawWindow(content, 0, 0, content.innerWidth, content.innerHeight,
-                   "rgb(255,255,255)");
+                   transparent ? "rgba(255,255,255,0)" : "rgb(255,255,255)");
 
-    // Take a JPEG screenshot to hack around the fact that we can't specify
-    // opaque PNG.  This requires us to unpremultiply the alpha channel, which
+    // Take a JPEG screenshot by default instead of PNG with alpha channel.
+    // This requires us to unpremultiply the alpha channel, which
     // is expensive on ARM processors because they lack a hardware integer
     // division instruction.
     canvas.toBlob(function(blob) {
@@ -769,7 +772,7 @@ BrowserElementChild.prototype = {
         id: domRequestID,
         successRv: blob
       });
-    }, 'image/jpeg');
+    }, mimeType);
   },
 
   _recvFireCtxCallback: function(data) {

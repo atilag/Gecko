@@ -21,7 +21,6 @@
 #include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
 #include "LayersTypes.h"
 
-struct gfxMatrix;
 struct nsIntSize;
 
 namespace mozilla {
@@ -79,7 +78,7 @@ public:
   // this method.
   void DrawBufferWithRotation(gfx::DrawTarget* aTarget, ContextSource aSource,
                               float aOpacity = 1.0,
-                              gfx::CompositionOp aOperator = gfx::OP_OVER,
+                              gfx::CompositionOp aOperator = gfx::CompositionOp::OP_OVER,
                               gfx::SourceSurface* aMask = nullptr,
                               const gfx::Matrix* aMaskTransform = nullptr) const;
 
@@ -214,14 +213,16 @@ public:
    */
   struct PaintState {
     PaintState()
-      : mTarget(nullptr)
+      : mMode(SurfaceMode::SURFACE_NONE)
+      , mContentType(gfxContentType::SENTINEL)
       , mDidSelfCopy(false)
     {}
 
-    gfx::DrawTarget* mTarget;
     nsIntRegion mRegionToDraw;
     nsIntRegion mRegionToInvalidate;
+    SurfaceMode mMode;
     DrawRegionClip mClip;
+    ContentType mContentType;
     bool mDidSelfCopy;
   };
 
@@ -245,8 +246,17 @@ public:
    * invalid pixels outside the visible region, if the visible region doesn't
    * fill the buffer bounds).
    */
-  PaintState BeginPaint(ThebesLayer* aLayer, ContentType aContentType,
+  PaintState BeginPaint(ThebesLayer* aLayer,
                         uint32_t aFlags);
+
+  /**
+   * Fetch a DrawTarget for rendering. The DrawTarget remains owned by
+   * this. See notes on BorrowDrawTargetForQuadrantUpdate.
+   * May return null. If the return value is non-null, it must be
+   * 'un-borrowed' using ReturnDrawTarget.
+   */
+  gfx::DrawTarget* BorrowDrawTargetForPainting(ThebesLayer* aLayer,
+                                               const PaintState& aPaintState);
 
   enum {
     ALLOW_REPEAT = 0x01,
@@ -283,7 +293,7 @@ public:
               float aOpacity,
               gfx::CompositionOp aOp,
               gfxASurface* aMask,
-              const gfxMatrix* aMaskTransform);
+              const gfx::Matrix* aMaskTransform);
 
 protected:
   TemporaryRef<gfx::DrawTarget>
@@ -382,7 +392,6 @@ protected:
   gfx::DrawTarget*
   BorrowDrawTargetForQuadrantUpdate(const nsIntRect& aBounds,
                                     ContextSource aSource);
-  void ReturnDrawTarget(gfx::DrawTarget* aReturned);
 
   static bool IsClippingCheap(gfx::DrawTarget* aTarget, const nsIntRegion& aRegion);
 
@@ -408,6 +417,15 @@ protected:
    */
   virtual bool HaveBuffer() const;
   virtual bool HaveBufferOnWhite() const;
+
+  /**
+   * Any actions that should be performed at the last moment before we begin
+   * rendering the next frame. I.e., after we calculate what we will draw,
+   * but before we rotate the buffer and possibly create new buffers.
+   * aRegionToDraw is the region which is guaranteed to be overwritten when
+   * drawing the next frame.
+   */
+  virtual void FinalizeFrame(const nsIntRegion& aRegionToDraw) {}
 
   /**
    * These members are only set transiently.  They're used to map mDTBuffer

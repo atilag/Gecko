@@ -11,7 +11,6 @@
 #include "nsITimer.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeItem.h"
-#include "nsIDocShellTreeNode.h"
 #include "nsIBaseWindow.h"
 #include "nsIScrollable.h"
 #include "nsITextScroll.h"
@@ -155,7 +154,6 @@ public:
 
     NS_DECL_NSIDOCSHELL
     NS_DECL_NSIDOCSHELLTREEITEM
-    NS_DECL_NSIDOCSHELLTREENODE
     NS_DECL_NSIWEBNAVIGATION
     NS_DECL_NSIBASEWINDOW
     NS_DECL_NSISCROLLABLE
@@ -890,10 +888,6 @@ private:
                                 nsISupports* aRequestor,
                                 nsIDocShellTreeItem* aOriginalRequestor,
                                 nsIDocShellTreeItem** _retval);
-
-    // Check whether accessing item is sandboxed from the target item.
-    static bool IsSandboxedFrom(nsIDocShellTreeItem* aTargetItem,
-                                nsIDocShellTreeItem* aAccessingItem);
 
 #ifdef DEBUG
     // We're counting the number of |nsDocShells| to help find leaks
