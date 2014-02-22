@@ -2164,7 +2164,7 @@ FindPendingDir()
 static bool
 GetPendingDir(nsIFile** dir)
 {
-  MOZ_ASSERT(OOPInitialized());
+  //MOZ_ASSERT(OOPInitialized());
   if (!pendingDirectory) {
     return false;
   }
@@ -2582,7 +2582,7 @@ GetChildNotificationPipe()
   if (!GetEnabled())
     return kNullNotifyPipe;
 
-  MOZ_ASSERT(OOPInitialized());
+  //MOZ_ASSERT(OOPInitialized());
 
   return childCrashNotifyPipe;
 }
@@ -2761,7 +2761,7 @@ CreateNotificationPipeForChild(int* childCrashFd, int* childCrashRemapFd)
     return true;
   }
 
-  MOZ_ASSERT(OOPInitialized());
+  //MOZ_ASSERT(OOPInitialized());
 
   *childCrashFd = clientSocketFd;
   *childCrashRemapFd = kMagicChildCrashReportFd;
