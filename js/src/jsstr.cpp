@@ -393,7 +393,7 @@ js::str_resolve(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
 
     int32_t slot = JSID_TO_INT(id);
     if ((size_t)slot < str->length()) {
-        JSString *str1 = cx->runtime()->staticStrings.getUnitStringForElement(cx, str, size_t(slot));
+        JSString *str1 = cx->staticStrings().getUnitStringForElement(cx, str, size_t(slot));
         if (!str1)
             return false;
         RootedValue value(cx, StringValue(str1));
@@ -864,7 +864,7 @@ js_str_charAt(JSContext *cx, unsigned argc, Value *vp)
         i = size_t(d);
     }
 
-    str = cx->runtime()->staticStrings.getUnitStringForElement(cx, str, i);
+    str = cx->staticStrings().getUnitStringForElement(cx, str, i);
     if (!str)
         return false;
     args.rval().setString(str);
@@ -1863,7 +1863,7 @@ DoMatchLocal(JSContext *cx, CallArgs args, RegExpStatics *res, Handle<JSLinearSt
     res->updateFromMatchPairs(cx, input, matches);
 
     RootedValue rval(cx);
-    if (!CreateRegExpMatchResult(cx, input, chars, charsLen, matches, &rval))
+    if (!CreateRegExpMatchResult(cx, input, matches, &rval))
         return false;
 
     args.rval().set(rval);
@@ -2649,16 +2649,16 @@ FlattenSubstrings(JSContext *cx, const jschar *chars,
 }
 
 static JSString *
-AppendSubstrings(JSContext *cx, Handle<JSStableString*> stableStr,
+AppendSubstrings(JSContext *cx, Handle<JSFlatString*> flatStr,
                  const StringRange *ranges, size_t rangesLen)
 {
     JS_ASSERT(rangesLen);
 
     /* For single substrings, construct a dependent string. */
     if (rangesLen == 1)
-        return js_NewDependentString(cx, stableStr, ranges[0].start, ranges[0].length);
+        return js_NewDependentString(cx, flatStr, ranges[0].start, ranges[0].length);
 
-    const jschar *chars = stableStr->getChars(cx);
+    const jschar *chars = flatStr->getChars(cx);
     if (!chars)
         return nullptr;
 
@@ -2680,7 +2680,7 @@ AppendSubstrings(JSContext *cx, Handle<JSStableString*> stableStr,
         if (i == end) {
             /* Not even one range fits JSShortString, use DependentString */
             const StringRange &sr = ranges[i++];
-            part = js_NewDependentString(cx, stableStr, sr.start, sr.length);
+            part = js_NewDependentString(cx, flatStr, sr.start, sr.length);
         } else {
             /* Copy the ranges (linearly) into a JSShortString */
             part = FlattenSubstrings(cx, chars, ranges + i, end - i, substrLen);
@@ -2701,14 +2701,13 @@ AppendSubstrings(JSContext *cx, Handle<JSStableString*> stableStr,
 static bool
 StrReplaceRegexpRemove(JSContext *cx, HandleString str, RegExpShared &re, MutableHandleValue rval)
 {
-    Rooted<JSStableString*> stableStr(cx, str->ensureStable(cx));
-    if (!stableStr)
+    Rooted<JSFlatString*> flatStr(cx, str->ensureFlat(cx));
+    if (!flatStr)
         return false;
 
     Vector<StringRange, 16, SystemAllocPolicy> ranges;
 
-    StableCharPtr chars = stableStr->chars();
-    size_t charsLen = stableStr->length();
+    size_t charsLen = flatStr->length();
 
     MatchPair match;
     size_t startIndex = 0; /* Index used for iterating through the string. */
@@ -2720,7 +2719,8 @@ StrReplaceRegexpRemove(JSContext *cx, HandleString str, RegExpShared &re, Mutabl
         if (!JS_CHECK_OPERATION_LIMIT(cx))
             return false;
 
-        RegExpRunStatus status = re.executeMatchOnly(cx, chars.get(), charsLen, &startIndex, match);
+        RegExpRunStatus status =
+            re.executeMatchOnly(cx, flatStr->chars(), charsLen, &startIndex, match);
         if (status == RegExpRunStatus_Error)
             return false;
         if (status == RegExpRunStatus_Success_NotFound)
@@ -2746,13 +2746,13 @@ StrReplaceRegexpRemove(JSContext *cx, HandleString str, RegExpShared &re, Mutabl
     /* If unmatched, return the input string. */
     if (!lastIndex) {
         if (startIndex > 0)
-            cx->global()->getRegExpStatics()->updateLazily(cx, stableStr, &re, lazyIndex);
+            cx->global()->getRegExpStatics()->updateLazily(cx, flatStr, &re, lazyIndex);
         rval.setString(str);
         return true;
     }
 
     /* The last successful match updates the RegExpStatics. */
-    cx->global()->getRegExpStatics()->updateLazily(cx, stableStr, &re, lazyIndex);
+    cx->global()->getRegExpStatics()->updateLazily(cx, flatStr, &re, lazyIndex);
 
     /* Include any remaining part of the string. */
     if (lastIndex < charsLen) {
@@ -2766,7 +2766,7 @@ StrReplaceRegexpRemove(JSContext *cx, HandleString str, RegExpShared &re, Mutabl
         return true;
     }
 
-    JSString *result = AppendSubstrings(cx, stableStr, ranges.begin(), ranges.length());
+    JSString *result = AppendSubstrings(cx, flatStr, ranges.begin(), ranges.length());
     if (!result)
         return false;
 
@@ -3241,7 +3241,7 @@ CharSplitHelper(JSContext *cx, Handle<JSLinearString*> str, uint32_t limit)
     if (strLength == 0)
         return NewDenseEmptyArray(cx);
 
-    js::StaticStrings &staticStrings = cx->runtime()->staticStrings;
+    js::StaticStrings &staticStrings = cx->staticStrings();
     uint32_t resultlen = (limit < strLength ? limit : strLength);
 
     AutoValueVector splits(cx);
@@ -3546,7 +3546,7 @@ str_slice(JSContext *cx, unsigned argc, Value *vp)
                 str = cx->runtime()->emptyString;
             } else {
                 str = (length == 1)
-                      ? cx->runtime()->staticStrings.getUnitStringForElement(cx, str, begin)
+                      ? cx->staticStrings().getUnitStringForElement(cx, str, begin)
                       : js_NewDependentString(cx, str, begin, length);
                 if (!str)
                     return false;
@@ -3864,7 +3864,7 @@ js::str_fromCharCode(JSContext *cx, unsigned argc, Value *vp)
         if (!ToUint16(cx, args[0], &code))
             return false;
         if (StaticStrings::hasUnit(code)) {
-            args.rval().setString(cx->runtime()->staticStrings.getUnit(code));
+            args.rval().setString(cx->staticStrings().getUnit(code));
             return true;
         }
         args[0].setInt32(code);
@@ -3953,16 +3953,26 @@ js_InitStringClass(JSContext *cx, HandleObject obj)
 }
 
 template <AllowGC allowGC>
-JSStableString *
+JSFlatString *
 js_NewString(ThreadSafeContext *cx, jschar *chars, size_t length)
 {
-    return JSStableString::new_<allowGC>(cx, chars, length);
+    if (length == 1) {
+        jschar c = chars[0];
+        if (StaticStrings::hasUnit(c)) {
+            // Free |chars| because we're taking possession of it, but it's no
+            // longer needed because we use the static string instead.
+            js_free(chars);
+            return cx->staticStrings().getUnit(c);
+        }
+    }
+
+    return JSFlatString::new_<allowGC>(cx, chars, length);
 }
 
-template JSStableString *
+template JSFlatString *
 js_NewString<CanGC>(ThreadSafeContext *cx, jschar *chars, size_t length);
 
-template JSStableString *
+template JSFlatString *
 js_NewString<NoGC>(ThreadSafeContext *cx, jschar *chars, size_t length);
 
 JSLinearString *
@@ -3980,7 +3990,7 @@ js_NewDependentString(JSContext *cx, JSString *baseArg, size_t start, size_t len
 
     const jschar *chars = base->chars() + start;
 
-    if (JSLinearString *staticStr = cx->runtime()->staticStrings.lookup(chars, length))
+    if (JSLinearString *staticStr = cx->staticStrings().lookup(chars, length))
         return staticStr;
 
     return JSDependentString::new_(cx, base, chars, length);
@@ -4244,8 +4254,6 @@ js::CompareStrings(JSContext *cx, JSString *str1, JSString *str2, int32_t *resul
 int32_t
 js::CompareAtoms(JSAtom *atom1, JSAtom *atom2)
 {
-    AutoThreadSafeAccess ts0(atom1);
-    AutoThreadSafeAccess ts1(atom2);
     return CompareChars(atom1->chars(), atom1->length(), atom2->chars(), atom2->length());
 }
 

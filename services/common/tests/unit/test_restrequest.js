@@ -717,8 +717,14 @@ add_test(function test_timeout() {
     do_check_eq(error.result, Cr.NS_ERROR_NET_TIMEOUT);
     do_check_eq(this.status, this.ABORTED);
 
-    _("Closing connection.");
-    server_connection.close();
+    // server_connection is undefined on the Android emulator for reasons
+    // unknown. Yet, we still get here. If this test is refactored, we should
+    // investigate the reason why the above callback is behaving differently.
+    if (server_connection) {
+      _("Closing connection.");
+      server_connection.close();
+    }
+
     _("Shutting down server.");
     server.stop(run_next_test);
   });
@@ -830,4 +836,81 @@ add_test(function test_not_sending_cookie() {
     do_check_eq("COOKIE!", this.response.body);
     server.stop(run_next_test);
   });
+});
+
+add_test(function test_hawk_authenticated_request() {
+  do_test_pending();
+
+  let onProgressCalled = false;
+  let postData = {your: "data"};
+
+  // An arbitrary date - Feb 2, 1971.  It ends in a bunch of zeroes to make our
+  // computation with the hawk timestamp easier, since hawk throws away the
+  // millisecond values.
+  let then = 34329600000;
+
+  let clockSkew = 120000;
+  let timeOffset = -1 * clockSkew;
+  let localTime = then + clockSkew;
+
+  // Set the accept-languages pref to the Nepalese dialect of Zulu.
+  let acceptLanguage = Cc['@mozilla.org/supports-string;1'].createInstance(Ci.nsISupportsString);
+  acceptLanguage.data = 'zu-NP'; // omit trailing ';', which our HTTP libs snip
+  Services.prefs.setComplexValue('intl.accept_languages', Ci.nsISupportsString, acceptLanguage);
+
+  let credentials = {
+    id: "eyJleHBpcmVzIjogMTM2NTAxMDg5OC4x",
+    key: "qTZf4ZFpAMpMoeSsX3zVRjiqmNs=",
+    algorithm: "sha256"
+  };
+
+  let server = httpd_setup({
+    "/elysium": function(request, response) {
+      do_check_true(request.hasHeader("Authorization"));
+
+      // check that the header timestamp is our arbitrary system date, not
+      // today's date.  Note that hawk header timestamps are in seconds, not
+      // milliseconds.
+      let authorization = request.getHeader("Authorization");
+      let tsMS = parseInt(/ts="(\d+)"/.exec(authorization)[1], 10) * 1000;
+      do_check_eq(tsMS, then);
+
+      // This testing can be a little wonky. In an environment where
+      //   pref("intl.accept_languages") === 'en-US, en'
+      // the header is sent as:
+      //   'en-US,en;q=0.5'
+      // hence our fake value for acceptLanguage.
+      let lang = request.getHeader('Accept-Language');
+      do_check_eq(lang, acceptLanguage);
+
+      let message = "yay";
+      response.setStatusLine(request.httpVersion, 200, "OK");
+      response.bodyOutputStream.write(message, message.length);
+    }
+  });
+
+  function onProgress() {
+    onProgressCalled = true;
+  }
+
+  function onComplete(error) {
+    do_check_eq(200, this.response.status);
+    do_check_eq(this.response.body, "yay");
+    do_check_true(onProgressCalled);
+    do_test_finished();
+    server.stop(run_next_test);
+  }
+
+  let url = server.baseURI + "/elysium";
+  let extra = {
+    now: localTime,
+    localtimeOffsetMsec: timeOffset
+  };
+  let request = new HAWKAuthenticatedRESTRequest(url, credentials, extra);
+  request.post(postData, onComplete, onProgress);
+
+  Services.prefs.resetUserPrefs();
+  let pref = Services.prefs.getComplexValue('intl.accept_languages',
+                                            Ci.nsIPrefLocalizedString);
+  do_check_neq(acceptLanguage.data, pref.data);
 });

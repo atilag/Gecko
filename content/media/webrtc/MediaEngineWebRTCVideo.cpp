@@ -9,6 +9,10 @@
 #include "nsMemory.h"
 #include "mtransport/runnable_utils.h"
 
+#ifdef MOZ_B2G_CAMERA
+#include "GrallocImages.h"
+#include "libyuv.h"
+#endif
 namespace mozilla {
 
 using namespace mozilla::gfx;
@@ -25,7 +29,13 @@ extern PRLogModuleInfo* GetMediaManagerLog();
 /**
  * Webrtc video source.
  */
+#ifndef MOZ_B2G_CAMERA
 NS_IMPL_ISUPPORTS1(MediaEngineWebRTCVideoSource, nsIRunnable)
+#else
+NS_IMPL_QUERY_INTERFACE1(MediaEngineWebRTCVideoSource, nsIRunnable)
+NS_IMPL_ADDREF_INHERITED(MediaEngineWebRTCVideoSource, CameraControlListener)
+NS_IMPL_RELEASE_INHERITED(MediaEngineWebRTCVideoSource, CameraControlListener)
+#endif
 
 // ViEExternalRenderer Callback.
 #ifndef MOZ_B2G_CAMERA
@@ -67,9 +77,7 @@ MediaEngineWebRTCVideoSource::DeliverFrame(
   }
 
   // Create a video frame and append it to the track.
-  ImageFormat format = PLANAR_YCBCR;
-
-  nsRefPtr<layers::Image> image = mImageContainer->CreateImage(&format, 1);
+  nsRefPtr<layers::Image> image = mImageContainer->CreateImage(ImageFormat::PLANAR_YCBCR);
 
   layers::PlanarYCbCrImage* videoImage = static_cast<layers::PlanarYCbCrImage*>(image.get());
 
@@ -88,7 +96,7 @@ MediaEngineWebRTCVideoSource::DeliverFrame(
   data.mPicX = 0;
   data.mPicY = 0;
   data.mPicSize = IntSize(mWidth, mHeight);
-  data.mStereoMode = STEREO_MODE_MONO;
+  data.mStereoMode = StereoMode::MONO;
 
   videoImage->SetData(data);
 
@@ -145,9 +153,9 @@ MediaEngineWebRTCVideoSource::NotifyPull(MediaStreamGraph* aGraph,
   if (delta > 0) {
     // nullptr images are allowed
     if (image) {
-      segment.AppendFrame(image.forget(), delta, gfxIntSize(mWidth, mHeight));
+      segment.AppendFrame(image.forget(), delta, IntSize(mWidth, mHeight));
     } else {
-      segment.AppendFrame(nullptr, delta, gfxIntSize(0,0));
+      segment.AppendFrame(nullptr, delta, IntSize(0, 0));
     }
     // This can fail if either a) we haven't added the track yet, or b)
     // we've removed or finished the track.
@@ -314,7 +322,9 @@ nsresult
 MediaEngineWebRTCVideoSource::Start(SourceMediaStream* aStream, TrackID aID)
 {
   LOG((__FUNCTION__));
+#ifndef MOZ_B2G_CAMERA
   int error = 0;
+#endif
   if (!mInitDone || !aStream) {
     return NS_ERROR_FAILURE;
   }
@@ -415,7 +425,7 @@ MediaEngineWebRTCVideoSource::Init()
 {
 #ifdef MOZ_B2G_CAMERA
   nsAutoCString deviceName;
-  mCameraManager->GetCameraName(mCaptureIndex, deviceName);
+  ICameraControl::GetCameraName(mCaptureIndex, deviceName);
   CopyUTF8toUTF16(deviceName, mDeviceName);
   CopyUTF8toUTF16(deviceName, mUniqueId);
 #else
@@ -494,122 +504,165 @@ void
 MediaEngineWebRTCVideoSource::AllocImpl() {
   MOZ_ASSERT(NS_IsMainThread());
 
-  mDOMCameraControl = new nsDOMCameraControl(mCaptureIndex,
-                                             mCameraThread,
-                                             this,
-                                             this,
-                                             nsGlobalWindow::GetInnerWindowWithId(mWindowId));
-  mCameraManager->Register(mDOMCameraControl);
+  mCameraControl = ICameraControl::Create(mCaptureIndex);
+  if (mCameraControl) {
+    mState = kAllocated;
+    // Add this as a listener for CameraControl events. We don't need
+    // to explicitly remove this--destroying the CameraControl object
+    // in DeallocImpl() will do that for us.
+    mCameraControl->AddListener(this);
+  }
+  mCallbackMonitor.Notify();
 }
 
 void
 MediaEngineWebRTCVideoSource::DeallocImpl() {
   MOZ_ASSERT(NS_IsMainThread());
 
-  mNativeCameraControl->ReleaseHardware(this, this);
-  mNativeCameraControl = nullptr;
+  mCameraControl = nullptr;
 }
 
 void
 MediaEngineWebRTCVideoSource::StartImpl(webrtc::CaptureCapability aCapability) {
   MOZ_ASSERT(NS_IsMainThread());
 
-  idl::CameraSize size;
-  size.width = aCapability.width;
-  size.height = aCapability.height;
-  mNativeCameraControl->GetPreviewStream(size, this, this);
+  ICameraControl::Configuration config;
+  config.mMode = ICameraControl::kPictureMode;
+  config.mPreviewSize.width = aCapability.width;
+  config.mPreviewSize.height = aCapability.height;
+  mCameraControl->Start(&config);
+  mCameraControl->Set(CAMERA_PARAM_PICTURESIZE, config.mPreviewSize);
+  mCameraControl->Get(CAMERA_PARAM_SENSORANGLE, mSensorAngle);
+  MOZ_ASSERT(mSensorAngle >= 0 && mSensorAngle < 360);
 }
 
 void
 MediaEngineWebRTCVideoSource::StopImpl() {
   MOZ_ASSERT(NS_IsMainThread());
 
-  mNativeCameraControl->StopPreview();
-  mPreviewStream = nullptr;
+  mCameraControl->Stop();
 }
 
 void
 MediaEngineWebRTCVideoSource::SnapshotImpl() {
-
   MOZ_ASSERT(NS_IsMainThread());
-
-  idl::CameraSize size;
-  size.width = mCapability.width;
-  size.height = mCapability.height;
-
-  idl::CameraPosition cameraPosition;
-  cameraPosition.latitude = NAN;
-  cameraPosition.longitude = NAN;
-  cameraPosition.altitude = NAN;
-  cameraPosition.timestamp = NAN;
-
-  mNativeCameraControl->TakePicture(size, 0, NS_LITERAL_STRING("jpeg"), cameraPosition, PR_Now() / 1000000, this, this);
+  mCameraControl->TakePicture();
 }
 
-// nsICameraGetCameraCallback
-nsresult
-MediaEngineWebRTCVideoSource::HandleEvent(nsISupports* /* unused */) {
-  MOZ_ASSERT(NS_IsMainThread());
-  ReentrantMonitorAutoEnter sync(mCallbackMonitor);
-  mNativeCameraControl = static_cast<nsGonkCameraControl*>(mDOMCameraControl->GetNativeCameraControl().get());
-  mState = kAllocated;
-  mCallbackMonitor.Notify();
-  return NS_OK;
-}
-
-// nsICameraPreviewStreamCallback
-nsresult
-MediaEngineWebRTCVideoSource::HandleEvent(nsIDOMMediaStream* stream) {
-  MOZ_ASSERT(NS_IsMainThread());
-  ReentrantMonitorAutoEnter sync(mCallbackMonitor);
-  mPreviewStream = static_cast<DOMCameraPreview*>(stream);
-  mPreviewStream->Start();
-  CameraPreviewMediaStream* cameraStream = static_cast<CameraPreviewMediaStream*>(mPreviewStream->GetStream());
-  cameraStream->SetFrameCallback(this);
-  mState = kStarted;
-  mCallbackMonitor.Notify();
-  return NS_OK;
-}
-
-// nsICameraTakePictureCallback
-nsresult
-MediaEngineWebRTCVideoSource::HandleEvent(nsIDOMBlob* picture) {
-  MOZ_ASSERT(NS_IsMainThread());
-  ReentrantMonitorAutoEnter sync(mCallbackMonitor);
-  mLastCapture = static_cast<nsIDOMFile*>(picture);
-  mCallbackMonitor.Notify();
-  return NS_OK;
-}
-
-// nsICameraReleaseCallback
-nsresult
-MediaEngineWebRTCVideoSource::HandleEvent() {
-  MOZ_ASSERT(NS_IsMainThread());
-  ReentrantMonitorAutoEnter sync(mCallbackMonitor);
-  mState = kReleased;
-  mCallbackMonitor.Notify();
-  return NS_OK;
-}
-
-// nsICameraErrorCallback
-nsresult
-MediaEngineWebRTCVideoSource::HandleEvent(const nsAString& error) {
-  MOZ_ASSERT(NS_IsMainThread());
-  ReentrantMonitorAutoEnter sync(mCallbackMonitor);
-  mCallbackMonitor.Notify();
-  return NS_OK;
-}
-
-//Except this one. This callback should called on camera preview thread.
 void
-MediaEngineWebRTCVideoSource::OnNewFrame(const gfxIntSize& aIntrinsicSize, layers::Image* aImage) {
+MediaEngineWebRTCVideoSource::OnHardwareStateChange(HardwareState aState)
+{
+  ReentrantMonitorAutoEnter sync(mCallbackMonitor);
+  if (aState == CameraControlListener::kHardwareClosed) {
+    // When the first CameraControl listener is added, it gets pushed
+    // the current state of the camera--normally 'closed'. We only
+    // pay attention to that state if we've progressed out of the
+    // allocated state.
+    if (mState != kAllocated) {
+      mState = kReleased;
+      mCallbackMonitor.Notify();
+    }
+  } else {
+    mState = kStarted;
+    mCallbackMonitor.Notify();
+  }
+}
+
+void
+MediaEngineWebRTCVideoSource::OnError(CameraErrorContext aContext, CameraError aError)
+{
+  ReentrantMonitorAutoEnter sync(mCallbackMonitor);
+  mCallbackMonitor.Notify();
+}
+
+void
+MediaEngineWebRTCVideoSource::OnTakePictureComplete(uint8_t* aData, uint32_t aLength, const nsAString& aMimeType)
+{
+  ReentrantMonitorAutoEnter sync(mCallbackMonitor);
+  mLastCapture =
+    static_cast<nsIDOMFile*>(new nsDOMMemoryFile(static_cast<void*>(aData),
+                                                 static_cast<uint64_t>(aLength),
+                                                 aMimeType));
+  mCallbackMonitor.Notify();
+}
+
+void
+MediaEngineWebRTCVideoSource::RotateImage(layers::Image* aImage) {
+  layers::GrallocImage *nativeImage = static_cast<layers::GrallocImage*>(aImage);
+  layers::SurfaceDescriptor handle = nativeImage->GetSurfaceDescriptor();
+  layers::SurfaceDescriptorGralloc grallocHandle = handle.get_SurfaceDescriptorGralloc();
+  android::sp<android::GraphicBuffer> graphicBuffer = layers::GrallocBufferActor::GetFrom(grallocHandle);
+  void *pMem = nullptr;
+  uint32_t size = mWidth * mHeight * 3 / 2;
+
+  graphicBuffer->lock(android::GraphicBuffer::USAGE_SW_READ_MASK, &pMem);
+
+  uint8_t* srcPtr = static_cast<uint8_t*>(pMem);
+  // Create a video frame and append it to the track.
+  nsRefPtr<layers::Image> image = mImageContainer->CreateImage(ImageFormat::PLANAR_YCBCR);
+  layers::PlanarYCbCrImage* videoImage = static_cast<layers::PlanarYCbCrImage*>(image.get());
+
+  uint32_t dstWidth = mWidth;
+  uint32_t dstHeight = mHeight;
+
+  if (mSensorAngle == 90 || mSensorAngle == 270) {
+    dstWidth = mHeight;
+    dstHeight = mWidth;
+  }
+
+  uint32_t half_width = dstWidth / 2;
+  uint8_t* dstPtr = videoImage->AllocateAndGetNewBuffer(size);
+  libyuv::ConvertToI420(srcPtr, size,
+                        dstPtr, dstWidth,
+                        dstPtr + (dstWidth * dstHeight), half_width,
+                        dstPtr + (dstWidth * dstHeight * 5 / 4), half_width,
+                        0, 0,
+                        mWidth, mHeight,
+                        mWidth, mHeight,
+                        static_cast<libyuv::RotationMode>(mSensorAngle),
+                        libyuv::FOURCC_NV21);
+  graphicBuffer->unlock();
+
+  const uint8_t lumaBpp = 8;
+  const uint8_t chromaBpp = 4;
+
+  layers::PlanarYCbCrData data;
+  data.mYChannel = dstPtr;
+  data.mYSize = IntSize(dstWidth, dstHeight);
+  data.mYStride = dstWidth * lumaBpp / 8;
+  data.mCbCrStride = dstWidth * chromaBpp / 8;
+  data.mCbChannel = dstPtr + dstHeight * data.mYStride;
+  data.mCrChannel = data.mCbChannel +( dstHeight * data.mCbCrStride / 2);
+  data.mCbCrSize = IntSize(dstWidth / 2, dstHeight / 2);
+  data.mPicX = 0;
+  data.mPicY = 0;
+  data.mPicSize = IntSize(dstWidth, dstHeight);
+  data.mStereoMode = StereoMode::MONO;
+
+  videoImage->SetDataNoCopy(data);
+
+  // implicitly releases last image
+  mImage = image.forget();
+}
+
+bool
+MediaEngineWebRTCVideoSource::OnNewPreviewFrame(layers::Image* aImage, uint32_t aWidth, uint32_t aHeight) {
   MonitorAutoLock enter(mMonitor);
-  mImage = aImage;
-  if (mWidth != aIntrinsicSize.width || mHeight != aIntrinsicSize.height) {
-    mWidth = aIntrinsicSize.width;
-    mHeight = aIntrinsicSize.height;
+  if (mState == kStopped) {
+    return false;
+  }
+  if (mWidth != static_cast<int>(aWidth) || mHeight != static_cast<int>(aHeight)) {
+    mWidth = aWidth;
+    mHeight = aHeight;
     LOG(("Video FrameSizeChange: %ux%u", mWidth, mHeight));
   }
+
+  if (mSensorAngle == 0) {
+    mImage = aImage;
+  } else {
+    RotateImage(aImage);
+  }
+  return true; // return true because we're accepting the frame
 }
 #endif
 

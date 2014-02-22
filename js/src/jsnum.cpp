@@ -14,12 +14,6 @@
 #include "mozilla/PodOperations.h"
 #include "mozilla/RangedPtr.h"
 
-#ifdef XP_OS2
-#define _PC_53  PC_53
-#define _MCW_EM MCW_EM
-#define _MCW_PC MCW_PC
-#endif
-
 #ifdef HAVE_LOCALECONV
 #include <locale.h>
 #endif
@@ -1249,10 +1243,10 @@ js_InitNumberClass(JSContext *cx, HandleObject obj)
     /* ES5 15.1.1.1, 15.1.1.2 */
     if (!DefineNativeProperty(cx, global, cx->names().NaN, valueNaN,
                               JS_PropertyStub, JS_StrictPropertyStub,
-                              JSPROP_PERMANENT | JSPROP_READONLY, 0, 0) ||
+                              JSPROP_PERMANENT | JSPROP_READONLY, 0) ||
         !DefineNativeProperty(cx, global, cx->names().Infinity, valueInfinity,
                               JS_PropertyStub, JS_StrictPropertyStub,
-                              JSPROP_PERMANENT | JSPROP_READONLY, 0, 0))
+                              JSPROP_PERMANENT | JSPROP_READONLY, 0))
     {
         return nullptr;
     }

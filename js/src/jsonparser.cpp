@@ -60,7 +60,7 @@ JSONParser::trace(JSTracer *trc)
 void
 JSONParser::getTextPosition(uint32_t *column, uint32_t *line)
 {
-    StableCharPtr ptr = begin;
+    ConstTwoByteChars ptr = begin;
     uint32_t col = 1;
     uint32_t row = 1;
     for (; ptr < current; ptr++) {
@@ -594,10 +594,8 @@ JSONParser::createFinishedObject(PropertyVector &properties)
     for (size_t i = 0; i < properties.length(); i++) {
         propid = properties[i].id;
         value = properties[i].value;
-        if (!DefineNativeProperty(cx, obj, propid, value,
-                                  JS_PropertyStub, JS_StrictPropertyStub, JSPROP_ENUMERATE,
-                                  0, 0))
-        {
+        if (!DefineNativeProperty(cx, obj, propid, value, JS_PropertyStub, JS_StrictPropertyStub,
+                                  JSPROP_ENUMERATE, 0)) {
             return nullptr;
         }
     }

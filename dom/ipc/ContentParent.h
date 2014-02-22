@@ -11,6 +11,7 @@
 #include "mozilla/ipc/GeckoChildProcessHost.h"
 #include "mozilla/dom/ipc/Blob.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/FileUtils.h"
 #include "mozilla/HalTypes.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/StaticPtr.h"
@@ -366,6 +367,8 @@ private:
             const OptionalURIParams& aUri,
             const nsCString& aMimeContentType,
             const nsCString& aContentDisposition,
+            const uint32_t& aContentDispositionHint,
+            const nsString& aContentDispositionFilename, 
             const bool& aForceSave,
             const int64_t& aContentLength,
             const OptionalURIParams& aReferrer,
@@ -407,8 +410,8 @@ private:
                                       const bool& isPrivateData,
                                       const int32_t& whichClipboard) MOZ_OVERRIDE;
     virtual bool RecvGetClipboardText(const int32_t& whichClipboard, nsString* text) MOZ_OVERRIDE;
-    virtual bool RecvEmptyClipboard() MOZ_OVERRIDE;
-    virtual bool RecvClipboardHasText(bool* hasText) MOZ_OVERRIDE;
+    virtual bool RecvEmptyClipboard(const int32_t& whichClipboard) MOZ_OVERRIDE;
+    virtual bool RecvClipboardHasText(const int32_t& whichClipboard, bool* hasText) MOZ_OVERRIDE;
 
     virtual bool RecvGetSystemColors(const uint32_t& colorsCount,
                                      InfallibleTArray<uint32_t>* colors) MOZ_OVERRIDE;
@@ -425,18 +428,6 @@ private:
 
     virtual bool RecvSetURITitle(const URIParams& uri,
                                  const nsString& title) MOZ_OVERRIDE;
-
-    virtual bool RecvShowFilePicker(const int16_t& mode,
-                                    const int16_t& selectedType,
-                                    const bool& addToRecentDocs,
-                                    const nsString& title,
-                                    const nsString& defaultFile,
-                                    const nsString& defaultExtension,
-                                    const InfallibleTArray<nsString>& filters,
-                                    const InfallibleTArray<nsString>& filterNames,
-                                    InfallibleTArray<nsString>* files,
-                                    int16_t* retValue,
-                                    nsresult* result) MOZ_OVERRIDE;
 
     virtual bool RecvShowAlertNotification(const nsString& aImageUrl, const nsString& aTitle,
                                            const nsString& aText, const bool& aTextClickable,
@@ -534,6 +525,9 @@ private:
     virtual bool RecvRemoveIdleObserver(const uint64_t& observerId,
                                         const uint32_t& aIdleTimeInS) MOZ_OVERRIDE;
 
+    virtual bool
+    RecvBackUpXResources(const FileDescriptor& aXSocketFd) MOZ_OVERRIDE;
+
     // If you add strong pointers to cycle collected objects here, be sure to
     // release these objects in ShutDownProcess.  See the comment there for more
     // details.
@@ -586,6 +580,12 @@ private:
     nsConsoleService* GetConsoleService();
 
     nsDataHashtable<nsUint64HashKey, nsCOMPtr<ParentIdleListener> > mIdleListeners;
+
+#ifdef MOZ_X11
+    // Dup of child's X socket, used to scope its resources to this
+    // object instead of the child process's lifetime.
+    ScopedClose mChildXSocketFdDup;
+#endif
 };
 
 } // namespace dom

@@ -70,8 +70,6 @@
 
 #ifdef XP_MACOSX
 #include "nsILocalFileMac.h"
-#elif defined(XP_OS2)
-#include "nsILocalFileOS2.h"
 #endif
 
 #include "nsIPluginHost.h" // XXX needed for ext->type mapping (bug 233289)
@@ -534,7 +532,8 @@ static nsExtraMimeTypeEntry extraMimeEntries [] =
   { AUDIO_MP4, "m4a", "MPEG-4 Audio" },
   { VIDEO_RAW, "yuv", "Raw YUV Video" },
   { AUDIO_WAV, "wav", "Waveform Audio" },
-  { VIDEO_3GPP, "3gpp,3gp", "3GPP Video" }
+  { VIDEO_3GPP, "3gpp,3gp", "3GPP Video" },
+  { AUDIO_MIDI, "mid", "Standard MIDI Audio" }
 };
 
 #undef MAC_TYPE
@@ -671,6 +670,8 @@ NS_IMETHODIMP nsExternalHelperAppService::DoContent(const nsACString& aMimeConte
   nsAutoString fileName;
   nsAutoCString fileExtension;
   uint32_t reason = nsIHelperAppLauncherDialog::REASON_CANTHANDLE;
+  uint32_t contentDisposition = -1;
+
   nsresult rv;
 
   // Get the file extension and name that we will need later
@@ -680,7 +681,10 @@ NS_IMETHODIMP nsExternalHelperAppService::DoContent(const nsACString& aMimeConte
   if (channel) {
     channel->GetURI(getter_AddRefs(uri));
     channel->GetContentLength(&contentLength);
+    channel->GetContentDisposition(&contentDisposition);
+    channel->GetContentDispositionFilename(fileName);
   }
+  
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     nsCOMPtr<nsIDOMWindow> window = do_GetInterface(aWindowContext);
     NS_ENSURE_STATE(window);
@@ -697,8 +701,9 @@ NS_IMETHODIMP nsExternalHelperAppService::DoContent(const nsACString& aMimeConte
       return NS_ERROR_FAILURE;
 
     nsCString disp;
-    if (channel)
+    if (channel) {
       channel->GetContentDispositionHeader(disp);
+    }
 
     nsCOMPtr<nsIURI> referrer;
     rv = NS_GetReferrerFromChannel(channel, getter_AddRefs(referrer));
@@ -714,8 +719,9 @@ NS_IMETHODIMP nsExternalHelperAppService::DoContent(const nsACString& aMimeConte
     mozilla::dom::PExternalHelperAppChild *pc =
       child->SendPExternalHelperAppConstructor(uriParams,
                                                nsCString(aMimeContentType),
-                                               disp, aForceSave, contentLength,
-                                               referrerParams,
+                                               disp, contentDisposition,
+                                               fileName, aForceSave, 
+                                               contentLength, referrerParams,
                                                mozilla::dom::TabChild::GetFrom(window));
     ExternalHelperAppChild *childListener = static_cast<ExternalHelperAppChild *>(pc);
 
@@ -1495,7 +1501,10 @@ nsresult nsExternalAppHandler::SetUpTempFile(nsIChannel * aChannel)
 
   rv = mSaver->EnableSha256();
   NS_ENSURE_SUCCESS(rv, rv);
-  LOG(("Enabled hashing"));
+
+  rv = mSaver->EnableSignatureInfo();
+  NS_ENSURE_SUCCESS(rv, rv);
+  LOG(("Enabled hashing and signature verification"));
 
   rv = mSaver->SetTarget(mTempFile, false);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1935,6 +1944,7 @@ nsExternalAppHandler::OnSaveComplete(nsIBackgroundFileSaver *aSaver,
   if (!mCanceled) {
     // Save the hash
     (void)mSaver->GetSha256Hash(mHash);
+    (void)mSaver->GetSignatureInfo(getter_AddRefs(mSignatureInfo));
     // Free the reference that the saver keeps on us, even if we couldn't get
     // the hash.
     mSaver = nullptr;
@@ -1968,6 +1978,7 @@ void nsExternalAppHandler::NotifyTransfer(nsresult aStatus)
 
   if (NS_SUCCEEDED(aStatus)) {
     (void)mTransfer->SetSha256Hash(mHash);
+    (void)mTransfer->SetSignatureInfo(mSignatureInfo);
     (void)mTransfer->OnProgressChange64(nullptr, nullptr, mProgress,
       mContentLength, mProgress, mContentLength);
   }

@@ -135,6 +135,7 @@ namespace jit {
     _(InitializedLength)                                                    \
     _(SetInitializedLength)                                                 \
     _(Not)                                                                  \
+    _(NeuterCheck)                                                          \
     _(BoundsCheck)                                                          \
     _(BoundsCheckLower)                                                     \
     _(InArray)                                                              \
@@ -211,9 +212,9 @@ namespace jit {
     _(AbortPar)                                                             \
     _(LambdaPar)                                                            \
     _(RestPar)                                                              \
-    _(ForkJoinSlice)                                                        \
+    _(ForkJoinContext)                                                      \
     _(GuardThreadExclusive)                                                 \
-    _(CheckInterruptPar)                                                    \
+    _(InterruptCheckPar)                                                    \
     _(RecompileCheck)
 
 // Forward declarations of MIR types.

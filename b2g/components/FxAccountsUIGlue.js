@@ -8,7 +8,6 @@ const { interfaces: Ci, utils: Cu } = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/ObjectWrapper.jsm");
 Cu.import("resource://gre/modules/Promise.jsm");
 Cu.import("resource://gre/modules/FxAccountsCommon.js");
 
@@ -23,7 +22,7 @@ FxAccountsUIGlue.prototype = {
 
   _browser: Services.wm.getMostRecentWindow("navigator:browser"),
 
-  signInFlow: function() {
+  _contentRequest: function(aEventName, aData) {
     let deferred = Promise.defer();
 
     let content = this._browser.getContentWindow();
@@ -56,13 +55,24 @@ FxAccountsUIGlue.prototype = {
     });
 
     let detail = {
-       eventName: "openFlow",
-       id: id
+       eventName: aEventName,
+       id: id,
+       data: aData
     };
     log.debug("Send chrome event " + JSON.stringify(detail));
     this._browser.shell.sendCustomEvent("mozFxAccountsUnsolChromeEvent", detail);
 
     return deferred.promise;
+  },
+
+  signInFlow: function() {
+    return this._contentRequest("openFlow");
+  },
+
+  refreshAuthentication: function(aAccountId) {
+    return this._contentRequest("refreshAuthentication", {
+      accountId: aAccountId
+    });
   },
 
   classID: Components.ID("{51875c14-91d7-4b8c-b65d-3549e101228c}"),

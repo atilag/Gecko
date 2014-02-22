@@ -2119,10 +2119,9 @@ public:
   bool Next(uint32_t aCount);
 
   /**
-   * Advances ahead up to aCount matching characters, returns true if there
-   * were enough characters to advance to.
+   * Advances ahead up to aCount matching characters.
    */
-  bool NextWithinSubtree(uint32_t aCount);
+  void NextWithinSubtree(uint32_t aCount);
 
   /**
    * Advances to the character with the specified index.  The index is in the
@@ -2421,16 +2420,15 @@ CharIterator::Next(uint32_t aCount)
   return true;
 }
 
-bool
+void
 CharIterator::NextWithinSubtree(uint32_t aCount)
 {
   while (IsWithinSubtree() && aCount) {
     --aCount;
     if (!Next()) {
-      break;
+      return;
     }
   }
-  return !aCount;
 }
 
 bool
@@ -3179,7 +3177,7 @@ SVGTextFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     new (aBuilder) nsDisplaySVGText(aBuilder, this));
 }
 
-NS_IMETHODIMP
+nsresult
 SVGTextFrame::AttributeChanged(int32_t aNameSpaceID,
                                nsIAtom* aAttribute,
                                int32_t aModType)
@@ -3541,7 +3539,7 @@ ShouldPaintCaret(const TextRenderedRun& aThisRun, nsCaret* aCaret)
   return false;
 }
 
-NS_IMETHODIMP
+nsresult
 SVGTextFrame::PaintSVG(nsRenderingContext* aContext,
                        const nsIntRect *aDirtyRect,
                        nsIFrame* aTransformRoot)
@@ -3676,7 +3674,7 @@ SVGTextFrame::PaintSVG(nsRenderingContext* aContext,
   return NS_OK;
 }
 
-NS_IMETHODIMP_(nsIFrame*)
+nsIFrame*
 SVGTextFrame::GetFrameForPoint(const nsPoint& aPoint)
 {
   NS_ASSERTION(GetFirstPrincipalChild(), "must have a child frame");
@@ -3720,7 +3718,7 @@ SVGTextFrame::GetFrameForPoint(const nsPoint& aPoint)
   return hit;
 }
 
-NS_IMETHODIMP_(nsRect)
+nsRect
 SVGTextFrame::GetCoveredRegion()
 {
   return nsSVGUtils::TransformFrameRectToOuterSVG(
@@ -4015,9 +4013,7 @@ SVGTextFrame::SelectSubString(nsIContent* aContent,
   }
   charnum = chit.TextElementCharIndex();
   nsIContent* content = chit.TextFrame()->GetContent();
-  if (!chit.NextWithinSubtree(nchars)) {
-    return NS_ERROR_DOM_INDEX_SIZE_ERR;
-  }
+  chit.NextWithinSubtree(nchars);
   nchars = chit.TextElementCharIndex() - charnum;
 
   nsRefPtr<nsFrameSelection> frameSelection = GetFrameSelection();
@@ -4053,9 +4049,7 @@ SVGTextFrame::GetSubStringLength(nsIContent* aContent,
   }
 
   charnum = chit.TextElementCharIndex();
-  if (!chit.NextWithinSubtree(nchars)) {
-    return NS_ERROR_DOM_INDEX_SIZE_ERR;
-  }
+  chit.NextWithinSubtree(nchars);
   nchars = chit.TextElementCharIndex() - charnum;
 
   // Find each rendered run that intersects with the range defined

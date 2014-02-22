@@ -328,16 +328,16 @@ protected:
   virtual ~nsGenericArraySH()
   {
   }
-  
+
 public:
   NS_IMETHOD NewResolve(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
                         JSObject *obj, jsid id, uint32_t flags,
                         JSObject **objp, bool *_retval) MOZ_OVERRIDE;
   NS_IMETHOD Enumerate(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
                        JSObject *obj, bool *_retval) MOZ_OVERRIDE;
-  
+
   virtual nsresult GetLength(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
-                             JSObject *obj, uint32_t *length);
+                             JS::Handle<JSObject*> obj, uint32_t *length);
 
   static nsIClassInfo *doCreate(nsDOMClassInfoData* aData)
   {
@@ -371,26 +371,6 @@ public:
 private:
   // Not implemented, nothing should create an instance of this class.
   static nsIClassInfo *doCreate(nsDOMClassInfoData* aData);
-};
-
-
-// HTMLAllCollection
-
-extern const JSClass sHTMLDocumentAllClass;
-
-class nsHTMLDocumentSH
-{
-protected:
-  static bool GetDocumentAllNodeList(JSContext *cx, JS::Handle<JSObject*> obj,
-                                     nsDocument *doc,
-                                     nsContentList **nodeList);
-public:
-  static bool DocumentAllGetProperty(JSContext *cx, JS::Handle<JSObject*> obj, JS::Handle<jsid> id,
-                                     JS::MutableHandle<JS::Value> vp);
-  static bool DocumentAllNewResolve(JSContext *cx, JS::Handle<JSObject*> obj, JS::Handle<jsid> id,
-                                    unsigned flags, JS::MutableHandle<JSObject*> objp);
-  static void ReleaseDocument(JSFreeOp *fop, JSObject *obj);
-  static bool CallToGetPropMapper(JSContext *cx, unsigned argc, JS::Value *vp);
 };
 
 

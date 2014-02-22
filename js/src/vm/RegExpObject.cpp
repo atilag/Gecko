@@ -650,15 +650,14 @@ RegExpCompartment::RegExpCompartment(JSRuntime *rt)
 
 RegExpCompartment::~RegExpCompartment()
 {
-    JS_ASSERT(map_.empty());
-    JS_ASSERT(inUse_.empty());
+    JS_ASSERT_IF(map_.initialized(), map_.empty());
+    JS_ASSERT_IF(inUse_.initialized(), inUse_.empty());
 }
 
 JSObject *
-RegExpCompartment::getOrCreateMatchResultTemplateObject(JSContext *cx)
+RegExpCompartment::createMatchResultTemplateObject(JSContext *cx)
 {
-    if (matchResultTemplateObject_)
-        return matchResultTemplateObject_;
+    JS_ASSERT(!matchResultTemplateObject_);
 
     /* Create template array object */
     RootedObject templateObject(cx, NewDenseUnallocatedArray(cx, 0, nullptr, TenuredObject));

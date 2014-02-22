@@ -21,7 +21,7 @@ using namespace mozilla::layout;
  * XXX should we support CSS columns applied to table elements?
  */
 nsIFrame*
-NS_NewColumnSetFrame(nsIPresShell* aPresShell, nsStyleContext* aContext, uint32_t aStateFlags)
+NS_NewColumnSetFrame(nsIPresShell* aPresShell, nsStyleContext* aContext, nsFrameState aStateFlags)
 {
   nsColumnSetFrame* it = new (aPresShell) nsColumnSetFrame(aContext);
   it->AddStateBits(aStateFlags | NS_BLOCK_MARGIN_ROOT);
@@ -120,7 +120,7 @@ nsColumnSetFrame::PaintColumnRule(nsRenderingContext* aCtx,
   }
 }
 
-NS_IMETHODIMP
+nsresult
 nsColumnSetFrame::SetInitialChildList(ChildListID     aListID,
                                       nsFrameList&    aChildList)
 {
@@ -629,7 +629,7 @@ nsColumnSetFrame::ReflowChildren(nsHTMLReflowMetrics&     aDesiredSize,
                      "We have to create a continuation, but the block doesn't want us to reflow it?");
 
         // We need to create a continuing column
-        nsresult rv = CreateNextInFlow(PresContext(), child, kidNextInFlow);
+        nsresult rv = CreateNextInFlow(child, kidNextInFlow);
         
         if (NS_FAILED(rv)) {
           NS_NOTREACHED("Couldn't create continuation");
@@ -670,7 +670,7 @@ nsColumnSetFrame::ReflowChildren(nsHTMLReflowMetrics&     aDesiredSize,
         // next-in-flow will eventually pick them up.
         const nsFrameList& continuationColumns = mFrames.RemoveFramesAfter(child);
         if (continuationColumns.NotEmpty()) {
-          SetOverflowFrames(PresContext(), continuationColumns);
+          SetOverflowFrames(continuationColumns);
         }
         child = nullptr;
         break;
@@ -775,8 +775,7 @@ nsColumnSetFrame::DrainOverflowColumns()
   if (prev) {
     AutoFrameListPtr overflows(presContext, prev->StealOverflowFrames());
     if (overflows) {
-      nsContainerFrame::ReparentFrameViewList(presContext, *overflows,
-                                              prev, this);
+      nsContainerFrame::ReparentFrameViewList(*overflows, prev, this);
 
       mFrames.InsertFrames(this, nullptr, *overflows);
     }
@@ -950,7 +949,7 @@ nsColumnSetFrame::FindBestBalanceHeight(const nsHTMLReflowState& aReflowState,
   aRunWasFeasible = feasible;
 }
 
-NS_IMETHODIMP 
+nsresult 
 nsColumnSetFrame::Reflow(nsPresContext*           aPresContext,
                          nsHTMLReflowMetrics&     aDesiredSize,
                          const nsHTMLReflowState& aReflowState,
@@ -1042,7 +1041,7 @@ nsColumnSetFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   }
 }
 
-NS_IMETHODIMP
+nsresult
 nsColumnSetFrame::AppendFrames(ChildListID     aListID,
                                nsFrameList&    aFrameList)
 {
@@ -1054,7 +1053,7 @@ nsColumnSetFrame::AppendFrames(ChildListID     aListID,
   return NS_ERROR_INVALID_ARG;
 }
 
-NS_IMETHODIMP
+nsresult
 nsColumnSetFrame::InsertFrames(ChildListID     aListID,
                                nsIFrame*       aPrevFrame,
                                nsFrameList&    aFrameList)
@@ -1067,7 +1066,7 @@ nsColumnSetFrame::InsertFrames(ChildListID     aListID,
   return NS_ERROR_INVALID_ARG;
 }
 
-NS_IMETHODIMP
+nsresult
 nsColumnSetFrame::RemoveFrame(ChildListID     aListID,
                               nsIFrame*       aOldFrame)
 {

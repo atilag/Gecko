@@ -8,7 +8,7 @@
 /*****************************************************************************/
 
 #include <stdint.h>
-const PRTime gPreloadListExpirationTime = INT64_C(1401534344234000);
+const PRTime gPreloadListExpirationTime = INT64_C(1403348819505000);
 
 class nsSTSPreload
 {
@@ -30,7 +30,6 @@ static const nsSTSPreload kSTSPreloadList[] = {
   { "appseccalifornia.org", true },
   { "arivo.com.br", true },
   { "bank.simple.com", false },
-  { "bassh.net", true },
   { "bccx.com", true },
   { "bitbucket.org", false },
   { "blog.cyveillance.com", true },
@@ -38,6 +37,7 @@ static const nsSTSPreload kSTSPreloadList[] = {
   { "blog.lookout.com", false },
   { "blog.torproject.org", false },
   { "blueseed.co", false },
+  { "boxcryptor.com", true },
   { "bugzilla.mozilla.org", true },
   { "business.lookout.com", false },
   { "carezone.com", false },
@@ -136,9 +136,11 @@ static const nsSTSPreload kSTSPreloadList[] = {
   { "mykolab.com", true },
   { "mylookout.com", false },
   { "neg9.org", false },
+  { "neilwynne.com", false },
   { "oplop.appspot.com", true },
   { "opsmate.com", false },
   { "p.linode.com", false },
+  { "packagist.org", false },
   { "passwd.io", true },
   { "paste.linode.com", false },
   { "pastebin.linode.com", false },
@@ -183,7 +185,6 @@ static const nsSTSPreload kSTSPreloadList[] = {
   { "ubertt.org", true },
   { "wallet.google.com", true },
   { "webmail.gigahost.dk", false },
-  { "webmail.mayfirst.org", false },
   { "webmail.onlime.ch", false },
   { "wiki.python.org", true },
   { "wiz.biz", true },

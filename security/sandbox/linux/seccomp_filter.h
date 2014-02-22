@@ -13,16 +13,13 @@
 /* Architecture-specific frequently used syscalls */
 #if defined(__arm__)
 #define SECCOMP_WHITELIST_ARCH_HIGH \
-  ALLOW_SYSCALL(msgget), \
-  ALLOW_SYSCALL(recv), \
   ALLOW_SYSCALL(mmap2),
 #elif defined(__i386__)
 #define SECCOMP_WHITELIST_ARCH_HIGH \
   ALLOW_SYSCALL(ipc), \
   ALLOW_SYSCALL(mmap2),
 #elif defined(__x86_64__)
-#define SECCOMP_WHITELIST_ARCH_HIGH \
-  ALLOW_SYSCALL(msgget),
+#define SECCOMP_WHITELIST_ARCH_HIGH
 #else
 #define SECCOMP_WHITELIST_ARCH_HIGH
 #endif
@@ -30,6 +27,7 @@
 /* Architecture-specific infrequently used syscalls */
 #if defined(__arm__)
 #define SECCOMP_WHITELIST_ARCH_LOW \
+  ALLOW_SYSCALL(_newselect), \
   ALLOW_SYSCALL(_llseek), \
   ALLOW_SYSCALL(getuid32), \
   ALLOW_SYSCALL(geteuid32), \
@@ -37,13 +35,15 @@
   ALLOW_SYSCALL(fcntl64),
 #elif defined(__i386__)
 #define SECCOMP_WHITELIST_ARCH_LOW \
+  ALLOW_SYSCALL(_newselect), \
   ALLOW_SYSCALL(_llseek), \
   ALLOW_SYSCALL(getuid32), \
   ALLOW_SYSCALL(geteuid32), \
   ALLOW_SYSCALL(sigreturn), \
   ALLOW_SYSCALL(fcntl64),
 #else
-#define SECCOMP_WHITELIST_ARCH_LOW
+#define SECCOMP_WHITELIST_ARCH_LOW \
+  ALLOW_SYSCALL(select),
 #endif
 
 /* Architecture-specific very infrequently used syscalls */
@@ -83,7 +83,8 @@
   ALLOW_SYSCALL(lstat64), \
   ALLOW_SYSCALL(socketpair), \
   ALLOW_SYSCALL(sendmsg), \
-  ALLOW_SYSCALL(sigprocmask),
+  ALLOW_SYSCALL(sigprocmask), \
+  DENY_SYSCALL(socket, EACCES),
 #elif defined(__i386__)
 #define SECCOMP_WHITELIST_ARCH_TOREMOVE \
   ALLOW_SYSCALL(fstat64), \
@@ -93,7 +94,8 @@
 #else
 #define SECCOMP_WHITELIST_ARCH_TOREMOVE \
   ALLOW_SYSCALL(socketpair), \
-  ALLOW_SYSCALL(sendmsg),
+  ALLOW_SYSCALL(sendmsg), \
+  DENY_SYSCALL(socket, EACCES),
 #endif
 
 /* Architecture-specific syscalls for desktop linux */
@@ -111,15 +113,17 @@
 #if defined(MOZ_B2G)
 
 #define SECCOMP_WHITELIST_B2G_HIGH \
+  ALLOW_SYSCALL(clock_gettime), \
+  ALLOW_SYSCALL(epoll_wait), \
   ALLOW_SYSCALL(gettimeofday),
 
 #define SECCOMP_WHITELIST_B2G_MED \
-  ALLOW_SYSCALL(clock_gettime), \
   ALLOW_SYSCALL(getpid), \
-  ALLOW_SYSCALL(rt_sigreturn), \
-  ALLOW_SYSCALL(epoll_wait),
+  ALLOW_SYSCALL(rt_sigreturn),
 
 #define SECCOMP_WHITELIST_B2G_LOW \
+  ALLOW_SYSCALL(sendto), \
+  ALLOW_SYSCALL(recvfrom), \
   ALLOW_SYSCALL(getdents64), \
   ALLOW_SYSCALL(sched_setscheduler),
 
@@ -223,6 +227,7 @@
  */
 #define SECCOMP_WHITELIST \
   /* These are calls we're ok to allow */ \
+  ALLOW_SYSCALL(futex), \
   SECCOMP_WHITELIST_ARCH_HIGH \
   SECCOMP_WHITELIST_B2G_HIGH \
   ALLOW_SYSCALL(read), \
@@ -242,7 +247,6 @@
   ALLOW_SYSCALL(gettid), \
   ALLOW_SYSCALL(getrusage), \
   ALLOW_SYSCALL(madvise), \
-  ALLOW_SYSCALL(futex), \
   ALLOW_SYSCALL(dup), \
   ALLOW_SYSCALL(nanosleep), \
   SECCOMP_WHITELIST_ARCH_LOW \
@@ -251,6 +255,7 @@
   /* See bug 906996 for removing unlink(). */ \
   SECCOMP_WHITELIST_ARCH_TOREMOVE \
   ALLOW_SYSCALL(open), \
+  ALLOW_SYSCALL(readlink), /* Workaround for bug 964455 */ \
   ALLOW_SYSCALL(prctl), \
   ALLOW_SYSCALL(access), \
   ALLOW_SYSCALL(unlink), \

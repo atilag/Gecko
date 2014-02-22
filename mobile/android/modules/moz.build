@@ -5,18 +5,21 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 EXTRA_JS_MODULES += [
+    'Accounts.jsm',
     'ContactService.jsm',
     'HelperApps.jsm',
     'Home.jsm',
     'HomeProvider.jsm',
     'JNI.jsm',
     'LightweightThemeConsumer.jsm',
+    'Messaging.jsm',
     'Notifications.jsm',
     'OrderedBroadcast.jsm',
     'Prompt.jsm',
     'Sanitizer.jsm',
     'SharedPreferences.jsm',
     'SimpleServiceDiscovery.jsm',
+    'SSLExceptions.jsm',
 ]
 
 if CONFIG['MOZ_ANDROID_SYNTHAPKS']:

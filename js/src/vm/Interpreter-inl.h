@@ -113,14 +113,14 @@ ValuePropertyBearer(JSContext *cx, StackFrame *fp, HandleValue v, int spindex)
     if (v.isObject())
         return &v.toObject();
 
-    GlobalObject &global = fp->global();
+    Rooted<GlobalObject*> global(cx, &fp->global());
 
     if (v.isString())
-        return global.getOrCreateStringPrototype(cx);
+        return GlobalObject::getOrCreateStringPrototype(cx, global);
     if (v.isNumber())
-        return global.getOrCreateNumberPrototype(cx);
+        return GlobalObject::getOrCreateNumberPrototype(cx, global);
     if (v.isBoolean())
-        return global.getOrCreateBooleanPrototype(cx);
+        return GlobalObject::getOrCreateBooleanPrototype(cx, global);
 
     JS_ASSERT(v.isNull() || v.isUndefined());
     js_ReportIsNullOrUndefined(cx, spindex, v, NullPtr());
@@ -183,8 +183,8 @@ FetchName(JSContext *cx, HandleObject obj, HandleObject obj2, HandlePropertyName
             return false;
     } else {
         Rooted<JSObject*> normalized(cx, obj);
-        if (normalized->getClass() == &WithObject::class_ && !shape->hasDefaultGetter())
-            normalized = &normalized->as<WithObject>().object();
+        if (normalized->is<DynamicWithObject>() && !shape->hasDefaultGetter())
+            normalized = &normalized->as<DynamicWithObject>().object();
         if (shape->isDataDescriptor() && shape->hasDefaultGetter()) {
             /* Fast path for Object instance properties. */
             JS_ASSERT(shape->hasSlot());
@@ -258,8 +258,7 @@ DefVarOrConstOperation(JSContext *cx, HandleObject varobj, HandlePropertyName dn
 
     /* Steps 8c, 8d. */
     if (!prop || (obj2 != varobj && varobj->is<GlobalObject>())) {
-        RootedValue value(cx, UndefinedValue());
-        if (!JSObject::defineProperty(cx, varobj, dn, value, JS_PropertyStub,
+        if (!JSObject::defineProperty(cx, varobj, dn, UndefinedHandleValue, JS_PropertyStub,
                                       JS_StrictPropertyStub, attrs)) {
             return false;
         }
@@ -440,7 +439,7 @@ GetElementOperation(JSContext *cx, JSOp op, MutableHandleValue lref, HandleValue
     if (lref.isString() && IsDefinitelyIndex(rref, &index)) {
         JSString *str = lref.toString();
         if (index < str->length()) {
-            str = cx->runtime()->staticStrings.getUnitStringForElement(cx, str, index);
+            str = cx->staticStrings().getUnitStringForElement(cx, str, index);
             if (!str)
                 return false;
             res.setString(str);
@@ -459,14 +458,14 @@ static MOZ_ALWAYS_INLINE JSString *
 TypeOfOperation(const Value &v, JSRuntime *rt)
 {
     JSType type = js::TypeOfValue(v);
-    return TypeName(type, rt->atomState);
+    return TypeName(type, *rt->commonNames);
 }
 
 static inline JSString *
 TypeOfObjectOperation(JSObject *obj, JSRuntime *rt)
 {
     JSType type = js::TypeOfObject(obj);
-    return TypeName(type, rt->atomState);
+    return TypeName(type, *rt->commonNames);
 }
 
 static MOZ_ALWAYS_INLINE bool

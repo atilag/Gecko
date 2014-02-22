@@ -545,7 +545,7 @@ nsSubDocumentFrame::List(FILE* out, const char* aPrefix, uint32_t aFlags) const
   }
 }
 
-NS_IMETHODIMP nsSubDocumentFrame::GetFrameName(nsAString& aResult) const
+nsresult nsSubDocumentFrame::GetFrameName(nsAString& aResult) const
 {
   return MakeFrameName(NS_LITERAL_STRING("FrameOuter"), aResult);
 }
@@ -645,7 +645,7 @@ nsSubDocumentFrame::ComputeSize(nsRenderingContext *aRenderingContext,
                                   aMargin, aBorder, aPadding, aFlags);
 }
 
-NS_IMETHODIMP
+nsresult
 nsSubDocumentFrame::Reflow(nsPresContext*           aPresContext,
                            nsHTMLReflowMetrics&     aDesiredSize,
                            const nsHTMLReflowState& aReflowState,
@@ -733,7 +733,7 @@ nsSubDocumentFrame::ReflowCallbackCanceled()
   mPostedReflowCallback = false;
 }
 
-NS_IMETHODIMP
+nsresult
 nsSubDocumentFrame::AttributeChanged(int32_t aNameSpaceID,
                                      nsIAtom* aAttribute,
                                      int32_t aModType)
@@ -927,9 +927,14 @@ BeginSwapDocShellsForDocument(nsIDocument* aDocument, void*)
   NS_PRECONDITION(aDocument, "");
 
   nsIPresShell* shell = aDocument->GetShell();
-  nsIFrame* rootFrame = shell ? shell->GetRootFrame() : nullptr;
-  if (rootFrame) {
-    ::DestroyDisplayItemDataForFrames(rootFrame);
+  if (shell) {
+    // Disable painting while the views are detached, see bug 946929.
+    shell->SetNeverPainting(true);
+
+    nsIFrame* rootFrame = shell->GetRootFrame();
+    if (rootFrame) {
+      ::DestroyDisplayItemDataForFrames(rootFrame);
+    }
   }
   aDocument->EnumerateFreezableElements(
     nsObjectFrame::BeginSwapDocShells, nullptr);
@@ -1014,6 +1019,9 @@ EndSwapDocShellsForDocument(nsIDocument* aDocument, void*)
     while (cv) {
       nsCOMPtr<nsPresContext> pc;
       cv->GetPresContext(getter_AddRefs(pc));
+      if (pc && pc->GetPresShell()) {
+        pc->GetPresShell()->SetNeverPainting(ds->IsInvisible());
+      }
       nsDeviceContext* dc = pc ? pc->DeviceContext() : nullptr;
       if (dc) {
         nsView* v = cv->FindContainerView();

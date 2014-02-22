@@ -352,10 +352,20 @@ JSObject::getChildPropertyOnDictionary(ThreadSafeContext *cx, JS::HandleObject o
                 return nullptr;
             child.setSlot(slot);
         } else {
-            /* Slots can only be allocated out of order on objects in dictionary mode. */
+            /*
+             * Slots can only be allocated out of order on objects in
+             * dictionary mode.  Otherwise the child's slot must be after the
+             * parent's slot (if it has one), because slot number determines
+             * slot span for objects with that shape.  Usually child slot
+             * *immediately* follows parent slot, but there may be a slot gap
+             * when the object uses some -- but not all -- of its reserved
+             * slots to store properties.
+             */
             JS_ASSERT(obj->inDictionaryMode() ||
                       parent->hasMissingSlot() ||
-                      child.slot() == parent->maybeSlot() + 1);
+                      child.slot() == parent->maybeSlot() + 1 ||
+                      (parent->maybeSlot() + 1 < JSSLOT_FREE(obj->getClass()) &&
+                       child.slot() == JSSLOT_FREE(obj->getClass())));
         }
     }
 
@@ -508,7 +518,7 @@ NormalizeGetterAndSetter(JSObject *obj,
 JSObject::addProperty(ExclusiveContext *cx, HandleObject obj, HandleId id,
                       PropertyOp getter, StrictPropertyOp setter,
                       uint32_t slot, unsigned attrs,
-                      unsigned flags, int shortid, bool allowDictionary)
+                      unsigned flags, bool allowDictionary)
 {
     JS_ASSERT(!JSID_IS_VOID(id));
 
@@ -528,7 +538,7 @@ JSObject::addProperty(ExclusiveContext *cx, HandleObject obj, HandleId id,
         spp = obj->lastProperty()->table().search(id, true);
 
     return addPropertyInternal<SequentialExecution>(cx, obj, id, getter, setter, slot, attrs,
-                                                    flags, shortid, spp, allowDictionary);
+                                                    flags, spp, allowDictionary);
 }
 
 static bool
@@ -559,7 +569,7 @@ JSObject::addPropertyInternal(typename ExecutionModeTraits<mode>::ExclusiveConte
                               HandleObject obj, HandleId id,
                               PropertyOp getter, StrictPropertyOp setter,
                               uint32_t slot, unsigned attrs,
-                              unsigned flags, int shortid, Shape **spp,
+                              unsigned flags, Shape **spp,
                               bool allowDictionary)
 {
     JS_ASSERT(cx->isThreadLocal(obj));
@@ -620,7 +630,7 @@ JSObject::addPropertyInternal(typename ExecutionModeTraits<mode>::ExclusiveConte
                 return nullptr;
         }
 
-        StackShape child(nbase, id, slot, attrs, flags, shortid);
+        StackShape child(nbase, id, slot, attrs, flags);
         shape = getOrLookupChildProperty<mode>(cx, obj, last, child);
     }
 
@@ -650,14 +660,14 @@ JSObject::addPropertyInternal<SequentialExecution>(ExclusiveContext *cx,
                                                    HandleObject obj, HandleId id,
                                                    PropertyOp getter, StrictPropertyOp setter,
                                                    uint32_t slot, unsigned attrs,
-                                                   unsigned flags, int shortid, Shape **spp,
+                                                   unsigned flags, Shape **spp,
                                                    bool allowDictionary);
 template /* static */ Shape *
-JSObject::addPropertyInternal<ParallelExecution>(ForkJoinSlice *cx,
+JSObject::addPropertyInternal<ParallelExecution>(ForkJoinContext *cx,
                                                  HandleObject obj, HandleId id,
                                                  PropertyOp getter, StrictPropertyOp setter,
                                                  uint32_t slot, unsigned attrs,
-                                                 unsigned flags, int shortid, Shape **spp,
+                                                 unsigned flags, Shape **spp,
                                                  bool allowDictionary);
 
 JSObject *
@@ -704,7 +714,7 @@ js::NewReshapedObject(JSContext *cx, HandleTypeObject type, JSObject *parent,
                 return nullptr;
         }
 
-        StackShape child(nbase, id, i, JSPROP_ENUMERATE, 0, 0);
+        StackShape child(nbase, id, i, JSPROP_ENUMERATE, 0);
         newShape = cx->compartment()->propertyTree.getChild(cx, newShape, child);
         if (!newShape)
             return nullptr;
@@ -746,8 +756,7 @@ template <ExecutionMode mode>
 JSObject::putProperty(typename ExecutionModeTraits<mode>::ExclusiveContextType cx,
                       HandleObject obj, HandleId id,
                       PropertyOp getter, StrictPropertyOp setter,
-                      uint32_t slot, unsigned attrs,
-                      unsigned flags, int shortid)
+                      uint32_t slot, unsigned attrs, unsigned flags)
 {
     JS_ASSERT(cx->isThreadLocal(obj));
     JS_ASSERT(!JSID_IS_VOID(id));
@@ -804,7 +813,7 @@ JSObject::putProperty(typename ExecutionModeTraits<mode>::ExclusiveContextType c
         }
 
         return addPropertyInternal<mode>(cx, obj, id, getter, setter, slot, attrs, flags,
-                                         shortid, spp, true);
+                                         spp, true);
     }
 
     /* Property exists: search must have returned a valid *spp. */
@@ -840,7 +849,7 @@ JSObject::putProperty(typename ExecutionModeTraits<mode>::ExclusiveContextType c
      * Now that we've possibly preserved slot, check whether all members match.
      * If so, this is a redundant "put" and we can return without more work.
      */
-    if (shape->matchesParamsAfterId(nbase, slot, attrs, flags, shortid))
+    if (shape->matchesParamsAfterId(nbase, slot, attrs, flags))
         return shape;
 
     /*
@@ -885,7 +894,6 @@ JSObject::putProperty(typename ExecutionModeTraits<mode>::ExclusiveContextType c
         shape->setSlot(slot);
         shape->attrs = uint8_t(attrs);
         shape->flags = flags | Shape::IN_DICTIONARY;
-        shape->shortid_ = int16_t(shortid);
     } else {
         /*
          * Updating the last property in a non-dictionary-mode object. Find an
@@ -901,7 +909,7 @@ JSObject::putProperty(typename ExecutionModeTraits<mode>::ExclusiveContextType c
         JS_ASSERT(shape == obj->lastProperty());
 
         /* Find or create a property tree node labeled by our arguments. */
-        StackShape child(nbase, id, slot, attrs, flags, shortid);
+        StackShape child(nbase, id, slot, attrs, flags);
         RootedShape parent(cx, shape->parent);
         Shape *newShape = getOrLookupChildProperty<mode>(cx, obj, parent, child);
 
@@ -937,13 +945,13 @@ JSObject::putProperty<SequentialExecution>(ExclusiveContext *cx,
                                            HandleObject obj, HandleId id,
                                            PropertyOp getter, StrictPropertyOp setter,
                                            uint32_t slot, unsigned attrs,
-                                           unsigned flags, int shortid);
+                                           unsigned flags);
 template /* static */ Shape *
-JSObject::putProperty<ParallelExecution>(ForkJoinSlice *cx,
+JSObject::putProperty<ParallelExecution>(ForkJoinContext *cx,
                                          HandleObject obj, HandleId id,
                                          PropertyOp getter, StrictPropertyOp setter,
                                          uint32_t slot, unsigned attrs,
-                                         unsigned flags, int shortid);
+                                         unsigned flags);
 
 template <ExecutionMode mode>
 /* static */ Shape *
@@ -986,8 +994,7 @@ JSObject::changeProperty(typename ExecutionModeTraits<mode>::ExclusiveContextTyp
      */
     RootedId propid(cx, shape->propid());
     Shape *newShape = putProperty<mode>(cx, obj, propid, getter, setter,
-                                        shape->maybeSlot(), attrs, shape->flags,
-                                        shape->maybeShortid());
+                                        shape->maybeSlot(), attrs, shape->flags);
 
     obj->checkShapeConsistency();
     return newShape;
@@ -999,7 +1006,7 @@ JSObject::changeProperty<SequentialExecution>(ExclusiveContext *cx,
                                               unsigned attrs, unsigned mask,
                                               PropertyOp getter, StrictPropertyOp setter);
 template /* static */ Shape *
-JSObject::changeProperty<ParallelExecution>(ForkJoinSlice *slice,
+JSObject::changeProperty<ParallelExecution>(ForkJoinContext *cx,
                                             HandleObject obj, HandleShape shape,
                                             unsigned attrs, unsigned mask,
                                             PropertyOp getter, StrictPropertyOp setter);

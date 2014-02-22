@@ -36,7 +36,7 @@
     _(AbortPar)                     \
     _(InitElem)                     \
     _(InitElemGetterSetter)         \
-    _(MutateProto)                    \
+    _(MutateProto)                  \
     _(InitProp)                     \
     _(InitPropGetterSetter)         \
     _(CheckOverRecursed)            \
@@ -142,8 +142,10 @@
     _(Float32ToInt32)               \
     _(TruncateDToInt32)             \
     _(TruncateFToInt32)             \
+    _(BooleanToString)              \
     _(IntToString)                  \
     _(DoubleToString)               \
+    _(PrimitiveToString)            \
     _(Start)                        \
     _(OsrEntry)                     \
     _(OsrValue)                     \
@@ -180,6 +182,7 @@
     _(PostWriteBarrierAllSlots)     \
     _(InitializedLength)            \
     _(SetInitializedLength)         \
+    _(NeuterCheck)                  \
     _(BoundsCheck)                  \
     _(BoundsCheckRange)             \
     _(BoundsCheckLower)             \
@@ -210,7 +213,7 @@
     _(StoreFixedSlotV)              \
     _(StoreFixedSlotT)              \
     _(FunctionEnvironment)          \
-    _(ForkJoinSlice)                \
+    _(ForkJoinContext)              \
     _(GetPropertyCacheV)            \
     _(GetPropertyCacheT)            \
     _(GetPropertyPolymorphicV)      \
@@ -283,7 +286,7 @@
     _(AsmJSPassStackArg)            \
     _(AsmJSCall)                    \
     _(AsmJSCheckOverRecursed)       \
-    _(CheckInterruptPar)            \
+    _(InterruptCheckPar)            \
     _(RecompileCheck)               \
     _(AssertRangeI)                 \
     _(AssertRangeD)                 \

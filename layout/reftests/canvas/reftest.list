@@ -8,7 +8,7 @@ skip-if(B2G) fuzzy-if(Android&&AndroidVersion>=15,8,1000) == size-1.html size-1-
 
 skip-if(B2G) asserts-if(cocoaWidget,0-2) == size-change-1.html size-change-1-ref.html
 
-== subpixel-1.html about:blank
+random-if(cocoaWidget) == subpixel-1.html about:blank
 
 != text-ltr-left.html text-blank.html
 != text-ltr-right.html text-blank.html
@@ -64,10 +64,10 @@ random-if(!cocoaWidget||OSX==10.6||OSX==10.7) != text-emoji.html text-emoji-notr
 # azure quartz uses CGDrawLinearGradient instead of DrawShading
 # so we have less control over degenerate behaviour as tested by this
 # test
-fuzzy-if(azureSkiaGL,256,601) fails-if(azureQuartz) == linear-gradient-1a.html linear-gradient-1-ref.html
+fails-if(azureSkia||azureSkiaGL||azureQuartz) == linear-gradient-1a.html linear-gradient-1-ref.html
 
 # this passes with cairo on 10.7 and 10.8 but not with azure for reasons unknown
-fails-if(!(Android&&AndroidVersion>=15)&&(azureSkiaGL||OSX==10.6||(azureQuartz&&(OSX==10.7||OSX==10.8)))) == linear-gradient-1b.html linear-gradient-1-ref.html
+fails-if(!(Android&&AndroidVersion>=15)&&(OSX==10.6||(azureQuartz&&(OSX==10.7||OSX==10.8)))||azureSkiaGL||azureSkia) == linear-gradient-1b.html linear-gradient-1-ref.html
 
 == zero-dimensions.html zero-dimensions-ref.html
 

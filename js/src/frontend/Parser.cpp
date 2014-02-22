@@ -49,6 +49,8 @@ namespace frontend {
 
 typedef Rooted<StaticBlockObject*> RootedStaticBlockObject;
 typedef Handle<StaticBlockObject*> HandleStaticBlockObject;
+typedef Rooted<NestedScopeObject*> RootedNestedScopeObject;
+typedef Handle<NestedScopeObject*> HandleNestedScopeObject;
 
 
 /*
@@ -533,7 +535,7 @@ FunctionBox::FunctionBox(ExclusiveContext *cx, ObjectBox* traceListHead, JSFunct
         //
         JSObject *scope = outerpc->sc->asGlobalSharedContext()->scopeChain();
         while (scope) {
-            if (scope->is<WithObject>())
+            if (scope->is<DynamicWithObject>())
                 inWith = true;
             scope = scope->enclosingScope();
         }
@@ -1245,17 +1247,13 @@ Parser<ParseHandler>::newFunction(GenericParseContext *pc, HandleAtom atom,
     while (pc->parent)
         pc = pc->parent;
 
-    RootedObject parent(context);
-    if (!pc->sc->isFunctionBox() && options().compileAndGo)
-        parent = pc->sc->asGlobalSharedContext()->scopeChain();
-
     RootedFunction fun(context);
     JSFunction::Flags flags = (kind == Expression)
                               ? JSFunction::INTERPRETED_LAMBDA
                               : (kind == Arrow)
                                 ? JSFunction::INTERPRETED_LAMBDA_ARROW
                                 : JSFunction::INTERPRETED;
-    fun = NewFunctionWithProto(context, NullPtr(), nullptr, 0, flags, parent, atom, proto,
+    fun = NewFunctionWithProto(context, NullPtr(), nullptr, 0, flags, NullPtr(), atom, proto,
                                JSFunction::FinalizeKind, MaybeSingletonObject);
     if (!fun)
         return nullptr;
@@ -1505,7 +1503,6 @@ Parser<ParseHandler>::defineArg(Node funcpn, HandlePropertyName name,
     return pc->define(tokenStream, name, argpn, Definition::ARG);
 }
 
-#if JS_HAS_DESTRUCTURING
 template <typename ParseHandler>
 /* static */ bool
 Parser<ParseHandler>::bindDestructuringArg(BindData<ParseHandler> *data,
@@ -1524,7 +1521,6 @@ Parser<ParseHandler>::bindDestructuringArg(BindData<ParseHandler> *data,
 
     return pc->define(parser->tokenStream, name, data->pn, Definition::VAR);
 }
-#endif /* JS_HAS_DESTRUCTURING */
 
 template <typename ParseHandler>
 bool
@@ -1558,9 +1554,7 @@ Parser<ParseHandler>::functionArguments(FunctionSyntaxKind kind, Node *listp, No
     if (parenFreeArrow || !tokenStream.matchToken(TOK_RP)) {
         bool hasDefaults = false;
         Node duplicatedArg = null();
-#if JS_HAS_DESTRUCTURING
         Node list = null();
-#endif
 
         do {
             if (*hasRest) {
@@ -1571,7 +1565,6 @@ Parser<ParseHandler>::functionArguments(FunctionSyntaxKind kind, Node *listp, No
             TokenKind tt = tokenStream.getToken();
             JS_ASSERT_IF(parenFreeArrow, tt == TOK_NAME);
             switch (tt) {
-#if JS_HAS_DESTRUCTURING
               case TOK_LB:
               case TOK_LC:
               {
@@ -1628,7 +1621,6 @@ Parser<ParseHandler>::functionArguments(FunctionSyntaxKind kind, Node *listp, No
                 }
                 break;
               }
-#endif /* JS_HAS_DESTRUCTURING */
 
               case TOK_YIELD:
                 if (!checkYieldNameValidity())
@@ -1973,7 +1965,7 @@ Parser<ParseHandler>::functionDef(HandlePropertyName funName, const TokenStream:
         // already been created by js::StartOffThreadParseScript, so cx will not
         // be necessary.
         JSContext *cx = context->maybeJSContext();
-        proto = context->global()->getOrCreateStarGeneratorFunctionPrototype(cx);
+        proto = GlobalObject::getOrCreateStarGeneratorFunctionPrototype(cx, context->global());
         if (!proto)
             return null();
     }
@@ -2017,7 +2009,6 @@ Parser<FullParseHandler>::finishFunctionDefinition(ParseNode *pn, FunctionBox *f
 {
     pn->pn_pos.end = pos().end;
 
-#if JS_HAS_DESTRUCTURING
     /*
      * If there were destructuring formal parameters, prepend the initializing
      * comma expression that we synthesized to body. If the body is a return
@@ -2050,7 +2041,6 @@ Parser<FullParseHandler>::finishFunctionDefinition(ParseNode *pn, FunctionBox *f
         ++body->pn_count;
         body->pn_xflags |= PNX_DESTRUCT;
     }
-#endif
 
     JS_ASSERT(pn->pn_funbox == funbox);
     pn->pn_body->append(body);
@@ -2075,9 +2065,9 @@ Parser<SyntaxParseHandler>::finishFunctionDefinition(Node pn, FunctionBox *funbo
     size_t numInnerFunctions = pc->innerFunctions.length();
 
     RootedFunction fun(context, funbox->function());
-    LazyScript *lazy = LazyScript::Create(context, fun, numFreeVariables, numInnerFunctions, versionNumber(),
-                                          funbox->bufStart, funbox->bufEnd,
-                                          funbox->startLine, funbox->startColumn);
+    LazyScript *lazy = LazyScript::CreateRaw(context, fun, numFreeVariables, numInnerFunctions,
+                                             versionNumber(), funbox->bufStart, funbox->bufEnd,
+                                             funbox->startLine, funbox->startColumn);
     if (!lazy)
         return false;
 
@@ -2676,7 +2666,7 @@ Parser<ParseHandler>::reportRedeclaration(Node pn, bool isConst, JSAtom *atom)
  * must already be in such a scope.
  *
  * Throw a SyntaxError if 'atom' is an invalid name. Otherwise create a
- * property for the new variable on the block object, pc->blockChain;
+ * property for the new variable on the block object, pc->staticScope;
  * populate data->pn->pn_{op,cookie,defn,dflags}; and stash a pointer to
  * data->pn in a slot of the block object.
  */
@@ -2779,15 +2769,18 @@ template <typename ParseHandler>
 static void
 PopStatementPC(TokenStream &ts, ParseContext<ParseHandler> *pc)
 {
-    RootedStaticBlockObject blockObj(ts.context(), pc->topStmt->blockObj);
-    JS_ASSERT(!!blockObj == (pc->topStmt->isBlockScope));
+    RootedNestedScopeObject scopeObj(ts.context(), pc->topStmt->staticScope);
+    JS_ASSERT(!!scopeObj == pc->topStmt->isNestedScope);
 
     FinishPopStatement(pc);
 
-    if (blockObj) {
-        JS_ASSERT(!blockObj->inDictionaryMode());
-        ForEachLetDef(ts, pc, blockObj, PopLetDecl<ParseHandler>());
-        blockObj->resetPrevBlockChainFromParser();
+    if (scopeObj) {
+        if (scopeObj->is<StaticBlockObject>()) {
+            RootedStaticBlockObject blockObj(ts.context(), &scopeObj->as<StaticBlockObject>());
+            JS_ASSERT(!blockObj->inDictionaryMode());
+            ForEachLetDef(ts, pc, blockObj, PopLetDecl<ParseHandler>());
+        }
+        scopeObj->resetEnclosingNestedScopeFromParser();
     }
 }
 
@@ -2820,13 +2813,11 @@ LexicalLookup(ContextT *ct, HandleAtom atom, int *slotp, typename ContextT::Stmt
         if (!stmt->isBlockScope)
             continue;
 
-        StaticBlockObject &blockObj = *stmt->blockObj;
+        StaticBlockObject &blockObj = stmt->staticBlock();
         Shape *shape = blockObj.nativeLookup(ct->sc->context, id);
         if (shape) {
-            JS_ASSERT(shape->hasShortID());
-
             if (slotp)
-                *slotp = blockObj.stackDepth() + shape->shortid();
+                *slotp = blockObj.stackDepth() + blockObj.shapeToIndex(*shape);
             return stmt;
         }
     }
@@ -2990,8 +2981,6 @@ Parser<ParseHandler>::noteNameUse(HandlePropertyName name, Node pn)
     return true;
 }
 
-#if JS_HAS_DESTRUCTURING
-
 template <>
 bool
 Parser<FullParseHandler>::bindDestructuringVar(BindData<FullParseHandler> *data, ParseNode *pn)
@@ -3075,7 +3064,6 @@ Parser<FullParseHandler>::checkDestructuring(BindData<FullParseHandler> *data,
 
     Rooted<StaticBlockObject *> blockObj(context);
     blockObj = data && data->binder == bindLet ? data->let.blockObj.get() : nullptr;
-    uint32_t blockCountBefore = blockObj ? blockObj->slotCount() : 0;
 
     if (left->isKind(PNK_ARRAY)) {
         for (ParseNode *pn = left->pn_head; pn; pn = pn->pn_next) {
@@ -3130,38 +3118,6 @@ Parser<FullParseHandler>::checkDestructuring(BindData<FullParseHandler> *data,
         }
     }
 
-    /*
-     * The catch/finally handler implementation in the interpreter assumes
-     * that any operation that introduces a new scope (like a "let" or "with"
-     * block) increases the stack depth. This way, it is possible to restore
-     * the scope chain based on stack depth of the handler alone. "let" with
-     * an empty destructuring pattern like in
-     *
-     *   let [] = 1;
-     *
-     * would violate this assumption as the there would be no let locals to
-     * store on the stack.
-     *
-     * Furthermore, the decompiler needs an abstract stack location to store
-     * the decompilation of each let block/expr initializer. E.g., given:
-     *
-     *   let (x = 1, [[]] = b, y = 3, {a:[]} = c) { ... }
-     *
-     * four slots are needed.
-     *
-     * To satisfy both constraints, we push a dummy slot (and add a
-     * corresponding dummy property to the block object) for each initializer
-     * that doesn't introduce at least one binding.
-     */
-    if (toplevel && blockObj && blockCountBefore == blockObj->slotCount()) {
-        bool redeclared;
-        RootedId id(context, INT_TO_JSID(blockCountBefore));
-        if (!StaticBlockObject::addVar(context, blockObj, id, blockCountBefore, &redeclared))
-            return false;
-        JS_ASSERT(!redeclared);
-        JS_ASSERT(blockObj->slotCount() == blockCountBefore + 1);
-    }
-
     return true;
 }
 
@@ -3189,8 +3145,6 @@ Parser<ParseHandler>::destructuringExpr(BindData<ParseHandler> *data, TokenKind 
     return pn;
 }
 
-#endif /* JS_HAS_DESTRUCTURING */
-
 template <typename ParseHandler>
 typename ParseHandler::Node
 Parser<ParseHandler>::pushLexicalScope(HandleStaticBlockObject blockObj, StmtInfoPC *stmt)
@@ -3202,8 +3156,9 @@ Parser<ParseHandler>::pushLexicalScope(HandleStaticBlockObject blockObj, StmtInf
         return null();
 
     PushStatementPC(pc, stmt, STMT_BLOCK);
-    blockObj->initPrevBlockChainFromParser(pc->blockChain);
-    FinishPushBlockScope(pc, stmt, *blockObj.get());
+    blockObj->initEnclosingNestedScopeFromParser(pc->staticScope);
+    FinishPushNestedScope(pc, stmt, *blockObj.get());
+    stmt->isBlockScope = true;
 
     Node pn = handler.newLexicalScope(blockbox);
     if (!pn)
@@ -3461,7 +3416,6 @@ Parser<ParseHandler>::variables(ParseNodeKind kind, bool *psimple,
         first = false;
 
         TokenKind tt = tokenStream.getToken();
-#if JS_HAS_DESTRUCTURING
         if (tt == TOK_LB || tt == TOK_LC) {
             if (psimple)
                 *psimple = false;
@@ -3493,7 +3447,6 @@ Parser<ParseHandler>::variables(ParseNodeKind kind, bool *psimple,
             handler.addList(pn, pn2);
             continue;
         }
-#endif /* JS_HAS_DESTRUCTURING */
 
         if (tt != TOK_NAME) {
             if (tt == TOK_YIELD) {
@@ -3560,7 +3513,7 @@ Parser<FullParseHandler>::letDeclaration()
         }
 
         if (stmt && stmt->isBlockScope) {
-            JS_ASSERT(pc->blockChain == stmt->blockObj);
+            JS_ASSERT(pc->staticScope == stmt->staticScope);
         } else {
             if (pc->atBodyLevel()) {
                 /*
@@ -3602,13 +3555,13 @@ Parser<FullParseHandler>::letDeclaration()
              * lacks the SIF_SCOPE flag, it must be a try, catch, or finally
              * block.
              */
-            stmt->isBlockScope = true;
+            stmt->isBlockScope = stmt->isNestedScope = true;
             stmt->downScope = pc->topScopeStmt;
             pc->topScopeStmt = stmt;
 
-            blockObj->initPrevBlockChainFromParser(pc->blockChain);
-            pc->blockChain = blockObj;
-            stmt->blockObj = blockObj;
+            blockObj->initEnclosingNestedScopeFromParser(pc->staticScope);
+            pc->staticScope = blockObj;
+            stmt->staticScope = blockObj;
 
 #ifdef DEBUG
             ParseNode *tmp = pc->blockNode;
@@ -3628,7 +3581,7 @@ Parser<FullParseHandler>::letDeclaration()
             pc->blockNode = pn1;
         }
 
-        pn = variables(PNK_LET, nullptr, pc->blockChain, HoistVars);
+        pn = variables(PNK_LET, nullptr, &pc->staticScope->as<StaticBlockObject>(), HoistVars);
         if (!pn)
             return null();
         pn->pn_xflags = PNX_POPVAR;
@@ -4063,7 +4016,6 @@ Parser<FullParseHandler>::isValidForStatementLHS(ParseNode *pn1, JSVersion versi
         if (pn1->isOp(JSOP_DEFCONST))
             return false;
 
-#if JS_HAS_DESTRUCTURING
         // In JS 1.7 only, for (var [K, V] in EXPR) has a special meaning.
         // Hence all other destructuring decls are banned there.
         if (version == JSVERSION_1_7 && !isForEach && headKind == PNK_FORIN) {
@@ -4076,7 +4028,6 @@ Parser<FullParseHandler>::isValidForStatementLHS(ParseNode *pn1, JSVersion versi
             if (lhs->isKind(PNK_ARRAY) && lhs->pn_count != 2)
                 return false;
         }
-#endif
         return true;
     }
 
@@ -4087,7 +4038,6 @@ Parser<FullParseHandler>::isValidForStatementLHS(ParseNode *pn1, JSVersion versi
       case PNK_ELEM:
         return true;
 
-#if JS_HAS_DESTRUCTURING
       case PNK_ARRAY:
       case PNK_OBJECT:
         // In JS 1.7 only, for ([K, V] in EXPR) has a special meaning.
@@ -4095,7 +4045,6 @@ Parser<FullParseHandler>::isValidForStatementLHS(ParseNode *pn1, JSVersion versi
         if (version == JSVERSION_1_7 && !isForEach && headKind == PNK_FORIN)
             return pn1->isKind(PNK_ARRAY) && pn1->pn_count == 2;
         return true;
-#endif
 
       default:
         return false;
@@ -4246,12 +4195,7 @@ Parser<FullParseHandler>::forStatement()
          */
         if (isForDecl) {
             pn2 = pn1->pn_head;
-            if ((pn2->isKind(PNK_NAME) && pn2->maybeExpr())
-#if JS_HAS_DESTRUCTURING
-                || pn2->isKind(PNK_ASSIGN)
-#endif
-                )
-            {
+            if ((pn2->isKind(PNK_NAME) && pn2->maybeExpr()) || pn2->isKind(PNK_ASSIGN)) {
                 /*
                  * Declaration with initializer.
                  *
@@ -4280,13 +4224,11 @@ Parser<FullParseHandler>::forStatement()
                 pn1->pn_xflags |= PNX_POPVAR;
                 pn1 = nullptr;
 
-#if JS_HAS_DESTRUCTURING
                 if (pn2->isKind(PNK_ASSIGN)) {
                     pn2 = pn2->pn_left;
                     JS_ASSERT(pn2->isKind(PNK_ARRAY) || pn2->isKind(PNK_OBJECT) ||
                               pn2->isKind(PNK_NAME));
                 }
-#endif
             }
         } else {
             /* Not a declaration. */
@@ -4334,7 +4276,6 @@ Parser<FullParseHandler>::forStatement()
             pn2->markAsAssigned();
             break;
 
-#if JS_HAS_DESTRUCTURING
           case PNK_ASSIGN:
             MOZ_ASSUME_UNREACHABLE("forStatement TOK_ASSIGN");
 
@@ -4349,7 +4290,6 @@ Parser<FullParseHandler>::forStatement()
                     iflags |= JSITER_FOREACH | JSITER_KEYVALUE;
             }
             break;
-#endif
 
           default:;
         }
@@ -4918,9 +4858,16 @@ Parser<FullParseHandler>::withStatement()
 
     StmtInfoPC stmtInfo(context);
     PushStatementPC(pc, &stmtInfo, STMT_WITH);
+    Rooted<StaticWithObject *> staticWith(context, StaticWithObject::create(context));
+    if (!staticWith)
+        return null();
+    staticWith->initEnclosingNestedScopeFromParser(pc->staticScope);
+    FinishPushNestedScope(pc, &stmtInfo, *staticWith);
+
     Node innerBlock = statement();
     if (!innerBlock)
         return null();
+
     PopStatementPC(tokenStream, pc);
 
     pc->sc->setBindingsAccessedDynamically();
@@ -4936,7 +4883,10 @@ Parser<FullParseHandler>::withStatement()
         handler.deoptimizeUsesWithin(lexdep, TokenPos(begin, pos().begin));
     }
 
-    return handler.newWithStatement(begin, objectExpr, innerBlock);
+    ObjectBox *staticWithBox = newObjectBox(staticWith);
+    if (!staticWithBox)
+        return null();
+    return handler.newWithStatement(begin, objectExpr, innerBlock, staticWithBox);
 }
 
 template <>
@@ -5078,20 +5028,19 @@ Parser<ParseHandler>::tryStatement()
              * scoped, not a property of a new Object instance.  This is
              * an intentional change that anticipates ECMA Ed. 4.
              */
-            data.initLet(HoistVars, *pc->blockChain, JSMSG_TOO_MANY_CATCH_VARS);
+            data.initLet(HoistVars, pc->staticScope->template as<StaticBlockObject>(),
+                         JSMSG_TOO_MANY_CATCH_VARS);
             JS_ASSERT(data.let.blockObj);
 
             tt = tokenStream.getToken();
             Node catchName;
             switch (tt) {
-#if JS_HAS_DESTRUCTURING
               case TOK_LB:
               case TOK_LC:
                 catchName = destructuringExpr(&data, tt);
                 if (!catchName)
                     return null();
                 break;
-#endif
 
               case TOK_YIELD:
                 if (!checkYieldNameValidity())
@@ -5522,7 +5471,6 @@ Parser<FullParseHandler>::checkAndMarkAsAssignmentLhs(ParseNode *pn, AssignmentF
       case PNK_ELEM:
         break;
 
-#if JS_HAS_DESTRUCTURING
       case PNK_ARRAY:
       case PNK_OBJECT:
         if (flavor == CompoundAssignment) {
@@ -5532,7 +5480,6 @@ Parser<FullParseHandler>::checkAndMarkAsAssignmentLhs(ParseNode *pn, AssignmentF
         if (!checkDestructuring(nullptr, pn))
             return false;
         break;
-#endif
 
       case PNK_CALL:
         if (!makeSetCall(pn, JSMSG_BAD_LEFTSIDE_OF_ASS))
@@ -5885,6 +5832,7 @@ CompExprTransplanter::transplant(ParseNode *pn)
         break;
 
       case PN_BINARY:
+      case PN_BINARY_OBJ:
         if (!transplant(pn->pn_left))
             return false;
 
@@ -6097,8 +6045,8 @@ Parser<FullParseHandler>::comprehensionTail(ParseNode *kid, unsigned blockid, bo
     if (!transplanter.transplant(kid))
         return null();
 
-    JS_ASSERT(pc->blockChain && pc->blockChain == pn->pn_objbox->object);
-    data.initLet(HoistVars, *pc->blockChain, JSMSG_ARRAY_INIT_TOO_BIG);
+    JS_ASSERT(pc->staticScope && pc->staticScope == pn->pn_objbox->object);
+    data.initLet(HoistVars, pc->staticScope->as<StaticBlockObject>(), JSMSG_ARRAY_INIT_TOO_BIG);
 
     do {
         /*
@@ -6121,7 +6069,6 @@ Parser<FullParseHandler>::comprehensionTail(ParseNode *kid, unsigned blockid, bo
         RootedPropertyName name(context);
         tt = tokenStream.getToken();
         switch (tt) {
-#if JS_HAS_DESTRUCTURING
           case TOK_LB:
           case TOK_LC:
             pc->inDeclDestructuring = true;
@@ -6130,7 +6077,6 @@ Parser<FullParseHandler>::comprehensionTail(ParseNode *kid, unsigned blockid, bo
             if (!pn3)
                 return null();
             break;
-#endif
 
           case TOK_NAME:
             name = tokenStream.currentName();
@@ -6182,7 +6128,6 @@ Parser<FullParseHandler>::comprehensionTail(ParseNode *kid, unsigned blockid, bo
         }
 
         switch (tt) {
-#if JS_HAS_DESTRUCTURING
           case TOK_LB:
           case TOK_LC:
             if (!checkDestructuring(&data, pn3))
@@ -6204,7 +6149,6 @@ Parser<FullParseHandler>::comprehensionTail(ParseNode *kid, unsigned blockid, bo
                 pn2->pn_iflags |= JSITER_FOREACH | JSITER_KEYVALUE;
             }
             break;
-#endif
 
           case TOK_NAME:
             data.pn = pn3;
@@ -6635,15 +6579,15 @@ typename ParseHandler::Node
 Parser<ParseHandler>::newRegExp()
 {
     // Create the regexp even when doing a syntax parse, to check the regexp's syntax.
+    const jschar *chars = tokenStream.getTokenbuf().begin();
     size_t length = tokenStream.getTokenbuf().length();
-    const StableCharPtr chars(tokenStream.getTokenbuf().begin(), length);
     RegExpFlag flags = tokenStream.currentToken().regExpFlags();
 
     Rooted<RegExpObject*> reobj(context);
     if (RegExpStatics *res = context->global()->getRegExpStatics())
-        reobj = RegExpObject::create(context, res, chars.get(), length, flags, &tokenStream);
+        reobj = RegExpObject::create(context, res, chars, length, flags, &tokenStream);
     else
-        reobj = RegExpObject::createNoStatics(context, chars.get(), length, flags, &tokenStream);
+        reobj = RegExpObject::createNoStatics(context, chars, length, flags, &tokenStream);
 
     if (!reobj)
         return null();
@@ -6915,7 +6859,6 @@ Parser<ParseHandler>::objectLiteral()
                 if (!handler.addPropertyDefinition(literal, propname, propexpr))
                     return null();
             }
-#if JS_HAS_DESTRUCTURING_SHORTHAND
             else if (ltok == TOK_NAME && (tt == TOK_COMMA || tt == TOK_RC)) {
                 /*
                  * Support, e.g., |var {x, y} = o| as destructuring shorthand
@@ -6934,7 +6877,6 @@ Parser<ParseHandler>::objectLiteral()
                 if (!handler.addShorthandPropertyDefinition(literal, propname))
                     return null();
             }
-#endif
             else {
                 report(ParseError, false, null(), JSMSG_COLON_AFTER_ID);
                 return null();

@@ -98,7 +98,13 @@ CompositableParentManager::ReceiveCompositableUpdate(const CompositableOperation
       MOZ_LAYERS_LOG(("[ParentSide] Created double buffer"));
       const OpDestroyThebesBuffer& op = aEdit.get_OpDestroyThebesBuffer();
       CompositableParent* compositableParent = static_cast<CompositableParent*>(op.compositableParent());
-      DeprecatedContentHostBase* content = static_cast<DeprecatedContentHostBase*>(compositableParent->GetCompositableHost());
+      CompositableHost* compositableHost = compositableParent->GetCompositableHost();
+      if (compositableHost->GetType() != COMPOSITABLE_CONTENT_SINGLE &&
+          compositableHost->GetType() != COMPOSITABLE_CONTENT_DOUBLE)
+      {
+        return false;
+      }
+      DeprecatedContentHostBase* content = static_cast<DeprecatedContentHostBase*>(compositableHost);
       content->DestroyTextures();
 
       break;
@@ -162,18 +168,24 @@ CompositableParentManager::ReceiveCompositableUpdate(const CompositableOperation
       CompositableParent* compositableParent = static_cast<CompositableParent*>(op.compositableParent());
       CompositableHost* compositable =
         compositableParent->GetCompositableHost();
-      ThebesLayerComposite* thebes =
-        static_cast<ThebesLayerComposite*>(compositable->GetLayer());
+      Layer* layer = compositable->GetLayer();
+      if (!layer || layer->GetType() != Layer::TYPE_THEBES) {
+        return false;
+      }
+      ThebesLayerComposite* thebes = static_cast<ThebesLayerComposite*>(layer);
 
       const ThebesBufferData& bufferData = op.bufferData();
 
       RenderTraceInvalidateStart(thebes, "FF00FF", op.updatedRegion().GetBounds());
 
       nsIntRegion frontUpdatedRegion;
-      compositable->UpdateThebes(bufferData,
-                                 op.updatedRegion(),
-                                 thebes->GetValidRegion(),
-                                 &frontUpdatedRegion);
+      if (!compositable->UpdateThebes(bufferData,
+                                      op.updatedRegion(),
+                                      thebes->GetValidRegion(),
+                                      &frontUpdatedRegion))
+      {
+        return false;
+      }
       replyv.push_back(
         OpContentBufferSwap(compositableParent, nullptr, frontUpdatedRegion));
 
@@ -220,6 +232,15 @@ CompositableParentManager::ReceiveCompositableUpdate(const CompositableOperation
       tileComposer->PaintedTiledLayerBuffer(this, tileDesc);
       break;
     }
+    case CompositableOperation::TOpRemoveTexture: {
+      const OpRemoveTexture& op = aEdit.get_OpRemoveTexture();
+      CompositableHost* compositable = AsCompositable(op);
+      RefPtr<TextureHost> tex = TextureHost::AsTextureHost(op.textureParent());
+
+      MOZ_ASSERT(tex.get());
+      compositable->RemoveTextureHost(tex);
+      break;
+    }
     case CompositableOperation::TOpUseTexture: {
       const OpUseTexture& op = aEdit.get_OpUseTexture();
       CompositableHost* compositable = AsCompositable(op);
@@ -227,6 +248,25 @@ CompositableParentManager::ReceiveCompositableUpdate(const CompositableOperation
 
       MOZ_ASSERT(tex.get());
       compositable->UseTextureHost(tex);
+
+      if (IsAsync()) {
+        ScheduleComposition(op);
+        // Async layer updates don't trigger invalidation, manually tell the layer
+        // that its content have changed.
+        if (compositable->GetLayer()) {
+          compositable->GetLayer()->SetInvalidRectToVisibleRegion();
+        }
+      }
+      break;
+    }
+    case CompositableOperation::TOpUseComponentAlphaTextures: {
+      const OpUseComponentAlphaTextures& op = aEdit.get_OpUseComponentAlphaTextures();
+      CompositableHost* compositable = AsCompositable(op);
+      RefPtr<TextureHost> texOnBlack = TextureHost::AsTextureHost(op.textureOnBlackParent());
+      RefPtr<TextureHost> texOnWhite = TextureHost::AsTextureHost(op.textureOnWhiteParent());
+
+      MOZ_ASSERT(texOnBlack && texOnWhite);
+      compositable->UseComponentAlphaTextures(texOnBlack, texOnWhite);
 
       if (IsAsync()) {
         ScheduleComposition(op);

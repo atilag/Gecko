@@ -86,7 +86,7 @@ class MediaRecorder::Session: public nsIObserver
       if (mSession->IsEncoderError()) {
         recorder->NotifyError(NS_ERROR_UNEXPECTED);
       }
-      nsresult rv = recorder->CreateAndDispatchBlobEvent(mSession);
+      nsresult rv = recorder->CreateAndDispatchBlobEvent(mSession->GetEncodedData());
       if (NS_FAILED(rv)) {
         recorder->NotifyError(rv);
       }
@@ -235,7 +235,9 @@ public:
 
   nsresult Pause()
   {
-    NS_ENSURE_TRUE(NS_IsMainThread() && mTrackUnionStream, NS_ERROR_FAILURE);
+    MOZ_ASSERT(NS_IsMainThread());
+
+    NS_ENSURE_TRUE(mTrackUnionStream, NS_ERROR_FAILURE);
     mTrackUnionStream->ChangeExplicitBlockerCount(-1);
 
     return NS_OK;
@@ -243,7 +245,9 @@ public:
 
   nsresult Resume()
   {
-    NS_ENSURE_TRUE(NS_IsMainThread() && mTrackUnionStream, NS_ERROR_FAILURE);
+    MOZ_ASSERT(NS_IsMainThread());
+
+    NS_ENSURE_TRUE(mTrackUnionStream, NS_ERROR_FAILURE);
     mTrackUnionStream->ChangeExplicitBlockerCount(1);
 
     return NS_OK;
@@ -544,8 +548,8 @@ MediaRecorder::RequestData(ErrorResult& aResult)
   }
 
   NS_DispatchToMainThread(
-    NS_NewRunnableMethodWithArg<Session *>(this,
-                                           &MediaRecorder::CreateAndDispatchBlobEvent, mSession),
+    NS_NewRunnableMethodWithArg<const already_AddRefed<nsIDOMBlob> >(this,
+      &MediaRecorder::CreateAndDispatchBlobEvent, mSession->GetEncodedData()),
     NS_DISPATCH_NORMAL);
 }
 
@@ -576,7 +580,7 @@ MediaRecorder::Constructor(const GlobalObject& aGlobal,
 }
 
 nsresult
-MediaRecorder::CreateAndDispatchBlobEvent(Session *aSession)
+MediaRecorder::CreateAndDispatchBlobEvent(const already_AddRefed<nsIDOMBlob> &aBlob)
 {
   NS_ABORT_IF_FALSE(NS_IsMainThread(), "Not running on main thread");
 
@@ -588,7 +592,7 @@ MediaRecorder::CreateAndDispatchBlobEvent(Session *aSession)
   BlobEventInit init;
   init.mBubbles = false;
   init.mCancelable = false;
-  init.mData = aSession->GetEncodedData();
+  init.mData = aBlob;
   nsRefPtr<BlobEvent> event =
     BlobEvent::Constructor(this,
                            NS_LITERAL_STRING("dataavailable"),

@@ -7,6 +7,12 @@
 // HttpLog.h should generally be included first
 #include "HttpLog.h"
 
+// Log on level :5, instead of default :4.
+#undef LOG
+#define LOG(args) LOG5(args)
+#undef LOG_ENABLED
+#define LOG_ENABLED() LOG5_ENABLED()
+
 #include <algorithm>
 
 #include "Http2Session.h"
@@ -246,7 +252,7 @@ Http2Session::IdleTime()
   return PR_IntervalNow() - mLastDataReadEpoch;
 }
 
-void
+uint32_t
 Http2Session::ReadTimeoutTick(PRIntervalTime now)
 {
   MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
@@ -255,24 +261,26 @@ Http2Session::ReadTimeoutTick(PRIntervalTime now)
        this, PR_IntervalToSeconds(now - mLastReadEpoch)));
 
   if (!mPingThreshold)
-    return;
+    return UINT32_MAX;
 
   if ((now - mLastReadEpoch) < mPingThreshold) {
     // recent activity means ping is not an issue
     if (mPingSentEpoch)
       mPingSentEpoch = 0;
-    return;
+
+    return PR_IntervalToSeconds(mPingThreshold) -
+      PR_IntervalToSeconds(now - mLastReadEpoch);
   }
 
   if (mPingSentEpoch) {
     LOG3(("Http2Session::ReadTimeoutTick %p handle outstanding ping\n"));
     if ((now - mPingSentEpoch) >= gHttpHandler->SpdyPingTimeout()) {
-      LOG3(("Http2Session::ReadTimeoutTick %p Ping Timer Exhaustion\n",
-           this));
+      LOG3(("Http2Session::ReadTimeoutTick %p Ping Timer Exhaustion\n", this));
       mPingSentEpoch = 0;
       Close(NS_ERROR_NET_TIMEOUT);
+      return UINT32_MAX;
     }
-    return;
+    return 1; // run the tick aggressively while ping is outstanding
   }
 
   LOG3(("Http2Session::ReadTimeoutTick %p generating ping\n", this));
@@ -311,6 +319,8 @@ Http2Session::ReadTimeoutTick(PRIntervalTime now)
       CleanupStream(deleteMe, NS_ERROR_ABORT, CANCEL_ERROR);
 
   } while (deleteMe);
+
+  return 1; // run the tick aggressively while ping is outstanding
 }
 
 uint32_t

@@ -82,7 +82,7 @@ public:
          const nsACString& aContinueQuery,
          const nsACString& aContinueToQuery,
          const Key& aKey,
-         StructuredCloneReadInfo& aCloneReadInfo);
+         StructuredCloneReadInfo&& aCloneReadInfo);
 
   // For OBJECTSTOREKEY cursors.
   static
@@ -121,7 +121,7 @@ public:
          const nsACString& aContinueToQuery,
          const Key& aKey,
          const Key& aObjectKey,
-         StructuredCloneReadInfo& aCloneReadInfo);
+         StructuredCloneReadInfo&& aCloneReadInfo);
 
   IDBTransaction* Transaction() const
   {
@@ -197,8 +197,7 @@ public:
   Advance(uint32_t aCount, ErrorResult& aRv);
 
   void
-  Continue(JSContext* aCx, const Optional<JS::Handle<JS::Value> >& aKey,
-           ErrorResult& aRv);
+  Continue(JSContext* aCx, JS::Handle<JS::Value> aKey, ErrorResult& aRv);
 
   already_AddRefed<IDBRequest>
   Delete(JSContext* aCx, ErrorResult& aRv);

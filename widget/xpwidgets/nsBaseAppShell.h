@@ -79,6 +79,9 @@ private:
 
   bool DispatchDummyEvent(nsIThread* target);
 
+  void IncrementEventloopNestingLevel();
+  void DecrementEventloopNestingLevel();
+
   /**
    * Runs all synchronous sections which are queued up in mSyncSections.
    */
@@ -119,7 +122,11 @@ private:
    * have been consumed by the inner event loop(s).
    */
   bool *mBlockedWait;
-  mozilla::Atomic<uint32_t> mNativeEventPending;
+  int32_t mFavorPerf;
+  mozilla::Atomic<bool> mNativeEventPending;
+  PRIntervalTime mStarvationDelay;
+  PRIntervalTime mSwitchTime;
+  PRIntervalTime mLastNativeEventTime;
   enum EventloopNestingState {
     eEventloopNone,  // top level thread execution
     eEventloopXPCOM, // innermost native event loop is ProcessNextNativeEvent
@@ -143,7 +150,7 @@ private:
    * Tracks whether we have processed any gecko events in NativeEventCallback so
    * that we can avoid erroneously entering a blocking loop waiting for gecko
    * events to show up during OnProcessNextEvent.  This is required because on
-   * OS X ProcessGeckoEvents may be invoked inside the context of 
+   * OS X ProcessGeckoEvents may be invoked inside the context of
    * ProcessNextNativeEvent and may result in NativeEventCallback being invoked
    * and in turn invoking NS_ProcessPendingEvents.  Because
    * ProcessNextNativeEvent may be invoked prior to the NS_HasPendingEvents

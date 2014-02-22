@@ -117,7 +117,7 @@ AutoMounterSetting::AutoMounterSetting()
     return;
   }
   nsCOMPtr<nsISettingsServiceLock> lock;
-  settingsService->CreateLock(getter_AddRefs(lock));
+  settingsService->CreateLock(nullptr, getter_AddRefs(lock));
   nsCOMPtr<nsISettingsServiceCallback> callback = new SettingsServiceCallback();
   mozilla::AutoSafeJSContext cx;
   JS::Rooted<JS::Value> value(cx);
@@ -162,7 +162,7 @@ public:
       do_GetService("@mozilla.org/settingsService;1");
     NS_ENSURE_TRUE(settingsService, NS_ERROR_FAILURE);
     nsCOMPtr<nsISettingsServiceLock> lock;
-    settingsService->CreateLock(getter_AddRefs(lock));
+    settingsService->CreateLock(nullptr, getter_AddRefs(lock));
     nsCOMPtr<nsISettingsServiceCallback> callback =
       new CheckVolumeSettingsCallback(mVolumeName);
     nsPrintfCString setting(UMS_VOLUME_ENABLED_PREFIX "%s" UMS_VOLUME_ENABLED_SUFFIX,
@@ -194,7 +194,7 @@ public:
       do_GetService("@mozilla.org/settingsService;1");
     NS_ENSURE_TRUE(settingsService, NS_ERROR_FAILURE);
     nsCOMPtr<nsISettingsServiceLock> lock;
-    settingsService->CreateLock(getter_AddRefs(lock));
+    settingsService->CreateLock(nullptr, getter_AddRefs(lock));
     // lock may be null if this gets called during shutdown.
     if (lock) {
       mozilla::AutoSafeJSContext cx;
@@ -242,9 +242,9 @@ AutoMounterSetting::Observe(nsISupports* aSubject,
       !val.isObject()) {
     return NS_OK;
   }
-  JSObject& obj(val.toObject());
+  JS::Rooted<JSObject*> obj(cx, &val.toObject());
   JS::Rooted<JS::Value> key(cx);
-  if (!JS_GetProperty(cx, &obj, "key", &key) ||
+  if (!JS_GetProperty(cx, obj, "key", &key) ||
       !key.isString()) {
     return NS_OK;
   }
@@ -256,7 +256,7 @@ AutoMounterSetting::Observe(nsISupports* aSubject,
   }
 
   JS::Rooted<JS::Value> value(cx);
-  if (!JS_GetProperty(cx, &obj, "value", &value)) {
+  if (!JS_GetProperty(cx, obj, "value", &value)) {
     return NS_OK;
   }
 

@@ -172,6 +172,10 @@ class MacroAssembler : public MacroAssemblerSpecific
     bool enoughMemory_;
     bool embedsNurseryPointers_;
 
+    // SPS instrumentation, only used for Ion caches.
+    mozilla::Maybe<IonInstrumentation> spsInstrumentation_;
+    jsbytecode *spsPc_;
+
   private:
     // This field is used to manage profiling instrumentation output. If
     // provided and enabled, then instrumentation will be emitted around call
@@ -212,7 +216,8 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     // This constructor should only be used when there is no IonContext active
     // (for example, Trampoline-$(ARCH).cpp and IonCaches.cpp).
-    MacroAssembler(JSContext *cx, IonScript *ion = nullptr)
+    MacroAssembler(JSContext *cx, IonScript *ion = nullptr,
+                   JSScript *script = nullptr, jsbytecode *pc = nullptr)
       : enoughMemory_(true),
         embedsNurseryPointers_(false),
         sps_(nullptr)
@@ -225,8 +230,17 @@ class MacroAssembler : public MacroAssemblerSpecific
         initWithAllocator();
         m_buffer.id = GetIonContext()->getNextAssemblerId();
 #endif
-        if (ion)
+        if (ion) {
             setFramePushed(ion->frameSize());
+            if (pc && cx->runtime()->spsProfiler.enabled()) {
+                // We have to update the SPS pc when this IC stub calls into
+                // the VM.
+                spsPc_ = pc;
+                spsInstrumentation_.construct(&cx->runtime()->spsProfiler, &spsPc_);
+                sps_ = spsInstrumentation_.addr();
+                sps_->setPushed(script);
+            }
+        }
     }
 
     // asm.js compilation handles its own IonContet-pushing
@@ -698,17 +712,17 @@ class MacroAssembler : public MacroAssemblerSpecific
     template<typename S, typename T>
     void storeToTypedIntArray(int arrayType, const S &value, const T &dest) {
         switch (arrayType) {
-          case ScalarTypeRepresentation::TYPE_INT8:
-          case ScalarTypeRepresentation::TYPE_UINT8:
-          case ScalarTypeRepresentation::TYPE_UINT8_CLAMPED:
+          case ScalarTypeDescr::TYPE_INT8:
+          case ScalarTypeDescr::TYPE_UINT8:
+          case ScalarTypeDescr::TYPE_UINT8_CLAMPED:
             store8(value, dest);
             break;
-          case ScalarTypeRepresentation::TYPE_INT16:
-          case ScalarTypeRepresentation::TYPE_UINT16:
+          case ScalarTypeDescr::TYPE_INT16:
+          case ScalarTypeDescr::TYPE_UINT16:
             store16(value, dest);
             break;
-          case ScalarTypeRepresentation::TYPE_INT32:
-          case ScalarTypeRepresentation::TYPE_UINT32:
+          case ScalarTypeDescr::TYPE_INT32:
+          case ScalarTypeDescr::TYPE_UINT32:
             store32(value, dest);
             break;
           default:
@@ -776,16 +790,16 @@ class MacroAssembler : public MacroAssemblerSpecific
     void newGCString(const Register &result, Label *fail);
     void newGCShortString(const Register &result, Label *fail);
 
-    void newGCThingPar(const Register &result, const Register &slice,
+    void newGCThingPar(const Register &result, const Register &cx,
                        const Register &tempReg1, const Register &tempReg2,
                        gc::AllocKind allocKind, Label *fail);
-    void newGCThingPar(const Register &result, const Register &slice,
+    void newGCThingPar(const Register &result, const Register &cx,
                        const Register &tempReg1, const Register &tempReg2,
                        JSObject *templateObject, Label *fail);
-    void newGCStringPar(const Register &result, const Register &slice,
+    void newGCStringPar(const Register &result, const Register &cx,
                         const Register &tempReg1, const Register &tempReg2,
                         Label *fail);
-    void newGCShortStringPar(const Register &result, const Register &slice,
+    void newGCShortStringPar(const Register &result, const Register &cx,
                              const Register &tempReg1, const Register &tempReg2,
                              Label *fail);
     void initGCThing(const Register &obj, JSObject *templateObject);
@@ -797,7 +811,7 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     // Checks the flags that signal that parallel code may need to interrupt or
     // abort.  Branches to fail in that case.
-    void checkInterruptFlagsPar(const Register &tempReg, Label *fail);
+    void checkInterruptFlagPar(const Register &tempReg, Label *fail);
 
     // If the JitCode that created this assembler needs to transition into the VM,
     // we want to store the JitCode on the stack in order to mark it during a GC.
@@ -819,16 +833,16 @@ class MacroAssembler : public MacroAssemblerSpecific
         Push(ImmPtr(nullptr));
     }
 
-    void loadForkJoinSlice(Register slice, Register scratch);
+    void loadForkJoinContext(Register cx, Register scratch);
     void loadContext(Register cxReg, Register scratch, ExecutionMode executionMode);
 
-    void enterParallelExitFrameAndLoadSlice(const VMFunction *f, Register slice,
-                                            Register scratch);
+    void enterParallelExitFrameAndLoadContext(const VMFunction *f, Register cx,
+                                              Register scratch);
 
     void enterExitFrameAndLoadContext(const VMFunction *f, Register cxReg, Register scratch,
                                       ExecutionMode executionMode);
 
-    void enterFakeParallelExitFrame(Register slice, Register scratch,
+    void enterFakeParallelExitFrame(Register cx, Register scratch,
                                     JitCode *codeVal = nullptr);
 
     void enterFakeExitFrame(Register cxReg, Register scratch,
@@ -1178,6 +1192,7 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     enum IntConversionInputKind {
         IntConversion_NumbersOnly,
+        IntConversion_NumbersOrBoolsOnly,
         IntConversion_Any
     };
 

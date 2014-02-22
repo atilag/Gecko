@@ -29,6 +29,8 @@
 #  include "mozilla/NullPtr.h"
 #endif
 
+#include "mozilla/RefCountType.h"
+
 /* Core XPCOM declarations. */
 
 /*----------------------------------------------------------------------*/
@@ -112,7 +114,7 @@
  *           NS_HIDDEN_(int) NS_FASTCALL func2(char *foo);
  */
 
-#if defined(__i386__) && defined(__GNUC__) && !defined(XP_OS2)
+#if defined(__i386__) && defined(__GNUC__)
 #define NS_FASTCALL __attribute__ ((regparm (3), stdcall))
 #define NS_CONSTRUCTOR_FASTCALL __attribute__ ((regparm (3), stdcall))
 #elif defined(XP_WIN) && !defined(_WIN64)
@@ -149,21 +151,6 @@
 
 #define NS_EXPORT_STATIC_MEMBER_(type) type
 #define NS_IMPORT_STATIC_MEMBER_(type) type
-
-#elif defined(XP_OS2)
-
-#define NS_IMPORT __declspec(dllimport)
-#define NS_IMPORT_(type) type __declspec(dllimport)
-#define NS_EXPORT __declspec(dllexport)
-#define NS_EXPORT_(type) type __declspec(dllexport)
-#define NS_IMETHOD_(type) virtual type
-#define NS_IMETHODIMP_(type) type
-#define NS_METHOD_(type) type
-#define NS_CALLBACK_(_type, _name) _type (* _name)
-#define NS_STDCALL
-#define NS_FROZENCALL
-#define NS_EXPORT_STATIC_MEMBER_(type) NS_EXTERNAL_VIS_(type)
-#define NS_IMPORT_STATIC_MEMBER_(type) NS_EXTERNAL_VIS_(type)
 
 #else
 
@@ -312,19 +299,7 @@
  */
 #include "nsError.h"
 
-/**
- * Reference count values
- *
- * This is the return type for AddRef() and Release() in nsISupports.
- * IUnknown of COM returns an unsigned long from equivalent functions.
- * The following ifdef exists to maintain binary compatibility with
- * IUnknown.
- */
-#ifdef XP_WIN
-typedef unsigned long nsrefcnt;
-#else
-typedef uint32_t nsrefcnt;
-#endif
+typedef MozRefCountType nsrefcnt;
 
 /*
  * Use these macros to do 64bit safe pointer conversions.

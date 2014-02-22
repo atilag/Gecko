@@ -15,7 +15,8 @@ callback PromiseInit = void (object resolve, object reject);
 [TreatNonCallableAsNull]
 callback AnyCallback = any (any value);
 
-[Func="mozilla::dom::Promise::EnabledForScope", Constructor(PromiseInit init)]
+// REMOVE THE RELEVANT ENTRY FROM test_interfaces.html WHEN THIS IS IMPLEMENTED IN JS.
+[Constructor(PromiseInit init)]
 interface Promise {
   // TODO bug 875289 - static Promise fulfill(any value);
 
@@ -24,10 +25,10 @@ interface Promise {
   // the proto of a promise object or someone screws up and manages to create a
   // Promise object in this scope without having resolved the interface object
   // first.
-  [NewObject, Throws, Func="mozilla::dom::Promise::EnabledForScope"]
-  static Promise resolve(optional any value);
-  [NewObject, Throws, Func="mozilla::dom::Promise::EnabledForScope"]
-  static Promise reject(optional any value);
+  [NewObject, Throws]
+  static Promise resolve(any value);
+  [NewObject, Throws]
+  static Promise reject(any value);
 
   // The [TreatNonCallableAsNull] annotation is required since then() should do
   // nothing instead of throwing errors when non-callable arguments are passed.
@@ -38,12 +39,9 @@ interface Promise {
   [NewObject]
   Promise catch([TreatNonCallableAsNull] optional AnyCallback? rejectCallback = null);
 
-  [NewObject, Throws, Func="mozilla::dom::Promise::EnabledForScope"]
+  [NewObject, Throws]
   static Promise all(sequence<any> iterable);
 
-  [NewObject, Throws, Func="mozilla::dom::Promise::EnabledForScope"]
-  static Promise cast(optional any value);
-
-  [NewObject, Throws, Func="mozilla::dom::Promise::EnabledForScope"]
+  [NewObject, Throws]
   static Promise race(sequence<any> iterable);
 };

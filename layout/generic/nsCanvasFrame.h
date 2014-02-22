@@ -40,22 +40,22 @@ public:
 
   virtual void DestroyFrom(nsIFrame* aDestructRoot) MOZ_OVERRIDE;
 
-  NS_IMETHOD SetInitialChildList(ChildListID     aListID,
-                                 nsFrameList&    aChildList) MOZ_OVERRIDE;
-  NS_IMETHOD AppendFrames(ChildListID     aListID,
-                          nsFrameList&    aFrameList) MOZ_OVERRIDE;
-  NS_IMETHOD InsertFrames(ChildListID     aListID,
-                          nsIFrame*       aPrevFrame,
-                          nsFrameList&    aFrameList) MOZ_OVERRIDE;
-  NS_IMETHOD RemoveFrame(ChildListID     aListID,
-                         nsIFrame*       aOldFrame) MOZ_OVERRIDE;
+  virtual nsresult SetInitialChildList(ChildListID     aListID,
+                                       nsFrameList&    aChildList) MOZ_OVERRIDE;
+  virtual nsresult AppendFrames(ChildListID     aListID,
+                                nsFrameList&    aFrameList) MOZ_OVERRIDE;
+  virtual nsresult InsertFrames(ChildListID     aListID,
+                                nsIFrame*       aPrevFrame,
+                                nsFrameList&    aFrameList) MOZ_OVERRIDE;
+  virtual nsresult RemoveFrame(ChildListID     aListID,
+                               nsIFrame*       aOldFrame) MOZ_OVERRIDE;
 
   virtual nscoord GetMinWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
   virtual nscoord GetPrefWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
-  NS_IMETHOD Reflow(nsPresContext*          aPresContext,
-                    nsHTMLReflowMetrics&     aDesiredSize,
-                    const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  virtual nsresult Reflow(nsPresContext*           aPresContext,
+                          nsHTMLReflowMetrics&     aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
   virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
   {
     return nsContainerFrame::IsFrameOfType(aFlags &
@@ -84,26 +84,24 @@ public:
    */
   virtual nsIAtom* GetType() const MOZ_OVERRIDE;
 
-  virtual nsresult StealFrame(nsPresContext* aPresContext,
-                              nsIFrame*      aChild,
-                              bool           aForceNormal) MOZ_OVERRIDE
+  virtual nsresult StealFrame(nsIFrame* aChild, bool aForceNormal) MOZ_OVERRIDE
   {
     NS_ASSERTION(!aForceNormal, "No-one should be passing this in here");
 
     // nsCanvasFrame keeps overflow container continuations of its child
     // frame in main child list
-    nsresult rv = nsContainerFrame::StealFrame(aPresContext, aChild, true);
+    nsresult rv = nsContainerFrame::StealFrame(aChild, true);
     if (NS_FAILED(rv)) {
-      rv = nsContainerFrame::StealFrame(aPresContext, aChild);
+      rv = nsContainerFrame::StealFrame(aChild);
     }
     return rv;
   }
 
 #ifdef DEBUG_FRAME_DUMP
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
-  NS_IMETHOD GetContentForEvent(mozilla::WidgetEvent* aEvent,
-                                nsIContent** aContent) MOZ_OVERRIDE;
+  virtual nsresult GetContentForEvent(mozilla::WidgetEvent* aEvent,
+                                      nsIContent** aContent) MOZ_OVERRIDE;
 
   nsRect CanvasArea() const;
 

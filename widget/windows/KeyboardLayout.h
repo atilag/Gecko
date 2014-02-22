@@ -328,19 +328,48 @@ private:
    */
   bool IsIMEDoingKakuteiUndo() const;
 
-  /*
-   * Dispatches a plugin event after the specified message is removed.
-   * Returns true if the widget is destoyed.  Otherwise, false.
-   */
-  bool RemoveMessageAndDispatchPluginEvent(UINT aFirstMsg, UINT aLastMsg) const;
-
   bool IsKeyDownMessage() const
   {
     return (mMsg.message == WM_KEYDOWN || mMsg.message == WM_SYSKEYDOWN);
   }
-  bool IsFollowedByCharMessage() const;
+  bool IsKeyUpMessage() const
+  {
+    return (mMsg.message == WM_KEYUP || mMsg.message == WM_SYSKEYUP);
+  }
+  bool IsPrintableCharMessage(const MSG& aMSG) const
+  {
+    return IsPrintableCharMessage(aMSG.message);
+  }
+  bool IsPrintableCharMessage(UINT aMessage) const
+  {
+    return (aMessage == WM_CHAR || aMessage == WM_SYSCHAR);
+  }
+  bool IsCharMessage(const MSG& aMSG) const
+  {
+    return IsCharMessage(aMSG.message);
+  }
+  bool IsCharMessage(UINT aMessage) const
+  {
+    return (IsPrintableCharMessage(aMessage) || IsDeadCharMessage(aMessage));
+  }
+  bool IsDeadCharMessage(const MSG& aMSG) const
+  {
+    return IsDeadCharMessage(aMSG.message);
+  }
+  bool IsDeadCharMessage(UINT aMessage) const
+  {
+    return (aMessage == WM_DEADCHAR || aMessage == WM_SYSDEADCHAR);
+  }
+  bool IsSysCharMessage(const MSG& aMSG) const
+  {
+    return IsSysCharMessage(aMSG.message);
+  }
+  bool IsSysCharMessage(UINT aMessage) const
+  {
+    return (aMessage == WM_SYSCHAR || aMessage == WM_SYSDEADCHAR);
+  }
   bool IsFollowedByDeadCharMessage() const;
-  MSG RemoveFollowingCharMessage() const;
+  bool GetFollowingCharMessage(MSG& aCharMsg) const;
 
   /**
    * Wraps MapVirtualKeyEx() with MAPVK_VSC_TO_VK.
@@ -387,10 +416,10 @@ private:
 
   /**
    * DispatchKeyPressEventForFollowingCharMessage() dispatches keypress event
-   * for following WM_*CHAR message.
+   * for following WM_*CHAR message which is removed and set to aCharMsg.
    * Returns true if the event is consumed.  Otherwise, false.
    */
-  bool DispatchKeyPressEventForFollowingCharMessage() const;
+  bool DispatchKeyPressEventForFollowingCharMessage(const MSG& aCharMsg) const;
 
   /**
    * Checkes whether the key event down message is handled without following

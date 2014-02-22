@@ -75,6 +75,7 @@ public class StringHelper {
     public static final String ROBOCOP_PICTURE_LINK_URL = "/robocop/robocop_picture_link.html";
     public static final String ROBOCOP_SEARCH_URL = "/robocop/robocop_search.html";
     public static final String ROBOCOP_TEXT_PAGE_URL = "/robocop/robocop_text_page.html";
+    public static final String ROBOCOP_ADOBE_FLASH_URL = "/robocop/robocop_adobe_flash.html";
 
     // Robocop page titles
     public static final String ROBOCOP_BIG_LINK_TITLE = "Big Link";
@@ -165,6 +166,7 @@ public class StringHelper {
 
     // Android 3.0+
     public static final String TOOLS_LABEL = "Tools";
+    public static final String PAGE_LABEL = "Page";
 
     // Android 2.3 and lower only
     public static final String MORE_LABEL = "More";

@@ -248,7 +248,7 @@ GetJSArrayFromJSValue(JS::Handle<JS::Value> aValue,
   // Build a temporary array to store this one item so the code below can
   // just loop.
   *_arrayLength = 1;
-  _array.set(JS_NewArrayObject(aCtx, 0, nullptr));
+  _array.set(JS_NewArrayObject(aCtx, 0));
   NS_ENSURE_TRUE(_array, NS_ERROR_OUT_OF_MEMORY);
 
   bool rc = JS_DefineElement(aCtx, _array, 0, aValue, nullptr, nullptr, 0);
@@ -293,7 +293,7 @@ GetJSValueAsURI(JSContext* aCtx,
  */
 already_AddRefed<nsIURI>
 GetURIFromJSObject(JSContext* aCtx,
-                   JSObject* aObject,
+                   JS::Handle<JSObject *> aObject,
                    const char* aProperty)
 {
   JS::Rooted<JS::Value> uriVal(aCtx);
@@ -350,7 +350,7 @@ GetJSValueAsString(JSContext* aCtx,
  */
 void
 GetStringFromJSObject(JSContext* aCtx,
-                      JSObject* aObject,
+                      JS::Handle<JSObject *> aObject,
                       const char* aProperty,
                       nsString& _string)
 {
@@ -380,7 +380,7 @@ GetStringFromJSObject(JSContext* aCtx,
 template <typename IntType>
 nsresult
 GetIntFromJSObject(JSContext* aCtx,
-                   JSObject* aObject,
+                   JS::Handle<JSObject *> aObject,
                    const char* aProperty,
                    IntType* _int)
 {

@@ -36,15 +36,11 @@ let CustomizationHandler = {
     let cmd = document.getElementById("cmd_CustomizeToolbars");
     cmd.setAttribute("disabled", "true");
 
-    let splitter = document.getElementById("urlbar-search-splitter");
-    if (splitter) {
-      splitter.parentNode.removeChild(splitter);
-    }
+    UpdateUrlbarSearchSplitterState();
 
     CombinedStopReload.uninit();
     CombinedBackForward.uninit();
     PlacesToolbarHelper.customizeStart();
-    BookmarkingUI.customizeStart();
     DownloadsButton.customizeStart();
 
     // The additional padding on the sides of the browser
@@ -58,7 +54,6 @@ let CustomizationHandler = {
 
   _customizationChange: function() {
     gHomeButton.updatePersonalToolbarStyle();
-    BookmarkingUI.customizeChange();
     PlacesToolbarHelper.customizeChange();
   },
 
@@ -87,7 +82,6 @@ let CustomizationHandler = {
     }
 
     PlacesToolbarHelper.customizeDone();
-    BookmarkingUI.customizeDone();
     DownloadsButton.customizeDone();
 
     // The url bar splitter state is dependent on whether stop/reload
@@ -100,7 +94,6 @@ let CustomizationHandler = {
     if (gURLBar) {
       URLBarSetURI();
       XULBrowserWindow.asyncUpdateUI();
-      BookmarkingUI.updateStarState();
     }
 
     // Re-enable parts of the UI we disabled during the dialog

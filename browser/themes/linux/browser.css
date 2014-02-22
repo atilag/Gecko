@@ -29,7 +29,14 @@
   -moz-appearance: none;
   background-color: transparent;
   border-top: none;
-  border-bottom: 1px solid ThreeDShadow;
+}
+
+#navigator-toolbox::after {
+  content: "";
+  display: -moz-box;
+  -moz-box-ordinal-group: 101; /* tabs toolbar is 100 */
+  height: 1px;
+  background-color: ThreeDShadow;
 }
 
 #navigator-toolbox > toolbar:not(:-moz-lwtheme):not(#toolbar-menubar):not(#TabsToolbar) {
@@ -115,6 +122,62 @@ toolbarbutton.bookmark-item[open="true"] {
 toolbarpaletteitem[place="palette"] > #personal-bookmarks > #bookmarks-toolbar-placeholder,
 #personal-bookmarks[cui-areatype="menu-panel"] > #bookmarks-toolbar-placeholder {
   list-style-image: url("chrome://browser/skin/places/bookmarksToolbar-menuPanel.png") !important;
+}
+
+/* ----- BOOKMARK STAR ANIMATION ----- */
+
+@keyframes animation-bookmarkAdded {
+  from { transform: rotate(0deg) translateX(-20px) rotate(0deg) scale(1); opacity: 0; }
+  60%  { transform: rotate(180deg) translateX(-20px) rotate(-180deg) scale(2.2); opacity: 1; }
+  80%  { opacity: 1; }
+  to   { transform: rotate(180deg) translateX(-20px) rotate(-180deg) scale(1); opacity: 0; }
+}
+
+@keyframes animation-bookmarkAddedToBookmarksBar {
+  from { transform: rotate(0deg) translateX(-12px) rotate(0deg) scale(1); opacity: 0; }
+  60%  { transform: rotate(180deg) translateX(-12px) rotate(-180deg) scale(2.2); opacity: 1; }
+  80%  { opacity: 1; }
+  to   { transform: rotate(180deg) translateX(-12px) rotate(-180deg) scale(1); opacity: 0; }
+}
+
+@keyframes animation-bookmarkPulse {
+  from { transform: scale(1); }
+  50%  { transform: scale(1.3); }
+  to   { transform: scale(1); }
+}
+
+#bookmarked-notification-container {
+  min-height: 1px;
+  min-width: 1px;
+  height: 1px;
+  margin-bottom: -1px;
+  z-index: 5;
+  position: relative;
+}
+
+#bookmarked-notification {
+  background-size: 16px;
+  background-position: center;
+  background-repeat: no-repeat;
+  width: 16px;
+  height: 16px;
+  opacity: 0;
+}
+
+#bookmarked-notification-anchor[notification="finish"] > #bookmarked-notification {
+  background-image: url("chrome://browser/skin/places/bookmarks-notification-finish.png");
+  animation: animation-bookmarkAdded 800ms;
+  animation-timing-function: ease ease ease linear;
+}
+
+#bookmarked-notification-anchor[notification="finish"][in-bookmarks-toolbar=true] > #bookmarked-notification {
+  animation: animation-bookmarkAddedToBookmarksBar 800ms;
+}
+
+#bookmarks-menu-button[notification="finish"] > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon {
+  animation: animation-bookmarkPulse 300ms;
+  animation-delay: 600ms;
+  animation-timing-function: ease-out;
 }
 
 /* Bookmark menus */
@@ -497,15 +560,40 @@ menuitem:not([type]):not(.menuitem-tooltip):not(.menuitem-iconic-tooltip) {
   -moz-appearance: none;
 }
 
+:-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1[open="true"],
+:-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1:hover:active {
+  padding: 3px;
+}
+
 :-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1 > .toolbarbutton-menubutton-button > .toolbarbutton-icon,
 :-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon,
 :-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1 > .toolbarbutton-icon {
   -moz-margin-end: 0;
-  padding: 3px 7px;
+  padding: 2px 6px;
   border: 1px solid transparent;
   border-radius: 2px;
   transition-property: background-color, border-color;
   transition-duration: 250ms;
+}
+
+:-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1:not(:-moz-any(@primaryToolbarButtons@)) > .toolbarbutton-icon,
+:-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1:not(:-moz-any(@primaryToolbarButtons@)) > .toolbarbutton-menubutton-button > .toolbarbutton-icon {
+  padding: 3px 7px;
+}
+
+/* Help SDK icons fit: */
+toolbarbutton[sdk-button="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
+  width: 16px;
+}
+
+:-moz-any(#TabsToolbar, #nav-bar) toolbarbutton[sdk-button="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
+  /* XXXgijs box models strike again: this is 16px + 2 * 7px padding + 2 * 1px border (from the rules above) */
+  width: 32px;
+}
+
+#nav-bar #PanelUI-menu-button {
+  -moz-padding-start: 7px;
+  -moz-padding-end: 5px;
 }
 
 :-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1 > .toolbarbutton-menubutton-button:not([disabled]):hover > .toolbarbutton-icon,
@@ -613,9 +701,13 @@ menuitem:not([type]):not(.menuitem-tooltip):not(.menuitem-iconic-tooltip) {
 #sync-button {
   -moz-image-region: rect(0px 144px 24px 120px);
 }
-#sync-button[status="active"] {
-  list-style-image: url("chrome://browser/skin/sync-24-throbber.png");
-  -moz-image-region: rect(0px 24px 24px 0px);
+#sync-button[cui-areatype="toolbar"][status="active"] {
+  list-style-image: url("chrome://browser/skin/syncProgress-toolbar.png");
+  -moz-image-region: rect(0px 18px 18px 0px);
+}
+#sync-button[cui-areatype="menu-panel"][status="active"] {
+  list-style-image: url("chrome://browser/skin/syncProgress-menuPanel.png");
+  -moz-image-region: rect(0px 32px 32px 0px);
 }
 
 #feed-button {
@@ -691,7 +783,6 @@ menuitem:not([type]):not(.menuitem-tooltip):not(.menuitem-iconic-tooltip) {
 
 .urlbar-input-box {
   -moz-margin-start: 0;
-  min-width: 4em;
 }
 
 .urlbar-history-dropmarker {
@@ -1378,6 +1469,11 @@ richlistitem[type~="action"][actiontype="switchtab"] > .ac-url-box > .ac-action-
   margin-bottom: -16px;
 }
 
+#nav-bar .toolbarbutton-1 > menupopup[side="top"].cui-widget-panel,
+#nav-bar .toolbarbutton-1 > menupopup[side="bottom"].cui-widget-panel {
+  margin-top: -4px;
+}
+
 /* Bookmarking panel */
 #editBookmarkPanelStarIcon {
   list-style-image: url("chrome://browser/skin/places/starred48.png");
@@ -1474,10 +1570,6 @@ richlistitem[type~="action"][actiontype="switchtab"] > .ac-url-box > .ac-action-
 #toolbar-menubar:not([autohide="true"]):not(:-moz-lwtheme):-moz-system-metric(menubar-drag),
 #TabsToolbar:not(:-moz-lwtheme):-moz-system-metric(menubar-drag) {
   -moz-binding: url("chrome://browser/content/customizableui/toolbar.xml#toolbar-drag");
-}
-
-#TabsToolbar:not(:-moz-lwtheme) > #tabbrowser-tabs > .tabbrowser-tab:not([selected]) {
-  color: -moz-menubartext;
 }
 
 .tabbrowser-tab:focus > .tab-stack > .tab-content > .tab-label {
@@ -1682,10 +1774,6 @@ toolbarbutton.chevron > .toolbarbutton-icon {
 
 /* Sync Panel */
 
-.sync-panel {
-  padding: 10px;
-}
-
 .sync-panel-icon {
   width: 32px;
   background: url("chrome://browser/content/abouthome/sync.png") top left no-repeat;
@@ -1700,7 +1788,8 @@ toolbarbutton.chevron > .toolbarbutton-icon {
   margin-top: 1em;
 }
 
-#sync-error-panel-title {
+#sync-error-panel-title,
+#sync-start-panel-title {
   font-weight: bold;
 }
 
@@ -1833,8 +1922,7 @@ toolbar[iconsize="small"] .toolbarbutton-badge-container {
 #servicesInstall-notification-icon {
   list-style-image: url(chrome://browser/skin/social/services-16.png);
 }
-#social-undoactivation-button,
-#servicesInstall-learnmore-link {
+#social-undoactivation-button {
   -moz-margin-start: 0; /* override default label margin to match description margin */
 }
 
@@ -1921,10 +2009,6 @@ chatbox {
   background-attachment: fixed;
 }
 
-#main-window:-moz-any([customize-entering],[customize-entered]) #tab-view-deck {
-  padding: 0 2em 2em;
-}
-
 #main-window[customize-entered] #navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar),
 #main-window[customize-entered] #customization-container {
   border: 3px solid hsla(0,0%,0%,.1);
@@ -1947,6 +2031,11 @@ chatbox {
   border-left: 3px solid transparent;
 }
 
+#main-window[customizing] #navigator-toolbox::after {
+  margin-left: 2em;
+  margin-right: 2em;
+}
+
 /* End customization mode */
 
 
@@ -1958,3 +2047,20 @@ chatbox {
 }
 
 %include ../shared/UITour.inc.css
+
+#UITourTooltipDescription {
+  font-size: 1.05rem;
+}
+
+#UITourTooltipClose {
+  -moz-appearance: toolbarbutton;
+  list-style-image: url("moz-icon://stock/gtk-close?size=menu");
+}
+
+#UITourTooltipClose > .toolbarbutton-icon {
+  margin: -4px;
+}
+
+#UITourTooltipButtons {
+  margin-bottom: 0;
+}

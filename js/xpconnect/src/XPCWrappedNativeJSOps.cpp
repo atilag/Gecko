@@ -155,9 +155,12 @@ XPC_WN_DoubleWrappedGetter(JSContext *cx, unsigned argc, jsval *vp)
         return true;
     }
 
-    // It is a double wrapped object. This should never appear in content these
-    // days, but let's be safe here.
-    MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+    // It is a double wrapped object. This should really never appear in
+    // content these days, but addons still do it - see bug 965921.
+    if (MOZ_UNLIKELY(!nsContentUtils::IsCallerChrome())) {
+        JS_ReportError(cx, "Attempt to use .wrappedJSObject in untrusted code");
+        return false;
+    }
     args.rval().setObject(*realObject);
     return JS_WrapValue(cx, args.rval());
 }
@@ -674,6 +677,7 @@ const XPCWrappedNativeJSClass XPC_WN_NoHelper_JSClass = {
     nullptr,                         // construct
     nullptr,                         // hasInstance
     XPC_WN_NoHelper_Trace,          // trace
+    JS_NULL_CLASS_SPEC,
 
     // ClassExtension
     {
@@ -1168,6 +1172,20 @@ XPCNativeScriptableShared::PopulateJSClass()
     // We have to figure out resolve strategy at call time
     mJSClass.base.resolve = (JSResolveOp) XPC_WN_Helper_NewResolve;
 
+    // We need to respect content-defined toString() hooks on Window objects.
+    // In particular, js::DefaultValue checks for a convert stub, and the one
+    // we would install below ignores anything implemented in JS.
+    //
+    // We've always had this behavior for most XPCWrappedNative-implemented
+    // objects. However, Window was special, because the outer-window proxy
+    // had a null convert hook, which means that we'd end up with the default
+    // JS-engine behavior (which respects toString() overrides). We've fixed
+    // the convert hook on the outer-window proxy to invoke the defaultValue
+    // hook on the proxy, which in this case invokes js::DefaultValue on the
+    // target. So now we need to special-case this for Window to maintain
+    // consistent behavior. This can go away once Window is on WebIDL bindings.
+    //
+    // Note that WantOuterObject() is true if and only if this is a Window object.
     if (mFlags.WantConvert())
         mJSClass.base.convert = XPC_WN_Helper_Convert;
     else if (mFlags.WantOuterObject())
@@ -1413,6 +1431,7 @@ const js::Class XPC_WN_ModsAllowed_WithCall_Proto_JSClass = {
     nullptr,                         // hasInstance;
     XPC_WN_Shared_Proto_Trace,      // trace;
 
+    JS_NULL_CLASS_SPEC,
     JS_NULL_CLASS_EXT,
     XPC_WN_WithCall_ObjectOps
 };
@@ -1437,6 +1456,7 @@ const js::Class XPC_WN_ModsAllowed_NoCall_Proto_JSClass = {
     nullptr,                         // hasInstance;
     XPC_WN_Shared_Proto_Trace,      // trace;
 
+    JS_NULL_CLASS_SPEC,
     JS_NULL_CLASS_EXT,
     XPC_WN_NoCall_ObjectOps
 };
@@ -1523,6 +1543,7 @@ const js::Class XPC_WN_NoMods_WithCall_Proto_JSClass = {
     nullptr,                         // hasInstance;
     XPC_WN_Shared_Proto_Trace,      // trace;
 
+    JS_NULL_CLASS_SPEC,
     JS_NULL_CLASS_EXT,
     XPC_WN_WithCall_ObjectOps
 };
@@ -1547,6 +1568,7 @@ const js::Class XPC_WN_NoMods_NoCall_Proto_JSClass = {
     nullptr,                         // hasInstance;
     XPC_WN_Shared_Proto_Trace,      // trace;
 
+    JS_NULL_CLASS_SPEC,
     JS_NULL_CLASS_EXT,
     XPC_WN_NoCall_ObjectOps
 };

@@ -95,8 +95,11 @@
 #include "nsIPrintOptions.h"
 #include "nsISimpleEnumerator.h"
 
+#ifdef DEBUG
 // PrintOptions is now implemented by PrintSettingsService
-static const char sPrintOptionsContractID[]         = "@mozilla.org/gfx/printsettings-service;1";
+static const char sPrintOptionsContractID[] =
+  "@mozilla.org/gfx/printsettings-service;1";
+#endif // DEBUG
 
 #include "nsIPluginDocument.h"
 
@@ -112,6 +115,7 @@ static const char sPrintOptionsContractID[]         = "@mozilla.org/gfx/printset
 #include "nsISHistoryInternal.h"
 #include "nsIWebNavigation.h"
 #include "nsEventDispatcher.h"
+#include "nsXMLHttpRequest.h"
 
 //paint forcing
 #include <stdio.h>
@@ -455,14 +459,11 @@ private:
 //------------------------------------------------------------------
 
 //------------------------------------------------------------------
-nsresult
-NS_NewContentViewer(nsIContentViewer** aResult)
+already_AddRefed<nsIContentViewer>
+NS_NewContentViewer()
 {
-  *aResult = new nsDocumentViewer();
-
-  NS_ADDREF(*aResult);
-
-  return NS_OK;
+  nsRefPtr<nsDocumentViewer> viewer = new nsDocumentViewer();
+  return viewer.forget();
 }
 
 void nsDocumentViewer::PrepareToStartLoad()
@@ -551,20 +552,18 @@ nsDocumentViewer::~nsDocumentViewer()
  * This method is also called when an out of band document.write() happens.
  * In that case, the document passed in is the same as the previous document.
  */
-NS_IMETHODIMP
-nsDocumentViewer::LoadStart(nsISupports *aDoc)
+/* virtual */ void
+nsDocumentViewer::LoadStart(nsIDocument* aDocument)
 {
-  nsresult rv = NS_OK;
+  MOZ_ASSERT(aDocument);
+
   if (!mDocument) {
-    mDocument = do_QueryInterface(aDoc, &rv);
-  }
-  else if (mDocument == aDoc) {
+    mDocument = aDocument;
+  } else if (mDocument == aDocument) {
     // Reset the document viewer's state back to what it was
     // when the document load started.
     PrepareToStartLoad();
   }
-
-  return rv;
 }
 
 nsresult
@@ -1073,6 +1072,8 @@ nsDocumentViewer::PermitUnloadInternal(bool aCallerClosesWindow,
                                        bool *aShouldPrompt,
                                        bool *aPermitUnload)
 {
+  AutoDontWarnAboutSyncXHR disableSyncXHRWarning;
+
   *aPermitUnload = true;
 
   if (!mDocument
@@ -1278,6 +1279,8 @@ nsDocumentViewer::ResetCloseWindow()
 NS_IMETHODIMP
 nsDocumentViewer::PageHide(bool aIsUnload)
 {
+  AutoDontWarnAboutSyncXHR disableSyncXHRWarning;
+
   mHidden = true;
 
   if (!mDocument) {
@@ -1498,8 +1501,7 @@ DetachContainerRecurse(nsIDocShell *aShell)
     nsRefPtr<nsPresContext> pc;
     viewer->GetPresContext(getter_AddRefs(pc));
     if (pc) {
-      pc->SetContainer(nullptr);
-      pc->SetLinkHandler(nullptr);
+      pc->Detach();
     }
     nsCOMPtr<nsIPresShell> presShell;
     viewer->GetPresShell(getter_AddRefs(presShell));
@@ -1622,8 +1624,7 @@ nsDocumentViewer::Destroy()
       mDocument->SetContainer(nullptr);
     }
     if (mPresContext) {
-      mPresContext->SetLinkHandler(nullptr);
-      mPresContext->SetContainer(nullptr);
+      mPresContext->Detach();
     }
     if (mPresShell) {
       mPresShell->SetForwardingContainer(mContainer);
@@ -3540,15 +3541,11 @@ NS_IMETHODIMP
 nsDocumentViewer::Print(nsIPrintSettings*       aPrintSettings,
                           nsIWebProgressListener* aWebProgressListener)
 {
-
-#ifdef MOZ_XUL
-  // Temporary code for Bug 136185 / Bug 240490
+  // Printing XUL documents is not supported.
   nsCOMPtr<nsIXULDocument> xulDoc(do_QueryInterface(mDocument));
   if (xulDoc) {
-    nsPrintEngine::ShowPrintErrorDialog(NS_ERROR_GFX_PRINTER_NO_XUL);
     return NS_ERROR_FAILURE;
   }
-#endif
 
   if (!mContainer) {
     PR_PL(("Container was destroyed yet we are still trying to use it!"));
@@ -3655,15 +3652,12 @@ nsDocumentViewer::PrintPreview(nsIPrintSettings* aPrintSettings,
     return NS_ERROR_FAILURE;
   }
 
-#ifdef MOZ_XUL
-  // Temporary code for Bug 136185 / Bug 240490
+  // Printing XUL documents is not supported.
   nsCOMPtr<nsIXULDocument> xulDoc(do_QueryInterface(mDocument));
   if (xulDoc) {
     nsPrintEngine::CloseProgressDialog(aWebProgressListener);
-    nsPrintEngine::ShowPrintErrorDialog(NS_ERROR_GFX_PRINTER_NO_XUL, false);
     return NS_ERROR_FAILURE;
   }
-#endif
 
   nsCOMPtr<nsIDocShell> docShell(mContainer);
   if (!docShell || !mDeviceContext) {
@@ -3701,11 +3695,13 @@ nsDocumentViewer::PrintPreview(nsIPrintSettings* aPrintSettings,
   if (mPrintEngine->HasPrintCallbackCanvas()) {
     mBeforeAndAfterPrint = beforeAndAfterPrint;
   }
-  dom::Element* root = mDocument->GetRootElement();
+  dom::Element* root = doc->GetRootElement();
   if (root && root->HasAttr(kNameSpaceID_None, nsGkAtoms::mozdisallowselectionprint)) {
+    PR_PL(("PrintPreview: found mozdisallowselectionprint"));
     mPrintEngine->SetDisallowSelectionPrint(true);
   }
   if (root && root->HasAttr(kNameSpaceID_None, nsGkAtoms::moznomarginboxes)) {
+    PR_PL(("PrintPreview: found moznomarginboxes"));
     mPrintEngine->SetNoMarginBoxes(true);
   }
   rv = mPrintEngine->PrintPreview(aPrintSettings, aChildDOMWin, aWebProgressListener);
@@ -4344,8 +4340,7 @@ nsDocumentViewer::DestroyPresShell()
 void
 nsDocumentViewer::DestroyPresContext()
 {
-  mPresContext->SetContainer(nullptr);
-  mPresContext->SetLinkHandler(nullptr);
+  mPresContext->Detach();
   mPresContext = nullptr;
 }
 

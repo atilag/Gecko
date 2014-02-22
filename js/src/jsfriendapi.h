@@ -262,6 +262,7 @@ namespace js {
         js::proxy_HasInstance,   /* hasInstance */                                      \
         constructOp,             /* construct   */                                      \
         js::proxy_Trace,         /* trace       */                                      \
+        JS_NULL_CLASS_SPEC,                                                             \
         ext,                                                                            \
         {                                                                               \
             js::proxy_LookupGeneric,                                                    \
@@ -810,14 +811,6 @@ JS_FRIEND_API(bool)
 IsObjectInContextCompartment(JSObject *obj, const JSContext *cx);
 
 /*
- * ErrorFromException takes a raw Value so that it's possible to call it during
- * GC/CC/whatever, when it may not be possible to get a JSContext to create a
- * Rooted.  It promises to never ever GC.
- */
-JS_FRIEND_API(JSErrorReport*)
-ErrorFromException(JS::Value val);
-
-/*
  * NB: these flag bits are encoded into the bytecode stream in the immediate
  * operand of JSOP_ITER, so don't change them without advancing vm/Xdr.h's
  * XDR_BYTECODE_VERSION.
@@ -1111,6 +1104,16 @@ typedef enum JSErrNum {
 extern JS_FRIEND_API(const JSErrorFormatString *)
 js_GetErrorMessage(void *userRef, const char *locale, const unsigned errorNumber);
 
+namespace js {
+
+// Creates a string of the form |ErrorType: ErrorMessage| for a JSErrorReport,
+// which generally matches the toString() behavior of an ErrorObject.
+extern JS_FRIEND_API(JSString *)
+ErrorReportToString(JSContext *cx, JSErrorReport *reportp);
+
+} /* namespace js */
+
+
 /* Implemented in jsclone.cpp. */
 
 extern JS_FRIEND_API(uint64_t)
@@ -1345,18 +1348,6 @@ extern JS_FRIEND_API(uint32_t)
 JS_GetArrayBufferByteLength(JSObject *obj);
 
 /*
- * Return a pointer to an array buffer's data. The buffer is still owned by the
- * array buffer object, and should not be modified on another thread. The
- * returned pointer is stable across GCs.
- *
- * |obj| must have passed a JS_IsArrayBufferObject test, or somehow be known
- * that it would pass such a test: it is an ArrayBuffer or a wrapper of an
- * ArrayBuffer, and the unwrapping will succeed.
- */
-extern JS_FRIEND_API(uint8_t *)
-JS_GetArrayBufferData(JSObject *obj);
-
-/*
  * Return the number of elements in a typed array.
  *
  * |obj| must have passed a JS_IsTypedArrayObject/JS_Is*Array test, or somehow
@@ -1404,13 +1395,17 @@ JS_GetArrayBufferViewByteLength(JSObject *obj);
 /*
  * Return a pointer to the start of the data referenced by a typed array. The
  * data is still owned by the typed array, and should not be modified on
- * another thread.
+ * another thread. Furthermore, the pointer can become invalid on GC (if the
+ * data is small and fits inside the array's GC header), so callers must take
+ * care not to hold on across anything that could GC.
  *
  * |obj| must have passed a JS_Is*Array test, or somehow be known that it would
  * pass such a test: it is a typed array or a wrapper of a typed array, and the
  * unwrapping will succeed.
  */
 
+extern JS_FRIEND_API(uint8_t *)
+JS_GetArrayBufferData(JSObject *obj);
 extern JS_FRIEND_API(int8_t *)
 JS_GetInt8ArrayData(JSObject *obj);
 extern JS_FRIEND_API(uint8_t *)
@@ -1429,6 +1424,13 @@ extern JS_FRIEND_API(float *)
 JS_GetFloat32ArrayData(JSObject *obj);
 extern JS_FRIEND_API(double *)
 JS_GetFloat64ArrayData(JSObject *obj);
+
+/*
+ * Stable versions of the above functions where the buffer remains valid as long
+ * as the object is live.
+ */
+extern JS_FRIEND_API(uint8_t *)
+JS_GetStableArrayBufferData(JSContext *cx, JSObject *obj);
 
 /*
  * Same as above, but for any kind of ArrayBufferView. Prefer the type-specific
@@ -1819,10 +1821,10 @@ inline int CheckIsParallelNative(JSParallelNative parallelNative);
         {{JS_CAST_PARALLEL_NATIVE_TO(parallelOp, JSJitGetterOp)},0,0,JSJitInfo::ParallelNative,JSJitInfo::AliasEverything,JSVAL_TYPE_MISSING,false,false,false,false,0}
 
 #define JS_JITINFO_NATIVE_PARALLEL_THREADSAFE(infoName, wrapperName, serialOp) \
-    bool wrapperName##_ParallelNativeThreadSafeWrapper(js::ForkJoinSlice *slice, unsigned argc, \
+    bool wrapperName##_ParallelNativeThreadSafeWrapper(js::ForkJoinContext *cx, unsigned argc, \
                                                        JS::Value *vp)   \
     {                                                                   \
-        return JSParallelNativeThreadSafeWrapper<serialOp>(slice, argc, vp); \
+        return JSParallelNativeThreadSafeWrapper<serialOp>(cx, argc, vp); \
     }                                                                   \
     JS_JITINFO_NATIVE_PARALLEL(infoName, wrapperName##_ParallelNativeThreadSafeWrapper)
 
@@ -1987,13 +1989,6 @@ class JS_FRIEND_API(AutoCTypesActivityCallback) {
         }
     }
 };
-
-#ifdef JS_DEBUG
-extern JS_FRIEND_API(void)
-assertEnteredPolicy(JSContext *cx, JSObject *obj, jsid id);
-#else
-inline void assertEnteredPolicy(JSContext *cx, JSObject *obj, jsid id) {};
-#endif
 
 typedef bool
 (* ObjectMetadataCallback)(JSContext *cx, JSObject **pmetadata);

@@ -31,6 +31,7 @@
 #include "nsWeakReference.h"
 #include "nsICryptoHash.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/WeakPtr.h"
 #include "nsTHashtable.h"
 #include "nsHashKeys.h"
 
@@ -185,8 +186,11 @@ private:
 };
 
 class nsOfflineCacheUpdateOwner
+  : public mozilla::SupportsWeakPtr<nsOfflineCacheUpdateOwner>
 {
 public:
+    MOZ_DECLARE_REFCOUNTED_TYPENAME(nsOfflineCacheUpdateOwner)
+    virtual ~nsOfflineCacheUpdateOwner() {}
     virtual nsresult UpdateFinished(nsOfflineCacheUpdate *aUpdate) = 0;
 };
 
@@ -196,6 +200,7 @@ class nsOfflineCacheUpdate MOZ_FINAL : public nsIOfflineCacheUpdate
                                      , public nsOfflineCacheUpdateOwner
 {
 public:
+    MOZ_DECLARE_REFCOUNTED_TYPENAME(nsOfflineCacheUpdate)
     NS_DECL_ISUPPORTS
     NS_DECL_NSIOFFLINECACHEUPDATE
     NS_DECL_NSIOFFLINECACHEUPDATEOBSERVER
@@ -261,7 +266,7 @@ private:
         STATE_FINISHED
     } mState;
 
-    nsOfflineCacheUpdateOwner *mOwner;
+    mozilla::WeakPtr<nsOfflineCacheUpdateOwner> mOwner;
 
     bool mAddedItems;
     bool mPartialUpdate;

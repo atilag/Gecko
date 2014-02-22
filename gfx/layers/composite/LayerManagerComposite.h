@@ -61,6 +61,7 @@ class RefLayerComposite;
 class SurfaceDescriptor;
 class ThebesLayerComposite;
 class TiledLayerComposer;
+struct FPSState;
 
 class LayerManagerComposite : public LayerManager
 {
@@ -224,6 +225,8 @@ public:
   void SetDebugOverlayWantsNextFrame(bool aVal)
   { mDebugOverlayWantsNextFrame = aVal; }
 
+  void NotifyShadowTreeTransaction();
+
 private:
   /** Region we're clipping our current drawing to. */
   nsIntRegion mClippingRegion;
@@ -256,13 +259,14 @@ private:
   void WorldTransformRect(nsIntRect& aRect);
 
   RefPtr<Compositor> mCompositor;
+  nsAutoPtr<LayerProperties> mClonedLayerTreeProperties;
 
   gfx::Matrix mWorldMatrix;
+  nsIntRegion mInvalidRegion;
+  nsAutoPtr<FPSState> mFPS;
 
   bool mInTransaction;
   bool mIsCompositorReady;
-  nsIntRegion mInvalidRegion;
-  nsAutoPtr<LayerProperties> mClonedLayerTreeProperties;
   bool mDebugOverlayWantsNextFrame;
 };
 
@@ -305,9 +309,11 @@ public:
 
   virtual void RenderLayer(const nsIntRect& aClipRect) = 0;
 
-  virtual void SetCompositableHost(CompositableHost* aHost)
+  virtual bool SetCompositableHost(CompositableHost*)
   {
-    MOZ_ASSERT(false, "called SetCompositableHost for a layer without a compositable host");
+    // We must handle this gracefully, see bug 967824
+    NS_WARNING("called SetCompositableHost for a layer type not accepting a compositable");
+    return false;
   }
   virtual CompositableHost* GetCompositableHost() = 0;
 

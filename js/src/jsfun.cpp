@@ -118,8 +118,8 @@ fun_getProperty(JSContext *cx, HandleObject obj_, HandleId id, MutableHandleValu
 
         /* Callsite clones should never escape to script. */
         JSObject &maybeClone = iter.calleev().toObject();
-        if (maybeClone.is<JSFunction>() && maybeClone.as<JSFunction>().nonLazyScript()->isCallsiteClone())
-            vp.setObject(*maybeClone.as<JSFunction>().nonLazyScript()->originalFunction());
+        if (maybeClone.is<JSFunction>())
+            vp.setObject(*maybeClone.as<JSFunction>().originalFunction());
         else
             vp.set(iter.calleev());
 
@@ -180,7 +180,7 @@ fun_enumerate(JSContext *cx, HandleObject obj)
 
     for (unsigned i = 0; i < ArrayLength(poisonPillProps); i++) {
         const uint16_t offset = poisonPillProps[i];
-        id = NameToId(AtomStateOffsetToName(cx->runtime()->atomState, offset));
+        id = NameToId(AtomStateOffsetToName(cx->names(), offset));
         if (!JSObject::hasProperty(cx, obj, id, &found, 0))
             return false;
     }
@@ -208,9 +208,10 @@ ResolveInterpretedFunctionPrototype(JSContext *cx, HandleObject obj)
     // that case, per the 15 July 2013 ES6 draft, section 15.19.3, its parent is
     // the GeneratorObjectPrototype singleton.
     bool isStarGenerator = obj->as<JSFunction>().isStarGenerator();
+    Rooted<GlobalObject*> global(cx, &obj->global());
     JSObject *objProto;
     if (isStarGenerator)
-        objProto = obj->global().getOrCreateStarGeneratorObjectPrototype(cx);
+        objProto = GlobalObject::getOrCreateStarGeneratorObjectPrototype(cx, global);
     else
         objProto = obj->global().getOrCreateObjectPrototype(cx);
     if (!objProto)
@@ -309,7 +310,7 @@ js::fun_resolve(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
         }
 
         if (!DefineNativeProperty(cx, fun, id, v, JS_PropertyStub, JS_StrictPropertyStub,
-                                  JSPROP_PERMANENT | JSPROP_READONLY, 0, 0)) {
+                                  JSPROP_PERMANENT | JSPROP_READONLY, 0)) {
             return false;
         }
         objp.set(fun);
@@ -319,7 +320,7 @@ js::fun_resolve(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
     for (unsigned i = 0; i < ArrayLength(poisonPillProps); i++) {
         const uint16_t offset = poisonPillProps[i];
 
-        if (JSID_IS_ATOM(id, AtomStateOffsetToName(cx->runtime()->atomState, offset))) {
+        if (JSID_IS_ATOM(id, AtomStateOffsetToName(cx->names(), offset))) {
             JS_ASSERT(!IsInternalFunctionObject(fun));
 
             PropertyOp getter;
@@ -338,11 +339,8 @@ js::fun_resolve(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
                 setter = JS_StrictPropertyStub;
             }
 
-            RootedValue value(cx, UndefinedValue());
-            if (!DefineNativeProperty(cx, fun, id, value, getter, setter,
-                                      attrs, 0, 0)) {
+            if (!DefineNativeProperty(cx, fun, id, UndefinedHandleValue, getter, setter, attrs, 0))
                 return false;
-            }
             objp.set(fun);
             return true;
         }
@@ -357,8 +355,10 @@ js::XDRInterpretedFunction(XDRState<mode> *xdr, HandleObject enclosingScope, Han
                            MutableHandleObject objp)
 {
     enum FirstWordFlag {
-        HasAtom = 0x1,
-        IsStarGenerator = 0x2
+        HasAtom             = 0x1,
+        IsStarGenerator     = 0x2,
+        IsLazy              = 0x4,
+        HasSingletonType    = 0x8
     };
 
     /* NB: Keep this in sync with CloneFunctionAndScript. */
@@ -369,6 +369,8 @@ js::XDRInterpretedFunction(XDRState<mode> *xdr, HandleObject enclosingScope, Han
     JSContext *cx = xdr->cx();
     RootedFunction fun(cx);
     RootedScript script(cx);
+    Rooted<LazyScript *> lazy(cx);
+
     if (mode == XDR_ENCODE) {
         fun = &objp->as<JSFunction>();
         if (!fun->isInterpreted()) {
@@ -379,15 +381,39 @@ js::XDRInterpretedFunction(XDRState<mode> *xdr, HandleObject enclosingScope, Han
             }
             return false;
         }
+
         if (fun->atom() || fun->hasGuessedAtom())
             firstword |= HasAtom;
+
         if (fun->isStarGenerator())
             firstword |= IsStarGenerator;
-        script = fun->getOrCreateScript(cx);
-        if (!script)
-            return false;
+
+        if (fun->isInterpretedLazy()) {
+            // This can only happen for re-lazified cloned functions, so this
+            // does not apply to any JSFunction produced by the parser, only to
+            // JSFunction created by the runtime.
+            JS_ASSERT(!fun->lazyScript()->maybeScript());
+
+            // Encode a lazy script.
+            firstword |= IsLazy;
+            lazy = fun->lazyScript();
+        } else {
+            // Encode the script.
+            script = fun->nonLazyScript();
+        }
+
+        if (fun->hasSingletonType())
+            firstword |= HasSingletonType;
+
         atom = fun->displayAtom();
         flagsword = (fun->nargs() << 16) | fun->flags();
+
+        // The environment of any function which is not reused will always be
+        // null, it is later defined when a function is cloned or reused to
+        // mirror the scope chain.
+        JS_ASSERT_IF(fun->hasSingletonType() &&
+                     !((lazy && lazy->hasBeenCloned()) || (script && script->hasBeenCloned())),
+                     fun->environment() == nullptr);
     }
 
     if (!xdr->codeUint32(&firstword))
@@ -396,12 +422,13 @@ js::XDRInterpretedFunction(XDRState<mode> *xdr, HandleObject enclosingScope, Han
     if (mode == XDR_DECODE) {
         JSObject *proto = nullptr;
         if (firstword & IsStarGenerator) {
-            proto = cx->global()->getOrCreateStarGeneratorFunctionPrototype(cx);
+            proto = GlobalObject::getOrCreateStarGeneratorFunctionPrototype(cx, cx->global());
             if (!proto)
                 return false;
         }
+
         fun = NewFunctionWithProto(cx, NullPtr(), nullptr, 0, JSFunction::INTERPRETED,
-                                   NullPtr(), NullPtr(), proto,
+                                   /* parent = */ NullPtr(), NullPtr(), proto,
                                    JSFunction::FinalizeKind, TenuredObject);
         if (!fun)
             return false;
@@ -414,18 +441,29 @@ js::XDRInterpretedFunction(XDRState<mode> *xdr, HandleObject enclosingScope, Han
     if (!xdr->codeUint32(&flagsword))
         return false;
 
-    if (!XDRScript(xdr, enclosingScope, enclosingScript, fun, &script))
-        return false;
+    if (firstword & IsLazy) {
+        if (!XDRLazyScript(xdr, enclosingScope, enclosingScript, fun, &lazy))
+            return false;
+    } else {
+        if (!XDRScript(xdr, enclosingScope, enclosingScript, fun, &script))
+            return false;
+    }
 
     if (mode == XDR_DECODE) {
         fun->setArgCount(flagsword >> 16);
         fun->setFlags(uint16_t(flagsword));
         fun->initAtom(atom);
-        fun->initScript(script);
-        script->setFunction(fun);
-        if (!JSFunction::setTypeForScriptedFunction(cx, fun))
+        if (firstword & IsLazy) {
+            fun->initLazyScript(lazy);
+        } else {
+            fun->initScript(script);
+            script->setFunction(fun);
+            JS_ASSERT(fun->nargs() == script->bindings.numArgs());
+        }
+
+        bool singleton = firstword & HasSingletonType;
+        if (!JSFunction::setTypeForScriptedFunction(cx, fun, singleton))
             return false;
-        JS_ASSERT(fun->nargs() == fun->nonLazyScript()->bindings.numArgs());
         objp.set(fun);
     }
 
@@ -444,7 +482,7 @@ js::CloneFunctionAndScript(JSContext *cx, HandleObject enclosingScope, HandleFun
     /* NB: Keep this in sync with XDRInterpretedFunction. */
     JSObject *cloneProto = nullptr;
     if (srcFun->isStarGenerator()) {
-        cloneProto = cx->global()->getOrCreateStarGeneratorFunctionPrototype(cx);
+        cloneProto = GlobalObject::getOrCreateStarGeneratorFunctionPrototype(cx, cx->global());
         if (!cloneProto)
             return nullptr;
     }
@@ -581,7 +619,7 @@ const Class* const js::FunctionClassPtr = &JSFunction::class_;
 
 /* Find the body of a function (not including braces). */
 static bool
-FindBody(JSContext *cx, HandleFunction fun, StableCharPtr chars, size_t length,
+FindBody(JSContext *cx, HandleFunction fun, ConstTwoByteChars chars, size_t length,
          size_t *bodyStart, size_t *bodyEnd)
 {
     // We don't need principals, since those are only used for error reporting.
@@ -624,7 +662,7 @@ FindBody(JSContext *cx, HandleFunction fun, StableCharPtr chars, size_t length,
     *bodyStart = ts.currentToken().pos.begin;
     if (braced)
         *bodyStart += 1;
-    StableCharPtr end(chars.get() + length, chars.get(), length);
+    ConstTwoByteChars end(chars.get() + length, chars.get(), length);
     if (end[-1] == '}') {
         end--;
     } else {
@@ -692,11 +730,11 @@ js::FunctionToString(JSContext *cx, HandleFunction fun, bool bodyOnly, bool lamb
         RootedString srcStr(cx, script->sourceData(cx));
         if (!srcStr)
             return nullptr;
-        Rooted<JSStableString *> src(cx, srcStr->ensureStable(cx));
+        Rooted<JSFlatString *> src(cx, srcStr->ensureFlat(cx));
         if (!src)
             return nullptr;
 
-        StableCharPtr chars = src->chars();
+        ConstTwoByteChars chars(src->chars(), src->length());
         bool exprBody = fun->isExprClosure();
 
         // The source data for functions created by calling the Function
@@ -1150,7 +1188,6 @@ JSFunction::createScriptForLazilyInterpretedFunction(JSContext *cx, HandleFuncti
         RootedScript script(cx, lazy->maybeScript());
 
         if (script) {
-            AutoLockForCompilation lock(cx);
             fun->setUnlazifiedScript(script);
             // Remember the lazy script on the compiled script, so it can be
             // stored on the function again in case of re-lazification.
@@ -1167,7 +1204,6 @@ JSFunction::createScriptForLazilyInterpretedFunction(JSContext *cx, HandleFuncti
             if (!script)
                 return false;
 
-            AutoLockForCompilation lock(cx);
             fun->setUnlazifiedScript(script);
             return true;
         }
@@ -1196,10 +1232,7 @@ JSFunction::createScriptForLazilyInterpretedFunction(JSContext *cx, HandleFuncti
             fun->initAtom(script->functionNonDelazifying()->displayAtom());
             clonedScript->setFunction(fun);
 
-            {
-                AutoLockForCompilation lock(cx);
-                fun->setUnlazifiedScript(clonedScript);
-            }
+            fun->setUnlazifiedScript(clonedScript);
 
             CallNewScriptHook(cx, clonedScript, fun);
 
@@ -1477,18 +1510,29 @@ FunctionConstructor(JSContext *cx, unsigned argc, Value *vp, GeneratorKind gener
     bool isStarGenerator = generatorKind == StarGenerator;
     JS_ASSERT(generatorKind != LegacyGenerator);
 
+    JSScript *script = nullptr;
     const char *filename;
     unsigned lineno;
     JSPrincipals *originPrincipals;
-    CurrentScriptFileLineOrigin(cx, &filename, &lineno, &originPrincipals);
+    uint32_t pcOffset;
+    CurrentScriptFileLineOrigin(cx, &script, &filename, &lineno, &pcOffset, &originPrincipals);
     JSPrincipals *principals = PrincipalsForCompiledCode(args, cx);
+
+    const char *introductionType = "Function";
+    if (generatorKind != NotGenerator)
+        introductionType = "GeneratorFunction";
+
+    const char *introducerFilename = filename;
+    if (script && script->scriptSource()->introducerFilename())
+        introducerFilename = script->scriptSource()->introducerFilename();
 
     CompileOptions options(cx);
     options.setPrincipals(principals)
            .setOriginPrincipals(originPrincipals)
-           .setFileAndLine(filename, lineno)
+           .setFileAndLine(filename, 1)
            .setNoScriptRval(false)
-           .setCompileAndGo(true);
+           .setCompileAndGo(true)
+           .setIntroductionInfo(introducerFilename, introductionType, lineno, pcOffset);
 
     unsigned n = args.length() ? args.length() - 1 : 0;
     if (n > 0) {
@@ -1542,7 +1586,7 @@ FunctionConstructor(JSContext *cx, unsigned argc, Value *vp, GeneratorKind gener
             js_ReportOutOfMemory(cx);
             return false;
         }
-        StableCharPtr collected_args(cp, args_length + 1);
+        ConstTwoByteChars collected_args(cp, args_length + 1);
 
         /*
          * Concatenate the arguments into the new string, separated by commas.
@@ -1654,7 +1698,7 @@ FunctionConstructor(JSContext *cx, unsigned argc, Value *vp, GeneratorKind gener
     RootedAtom anonymousAtom(cx, cx->names().anonymous);
     JSObject *proto = nullptr;
     if (isStarGenerator) {
-        proto = global->getOrCreateStarGeneratorFunctionPrototype(cx);
+        proto = GlobalObject::getOrCreateStarGeneratorFunctionPrototype(cx, global);
         if (!proto)
             return false;
     }
@@ -1776,7 +1820,7 @@ js::CloneFunctionObject(JSContext *cx, HandleFunction fun, HandleObject parent, 
     NewObjectKind newKind = useSameScript ? newKindArg : SingletonObject;
     JSObject *cloneProto = nullptr;
     if (fun->isStarGenerator()) {
-        cloneProto = cx->global()->getOrCreateStarGeneratorFunctionPrototype(cx);
+        cloneProto = GlobalObject::getOrCreateStarGeneratorFunctionPrototype(cx, cx->global());
         if (!cloneProto)
             return nullptr;
     }

@@ -4,7 +4,10 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-TEST_DIRS += ['test']
+if CONFIG['OS_ARCH'] == 'WINNT':
+    TEST_DIRS += ['test/win']
+
+MOCHITEST_MANIFESTS += ['test/mochitest.ini']
 
 XPIDL_SOURCES += [
     'nsINativeAppSupport.idl',
@@ -44,10 +47,6 @@ elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt':
     SOURCES += [
         'nsNativeAppSupportQt.cpp',
         'nsQAppInstance.cpp',
-    ]
-elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'os2':
-    SOURCES += [
-        'nsNativeAppSupportOS2.cpp',
     ]
 elif CONFIG['MOZ_ENABLE_GTK']:
     UNIFIED_SOURCES += [
@@ -144,3 +143,19 @@ for var in ('APP_VERSION', 'APP_ID'):
 
 if CONFIG['MOZILLA_OFFICIAL']:
     DEFINES['MOZILLA_OFFICIAL'] = True
+
+LOCAL_INCLUDES += [
+    '../profile',
+    '/config',
+    '/dom/base',
+    '/dom/ipc',
+    '/testing/gtest/mozilla',
+    '/toolkit/crashreporter',
+    '/xpcom/build',
+]
+
+if CONFIG['MOZ_ENABLE_XREMOTE']:
+    LOCAL_INCLUDES += [
+        '/widget/xremoteclient',
+    ]
+

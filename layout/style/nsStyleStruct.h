@@ -184,10 +184,6 @@ enum nsStyleImageType {
  * (*) Optionally a crop rect can be set to paint a partial (rectangular)
  * region of an image. (Currently, this feature is only supported with an
  * image of type (1)).
- *
- * This struct is currently used only for 'background-image', but it may be
- * used by other CSS properties such as 'border-image', 'list-style-image', and
- * 'content' in the future (bug 507052).
  */
 struct nsStyleImage {
   nsStyleImage();
@@ -286,8 +282,16 @@ struct nsStyleImage {
            GetImageData() == aOther.GetImageData();
   }
 
+  // These methods are used for the caller to caches the sub images created
+  // during a border-image paint operation
+  inline void SetSubImage(uint8_t aIndex, imgIContainer* aSubImage) const;
+  inline imgIContainer* GetSubImage(uint8_t aIndex) const;
+
 private:
   void DoCopy(const nsStyleImage& aOther);
+
+  // Cache for border-image painting.
+  nsCOMArray<imgIContainer> mSubImages;
 
   nsStyleImageType mType;
   union {
@@ -854,7 +858,7 @@ struct nsStyleBorder {
 
   bool HasBorder() const
   {
-    return mComputedBorder != nsMargin(0,0,0,0) || mBorderImageSource;
+    return mComputedBorder != nsMargin(0,0,0,0) || !mBorderImageSource.IsEmpty();
   }
 
   // Get the actual border width for a particular side, in appunits.  Note that
@@ -881,8 +885,12 @@ struct nsStyleBorder {
       (HasVisibleStyle(aSide) ? mBorder.Side(aSide) : 0);
   }
 
+  inline bool IsBorderImageLoaded() const
+  {
+    return mBorderImageSource.IsLoaded();
+  }
+
   // Defined in nsStyleStructInlines.h
-  inline bool IsBorderImageLoaded() const;
   inline nsresult RequestDecode();
 
   void GetBorderColor(mozilla::css::Side aSide, nscolor& aColor,
@@ -905,21 +913,20 @@ struct nsStyleBorder {
     mBorderStyle[aSide] &= ~BORDER_COLOR_SPECIAL;
   }
 
-  // These are defined in nsStyleStructInlines.h
-  inline void SetBorderImage(imgRequestProxy* aImage);
-  inline imgRequestProxy* GetBorderImage() const;
-
-  bool HasBorderImage() {return !!mBorderImageSource;}
-
-  void TrackImage(nsPresContext* aContext);
-  void UntrackImage(nsPresContext* aContext);
+  void TrackImage(nsPresContext* aContext)
+  {
+    if (mBorderImageSource.GetType() == eStyleImageType_Image) {
+      mBorderImageSource.TrackImage(aContext);
+    }
+  }
+  void UntrackImage(nsPresContext* aContext)
+  {
+    if (mBorderImageSource.GetType() == eStyleImageType_Image) {
+      mBorderImageSource.UntrackImage(aContext);
+    }
+  }
 
   nsMargin GetImageOutset() const;
-
-  // These methods are used for the caller to caches the sub images created during
-  // a border-image paint operation
-  inline void SetSubImage(uint8_t aIndex, imgIContainer* aSubImage) const;
-  inline imgIContainer* GetSubImage(uint8_t aIndex) const;
 
   void GetCompositeColors(int32_t aIndex, nsBorderColors** aColors) const
   {
@@ -951,19 +958,21 @@ struct nsStyleBorder {
     mBorderStyle[aSide] |= BORDER_COLOR_FOREGROUND;
   }
 
+  imgIRequest* GetBorderImageRequest() const
+  {
+    if (mBorderImageSource.GetType() == eStyleImageType_Image) {
+      return mBorderImageSource.GetImageData();
+    }
+    return nullptr;
+  }
+
 public:
   nsBorderColors** mBorderColors;        // [reset] composite (stripe) colors
   nsRefPtr<nsCSSShadowArray> mBoxShadow; // [reset] nullptr for 'none'
 
-#ifdef DEBUG
-  bool mImageTracked;
-#endif
-
-protected:
-  nsRefPtr<imgRequestProxy> mBorderImageSource; // [reset]
-
 public:
   nsStyleCorners mBorderRadius;       // [reset] coord, percent
+  nsStyleImage   mBorderImageSource;  // [reset]
   nsStyleSides   mBorderImageSlice;   // [reset] factor, percent
   nsStyleSides   mBorderImageWidth;   // [reset] length, factor, percent, auto
   nsStyleSides   mBorderImageOutset;  // [reset] length, factor
@@ -999,9 +1008,6 @@ protected:
   nscolor       mBorderColor[4];  // [reset] the colors to use for a simple
                                   // border.  not used for -moz-border-colors
 private:
-  // Cache used by callers for border-image painting
-  nsCOMArray<imgIContainer> mSubImages;
-
   nscoord       mTwipsPerPixel;
 
   nsStyleBorder& operator=(const nsStyleBorder& aOther) MOZ_DELETE;
@@ -1389,6 +1395,7 @@ struct nsStyleText {
   uint8_t mTextSizeAdjust;              // [inherited] see nsStyleConsts.h
   uint8_t mTextOrientation;             // [inherited] see nsStyleConsts.h
   uint8_t mTextCombineHorizontal;       // [inherited] see nsStyleConsts.h
+  uint8_t mControlCharacterVisibility;  // [inherited] see nsStyleConsts.h
   int32_t mTabSize;                     // [inherited] see nsStyleConsts.h
 
   nscoord mWordSpacing;                 // [inherited]
@@ -1794,10 +1801,12 @@ struct nsStyleDisplay {
   uint8_t mClipFlags;           // [reset] see nsStyleConsts.h
   uint8_t mOrient;              // [reset] see nsStyleConsts.h
   uint8_t mMixBlendMode;        // [reset] see nsStyleConsts.h
-  uint8_t mWillChangeBitField;  // [reset] see nsStyleConsts.h. Stores a bitfield
-                                // representation of the property that
-                                // are frequently queried. This should match
-                                // mWillChange
+  uint8_t mWillChangeBitField;  // [reset] see nsStyleConsts.h. Stores a
+                                // bitfield representation of the properties
+                                // that are frequently queried. This should
+                                // match mWillChange. Also tracks if any of the
+                                // properties in the will-change list require
+                                // a stacking context.
   nsAutoTArray<nsString, 1> mWillChange;
 
   uint8_t mTouchAction;         // [reset] see nsStyleConsts.h
@@ -2619,13 +2628,8 @@ struct nsStyleSVGReset {
                           nsChangeHint_ClearAncestorIntrinsics);
   }
 
-  // The backend only supports one SVG reference right now.
-  // Eventually, it will support multiple chained SVG reference filters and CSS
-  // filter functions.
-  nsIURI* SingleFilter() const {
-    return (mFilters.Length() == 1 &&
-            mFilters[0].GetType() == NS_STYLE_FILTER_URL) ?
-            mFilters[0].GetURL() : nullptr;
+  bool HasFilters() const {
+    return mFilters.Length() > 0;
   }
 
   nsCOMPtr<nsIURI> mClipPath;         // [reset]

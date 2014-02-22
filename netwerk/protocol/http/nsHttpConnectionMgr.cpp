@@ -6,6 +6,12 @@
 // HttpLog.h should generally be included first
 #include "HttpLog.h"
 
+// Log on level :5, instead of default :4.
+#undef LOG
+#define LOG(args) LOG5(args)
+#undef LOG_ENABLED
+#define LOG_ENABLED() LOG5_ENABLED()
+
 #include "nsHttpConnectionMgr.h"
 #include "nsHttpConnection.h"
 #include "nsHttpPipeline.h"
@@ -66,6 +72,7 @@ nsHttpConnectionMgr::nsHttpConnectionMgr()
     , mNumHalfOpenConns(0)
     , mTimeOfNextWakeUp(UINT64_MAX)
     , mTimeoutTickArmed(false)
+    , mTimeoutTickNext(1)
 {
     LOG(("Creating nsHttpConnectionMgr @%x\n", this));
 }
@@ -1361,6 +1368,9 @@ nsHttpConnectionMgr::MakeNewConnection(nsConnectionEntry *ent,
     if (!(trans->Caps() & NS_HTTP_DISALLOW_SPDY) &&
         (trans->Caps() & NS_HTTP_ALLOW_KEEPALIVE) &&
         RestrictConnections(ent)) {
+        LOG(("nsHttpConnectionMgr::MakeNewConnection [ci = %s] "
+             "Not Available Due to RestrictConnections()\n",
+             ent->mConnInfo->HashKey().get()));
         return NS_ERROR_NOT_AVAILABLE;
     }
 
@@ -1926,6 +1936,8 @@ nsHttpConnectionMgr::ProcessNewTransaction(nsHttpTransaction *trans)
         MOZ_ASSERT(trans->Caps() & NS_HTTP_STICKY_CONNECTION);
         MOZ_ASSERT(((int32_t)ent->mActiveConns.IndexOf(conn)) != -1,
                    "Sticky Connection Not In Active List");
+        LOG(("nsHttpConnectionMgr::ProcessNewTransaction trans=%p "
+             "sticky connection=%p\n", trans, conn.get()));
         trans->SetConnection(nullptr);
         rv = DispatchTransaction(ent, trans, conn);
     }
@@ -2188,21 +2200,42 @@ nsHttpConnectionMgr::OnMsgCancelTransaction(int32_t reason, void *param)
     // transaction directly (removing it from the pending queue first).
     //
     nsAHttpConnection *conn = trans->Connection();
-    if (conn && !trans->IsDone())
+    if (conn && !trans->IsDone()) {
         conn->CloseTransaction(trans, closeCode);
-    else {
-        nsConnectionEntry *ent = LookupConnectionEntry(trans->ConnectionInfo(),
-                                                       nullptr, trans);
+    } else {
+        nsConnectionEntry *ent =
+            LookupConnectionEntry(trans->ConnectionInfo(), nullptr, trans);
 
         if (ent) {
             int32_t index = ent->mPendingQ.IndexOf(trans);
             if (index >= 0) {
+                LOG(("nsHttpConnectionMgr::OnMsgCancelTransaction [trans=%p]"
+                     " found in pending queue\n", trans));
                 ent->mPendingQ.RemoveElementAt(index);
                 nsHttpTransaction *temp = trans;
                 NS_RELEASE(temp); // b/c NS_RELEASE nulls its argument!
             }
         }
         trans->Close(closeCode);
+
+        // Cancel is a pretty strong signal that things might be hanging
+        // so we want to cancel any null transactions related to this connection
+        // entry. They are just optimizations, but they aren't hooked up to
+        // anything that might get canceled from the rest of gecko, so best
+        // to assume that's what was meant by the cancel we did receive if
+        // it only applied to something in the queue.
+        for (uint32_t index = 0;
+             ent && (index < ent->mActiveConns.Length());
+             ++index) {
+            nsHttpConnection *activeConn = ent->mActiveConns[index];
+            nsAHttpTransaction *liveTransaction = activeConn->Transaction();
+            if (liveTransaction && liveTransaction->IsNullTransaction()) {
+                LOG(("nsHttpConnectionMgr::OnMsgCancelTransaction [trans=%p] "
+                     "also canceling Null Transaction %p on conn %p\n",
+                     trans, liveTransaction, activeConn));
+                activeConn->CloseTransaction(liveTransaction, closeCode);
+            }
+        }
     }
     NS_RELEASE(trans);
 }
@@ -2439,8 +2472,14 @@ nsHttpConnectionMgr::ActivateTimeoutTick()
     // Upon running the tick will rearm itself if there are active
     // connections available.
 
-    if (mTimeoutTick && mTimeoutTickArmed)
+    if (mTimeoutTick && mTimeoutTickArmed) {
+        // make sure we get one iteration on a quick tick
+        if (mTimeoutTickNext > 1) {
+            mTimeoutTickNext = 1;
+            mTimeoutTick->SetDelay(1000);
+        }
         return;
+    }
 
     if (!mTimeoutTick) {
         mTimeoutTick = do_CreateInstance(NS_TIMER_CONTRACTID);
@@ -2462,10 +2501,16 @@ nsHttpConnectionMgr::TimeoutTick()
     MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
     MOZ_ASSERT(mTimeoutTick, "no readtimeout tick");
 
-    LOG(("nsHttpConnectionMgr::TimeoutTick active=%d\n",
-         mNumActiveConns));
-
+    LOG(("nsHttpConnectionMgr::TimeoutTick active=%d\n", mNumActiveConns));
+    // The next tick will be between 1 second and 1 hr
+    // Set it to the max value here, and the TimeoutTickCB()s can
+    // reduce it to their local needs.
+    mTimeoutTickNext = 3600; // 1hr
     mCT.Enumerate(TimeoutTickCB, this);
+    if (mTimeoutTick) {
+        mTimeoutTickNext = std::max(mTimeoutTickNext, 1U);
+        mTimeoutTick->SetDelay(mTimeoutTickNext * 1000);
+    }
 }
 
 PLDHashOperator
@@ -2475,13 +2520,18 @@ nsHttpConnectionMgr::TimeoutTickCB(const nsACString &key,
 {
     nsHttpConnectionMgr *self = (nsHttpConnectionMgr *) closure;
 
-    LOG(("nsHttpConnectionMgr::TimeoutTickCB() this=%p host=%s\n",
-         self, ent->mConnInfo->Host()));
+    LOG(("nsHttpConnectionMgr::TimeoutTickCB() this=%p host=%s "
+         "idle=%d active=%d half-len=%d pending=%d\n",
+         self, ent->mConnInfo->Host(), ent->mIdleConns.Length(),
+         ent->mActiveConns.Length(), ent->mHalfOpens.Length(),
+         ent->mPendingQ.Length()));
 
     // first call the tick handler for each active connection
     PRIntervalTime now = PR_IntervalNow();
-    for (uint32_t index = 0; index < ent->mActiveConns.Length(); ++index)
-        ent->mActiveConns[index]->ReadTimeoutTick(now);
+    for (uint32_t index = 0; index < ent->mActiveConns.Length(); ++index) {
+        uint32_t connNextTimeout =  ent->mActiveConns[index]->ReadTimeoutTick(now);
+        self->mTimeoutTickNext = std::min(self->mTimeoutTickNext, connNextTimeout);
+    }
 
     // now check for any stalled half open sockets
     if (ent->mHalfOpens.Length()) {
@@ -2513,7 +2563,9 @@ nsHttpConnectionMgr::TimeoutTickCB(const nsACString &key,
             }
         }
     }
-
+    if (ent->mHalfOpens.Length()) {
+        self->mTimeoutTickNext = 1;
+    }
     return PL_DHASH_NEXT;
 }
 

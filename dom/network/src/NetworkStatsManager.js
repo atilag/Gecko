@@ -12,7 +12,6 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
-Cu.import("resource://gre/modules/ObjectWrapper.jsm");
 
 // Ensure NetworkStatsService and NetworkStatsDB are loaded in the parent process
 // to receive messages from the child processes.
@@ -236,6 +235,10 @@ NetworkStatsManager.prototype = {
 
     if (!aOptions) {
       aOptions = Object.create(null);
+    }
+
+    if (aOptions.startTime && aOptions.startTime.constructor.name !== "Date") {
+      throw Components.results.NS_ERROR_INVALID_ARG;
     }
 
     let request = this.createRequest();

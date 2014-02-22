@@ -15,14 +15,13 @@ namespace mozilla {
 // January 1, 1970.
 #define iso_time_offset 2082844800
 
-const static uint32_t MUXING_BUFFER_SIZE = 512*1024;
-
 FragmentBuffer::FragmentBuffer(uint32_t aTrackType, uint32_t aFragDuration,
                                TrackMetadataBase* aMetadata)
   : mTrackType(aTrackType)
   , mFragDuration(aFragDuration)
   , mMediaStartTime(0)
   , mFragmentNumber(0)
+  , mLastFrameTimeOfLastFragment(0)
   , mEOS(false)
 {
   mFragArray.AppendElement();
@@ -132,15 +131,17 @@ FragmentBuffer::GetFirstFragmentSampleSize()
   return size;
 }
 
-ISOControl::ISOControl()
-  : mAudioFragmentBuffer(nullptr)
+ISOControl::ISOControl(uint32_t aMuxingType)
+  : mMuxingType(aMuxingType)
+  , mAudioFragmentBuffer(nullptr)
   , mVideoFragmentBuffer(nullptr)
   , mFragNum(0)
   , mOutputSize(0)
   , mBitCount(0)
   , mBit(0)
 {
-  mOutBuffer.SetCapacity(MUXING_BUFFER_SIZE);
+  // Create a data array for first mp4 Box, ftyp.
+  mOutBuffers.SetLength(1);
   MOZ_COUNT_CTOR(ISOControl);
 }
 
@@ -250,19 +251,45 @@ ISOControl::GetFragment(uint32_t aType)
 }
 
 nsresult
-ISOControl::GetBuf(nsTArray<uint8_t>& aOutBuf)
+ISOControl::GetBufs(nsTArray<nsTArray<uint8_t>>* aOutputBufs)
 {
-  mOutputSize += mOutBuffer.Length();
-  aOutBuf.SwapElements(mOutBuffer);
+  uint32_t len = mOutBuffers.Length();
+  for (uint32_t i = 0; i < len; i++) {
+    mOutBuffers[i].SwapElements(*aOutputBufs->AppendElement());
+  }
   return FlushBuf();
 }
 
 nsresult
 ISOControl::FlushBuf()
 {
-  mOutBuffer.SetCapacity(MUXING_BUFFER_SIZE);
-  mLastWrittenBoxPos = 0;
+  mOutBuffers.SetLength(1);
   return NS_OK;
+}
+
+uint32_t
+ISOControl::WriteAVData(nsTArray<uint8_t>& aArray)
+{
+  MOZ_ASSERT(!mBitCount);
+
+  uint32_t len = aArray.Length();
+  if (!len) {
+    return 0;
+  }
+
+  mOutputSize += len;
+
+  // The last element already has data, allocated a new element for pointer
+  // swapping.
+  if (mOutBuffers.LastElement().Length()) {
+    mOutBuffers.AppendElement();
+  }
+  // Swap the video/audio data pointer.
+  mOutBuffers.LastElement().SwapElements(aArray);
+  // Following data could be boxes, so appending a new uint8_t array here.
+  mOutBuffers.AppendElement();
+
+  return len;
 }
 
 uint32_t
@@ -287,7 +314,8 @@ ISOControl::WriteBits(uint64_t aBits, size_t aNumBits)
 uint32_t
 ISOControl::Write(uint8_t* aBuf, uint32_t aSize)
 {
-  mOutBuffer.AppendElements(aBuf, aSize);
+  mOutBuffers.LastElement().AppendElements(aBuf, aSize);
+  mOutputSize += aSize;
   return aSize;
 }
 
@@ -297,6 +325,17 @@ ISOControl::Write(uint8_t aData)
   MOZ_ASSERT(!mBitCount);
   Write((uint8_t*)&aData, sizeof(uint8_t));
   return sizeof(uint8_t);
+}
+
+uint32_t
+ISOControl::GetBufPos()
+{
+  uint32_t len = mOutBuffers.Length();
+  uint32_t pos = 0;
+  for (uint32_t i = 0; i < len; i++) {
+    pos += mOutBuffers.ElementAt(i).Length();
+  }
+  return pos;
 }
 
 uint32_t
@@ -346,7 +385,7 @@ ISOControl::GenerateMoof(uint32_t aTrackType)
 
   nsresult rv;
   uint32_t size;
-  uint64_t first_sample_offset = mOutputSize + mLastWrittenBoxPos;
+  uint64_t first_sample_offset = mOutputSize;
   nsAutoPtr<MovieFragmentBox> moof_box(new MovieFragmentBox(aTrackType, this));
   nsAutoPtr<MediaDataBox> mdat_box(new MediaDataBox(aTrackType, this));
 

@@ -660,7 +660,7 @@ PeerConnectionImpl::ConvertRTCConfiguration(const RTCConfiguration& aSrc,
       NS_ConvertUTF16toUTF8 username(server.mUsername);
 
 #ifdef MOZ_WIDGET_GONK
-      if (transport.get() == kNrIceTransportTcp)
+      if (transport == kNrIceTransportTcp)
           continue;
 #endif
       if (!aDst->addTurnServer(host.get(), port,
@@ -728,22 +728,26 @@ PeerConnectionImpl::Initialize(PeerConnectionObserver& aObserver,
   char temp[128];
 
 #ifdef MOZILLA_INTERNAL_API
-  nsIDOMLocation* location = nullptr;
-  mWindow->GetLocation(&location);
-  MOZ_ASSERT(location);
-  nsString locationAStr;
-  location->ToString(locationAStr);
-  location->Release();
+  nsAutoCString locationCStr;
+  nsIDOMLocation* location;
+  res = mWindow->GetLocation(&location);
 
-  nsCString locationCStr;
-  CopyUTF16toUTF8(locationAStr, locationCStr);
-  MOZ_ASSERT(mWindow);
-  PR_snprintf(temp,
-              sizeof(temp),
-              "%llu (id=%u url=%s)",
-              (unsigned long long)timestamp,
-              (unsigned)mWindow->WindowID(),
-              locationCStr.get() ? locationCStr.get() : "NULL");
+  if (location && NS_SUCCEEDED(res)) {
+    nsAutoString locationAStr;
+    location->ToString(locationAStr);
+    location->Release();
+
+    CopyUTF16toUTF8(locationAStr, locationCStr);
+  }
+
+  PR_snprintf(
+      temp,
+      sizeof(temp),
+      "%llu (id=%llu url=%s)",
+      static_cast<unsigned long long>(timestamp),
+      static_cast<unsigned long long>(mWindow ? mWindow->WindowID() : 0),
+      locationCStr.get() ? locationCStr.get() : "NULL");
+
 #else
   PR_snprintf(temp, sizeof(temp), "%llu", (unsigned long long)timestamp);
 #endif // MOZILLA_INTERNAL_API
@@ -1993,9 +1997,11 @@ PeerConnectionImpl::GetStatsImpl_s(
           uint32_t jitterMs;
           uint32_t packetsReceived;
           uint64_t bytesReceived;
+          uint32_t packetsLost;
           if (mp.Conduit()->GetRTCPReceiverReport(&timestamp, &jitterMs,
                                                   &packetsReceived,
-                                                  &bytesReceived)) {
+                                                  &bytesReceived,
+                                                  &packetsLost)) {
             remoteId = NS_LITERAL_STRING("outbound_rtcp_") + idstr;
             RTCInboundRTPStreamStats s;
             s.mTimestamp.Construct(timestamp);
@@ -2009,6 +2015,7 @@ PeerConnectionImpl::GetStatsImpl_s(
             s.mIsRemote = true;
             s.mPacketsReceived.Construct(packetsReceived);
             s.mBytesReceived.Construct(bytesReceived);
+            s.mPacketsLost.Construct(packetsLost);
             report->mInboundRTPStreamStats.Value().AppendElement(s);
           }
         }
@@ -2067,9 +2074,10 @@ PeerConnectionImpl::GetStatsImpl_s(
         if (ssrc.Length()) {
           s.mSsrc.Construct(ssrc);
         }
-        unsigned int jitterMs;
-        if (mp.Conduit()->GetRTPJitter(&jitterMs)) {
+        unsigned int jitterMs, packetsLost;
+        if (mp.Conduit()->GetRTPStats(&jitterMs, &packetsLost)) {
           s.mJitter.Construct(double(jitterMs)/1000);
+          s.mPacketsLost.Construct(packetsLost);
         }
         if (remoteId.Length()) {
           s.mRemoteId.Construct(remoteId);

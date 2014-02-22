@@ -448,7 +448,7 @@ template bool
 js::CanonicalizeArrayLengthValue<SequentialExecution>(JSContext *cx,
                                                       HandleValue v, uint32_t *newLen);
 template bool
-js::CanonicalizeArrayLengthValue<ParallelExecution>(ForkJoinSlice *slice,
+js::CanonicalizeArrayLengthValue<ParallelExecution>(ForkJoinContext *cx,
                                                     HandleValue v, uint32_t *newLen);
 
 /* ES6 20130308 draft 8.4.2.4 ArraySetLength */
@@ -728,7 +728,7 @@ js::ArraySetLength<SequentialExecution>(JSContext *cx, Handle<ArrayObject*> arr,
                                         HandleId id, unsigned attrs, HandleValue value,
                                         bool setterIsStrict);
 template bool
-js::ArraySetLength<ParallelExecution>(ForkJoinSlice *slice, Handle<ArrayObject*> arr,
+js::ArraySetLength<ParallelExecution>(ForkJoinContext *cx, Handle<ArrayObject*> arr,
                                       HandleId id, unsigned attrs, HandleValue value,
                                       bool setterIsStrict);
 
@@ -758,8 +758,8 @@ js::WouldDefinePastNonwritableLength(ThreadSafeContext *cx,
 
     // Error in strict mode code or warn with strict option.
     unsigned flags = strict ? JSREPORT_ERROR : (JSREPORT_STRICT | JSREPORT_WARNING);
-    if (cx->isForkJoinSlice())
-        return cx->asForkJoinSlice()->reportError(ParallelBailoutUnsupportedVM, flags);
+    if (cx->isForkJoinContext())
+        return cx->asForkJoinContext()->reportError(ParallelBailoutUnsupportedVM, flags);
 
     if (!cx->isJSContext())
         return true;
@@ -775,8 +775,7 @@ js::WouldDefinePastNonwritableLength(ThreadSafeContext *cx,
 }
 
 static bool
-array_addProperty(JSContext *cx, HandleObject obj, HandleId id,
-                  MutableHandleValue vp)
+array_addProperty(JSContext *cx, HandleObject obj, HandleId id, MutableHandleValue vp)
 {
     Rooted<ArrayObject*> arr(cx, &obj->as<ArrayObject>());
 
@@ -843,13 +842,7 @@ const Class ArrayObject::class_ = {
     nullptr,        /* call        */
     nullptr,        /* hasInstance */
     nullptr,        /* construct   */
-    nullptr,        /* trace       */
-    {
-        nullptr,    /* outerObject */
-        nullptr,    /* innerObject */
-        nullptr,    /* iteratorObject  */
-        false,      /* isWrappedNative */
-    }
+    nullptr         /* trace       */
 };
 
 static bool
@@ -866,7 +859,7 @@ AddLengthProperty(ExclusiveContext *cx, HandleObject obj)
     JS_ASSERT(!obj->nativeLookup(cx, lengthId));
 
     return JSObject::addProperty(cx, obj, lengthId, array_length_getter, array_length_setter,
-                                 SHAPE_INVALID_SLOT, JSPROP_PERMANENT | JSPROP_SHARED, 0, 0,
+                                 SHAPE_INVALID_SLOT, JSPROP_PERMANENT | JSPROP_SHARED, 0,
                                  /* allowDictionary = */ false);
 }
 
@@ -1988,8 +1981,7 @@ js::array_sort(JSContext *cx, unsigned argc, Value *vp)
     /* Set undefs that sorted after the rest of elements. */
     while (undefs != 0) {
         --undefs;
-        RootedValue undefinedValue(cx);
-        if (!JS_CHECK_OPERATION_LIMIT(cx) || !SetArrayElement(cx, obj, n++, undefinedValue))
+        if (!JS_CHECK_OPERATION_LIMIT(cx) || !SetArrayElement(cx, obj, n++, UndefinedHandleValue))
             return false;
     }
 
@@ -3284,8 +3276,7 @@ js::NewDenseCopiedArray(JSContext *cx, uint32_t length, const Value *values,
 }
 
 ArrayObject *
-js::NewDenseCopiedArrayWithTemplate(JSContext *cx, uint32_t length, const Value *values,
-                                    JSObject *templateObject)
+js::NewDenseAllocatedArrayWithTemplate(JSContext *cx, uint32_t length, JSObject *templateObject)
 {
     gc::AllocKind allocKind = GuessArrayGCKind(length);
     JS_ASSERT(CanBeFinalizedInBackground(allocKind, &ArrayObject::class_));
@@ -3306,9 +3297,6 @@ js::NewDenseCopiedArrayWithTemplate(JSContext *cx, uint32_t length, const Value 
 
     if (!EnsureNewArrayElements(cx, arr, length))
         return nullptr;
-
-    arr->setDenseInitializedLength(length);
-    arr->initDenseElements(0, values, length);
 
     probes::CreateObject(cx, arr);
 

@@ -280,6 +280,17 @@ WebGLContext::DestroyResourcesAndContext()
         gl->fDeleteBuffers(1, &mFakeVertexAttrib0BufferObject);
     }
 
+    // disable all extensions except "WEBGL_lose_context". see bug #927969
+    // spec: http://www.khronos.org/registry/webgl/specs/latest/1.0/#5.15.2
+    for (size_t i = 0; i < size_t(WebGLExtensionID_max); ++i) {
+        WebGLExtensionID extension = WebGLExtensionID(i);
+
+        if (!IsExtensionEnabled(extension) || (extension == WEBGL_lose_context))
+            continue;
+
+        mExtensions[extension] = nullptr;
+    }
+
     // We just got rid of everything, so the context had better
     // have been going away.
 #ifdef DEBUG
@@ -1209,10 +1220,8 @@ void
 WebGLContext::DummyFramebufferOperation(const char *info)
 {
     GLenum status = CheckFramebufferStatus(LOCAL_GL_FRAMEBUFFER);
-    if (status == LOCAL_GL_FRAMEBUFFER_COMPLETE)
-        return;
-    else
-        return ErrorInvalidFramebufferOperation("%s: incomplete framebuffer", info);
+    if (status != LOCAL_GL_FRAMEBUFFER_COMPLETE)
+        ErrorInvalidFramebufferOperation("%s: incomplete framebuffer", info);
 }
 
 // We use this timer for many things. Here are the things that it is activated for:

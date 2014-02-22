@@ -15,6 +15,7 @@
 #include "prlog.h"
 
 #include "gfxPlatform.h"
+#include "gfxPrefs.h"
 
 #ifdef XP_WIN
 #include <process.h>
@@ -37,8 +38,6 @@
 #include "gfxPlatformGtk.h"
 #elif defined(MOZ_WIDGET_QT)
 #include "gfxQtPlatform.h"
-#elif defined(XP_OS2)
-#include "gfxOS2Platform.h"
 #elif defined(ANDROID)
 #include "gfxAndroidPlatform.h"
 #endif
@@ -114,16 +113,6 @@ static bool sDrawFrameCounter = false;
 
 #include "mozilla/gfx/2D.h"
 using namespace mozilla::gfx;
-
-// logs shared across gfx
-#ifdef PR_LOGGING
-static PRLogModuleInfo *sFontlistLog = nullptr;
-static PRLogModuleInfo *sFontInitLog = nullptr;
-static PRLogModuleInfo *sTextrunLog = nullptr;
-static PRLogModuleInfo *sTextrunuiLog = nullptr;
-static PRLogModuleInfo *sCmapDataLog = nullptr;
-static PRLogModuleInfo *sTextPerfLog = nullptr;
-#endif
 
 /* Class to listen for pref changes so that chrome code can dynamically
    force sRGB as an output profile. See Bug #452125. */
@@ -298,12 +287,16 @@ gfxPlatform::gfxPlatform()
     mOpenTypeSVGEnabled = UNINITIALIZED_VALUE;
     mBidiNumeralOption = UNINITIALIZED_VALUE;
 
-    mLayersPreferMemoryOverShmem =
-        XRE_GetProcessType() == GeckoProcessType_Default &&
-        Preferences::GetBool("layers.prefer-memory-over-shmem", true);
+    mLayersPreferMemoryOverShmem = XRE_GetProcessType() == GeckoProcessType_Default;
 
+#ifdef XP_WIN
+    // XXX - When 957560 is fixed, the pref can go away entirely
     mLayersUseDeprecated =
-        Preferences::GetBool("layers.use-deprecated-textures", true);
+        Preferences::GetBool("layers.use-deprecated-textures", true)
+        && !Preferences::GetBool("layers.prefer-opengl", false);
+#else
+    mLayersUseDeprecated = false;
+#endif
 
     Preferences::AddBoolVarCache(&mDrawLayerBorders,
                                  "layers.draw-borders",
@@ -370,14 +363,12 @@ gfxPlatform::Init()
     }
     gEverInitialized = true;
 
-#ifdef PR_LOGGING
-    sFontlistLog = PR_NewLogModule("fontlist");
-    sFontInitLog = PR_NewLogModule("fontinit");
-    sTextrunLog = PR_NewLogModule("textrun");
-    sTextrunuiLog = PR_NewLogModule("textrunui");
-    sCmapDataLog = PR_NewLogModule("cmapdata");
-    sTextPerfLog = PR_NewLogModule("textperf");
-#endif
+    /* Pref migration hook. */
+    MigratePrefs();
+
+    // Initialize the preferences by creating the singleton.  This should
+    // be done after the preference migration using MigratePrefs().
+    gfxPrefs::One();
 
     gGfxPlatformPrefsLock = new Mutex("gfxPlatform::gGfxPlatformPrefsLock");
 
@@ -400,8 +391,6 @@ gfxPlatform::Init()
     gPlatform = new gfxPlatformGtk;
 #elif defined(MOZ_WIDGET_QT)
     gPlatform = new gfxQtPlatform;
-#elif defined(XP_OS2)
-    gPlatform = new gfxOS2Platform;
 #elif defined(ANDROID)
     gPlatform = new gfxAndroidPlatform;
 #else
@@ -436,7 +425,7 @@ gfxPlatform::Init()
 #endif
 
     gPlatform->mScreenReferenceSurface =
-        gPlatform->CreateOffscreenSurface(gfxIntSize(1,1),
+        gPlatform->CreateOffscreenSurface(IntSize(1, 1),
                                           gfxContentType::COLOR_ALPHA);
     if (!gPlatform->mScreenReferenceSurface) {
         NS_RUNTIMEABORT("Could not initialize mScreenReferenceSurface");
@@ -455,9 +444,6 @@ gfxPlatform::Init()
     if (NS_FAILED(rv)) {
         NS_RUNTIMEABORT("Could not initialize gfxFontCache");
     }
-
-    /* Pref migration hook. */
-    MigratePrefs();
 
     /* Create and register our CMS Override observer. */
     gPlatform->mSRGBOverrideObserver = new SRGBOverrideObserver();
@@ -573,6 +559,8 @@ gfxPlatform::Shutdown()
 
     delete gGfxPlatformPrefsLock;
 
+    gfxPrefs::Destroy();
+
     delete gPlatform;
     gPlatform = nullptr;
 }
@@ -629,7 +617,7 @@ already_AddRefed<gfxASurface>
 gfxPlatform::OptimizeImage(gfxImageSurface *aSurface,
                            gfxImageFormat format)
 {
-    const gfxIntSize& surfaceSize = aSurface->GetSize();
+    IntSize surfaceSize = aSurface->GetSize().ToIntSize();
 
 #ifdef XP_WIN
     if (gfxWindowsPlatform::GetPlatform()->GetRenderMode() ==
@@ -988,7 +976,7 @@ gfxPlatform::CreateDrawTargetForBackend(BackendType aBackend, const IntSize& aSi
   // CreateOffscreenSurface() and CreateDrawTargetForSurface() for all
   // backends).
   if (aBackend == BackendType::CAIRO) {
-    nsRefPtr<gfxASurface> surf = CreateOffscreenSurface(ThebesIntSize(aSize),
+    nsRefPtr<gfxASurface> surf = CreateOffscreenSurface(aSize,
                                                         ContentForFormat(aFormat));
     if (!surf || surf->CairoStatus()) {
       return nullptr;
@@ -1607,19 +1595,17 @@ gfxPlatform::UseLowPrecisionBuffer()
 float
 gfxPlatform::GetLowPrecisionResolution()
 {
-    static float sLowPrecisionResolution;
+    static int32_t sLowPrecisionResolutionX1000 = 250;
     static bool sLowPrecisionResolutionPrefCached = false;
 
     if (!sLowPrecisionResolutionPrefCached) {
-        int32_t lowPrecisionResolution = 250;
         sLowPrecisionResolutionPrefCached = true;
-        mozilla::Preferences::AddIntVarCache(&lowPrecisionResolution,
+        mozilla::Preferences::AddIntVarCache(&sLowPrecisionResolutionX1000,
                                              "layers.low-precision-resolution",
-                                             250);
-        sLowPrecisionResolution = lowPrecisionResolution / 1000.f;
+                                             sLowPrecisionResolutionX1000);
     }
 
-    return sLowPrecisionResolution;
+    return sLowPrecisionResolutionX1000/1000.f;
 }
 
 bool
@@ -1882,7 +1868,10 @@ static void ShutdownCMS()
 static void MigratePrefs()
 {
     /* Migrate from the boolean color_management.enabled pref - we now use
-       color_management.mode. */
+       color_management.mode.  These calls should be made before gfxPrefs
+       is initialized, otherwise we may not pick up the correct values
+       with the gfxPrefs functions.
+    */
     if (Preferences::HasUserValue(GFX_PREF_CMS_ENABLED_OBSOLETE)) {
         if (Preferences::GetBool(GFX_PREF_CMS_ENABLED_OBSOLETE, false)) {
             Preferences::SetInt(GFX_PREF_CMS_MODE, static_cast<int32_t>(eCMSMode_All));
@@ -1960,7 +1949,25 @@ gfxPlatform::FontsPrefsChanged(const char *aPref)
 PRLogModuleInfo*
 gfxPlatform::GetLog(eGfxLog aWhichLog)
 {
+    // logs shared across gfx
 #ifdef PR_LOGGING
+    static PRLogModuleInfo *sFontlistLog = nullptr;
+    static PRLogModuleInfo *sFontInitLog = nullptr;
+    static PRLogModuleInfo *sTextrunLog = nullptr;
+    static PRLogModuleInfo *sTextrunuiLog = nullptr;
+    static PRLogModuleInfo *sCmapDataLog = nullptr;
+    static PRLogModuleInfo *sTextPerfLog = nullptr;
+
+    // Assume that if one is initialized, all are initialized
+    if (!sFontlistLog) {
+        sFontlistLog = PR_NewLogModule("fontlist");
+        sFontInitLog = PR_NewLogModule("fontinit");
+        sTextrunLog = PR_NewLogModule("textrun");
+        sTextrunuiLog = PR_NewLogModule("textrunui");
+        sCmapDataLog = PR_NewLogModule("cmapdata");
+        sTextPerfLog = PR_NewLogModule("textperf");
+    }
+
     switch (aWhichLog) {
     case eGfxLog_fontlist:
         return sFontlistLog;
@@ -2065,6 +2072,7 @@ static bool sPrefLayersAccelerationForceEnabled = false;
 static bool sPrefLayersAccelerationDisabled = false;
 static bool sPrefLayersPreferOpenGL = false;
 static bool sPrefLayersPreferD3D9 = false;
+static bool sPrefLayersDrawFPS = false;
 static bool sPrefLayersDump = false;
 static bool sPrefLayersScrollGraph = false;
 static bool sPrefLayersEnableTiles = false;
@@ -2073,7 +2081,7 @@ static int  sPrefLayoutFrameRate = -1;
 static int  sPrefLayersCompositionFrameRate = -1;
 static bool sBufferRotationEnabled = false;
 static bool sComponentAlphaEnabled = true;
-static bool sPrefBrowserTabsRemote = false;
+static bool sPrefBrowserTabsRemoteAutostart = false;
 
 static bool sLayersAccelerationPrefsInitialized = false;
 
@@ -2095,6 +2103,7 @@ InitLayersAccelerationPrefs()
     sPrefLayersAccelerationDisabled = Preferences::GetBool("layers.acceleration.disabled", false);
     sPrefLayersPreferOpenGL = Preferences::GetBool("layers.prefer-opengl", false);
     sPrefLayersPreferD3D9 = Preferences::GetBool("layers.prefer-d3d9", false);
+    sPrefLayersDrawFPS = Preferences::GetBool("layers.acceleration.draw-fps", false);
     sPrefLayersDump = Preferences::GetBool("layers.dump", false);
     sPrefLayersScrollGraph = Preferences::GetBool("layers.scroll-graph", false);
     sPrefLayersEnableTiles = Preferences::GetBool("layers.enable-tiles", false);
@@ -2102,7 +2111,7 @@ InitLayersAccelerationPrefs()
     sPrefLayersCompositionFrameRate = Preferences::GetInt("layers.offmainthreadcomposition.frame-rate", -1);
     sBufferRotationEnabled = Preferences::GetBool("layers.bufferrotation.enabled", true);
     sComponentAlphaEnabled = Preferences::GetBool("layers.componentalpha.enabled", true);
-    sPrefBrowserTabsRemote = BrowserTabsRemote();
+    sPrefBrowserTabsRemoteAutostart = Preferences::GetBool("browser.tabs.remote.autostart", false);
 
 #ifdef XP_WIN
     if (sPrefLayersAccelerationForceEnabled) {
@@ -2152,10 +2161,10 @@ bool gfxPlatform::OffMainThreadCompositionRequired()
   InitLayersAccelerationPrefs();
 #if defined(MOZ_WIDGET_GTK) && defined(NIGHTLY_BUILD)
   // Linux users who chose OpenGL are being grandfathered in to OMTC
-  return sPrefBrowserTabsRemote ||
+  return sPrefBrowserTabsRemoteAutostart ||
          sPrefLayersAccelerationForceEnabled;
 #else
-  return sPrefBrowserTabsRemote;
+  return sPrefBrowserTabsRemoteAutostart;
 #endif
 }
 
@@ -2178,6 +2187,13 @@ gfxPlatform::GetPrefLayersPreferD3D9()
 {
   InitLayersAccelerationPrefs();
   return sPrefLayersPreferD3D9;
+}
+
+bool
+gfxPlatform::GetPrefLayersDrawFPS()
+{
+  InitLayersAccelerationPrefs();
+  return sPrefLayersDrawFPS;
 }
 
 bool

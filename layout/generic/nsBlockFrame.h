@@ -70,40 +70,7 @@ class nsFirstLineFrame;
  * prepended to the overflow lines.
  */
 
-// see nsHTMLParts.h for the public block state bits
-
-/**
- * Something in the block has changed that requires Bidi resolution to be
- * performed on the block. This flag must be either set on all blocks in a 
- * continuation chain or none of them.
- */
-#define NS_BLOCK_NEEDS_BIDI_RESOLUTION      NS_FRAME_STATE_BIT(20)
-#define NS_BLOCK_HAS_PUSHED_FLOATS          NS_FRAME_STATE_BIT(21)
-#define NS_BLOCK_HAS_LINE_CURSOR            NS_FRAME_STATE_BIT(24)
-#define NS_BLOCK_HAS_OVERFLOW_LINES         NS_FRAME_STATE_BIT(25)
-#define NS_BLOCK_HAS_OVERFLOW_OUT_OF_FLOWS  NS_FRAME_STATE_BIT(26)
-
-// Set on any block that has descendant frames in the normal
-// flow with 'clear' set to something other than 'none'
-// (including <BR CLEAR="..."> frames)
-#define NS_BLOCK_HAS_CLEAR_CHILDREN         NS_FRAME_STATE_BIT(27)
-
-// This block has had a child marked dirty, so before we reflow we need
-// to look through the lines to find any such children and mark
-// appropriate lines dirty.
-#define NS_BLOCK_LOOK_FOR_DIRTY_FRAMES      NS_FRAME_STATE_BIT(61)
-
-// Are our cached intrinsic widths intrinsic widths for font size
-// inflation?  i.e., what was the current state of
-// GetPresContext()->mInflationDisabledForShrinkWrap at the time they
-// were computed?
-// nsBlockFrame is the only thing that caches intrinsic widths that
-// needs to track this because it's the only thing that caches intrinsic
-// widths that lives inside of things (form controls) that do intrinsic
-// sizing with font inflation enabled.
-#define NS_BLOCK_FRAME_INTRINSICS_INFLATED  NS_FRAME_STATE_BIT(62)
-
-#define nsBlockFrameSuper nsContainerFrame
+typedef nsContainerFrame nsBlockFrameSuper;
 
 /*
  * Base class for block and inline frames.
@@ -132,7 +99,7 @@ public:
   line_iterator line(nsLineBox* aList) { return mLines.begin(aList); }
   reverse_line_iterator rline(nsLineBox* aList) { return mLines.rbegin(aList); }
 
-  friend nsIFrame* NS_NewBlockFrame(nsIPresShell* aPresShell, nsStyleContext* aContext, uint32_t aFlags);
+  friend nsIFrame* NS_NewBlockFrame(nsIPresShell* aPresShell, nsStyleContext* aContext, nsFrameState aFlags);
 
   // nsQueryFrame
   NS_DECL_QUERYFRAME
@@ -141,15 +108,15 @@ public:
   virtual void Init(nsIContent*      aContent,
                     nsIFrame*        aParent,
                     nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
-  NS_IMETHOD SetInitialChildList(ChildListID     aListID,
-                                 nsFrameList&    aChildList) MOZ_OVERRIDE;
-  NS_IMETHOD  AppendFrames(ChildListID     aListID,
-                           nsFrameList&    aFrameList) MOZ_OVERRIDE;
-  NS_IMETHOD  InsertFrames(ChildListID     aListID,
-                           nsIFrame*       aPrevFrame,
-                           nsFrameList&    aFrameList) MOZ_OVERRIDE;
-  NS_IMETHOD  RemoveFrame(ChildListID     aListID,
-                          nsIFrame*       aOldFrame) MOZ_OVERRIDE;
+  virtual nsresult SetInitialChildList(ChildListID     aListID,
+                                       nsFrameList&    aChildList) MOZ_OVERRIDE;
+  virtual nsresult  AppendFrames(ChildListID     aListID,
+                                 nsFrameList&    aFrameList) MOZ_OVERRIDE;
+  virtual nsresult  InsertFrames(ChildListID     aListID,
+                                 nsIFrame*       aPrevFrame,
+                                 nsFrameList&    aFrameList) MOZ_OVERRIDE;
+  virtual nsresult  RemoveFrame(ChildListID     aListID,
+                                nsIFrame*       aOldFrame) MOZ_OVERRIDE;
   virtual const nsFrameList& GetChildList(ChildListID aListID) const MOZ_OVERRIDE;
   virtual void GetChildLists(nsTArray<ChildList>* aLists) const MOZ_OVERRIDE;
   virtual nscoord GetBaseline() const MOZ_OVERRIDE;
@@ -173,11 +140,11 @@ public:
 
 #ifdef DEBUG_FRAME_DUMP
   void List(FILE* out = stderr, const char* aPrefix = "", uint32_t aFlags = 0) const MOZ_OVERRIDE;
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
 
 #ifdef DEBUG
-  NS_IMETHOD_(nsFrameState) GetDebugStateBits() const MOZ_OVERRIDE;
+  virtual nsFrameState GetDebugStateBits() const MOZ_OVERRIDE;
 #endif
 
 #ifdef ACCESSIBILITY
@@ -294,14 +261,14 @@ public:
                           nsHTMLReflowMetrics&     aMetrics,
                           nscoord                  aConsumed);
 
-  NS_IMETHOD Reflow(nsPresContext*          aPresContext,
-                    nsHTMLReflowMetrics&     aDesiredSize,
-                    const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  virtual nsresult Reflow(nsPresContext*           aPresContext,
+                          nsHTMLReflowMetrics&     aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
-  NS_IMETHOD AttributeChanged(int32_t         aNameSpaceID,
-                              nsIAtom*        aAttribute,
-                              int32_t         aModType) MOZ_OVERRIDE;
+  virtual nsresult AttributeChanged(int32_t         aNameSpaceID,
+                                    nsIAtom*        aAttribute,
+                                    int32_t         aModType) MOZ_OVERRIDE;
 
   /**
    * Move any frames on our overflow list to the end of our principal list.
@@ -309,13 +276,11 @@ public:
    */
   virtual bool DrainSelfOverflowList() MOZ_OVERRIDE;
 
-  virtual nsresult StealFrame(nsPresContext* aPresContext,
-                              nsIFrame*      aChild,
-                              bool           aForceNormal = false) MOZ_OVERRIDE;
+  virtual nsresult StealFrame(nsIFrame* aChild,
+                              bool      aForceNormal = false) MOZ_OVERRIDE;
 
-  virtual void DeleteNextInFlowChild(nsPresContext* aPresContext,
-                                     nsIFrame*      aNextInFlow,
-                                     bool           aDeletingEmptyFrames) MOZ_OVERRIDE;
+  virtual void DeleteNextInFlowChild(nsIFrame* aNextInFlow,
+                                     bool      aDeletingEmptyFrames) MOZ_OVERRIDE;
 
   /**
     * This is a special method that allows a child class of nsBlockFrame to

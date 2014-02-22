@@ -186,6 +186,11 @@ BrowserElementChild.prototype = {
                      /* useCapture = */ true,
                      /* wantsUntrusted = */ false);
 
+    addEventListener('DOMMetaAdded',
+                     this._metaAddedHandler.bind(this),
+                     /* useCapture = */ true,
+                     /* wantsUntrusted = */ false);
+
     // This listens to unload events from our message manager, but /not/ from
     // the |content| window.  That's because the window's unload event doesn't
     // bubble, and we're not using a capturing listener.  If we'd used
@@ -501,6 +506,54 @@ BrowserElementChild.prototype = {
     }, this);
   },
 
+  _metaAddedHandler: function(e) {
+    let win = e.target.ownerDocument.defaultView;
+    // Ignore metas which don't come from the top-level
+    // <iframe mozbrowser> window.
+    if (win != content) {
+      debug('Not top level!');
+      return;
+    }
+
+    if (!e.target.name) {
+      return;
+    }
+
+    debug('Got metaAdded: (' + e.target.name + ') ' + e.target.content);
+    if (e.target.name == 'application-name') {
+      let meta = { name: e.target.name,
+                   content: e.target.content };
+
+      let lang;
+      let elm;
+
+      for (elm = e.target;
+           !lang && elm && elm.nodeType == e.target.ELEMENT_NODE;
+           elm = elm.parentNode) {
+        if (elm.hasAttribute('lang')) {
+          lang = elm.getAttribute('lang');
+          continue;
+        }
+
+        if (elm.hasAttributeNS('http://www.w3.org/XML/1998/namespace', 'lang')) {
+          lang = elm.getAttributeNS('http://www.w3.org/XML/1998/namespace', 'lang');
+          continue;
+        }
+      }
+
+      // No lang has been detected.
+      if (!lang && elm.nodeType == e.target.DOCUMENT_NODE) {
+        lang = elm.contentLanguage;
+      }
+
+      if (lang) {
+        meta.lang = lang;
+      }
+
+      sendAsyncMsg('metachange', meta);
+    }
+  },
+
   _addMozAfterPaintHandler: function(callback) {
     function onMozAfterPaint() {
       let uri = docShell.QueryInterface(Ci.nsIWebNavigation).currentURI;
@@ -705,17 +758,21 @@ BrowserElementChild.prototype = {
 
   /**
    * Actually take a screenshot and foward the result up to our parent, given
-   * the desired maxWidth and maxHeight, and given the DOMRequest ID associated
-   * with the request from the parent.
+   * the desired maxWidth and maxHeight (in CSS pixels), and given the
+   * DOMRequest ID associated with the request from the parent.
    */
   _takeScreenshot: function(maxWidth, maxHeight, mimeType, domRequestID) {
     // You can think of the screenshotting algorithm as carrying out the
     // following steps:
     //
+    // - Calculate maxWidth, maxHeight, and viewport's width and height in the
+    //   dimension of device pixels by multiply the numbers with
+    //   window.devicePixelRatio.
+    //
     // - Let scaleWidth be the factor by which we'd need to downscale the
-    //   viewport so it would fit within maxWidth.  (If the viewport's width
-    //   is less than maxWidth, let scaleWidth be 1.) Compute scaleHeight
-    //   the same way.
+    //   viewport pixel width so it would fit within maxPixelWidth.
+    //   (If the viewport's pixel width is less than maxPixelWidth, let
+    //   scaleWidth be 1.) Compute scaleHeight the same way.
     //
     // - Scale the viewport by max(scaleWidth, scaleHeight).  Now either the
     //   viewport's width is no larger than maxWidth, the viewport's height is
@@ -741,13 +798,23 @@ BrowserElementChild.prototype = {
       return;
     }
 
-    let scaleWidth = Math.min(1, maxWidth / content.innerWidth);
-    let scaleHeight = Math.min(1, maxHeight / content.innerHeight);
+    let devicePixelRatio = content.devicePixelRatio;
+
+    let maxPixelWidth = Math.round(maxWidth * devicePixelRatio);
+    let maxPixelHeight = Math.round(maxHeight * devicePixelRatio);
+
+    let contentPixelWidth = content.innerWidth * devicePixelRatio;
+    let contentPixelHeight = content.innerHeight * devicePixelRatio;
+
+    let scaleWidth = Math.min(1, maxPixelWidth / contentPixelWidth);
+    let scaleHeight = Math.min(1, maxPixelHeight / contentPixelHeight);
 
     let scale = Math.max(scaleWidth, scaleHeight);
 
-    let canvasWidth = Math.min(maxWidth, Math.round(content.innerWidth * scale));
-    let canvasHeight = Math.min(maxHeight, Math.round(content.innerHeight * scale));
+    let canvasWidth =
+      Math.min(maxPixelWidth, Math.round(contentPixelWidth * scale));
+    let canvasHeight =
+      Math.min(maxPixelHeight, Math.round(contentPixelHeight * scale));
 
     let transparent = (mimeType !== 'image/jpeg');
 
@@ -758,8 +825,8 @@ BrowserElementChild.prototype = {
     canvas.width = canvasWidth;
     canvas.height = canvasHeight;
 
-    var ctx = canvas.getContext("2d");
-    ctx.scale(scale, scale);
+    var ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.scale(scale * devicePixelRatio, scale * devicePixelRatio);
     ctx.drawWindow(content, 0, 0, content.innerWidth, content.innerHeight,
                    transparent ? "rgba(255,255,255,0)" : "rgb(255,255,255)");
 

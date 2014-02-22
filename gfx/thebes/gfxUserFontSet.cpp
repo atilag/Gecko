@@ -321,7 +321,21 @@ private:
     off_t        mOff;
 };
 
-#ifdef MOZ_OTS_REPORT_ERRORS
+static ots::TableAction
+OTSTableAction(uint32_t aTag, void *aUserData)
+{
+    // preserve Graphite and SVG tables
+    if (aTag == TRUETYPE_TAG('S', 'i', 'l', 'f') ||
+        aTag == TRUETYPE_TAG('S', 'i', 'l', 'l') ||
+        aTag == TRUETYPE_TAG('G', 'l', 'o', 'c') ||
+        aTag == TRUETYPE_TAG('G', 'l', 'a', 't') ||
+        aTag == TRUETYPE_TAG('F', 'e', 'a', 't') ||
+        aTag == TRUETYPE_TAG('S', 'V', 'G', ' ')) {
+        return ots::TABLE_ACTION_PASSTHRU;
+    }
+    return ots::TABLE_ACTION_DEFAULT;
+}
+
 struct OTSCallbackUserData {
     gfxUserFontSet     *mFontSet;
     gfxMixedFontFamily *mFamily;
@@ -346,7 +360,6 @@ gfxUserFontSet::OTSMessage(void *aUserData, const char *format, ...)
 
     return false;
 }
-#endif
 
 // Call the OTS library to sanitize an sfnt before attempting to use it.
 // Returns a newly-allocated block, or nullptr in case of fatal errors.
@@ -360,19 +373,15 @@ gfxUserFontSet::SanitizeOpenTypeData(gfxMixedFontFamily *aFamily,
     ExpandingMemoryStream output(aIsCompressed ? aLength * 2 : aLength,
                                  1024 * 1024 * 256);
 
-#ifdef MOZ_OTS_REPORT_ERRORS
     OTSCallbackUserData userData;
     userData.mFontSet = this;
     userData.mFamily = aFamily;
     userData.mProxy = aProxy;
-#define ERROR_REPORTING_ARGS &gfxUserFontSet::OTSMessage, &userData,
-#else
-#define ERROR_REPORTING_ARGS
-#endif
 
-    if (ots::Process(&output, aData, aLength,
-                     ERROR_REPORTING_ARGS
-                     true)) {
+    ots::SetTableActionCallback(&OTSTableAction, nullptr);
+    ots::SetMessageCallback(&gfxUserFontSet::OTSMessage, &userData);
+
+    if (ots::Process(&output, aData, aLength)) {
         aSaneLength = output.Tell();
         return static_cast<uint8_t*>(output.forget());
     } else {
@@ -384,7 +393,7 @@ gfxUserFontSet::SanitizeOpenTypeData(gfxMixedFontFamily *aFamily,
 static void
 StoreUserFontData(gfxFontEntry* aFontEntry, gfxProxyFontEntry* aProxy,
                   bool aPrivate, const nsAString& aOriginalName,
-                  nsTArray<uint8_t>* aMetadata, uint32_t aMetaOrigLen)
+                  FallibleTArray<uint8_t>* aMetadata, uint32_t aMetaOrigLen)
 {
     if (!aFontEntry->mUserFontData) {
         aFontEntry->mUserFontData = new gfxUserFontData;
@@ -426,7 +435,7 @@ struct WOFFHeader {
 void
 gfxUserFontSet::CopyWOFFMetadata(const uint8_t* aFontData,
                                  uint32_t aLength,
-                                 nsTArray<uint8_t>* aMetadata,
+                                 FallibleTArray<uint8_t>* aMetadata,
                                  uint32_t* aMetaOrigLen)
 {
     // This function may be called with arbitrary, unvalidated "font" data
@@ -704,7 +713,7 @@ gfxUserFontSet::LoadFont(gfxMixedFontFamily *aFamily,
         // Save a copy of the metadata block (if present) for nsIDOMFontFace
         // to use if required. Ownership of the metadata block will be passed
         // to the gfxUserFontData record below.
-        nsTArray<uint8_t> metadata;
+        FallibleTArray<uint8_t> metadata;
         uint32_t metaOrigLen = 0;
         if (fontType == GFX_USERFONT_WOFF) {
             CopyWOFFMetadata(aFontData, aLength, &metadata, &metaOrigLen);

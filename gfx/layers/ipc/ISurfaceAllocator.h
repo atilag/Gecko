@@ -76,6 +76,7 @@ bool ReleaseOwnedSurfaceDescriptor(const SurfaceDescriptor& aDescriptor);
 class ISurfaceAllocator : public AtomicRefCounted<ISurfaceAllocator>
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_TYPENAME(ISurfaceAllocator)
   ISurfaceAllocator() {}
 
   /**
@@ -183,7 +184,7 @@ public:
   }
 
 private:
-  static mozilla::Atomic<int32_t> sAmount;
+  static mozilla::Atomic<size_t> sAmount;
 };
 
 } // namespace

@@ -7,6 +7,7 @@ package org.mozilla.gecko.home;
 
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.db.BrowserContract.Bookmarks;
+import org.mozilla.gecko.db.BrowserContract.URLColumns;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.home.BookmarksListAdapter.FolderInfo;
 import org.mozilla.gecko.home.BookmarksListAdapter.OnRefreshFolderListener;
@@ -65,6 +66,22 @@ public class BookmarksPanel extends HomeFragment {
 
         mList = (BookmarksListView) view.findViewById(R.id.bookmarks_list);
 
+        mList.setContextMenuInfoFactory(new HomeListView.ContextMenuInfoFactory() {
+            @Override
+            public HomeContextMenuInfo makeInfoForCursor(View view, int position, long id, Cursor cursor) {
+                final int type = cursor.getInt(cursor.getColumnIndexOrThrow(Bookmarks.TYPE));
+                if (type == Bookmarks.TYPE_FOLDER) {
+                    // We don't show a context menu for folders
+                    return null;
+                }
+                final HomeContextMenuInfo info = new HomeContextMenuInfo(view, position, id);
+                info.url = cursor.getString(cursor.getColumnIndexOrThrow(Bookmarks.URL));
+                info.title = cursor.getString(cursor.getColumnIndexOrThrow(Bookmarks.TITLE));
+                info.bookmarkId = cursor.getInt(cursor.getColumnIndexOrThrow(Bookmarks._ID));
+                return info;
+            }
+        });
+
         return view;
     }
 
@@ -105,10 +122,6 @@ public class BookmarksPanel extends HomeFragment {
             }
         });
         mList.setAdapter(mListAdapter);
-
-        // Invalidate the cached value that keeps track of whether or
-        // not desktop bookmarks (or reading list items) exist.
-        BrowserDB.invalidateCachedState();
 
         // Create callbacks before the initial loader is started.
         mLoaderCallbacks = new CursorLoaderCallbacks();
@@ -188,6 +201,14 @@ public class BookmarksPanel extends HomeFragment {
         @Override
         public Cursor loadCursor() {
             return BrowserDB.getBookmarksInFolder(getContext().getContentResolver(), mFolderInfo.id);
+        }
+
+        @Override
+        public void onContentChanged() {
+            // Invalidate the cached value that keeps track of whether or
+            // not desktop bookmarks exist.
+            BrowserDB.invalidateCachedState();
+            super.onContentChanged();
         }
 
         public FolderInfo getFolderInfo() {

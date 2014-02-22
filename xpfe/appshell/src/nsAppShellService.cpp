@@ -46,6 +46,10 @@
 #include "nsIWebBrowser.h"
 #include "nsIDocShell.h"
 
+#ifdef MOZ_INSTRUMENT_EVENT_LOOP
+#include "EventTracer.h"
+#endif
+
 using namespace mozilla;
 
 // Default URL for the hidden window, can be overridden by a pref on Mac
@@ -517,6 +521,9 @@ nsAppShellService::JustCreateTopWindow(nsIXULWindow *aParent,
   if (aChromeMask & nsIWebBrowserChrome::CHROME_MAC_SUPPRESS_ANIMATION)
     widgetInitData.mIsAnimationSuppressed = true;
 
+  if (aChromeMask & nsIWebBrowserChrome::CHROME_REMOTE_WINDOW)
+    widgetInitData.mRequireOffMainThreadCompositing = true;
+
 #ifdef XP_MACOSX
   // Mac OS X sheet support
   // Adding CHROME_OPENAS_CHROME to sheetMask makes modal windows opened from
@@ -865,4 +872,22 @@ nsAppShellService::Observe(nsISupports* aSubject, const char *aTopic,
   }
 
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsAppShellService::StartEventLoopLagTracking(bool* aResult)
+{
+#ifdef MOZ_INSTRUMENT_EVENT_LOOP
+    *aResult = mozilla::InitEventTracing(true);
+#endif
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsAppShellService::StopEventLoopLagTracking()
+{
+#ifdef MOZ_INSTRUMENT_EVENT_LOOP
+    mozilla::ShutdownEventTracing();
+#endif
+    return NS_OK;
 }

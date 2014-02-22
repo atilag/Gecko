@@ -28,6 +28,7 @@
 #include "mozilla/Atomics.h"
 #include "nsThreadUtils.h"
 #include "mozilla/gfx/2D.h"
+#include "nsDataHashtable.h"
 
 #ifndef XPCOM_GLUE_AVOID_NSPR
 /**
@@ -146,6 +147,8 @@ class ImageClient;
 class SharedPlanarYCbCrImage;
 class DeprecatedSharedPlanarYCbCrImage;
 class TextureClient;
+class CompositableClient;
+class CompositableForwarder;
 class SurfaceDescriptor;
 
 struct ImageBackendData
@@ -165,7 +168,7 @@ public:
      * For use with the CompositableClient only (so that the later can
      * synchronize the TextureClient with the TextureHost).
      */
-    virtual TextureClient* GetTextureClient() = 0;
+    virtual TextureClient* GetTextureClient(CompositableClient* aClient) = 0;
 };
 
 /**
@@ -210,7 +213,7 @@ public:
   void MarkSent() { mSent = true; }
   bool IsSentToCompositor() { return mSent; }
 
-  virtual TemporaryRef<gfx::SourceSurface> GetAsSourceSurface();
+  virtual TemporaryRef<gfx::SourceSurface> GetAsSourceSurface() = 0;
 
 protected:
   Image(void* aImplData, ImageFormat aFormat) :
@@ -262,21 +265,6 @@ private:
   uint32_t mRecycledBufferSize;
 };
 
-/**
- * Returns true if aFormat is in the given format array.
- */
-static inline bool
-FormatInList(const ImageFormat* aFormats, uint32_t aNumFormats,
-             ImageFormat aFormat)
-{
-  for (uint32_t i = 0; i < aNumFormats; ++i) {
-    if (aFormats[i] == aFormat) {
-      return true;
-    }
-  }
-  return false;
-}
-
 class CompositionNotifySink
 {
 public:
@@ -309,8 +297,7 @@ protected:
   ImageFactory() {}
   virtual ~ImageFactory() {}
 
-  virtual already_AddRefed<Image> CreateImage(const ImageFormat* aFormats,
-                                              uint32_t aNumFormats,
+  virtual already_AddRefed<Image> CreateImage(ImageFormat aFormat,
                                               const gfx::IntSize &aScaleHint,
                                               BufferRecycleBin *aRecycleBin);
 
@@ -411,8 +398,7 @@ public:
    * Can be called on any thread. This method takes mReentrantMonitor
    * when accessing thread-shared state.
    */
-  already_AddRefed<Image> CreateImage(const ImageFormat* aFormats,
-                                      uint32_t aNumFormats);
+  already_AddRefed<Image> CreateImage(ImageFormat aFormat);
 
   /**
    * Set an Image as the current image to display. The Image must have
@@ -727,8 +713,8 @@ class AutoLockImage
 {
 public:
   AutoLockImage(ImageContainer *aContainer) : mContainer(aContainer) { mImage = mContainer->LockCurrentImage(); }
-  AutoLockImage(ImageContainer *aContainer, gfxASurface **aSurface) : mContainer(aContainer) {
-    *aSurface = mContainer->DeprecatedLockCurrentAsSurface(&mSize, getter_AddRefs(mImage)).get();
+  AutoLockImage(ImageContainer *aContainer, RefPtr<gfx::SourceSurface> *aSurface) : mContainer(aContainer) {
+    *aSurface = mContainer->LockCurrentAsSourceSurface(&mSize, getter_AddRefs(mImage));
   }
   ~AutoLockImage() { if (mContainer) { mContainer->UnlockCurrentImage(); } }
 
@@ -790,7 +776,7 @@ struct PlanarYCbCrData {
     : mYChannel(nullptr), mYStride(0), mYSize(0, 0), mYSkip(0)
     , mCbChannel(nullptr), mCrChannel(nullptr)
     , mCbCrStride(0), mCbCrSize(0, 0) , mCbSkip(0), mCrSkip(0)
-    , mPicX(0), mPicY(0), mPicSize(0, 0), mStereoMode(STEREO_MODE_MONO)
+    , mPicX(0), mPicY(0), mPicSize(0, 0), mStereoMode(StereoMode::MONO)
   {}
 };
 
@@ -922,7 +908,8 @@ protected:
  * device output color space. This class is very simple as all backends
  * have to know about how to deal with drawing a cairo image.
  */
-class CairoImage : public Image {
+class CairoImage : public Image,
+                   public ISharedImage {
 public:
   struct Data {
     gfxASurface* mDeprecatedSurface;
@@ -956,9 +943,14 @@ public:
     return surface.forget();
   }
 
+  virtual ISharedImage* AsSharedImage() { return this; }
+  virtual uint8_t* GetBuffer() { return nullptr; }
+  virtual TextureClient* GetTextureClient(CompositableClient* aClient);
+
   gfx::IntSize GetSize() { return mSize; }
 
-  CairoImage() : Image(nullptr, CAIRO_SURFACE) {}
+  CairoImage();
+  ~CairoImage();
 
   nsCountedRef<nsMainThreadSurfaceRef> mDeprecatedSurface;
   gfx::IntSize mSize;
@@ -966,11 +958,12 @@ public:
   // mSourceSurface wraps mDeprrecatedSurface's data, therefore it should not
   // outlive mDeprecatedSurface
   nsCountedRef<nsMainThreadSourceSurfaceRef> mSourceSurface;
+  nsDataHashtable<nsUint32HashKey, RefPtr<TextureClient> >  mTextureClients;
 };
 
 class RemoteBitmapImage : public Image {
 public:
-  RemoteBitmapImage() : Image(nullptr, REMOTE_IMAGE_BITMAP) {}
+  RemoteBitmapImage() : Image(nullptr, ImageFormat::REMOTE_IMAGE_BITMAP) {}
 
   already_AddRefed<gfxASurface> DeprecatedGetAsSurface();
   TemporaryRef<gfx::SourceSurface> GetAsSourceSurface();

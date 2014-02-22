@@ -177,9 +177,9 @@ public:
                     nsIFrame*        aParent,
                     nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
 
-  NS_IMETHOD AttributeChanged(int32_t aNameSpaceID,
-                              nsIAtom* aAttribute,
-                              int32_t aModType) MOZ_OVERRIDE;
+  virtual nsresult AttributeChanged(int32_t aNameSpaceID,
+                                    nsIAtom* aAttribute,
+                                    int32_t aModType) MOZ_OVERRIDE;
 
   virtual void DestroyFrom(nsIFrame* aDestructRoot) MOZ_OVERRIDE;
 
@@ -197,8 +197,8 @@ public:
   nsresult CreateWidgetForView(nsView* aView);
   uint8_t GetShadowStyle();
 
-  NS_IMETHOD SetInitialChildList(ChildListID     aListID,
-                                 nsFrameList&    aChildList) MOZ_OVERRIDE;
+  virtual nsresult SetInitialChildList(ChildListID  aListID,
+                                       nsFrameList& aChildList) MOZ_OVERRIDE;
 
   virtual bool IsLeaf() const MOZ_OVERRIDE;
 
@@ -230,7 +230,7 @@ public:
   bool IsMenu() MOZ_OVERRIDE { return mPopupType == ePopupTypeMenu; }
   bool IsOpen() MOZ_OVERRIDE { return mPopupState == ePopupOpen || mPopupState == ePopupOpenAndVisible; }
 
-  bool IsDragPopup() { return mIsDragPopup; }
+  bool IsMouseTransparent() { return mMouseTransparent; }
 
   static nsIContent* GetTriggerContent(nsMenuPopupFrame* aMenuPopupFrame);
   void ClearTriggerContent() { mTriggerContent = nullptr; }
@@ -280,7 +280,7 @@ public:
   virtual nsIAtom* GetType() const MOZ_OVERRIDE { return nsGkAtoms::menuPopupFrame; }
 
 #ifdef DEBUG_FRAME_DUMP
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE
   {
       return MakeFrameName(NS_LITERAL_STRING("MenuPopup"), aResult);
   }
@@ -310,7 +310,11 @@ public:
   // area of the screen the popup should be displayed on. Content popups,
   // however, will also be constrained by the content area, given by
   // aRootScreenRect. All coordinates are in app units.
-  nsRect GetConstraintRect(const nsRect& aAnchorRect, const nsRect& aRootScreenRect);
+  // For non-toplevel popups (which will always be panels), we will also
+  // constrain them to the available screen rect, ie they will not fall
+  // underneath the taskbar, dock or other fixed OS elements.
+  nsRect GetConstraintRect(const nsRect& aAnchorRect, const nsRect& aRootScreenRect,
+                           nsPopupLevel aPopupLevel);
 
   // Determines whether the given edges of the popup may be moved, where
   // aHorizontalSide and aVerticalSide are one of the NS_SIDE_* constants, or
@@ -333,10 +337,6 @@ public:
   // Return the screen coordinates of the popup, or (-1, -1) if anchored.
   // This position is in CSS pixels.
   nsIntPoint ScreenPosition() const { return nsIntPoint(mScreenXPos, mScreenYPos); }
-
-  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                const nsRect&           aDirtyRect,
-                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
   nsIntPoint GetLastClientOffset() const { return mLastClientOffset; }
 
@@ -480,7 +480,7 @@ protected:
   bool mShouldAutoPosition; // Should SetPopupPosition be allowed to auto position popup?
   bool mInContentShell; // True if the popup is in a content shell
   bool mIsMenuLocked; // Should events inside this menu be ignored?
-  bool mIsDragPopup; // True if this is a popup used for drag feedback
+  bool mMouseTransparent; // True if this is a popup is transparent to mouse events
 
   // the flip modes that were used when the popup was opened
   bool mHFlip;

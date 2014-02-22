@@ -17,6 +17,8 @@
 
 interface ApplicationCache;
 interface MozFrameRequestCallback;
+interface nsIBrowserDOMWindow;
+interface nsIMessageBroadcaster;
 interface nsIDOMCrypto;
 typedef any Transferable;
 
@@ -72,7 +74,7 @@ typedef any Transferable;
   [Throws] DOMString? prompt(optional DOMString message = "", optional DOMString default = "");
   [Throws] void print();
   //[Throws] any showModalDialog(DOMString url, optional any argument);
-  [Throws] any showModalDialog(DOMString url, optional any argument, optional DOMString options = "");
+  [Throws] any showModalDialog(DOMString url, any argument, optional DOMString options = "");
 
   [Throws, CrossOriginCallable] void postMessage(any message, DOMString targetOrigin, optional sequence<Transferable> transfer);
 
@@ -85,10 +87,10 @@ Window implements WindowEventHandlers;
 [NoInterfaceObject]
 interface WindowTimers {
   [Throws] long setTimeout(Function handler, optional long timeout = 0, any... arguments);
-  [Throws] long setTimeout(DOMString handler, optional long timeout = 0);
+  [Throws] long setTimeout(DOMString handler, optional long timeout = 0, any... unused);
   [Throws] void clearTimeout(long handle);
   [Throws] long setInterval(Function handler, optional long timeout, any... arguments);
-  [Throws] long setInterval(DOMString handler, optional long timeout);
+  [Throws] long setInterval(DOMString handler, optional long timeout, any... unused);
   [Throws] void clearInterval(long handle);
 };
 Window implements WindowTimers;
@@ -118,8 +120,8 @@ Window implements WindowLocalStorage;
 
 // http://www.whatwg.org/specs/web-apps/current-work/
 partial interface Window {
-  void captureEvents(long dummy);
-  void releaseEvents(long dummy);
+  void captureEvents();
+  void releaseEvents();
 };
 
 // https://dvcs.w3.org/hg/editing/raw-file/tip/editing.html
@@ -339,3 +341,66 @@ partial interface Window {
 Window implements TouchEventHandlers;
 
 Window implements OnErrorEventHandlerForWindow;
+
+[ChromeOnly] interface ChromeWindow {
+  [Func="nsGlobalWindow::IsChromeWindow"]
+  const unsigned short STATE_MAXIMIZED = 1;
+  [Func="nsGlobalWindow::IsChromeWindow"]
+  const unsigned short STATE_MINIMIZED = 2;
+  [Func="nsGlobalWindow::IsChromeWindow"]
+  const unsigned short STATE_NORMAL = 3;
+  [Func="nsGlobalWindow::IsChromeWindow"]
+  const unsigned short STATE_FULLSCREEN = 4;
+
+  [Func="nsGlobalWindow::IsChromeWindow"]
+  readonly attribute unsigned short windowState;
+
+  /**
+   * browserDOMWindow provides access to yet another layer of
+   * utility functions implemented by chrome script. It will be null
+   * for DOMWindows not corresponding to browsers.
+   */
+  [Throws, Func="nsGlobalWindow::IsChromeWindow"]
+           attribute nsIBrowserDOMWindow? browserDOMWindow;
+
+  [Throws, Func="nsGlobalWindow::IsChromeWindow"]
+  void                      getAttention();
+
+  [Throws, Func="nsGlobalWindow::IsChromeWindow"]
+  void                      getAttentionWithCycleCount(long aCycleCount);
+
+  [Throws, Func="nsGlobalWindow::IsChromeWindow"]
+  void                      setCursor(DOMString cursor);
+
+  [Throws, Func="nsGlobalWindow::IsChromeWindow"]
+  void                      maximize();
+  [Throws, Func="nsGlobalWindow::IsChromeWindow"]
+  void                      minimize();
+  [Throws, Func="nsGlobalWindow::IsChromeWindow"]
+  void                      restore();
+
+  /**
+   * Notify a default button is loaded on a dialog or a wizard.
+   * defaultButton is the default button.
+   */
+  [Throws, Func="nsGlobalWindow::IsChromeWindow"]
+  void notifyDefaultButtonLoaded(Element defaultButton);
+
+  [Throws, Func="nsGlobalWindow::IsChromeWindow"]
+  readonly attribute nsIMessageBroadcaster messageManager;
+
+  /**
+   * On some operating systems, we must allow the window manager to
+   * handle window dragging. This function tells the window manager to
+   * start dragging the window. This function will fail unless called
+   * while the left mouse button is held down, callers must check this.
+   *
+   * The optional panel argument should be set when moving a panel.
+   *
+   * Throws NS_ERROR_NOT_IMPLEMENTED if the OS doesn't support this.
+   */
+  [Throws, Func="nsGlobalWindow::IsChromeWindow"]
+  void beginWindowMove(Event mouseDownEvent, optional Element? panel = null);
+};
+
+Window implements ChromeWindow;

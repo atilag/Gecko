@@ -16,6 +16,7 @@
 #include "dom_quickstubs.h"
 #include "mozJSComponentLoader.h"
 
+#include "nsIMemoryInfoDumper.h"
 #include "nsIMemoryReporter.h"
 #include "nsIObserverService.h"
 #include "nsIDebug2.h"
@@ -491,7 +492,7 @@ Scriptability::Unblock()
 void
 Scriptability::SetDocShellAllowsScript(bool aAllowed)
 {
-    mDocShellAllowsScript = aAllowed;
+    mDocShellAllowsScript = aAllowed || mImmuneToScriptPolicy;
 }
 
 /* static */
@@ -1396,6 +1397,25 @@ XPCJSRuntime::OperationCallback(JSContext *cx)
     return true;
 }
 
+/* static */ void
+XPCJSRuntime::OutOfMemoryCallback(JSContext *cx)
+{
+    if (!Preferences::GetBool("memory.dump_reports_on_oom")) {
+        return;
+    }
+
+    nsCOMPtr<nsIMemoryInfoDumper> dumper =
+        do_GetService("@mozilla.org/memory-info-dumper;1");
+    if (!dumper) {
+        return;
+    }
+
+    // If this fails, it fails silently.
+    dumper->DumpMemoryInfoToTempDir(NS_LITERAL_STRING("due-to-JS-OOM"),
+                                    /* minimizeMemoryUsage = */ false,
+                                    /* dumpChildProcesses = */ false);
+}
+
 size_t
 XPCJSRuntime::SizeOfIncludingThis(MallocSizeOf mallocSizeOf)
 {
@@ -1415,38 +1435,32 @@ XPCJSRuntime::SizeOfIncludingThis(MallocSizeOf mallocSizeOf)
     return n;
 }
 
-XPCReadableJSStringWrapper *
-XPCJSRuntime::NewStringWrapper(const char16_t *str, uint32_t len)
+nsString*
+XPCJSRuntime::NewShortLivedString()
 {
     for (uint32_t i = 0; i < XPCCCX_STRING_CACHE_SIZE; ++i) {
-        StringWrapperEntry& ent = mScratchStrings[i];
-
-        if (!ent.mInUse) {
-            ent.mInUse = true;
-
-            // Construct the string using placement new.
-
-            return new (ent.mString.addr()) XPCReadableJSStringWrapper(str, len);
+        if (mScratchStrings[i].empty()) {
+            mScratchStrings[i].construct();
+            return mScratchStrings[i].addr();
         }
     }
 
     // All our internal string wrappers are used, allocate a new string.
-
-    return new XPCReadableJSStringWrapper(str, len);
+    return new nsString();
 }
 
 void
-XPCJSRuntime::DeleteString(nsAString *string)
+XPCJSRuntime::DeleteShortLivedString(nsString *string)
 {
+    if (string == &EmptyString() || string == &NullString())
+        return;
+
     for (uint32_t i = 0; i < XPCCCX_STRING_CACHE_SIZE; ++i) {
-        StringWrapperEntry& ent = mScratchStrings[i];
-        if (string == ent.mString.addr()) {
+        if (!mScratchStrings[i].empty() &&
+            mScratchStrings[i].addr() == string) {
             // One of our internal strings is no longer in use, mark
-            // it as such and destroy the string.
-
-            ent.mInUse = false;
-            ent.mString.addr()->~XPCReadableJSStringWrapper();
-
+            // it as such and free its data.
+            mScratchStrings[i].destroy();
             return;
         }
     }
@@ -1566,7 +1580,7 @@ XPCJSRuntime::~XPCJSRuntime()
 
 #ifdef DEBUG
     for (uint32_t i = 0; i < XPCCCX_STRING_CACHE_SIZE; ++i) {
-        MOZ_ASSERT(!mScratchStrings[i].mInUse, "Uh, string wrapper still in use!");
+        MOZ_ASSERT(mScratchStrings[i].empty(), "Short lived string still in use");
     }
 #endif
 }
@@ -2966,7 +2980,7 @@ static const JSWrapObjectCallbacks WrapObjectCallbacks = {
 };
 
 XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
-   : CycleCollectedJSRuntime(32L * 1024L * 1024L, JS_USE_HELPER_THREADS),
+   : CycleCollectedJSRuntime(nullptr, 32L * 1024L * 1024L, JS_USE_HELPER_THREADS),
    mJSContextStack(new XPCJSContextStack()),
    mCallContext(nullptr),
    mAutoRoots(nullptr),
@@ -3107,6 +3121,7 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
     js::SetActivityCallback(runtime, ActivityCallback, this);
     js::SetCTypesActivityCallback(runtime, CTypesActivityCallback);
     JS_SetOperationCallback(runtime, OperationCallback);
+    JS::SetOutOfMemoryCallback(runtime, OutOfMemoryCallback);
 
     // The JS engine needs to keep the source code around in order to implement
     // Function.prototype.toSource(). It'd be nice to not have to do this for

@@ -8,7 +8,7 @@
 
 #include <stdint.h>
 
-#include "insanity/ScopedPtr.h"
+#include "insanity/pkix.h"
 #include "certdb.h"
 #include "nss.h"
 #include "ocsp.h"
@@ -21,6 +21,10 @@
 
 using namespace insanity::pkix;
 
+#ifdef PR_LOGGING
+extern PRLogModuleInfo* gCertVerifierLog;
+#endif
+
 namespace mozilla { namespace psm {
 
 const char BUILTIN_ROOTS_MODULE_DEFAULT_NAME[] = "Builtin Roots Module";
@@ -30,6 +34,209 @@ namespace {
 inline void PORT_Free_string(char* str) { PORT_Free(str); }
 
 typedef ScopedPtr<SECMODModule, SECMOD_DestroyModule> ScopedSECMODModule;
+
+} // unnamed namespace
+
+NSSCertDBTrustDomain::NSSCertDBTrustDomain(SECTrustType certDBTrustType,
+                                           bool ocspDownloadEnabled,
+                                           bool ocspStrict,
+                                           void* pinArg)
+  : mCertDBTrustType(certDBTrustType)
+  , mOCSPDownloadEnabled(ocspDownloadEnabled)
+  , mOCSPStrict(ocspStrict)
+  , mPinArg(pinArg)
+{
+}
+
+SECStatus
+NSSCertDBTrustDomain::FindPotentialIssuers(
+  const SECItem* encodedIssuerName, PRTime time,
+  /*out*/ insanity::pkix::ScopedCERTCertList& results)
+{
+  // TODO: normalize encodedIssuerName
+  // TODO: NSS seems to be ambiguous between "no potential issuers found" and
+  // "there was an error trying to retrieve the potential issuers."
+  results = CERT_CreateSubjectCertList(nullptr, CERT_GetDefaultCertDB(),
+                                       encodedIssuerName, time, true);
+  if (!results) {
+    // NSS sometimes returns this unhelpful error code upon failing to find any
+    // candidate certificates.
+    if (PR_GetError() == SEC_ERROR_BAD_DATABASE) {
+      PR_SetError(SEC_ERROR_UNKNOWN_ISSUER, 0);
+    }
+    return SECFailure;
+  }
+
+  return SECSuccess;
+}
+
+SECStatus
+NSSCertDBTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
+                                   const CERTCertificate* candidateCert,
+                                   /*out*/ TrustLevel* trustLevel)
+{
+  PORT_Assert(candidateCert);
+  PORT_Assert(trustLevel);
+  if (!candidateCert || !trustLevel) {
+    PORT_SetError(SEC_ERROR_INVALID_ARGS);
+    return SECFailure;
+  }
+
+  // XXX: CERT_GetCertTrust seems to be abusing SECStatus as a boolean, where
+  // SECSuccess means that there is a trust record and SECFailure means there
+  // is not a trust record. I looked at NSS's internal uses of
+  // CERT_GetCertTrust, and all that code uses the result as a boolean meaning
+  // "We have a trust record."
+  CERTCertTrust trust;
+  if (CERT_GetCertTrust(candidateCert, &trust) == SECSuccess) {
+    PRUint32 flags = SEC_GET_TRUST_FLAGS(&trust, mCertDBTrustType);
+
+    // For DISTRUST, we use the CERTDB_TRUSTED or CERTDB_TRUSTED_CA bit,
+    // because we can have active distrust for either type of cert. Note that
+    // CERTDB_TERMINAL_RECORD means "stop trying to inherit trust" so if the
+    // relevant trust bit isn't set then that means the cert must be considered
+    // distrusted.
+    PRUint32 relevantTrustBit = endEntityOrCA == MustBeCA ? CERTDB_TRUSTED_CA
+                                                          : CERTDB_TRUSTED;
+    if (((flags & (relevantTrustBit|CERTDB_TERMINAL_RECORD)))
+            == CERTDB_TERMINAL_RECORD) {
+      *trustLevel = ActivelyDistrusted;
+      return SECSuccess;
+    }
+
+    // For TRUST, we only use the CERTDB_TRUSTED_CA bit, because Gecko hasn't
+    // needed to consider end-entity certs to be their own trust anchors since
+    // Gecko implemented nsICertOverrideService.
+    if (flags & CERTDB_TRUSTED_CA) {
+      *trustLevel = TrustAnchor;
+      return SECSuccess;
+    }
+  }
+
+  *trustLevel = InheritsTrust;
+  return SECSuccess;
+}
+
+SECStatus
+NSSCertDBTrustDomain::VerifySignedData(const CERTSignedData* signedData,
+                                       const CERTCertificate* cert)
+{
+  return ::insanity::pkix::VerifySignedData(signedData, cert, mPinArg);
+}
+
+SECStatus
+NSSCertDBTrustDomain::CheckRevocation(
+  insanity::pkix::EndEntityOrCA endEntityOrCA,
+  const CERTCertificate* cert,
+  /*const*/ CERTCertificate* issuerCert,
+  PRTime time,
+  /*optional*/ const SECItem* stapledOCSPResponse)
+{
+  // Actively distrusted certificates will have already been blocked by
+  // GetCertTrust.
+
+  // TODO: need to verify that IsRevoked isn't called for trust anchors AND
+  // that that fact is documented in insanity.
+
+  PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
+         ("NSSCertDBTrustDomain: Top of CheckRevocation\n"));
+
+  PORT_Assert(cert);
+  PORT_Assert(issuerCert);
+  if (!cert || !issuerCert) {
+    PORT_SetError(SEC_ERROR_INVALID_ARGS);
+    return SECFailure;
+  }
+
+  // If we have a stapled OCSP response then the verification of that response
+  // determines the result unless the OCSP response is expired. We make an
+  // exception for expired responses because some servers, nginx in particular,
+  // are known to serve expired responses due to bugs.
+  if (stapledOCSPResponse) {
+    PR_ASSERT(endEntityOrCA == MustBeEndEntity);
+    SECStatus rv = VerifyEncodedOCSPResponse(*this, cert, issuerCert, time,
+                                             stapledOCSPResponse);
+    if (rv == SECSuccess) {
+      return rv;
+    }
+    if (PR_GetError() != SEC_ERROR_OCSP_OLD_RESPONSE) {
+      return rv;
+    }
+  }
+
+  // TODO(bug 921885): We need to change this when we add EV support.
+
+  // TODO: when !mOCSPDownloadEnabled, we still need to handle the fallback for
+  // expired responses. But, if/when we disable OCSP fetching by default, it
+  // would be ambiguous whether !mOCSPDownloadEnabled means "I want the default"
+  // or "I really never want you to ever fetch OCSP."
+  if (mOCSPDownloadEnabled) {
+    // We don't do OCSP fetching for intermediates.
+    if (endEntityOrCA == MustBeCA) {
+      PR_ASSERT(!stapledOCSPResponse);
+      return SECSuccess;
+    }
+
+    ScopedPtr<char, PORT_Free_string>
+      url(CERT_GetOCSPAuthorityInfoAccessLocation(cert));
+
+    // Nothing to do if we don't have an OCSP responder URI for the cert; just
+    // assume it is good. Note that this is the confusing, but intended,
+    // interpretation of "strict" revocation checking in the face of a
+    // certificate that lacks an OCSP responder URI.
+    if (!url) {
+      if (stapledOCSPResponse) {
+        PR_SetError(SEC_ERROR_OCSP_OLD_RESPONSE, 0);
+        return SECFailure;
+      }
+      return SECSuccess;
+    }
+
+    ScopedPLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
+    if (!arena) {
+      return SECFailure;
+    }
+
+    const SECItem* request
+      = CreateEncodedOCSPRequest(arena.get(), cert, issuerCert);
+    if (!request) {
+      return SECFailure;
+    }
+
+    const SECItem* response(CERT_PostOCSPRequest(arena.get(), url.get(),
+                                                 request));
+    if (!response) {
+      if (mOCSPStrict) {
+        return SECFailure;
+      }
+      // Soft fail -> success :(
+    } else {
+      SECStatus rv = VerifyEncodedOCSPResponse(*this, cert, issuerCert, time,
+                                               response);
+      if (rv == SECSuccess) {
+        return SECSuccess;
+      }
+      PRErrorCode error = PR_GetError();
+      switch (error) {
+        case SEC_ERROR_OCSP_UNKNOWN_CERT:
+        case SEC_ERROR_REVOKED_CERTIFICATE:
+          return SECFailure;
+        default:
+          if (mOCSPStrict) {
+            return SECFailure;
+          }
+          break; // Soft fail -> success :(
+      }
+    }
+  }
+
+  PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
+         ("NSSCertDBTrustDomain: end of CheckRevocation"));
+
+  return SECSuccess;
+}
+
+namespace {
 
 static char*
 nss_addEscape(const char* string, char quote)

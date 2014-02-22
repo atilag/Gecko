@@ -2155,9 +2155,9 @@ nsXPCConstructor::CallOrConstruct(nsIXPConnectWrappedNative *wrapper,JSContext *
         return ThrowAndFail(NS_ERROR_XPC_CANT_CREATE_WN, cx, _retval);
     }
 
-    Value argv[1] = {ObjectValue(*iidObj)};
+    JS::Rooted<JS::Value> arg(cx, ObjectValue(*iidObj));
     RootedValue rval(cx);
-    if (!JS_CallFunctionName(cx, cidObj, "createInstance", 1, argv, rval.address()) ||
+    if (!JS_CallFunctionName(cx, cidObj, "createInstance", arg, &rval) ||
         rval.isPrimitive()) {
         // createInstance will have thrown an exception
         *_retval = false;
@@ -2177,7 +2177,7 @@ nsXPCConstructor::CallOrConstruct(nsIXPConnectWrappedNative *wrapper,JSContext *
         }
 
         RootedValue dummy(cx);
-        if (!JS_CallFunctionValue(cx, newObj, fun, args.length(), args.array(), dummy.address())) {
+        if (!JS_CallFunctionValue(cx, newObj, fun, args, &dummy)) {
             // function should have thrown an exception
             *_retval = false;
             return NS_OK;
@@ -2546,7 +2546,8 @@ nsXPCComponents_Utils::GetSandbox(nsIXPCComponents_utils_Sandbox **aSandbox)
     if (!mSandbox)
         mSandbox = NewSandboxConstructor();
 
-    NS_ADDREF(*aSandbox = mSandbox);
+    nsCOMPtr<nsIXPCComponents_utils_Sandbox> rval = mSandbox;
+    rval.forget(aSandbox);
     return NS_OK;
 }
 
@@ -2565,7 +2566,8 @@ nsXPCComponents_Utils::ReportError(HandleValue error, JSContext *cx)
 
     const uint64_t innerWindowID = nsJSUtils::GetCurrentlyRunningCodeInnerWindowID(cx);
 
-    JSErrorReport *err = JS_ErrorFromException(cx, error);
+    RootedObject errorObj(cx, error.isObject() ? &error.toObject() : nullptr);
+    JSErrorReport *err = errorObj ? JS_ErrorFromException(cx, errorObj) : nullptr;
     if (err) {
         // It's a proper JS Error
         nsAutoString fileUni;
@@ -2855,6 +2857,18 @@ nsXPCComponents_Utils::SchedulePreciseShrinkingGC(ScheduledGCCallback* aCallback
     return NS_DispatchToMainThread(event);
 }
 
+/* void unlinkGhostWindows(); */
+NS_IMETHODIMP
+nsXPCComponents_Utils::UnlinkGhostWindows()
+{
+#ifdef DEBUG
+    nsWindowMemoryReporter::UnlinkGhostWindows();
+    return NS_OK;
+#else
+    return NS_ERROR_NOT_IMPLEMENTED;
+#endif
+}
+
 /* [implicit_jscontext] jsval nondeterministicGetWeakMapKeys(in jsval aMap); */
 NS_IMETHODIMP
 nsXPCComponents_Utils::NondeterministicGetWeakMapKeys(HandleValue aMap,
@@ -3039,7 +3053,7 @@ nsXPCComponents_Utils::CreateArrayIn(HandleValue vobj, JSContext *cx,
     RootedObject obj(cx);
     {
         JSAutoCompartment ac(cx, scope);
-        obj =  JS_NewArrayObject(cx, 0, nullptr);
+        obj =  JS_NewArrayObject(cx, 0);
         if (!obj)
             return NS_ERROR_FAILURE;
     }
@@ -3380,7 +3394,7 @@ nsXPCComponents_Utils::GetIncumbentGlobal(HandleValue aCallback,
     // Invoke the callback, if passed.
     if (aCallback.isObject()) {
         RootedValue ignored(aCx);
-        if (!JS_CallFunctionValue(aCx, nullptr, aCallback, 1, globalVal.address(), ignored.address()))
+        if (!JS_CallFunctionValue(aCx, JS::NullPtr(), aCallback, globalVal, &ignored))
             return NS_ERROR_FAILURE;
     }
 
@@ -3621,6 +3635,19 @@ nsXPCComponents_Utils::CloneInto(HandleValue aValue, HandleValue aScope,
     if (!JS_WrapValue(aCx, aCloned))
         return NS_ERROR_FAILURE;
 
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsXPCComponents_Utils::GetWebIDLCallerPrincipal(nsIPrincipal **aResult)
+{
+    // This API may only be when the Entry Settings Object corresponds to a
+    // JS-implemented WebIDL call. In all other cases, the value will be null,
+    // and we throw.
+    nsCOMPtr<nsIPrincipal> callerPrin = mozilla::dom::GetWebIDLCallerPrincipal();
+    if (!callerPrin)
+        return NS_ERROR_NOT_AVAILABLE;
+    callerPrin.forget(aResult);
     return NS_OK;
 }
 

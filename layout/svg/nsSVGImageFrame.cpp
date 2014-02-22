@@ -57,18 +57,19 @@ public:
   NS_DECL_FRAMEARENA_HELPERS
 
   // nsISVGChildFrame interface:
-  NS_IMETHOD PaintSVG(nsRenderingContext *aContext, const nsIntRect *aDirtyRect,
-                      nsIFrame* aTransformRoot) MOZ_OVERRIDE;
-  NS_IMETHOD_(nsIFrame*) GetFrameForPoint(const nsPoint &aPoint);
+  virtual nsresult PaintSVG(nsRenderingContext *aContext,
+                            const nsIntRect *aDirtyRect,
+                            nsIFrame* aTransformRoot) MOZ_OVERRIDE;
+  virtual nsIFrame* GetFrameForPoint(const nsPoint &aPoint);
   virtual void ReflowSVG();
 
   // nsSVGPathGeometryFrame methods:
   virtual uint16_t GetHitTestFlags() MOZ_OVERRIDE;
 
   // nsIFrame interface:
-  NS_IMETHOD  AttributeChanged(int32_t         aNameSpaceID,
-                               nsIAtom*        aAttribute,
-                               int32_t         aModType);
+  virtual nsresult  AttributeChanged(int32_t         aNameSpaceID,
+                                     nsIAtom*        aAttribute,
+                                     int32_t         aModType);
   virtual void Init(nsIContent*      aContent,
                     nsIFrame*        aParent,
                     nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
@@ -82,7 +83,7 @@ public:
   virtual nsIAtom* GetType() const;
 
 #ifdef DEBUG_FRAME_DUMP
-  NS_IMETHOD GetFrameName(nsAString& aResult) const
+  virtual nsresult GetFrameName(nsAString& aResult) const
   {
     return MakeFrameName(NS_LITERAL_STRING("SVGImage"), aResult);
   }
@@ -179,7 +180,7 @@ nsSVGImageFrame::DestroyFrom(nsIFrame* aDestructRoot)
 //----------------------------------------------------------------------
 // nsIFrame methods:
 
-NS_IMETHODIMP
+nsresult
 nsSVGImageFrame::AttributeChanged(int32_t         aNameSpaceID,
                                   nsIAtom*        aAttribute,
                                   int32_t         aModType)
@@ -294,7 +295,7 @@ nsSVGImageFrame::TransformContextForPainting(gfxContext* aGfxContext,
 
 //----------------------------------------------------------------------
 // nsISVGChildFrame methods:
-NS_IMETHODIMP
+nsresult
 nsSVGImageFrame::PaintSVG(nsRenderingContext *aContext,
                           const nsIntRect *aDirtyRect,
                           nsIFrame* aTransformRoot)
@@ -409,7 +410,7 @@ nsSVGImageFrame::PaintSVG(nsRenderingContext *aContext,
   return rv;
 }
 
-NS_IMETHODIMP_(nsIFrame*)
+nsIFrame*
 nsSVGImageFrame::GetFrameForPoint(const nsPoint &aPoint)
 {
   // Special case for raster images -- we only want to accept points that fall

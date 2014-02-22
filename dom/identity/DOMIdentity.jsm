@@ -5,6 +5,10 @@
 "use strict";
 
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
+
+Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+
 const PREF_FXA_ENABLED = "identity.fxaccounts.enabled";
 let _fxa_enabled = false;
 try {
@@ -17,9 +21,6 @@ const FXA_ENABLED = _fxa_enabled;
 
 // This is the parent process corresponding to nsDOMIdentity.
 this.EXPORTED_SYMBOLS = ["DOMIdentity"];
-
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "objectCopy",
                                   "resource://gre/modules/identity/IdentityUtils.jsm");
@@ -159,7 +160,9 @@ RPWatchContext.prototype = {
   },
 
   doError: function RPWatchContext_onerror(aMessage) {
-    log("doError: " + aMessage);
+    log("doError: " + this.id + ": " + aMessage);
+    let message = new IDDOMMessage({id: this.id, message: aMessage});
+    this._mm.sendAsyncMessage("Identity:RP:Watch:OnError", message);
   }
 };
 
@@ -219,6 +222,10 @@ this.DOMIdentity = {
    */
   getContextForMM: function(targetMM) {
     return this._serviceContexts.get(this._mmContexts.get(targetMM));
+  },
+
+  hasContextForMM: function(targetMM) {
+    return this._mmContexts.has(targetMM);
   },
 
   /*
@@ -344,6 +351,10 @@ this.DOMIdentity = {
   },
 
   _childProcessShutdown: function DOMIdentity__childProcessShutdown(targetMM) {
+    if (!this.hasContextForMM(targetMM)) {
+      return;
+    }
+
     this.getContextForMM(targetMM).RP.childProcessShutdown(targetMM);
     this.deleteContextForMM(targetMM);
 

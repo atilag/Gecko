@@ -48,6 +48,7 @@ let Elements = {};
   ["contentViewport",    "content-viewport"],
   ["progress",           "progress-control"],
   ["progressContainer",  "progress-container"],
+  ["feedbackLabel",  "feedback-label"],
 ].forEach(function (aElementGlobal) {
   let [name, id] = aElementGlobal;
   XPCOMUtils.defineLazyGetter(Elements, name, function() {
@@ -106,6 +107,8 @@ var BrowserUI = {
     window.addEventListener("MozPrecisePointer", this, true);
     window.addEventListener("MozImprecisePointer", this, true);
 
+    window.addEventListener("AppCommand", this, true);
+
     Services.prefs.addObserver("browser.cache.disk_cache_ssl", this, false);
 
     // Init core UI modules
@@ -142,6 +145,15 @@ var BrowserUI = {
       return IndexedDB.receiveMessage(aMessage);
     });
 
+    // hook up telemetry ping for UI data
+    try {
+      UITelemetry.addSimpleMeasureFunction("metro-ui",
+                                           BrowserUI._getMeasures.bind(BrowserUI));
+    } catch (ex) {
+      // swallow exception that occurs if metro-appbar measure is already set up
+      dump("Failed to addSimpleMeasureFunction in browser-ui: " + ex.message + "\n");
+    }
+
     // Delay the panel UI and Sync initialization
     window.addEventListener("UIReadyDelayed", function delayedInit(aEvent) {
       Util.dumpLn("* delay load started...");
@@ -162,6 +174,8 @@ var BrowserUI = {
       } catch(ex) {
         Util.dumpLn("Exception in delay load module:", ex.message);
       }
+
+      BrowserUI._initFirstRunContent();
 
       // check for left over crash reports and submit them if found.
       BrowserUI.startupCrashCheck();
@@ -248,7 +262,6 @@ var BrowserUI = {
   },
 
   showContent: function showContent(aURI) {
-    this.updateStartURIAttributes(aURI);
     ContextUI.dismissTabs();
     ContextUI.dismissContextAppbar();
     FlyoutPanelsUI.hide();
@@ -379,7 +392,7 @@ var BrowserUI = {
 
       // Delay doing the fixup so the raw URI is passed to loadURIWithFlags
       // and the proper third-party fixup can be done
-      let fixupFlags = Ci.nsIURIFixup.FIXUP_FLAG_ALLOW_KEYWORD_LOOKUP | 
+      let fixupFlags = Ci.nsIURIFixup.FIXUP_FLAG_ALLOW_KEYWORD_LOOKUP |
                        Ci.nsIURIFixup.FIXUP_FLAG_FIX_SCHEME_TYPOS;
       let uri = gURIFixup.createFixupURI(aURI, fixupFlags);
       gHistSvc.markPageAsTyped(uri);
@@ -746,6 +759,14 @@ var BrowserUI = {
     }
   },
 
+  _getMeasures: function() {
+    let dimensions = {
+      "window-width": ContentAreaObserver.width,
+      "window-height": ContentAreaObserver.height
+    };
+    return dimensions;
+  },
+
   /*********************************
    * Event handling
    */
@@ -763,6 +784,9 @@ var BrowserUI = {
         break;
       case "MozImprecisePointer":
         this._onImpreciseInput();
+        break;
+      case "AppCommand":
+        this.handleAppCommandEvent(aEvent);
         break;
     }
   },
@@ -1123,14 +1147,56 @@ var BrowserUI = {
     }
   },
 
+  handleAppCommandEvent: function (aEvent) {
+    switch (aEvent.command) {
+      case "Back":
+        this.doCommand("cmd_back");
+        break;
+      case "Forward":
+        this.doCommand("cmd_forward");
+        break;
+      case "Reload":
+        this.doCommand("cmd_reload");
+        break;
+      case "Stop":
+        this.doCommand("cmd_stop");
+        break;
+      case "Home":
+        this.doCommand("cmd_home");
+        break;
+      case "New":
+        this.doCommand("cmd_newTab");
+        break;
+      case "Close":
+        this.doCommand("cmd_closeTab");
+        break;
+      case "Find":
+        FindHelperUI.show();
+        break;
+      case "Open":
+        this.doCommand("cmd_openFile");
+        break;
+      case "Save":
+        this.doCommand("cmd_savePage");
+        break;
+      case "Search":
+        this.doCommand("cmd_openLocation");
+        break;
+      default:
+        return;
+    }
+    aEvent.stopPropagation();
+    aEvent.preventDefault();
+  },
+
   confirmSanitizeDialog: function () {
     let bundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
-    let title = bundle.GetStringFromName("clearPrivateData.title");
-    let message = bundle.GetStringFromName("clearPrivateData.message");
+    let title = bundle.GetStringFromName("clearPrivateData.title2");
+    let message = bundle.GetStringFromName("clearPrivateData.message3");
     let clearbutton = bundle.GetStringFromName("clearPrivateData.clearButton");
 
     let prefsClearButton = document.getElementById("prefs-clear-data");
-    prefsClearButton.disabled = true; 
+    prefsClearButton.disabled = true;
 
     let buttonPressed = Services.prompt.confirmEx(
                           null,
@@ -1150,6 +1216,24 @@ var BrowserUI = {
     }
 
     prefsClearButton.disabled = false;
+  },
+
+  _initFirstRunContent: function () {
+    let dismissed = Services.prefs.getBoolPref("browser.firstrun-content.dismissed");
+    let firstRunCount = Services.prefs.getIntPref("browser.firstrun.count");
+
+    if (!dismissed && firstRunCount > 0) {
+      document.loadOverlay("chrome://browser/content/FirstRunContentOverlay.xul", null);
+    }
+  },
+
+  firstRunContentDismiss: function() {
+    let firstRunElements = Elements.stack.querySelectorAll(".firstrun-content");
+    for (let node of firstRunElements) {
+      node.parentNode.removeChild(node);
+    }
+
+    Services.prefs.setBoolPref("browser.firstrun-content.dismissed", true);
   },
 };
 

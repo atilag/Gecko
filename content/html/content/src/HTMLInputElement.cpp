@@ -513,7 +513,7 @@ public:
     , mInput(aInput)
     , mTopDir(aTopDir)
     , mFileListLength(0)
-    , mCanceled(0)
+    , mCanceled(false)
   {}
 
   NS_IMETHOD Run() {
@@ -578,7 +578,7 @@ public:
     // Clear mInput to make sure that it can't lose its last strong ref off the
     // main thread (which may happen if our dtor runs off the main thread)!
     mInput = nullptr;
-    mCanceled = 1; // true
+    mCanceled = true;
   }
 
   uint32_t GetFileListLength() const
@@ -606,8 +606,7 @@ private:
   // this atomic member to make the access thread safe:
   mozilla::Atomic<uint32_t> mFileListLength;
 
-  // We'd prefer this member to be bool, but we don't support Atomic<bool>.
-  mozilla::Atomic<uint32_t> mCanceled;
+  mozilla::Atomic<bool> mCanceled;
 };
 
 
@@ -1024,6 +1023,12 @@ UploadLastDir::FetchDirectoryAndDisplayPicker(nsIDocument* aDoc,
   nsCOMPtr<nsIContentPrefCallback2> prefCallback = 
     new UploadLastDir::ContentPrefCallback(aFilePicker, aFpCallback);
 
+  if (XRE_GetProcessType() == GeckoProcessType_Content) {
+    // FIXME (bug 949666): Run this code in the parent process.
+    prefCallback->HandleCompletion(nsIContentPrefCallback2::COMPLETE_ERROR);
+    return NS_OK;
+  }
+
   // Attempt to get the CPS, if it's not present we'll fallback to use the Desktop folder
   nsCOMPtr<nsIContentPrefService2> contentPrefService =
     do_GetService(NS_CONTENT_PREF_SERVICE_CONTRACTID);
@@ -1045,6 +1050,11 @@ UploadLastDir::StoreLastUsedDirectory(nsIDocument* aDoc, nsIFile* aDir)
 {
   NS_PRECONDITION(aDoc, "aDoc is null");
   if (!aDir) {
+    return NS_OK;
+  }
+
+  if (XRE_GetProcessType() == GeckoProcessType_Content) {
+    // FIXME (bug 949666): Run this code in the parent process.
     return NS_OK;
   }
 
@@ -1453,6 +1463,17 @@ HTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
     } else if (aName == nsGkAtoms::dir &&
                aValue && aValue->Equals(nsGkAtoms::_auto, eIgnoreCase)) {
       SetDirectionIfAuto(true, aNotify);
+    } else if (aName == nsGkAtoms::lang) {
+      if (mType == NS_FORM_INPUT_NUMBER) {
+        // Update the value that is displayed to the user to the new locale:
+        nsAutoString value;
+        GetValueInternal(value);
+        nsNumberControlFrame* numberControlFrame =
+          do_QueryFrame(GetPrimaryFrame());
+        if (numberControlFrame) {
+          numberControlFrame->SetValueOfAnonTextControl(value);
+        }
+      }
     }
 
     UpdateState(aNotify);
@@ -1665,7 +1686,8 @@ HTMLInputElement::ClearFiles(bool aSetValueChanged)
   SetFiles(files, aSetValueChanged);
 }
 
-static Decimal StringToDecimal(nsAString& aValue)
+/* static */ Decimal
+HTMLInputElement::StringToDecimal(const nsAString& aValue)
 {
   if (!IsASCII(aValue)) {
     return Decimal::nan();
@@ -1765,7 +1787,7 @@ HTMLInputElement::SetValue(const nsAString& aValue, ErrorResult& aRv)
       // NOTE: this is currently quite expensive work (too much string
       // manipulation). We should probably optimize that.
       nsAutoString currentValue;
-      GetValueInternal(currentValue);
+      GetValue(currentValue);
 
       SetValueInternal(aValue, false, true);
 
@@ -1777,7 +1799,7 @@ HTMLInputElement::SetValue(const nsAString& aValue, ErrorResult& aRv)
       }
 
       if (mFocusedValue.Equals(currentValue)) {
-        GetValueInternal(mFocusedValue);
+        GetValue(mFocusedValue);
       }
     } else {
       SetValueInternal(aValue, false, true);
@@ -2552,8 +2574,8 @@ HTMLInputElement::AfterSetFiles(bool aSetValueChanged)
 void
 HTMLInputElement::FireChangeEventIfNeeded()
 {
-  nsString value;
-  GetValueInternal(value);
+  nsAutoString value;
+  GetValue(value);
 
   if (!MayFireChangeOnBlur() || mFocusedValue.Equals(value)) {
     return;
@@ -2755,6 +2777,7 @@ HTMLInputElement::SetValueInternal(const nsAString& aValue,
       if (!mParserCreating) {
         SanitizeValue(value);
       }
+      // else SanitizeValue will be called by DoneCreatingElement
 
       if (aSetValueChanged) {
         SetValueChanged(true);
@@ -2762,20 +2785,24 @@ HTMLInputElement::SetValueInternal(const nsAString& aValue,
 
       if (IsSingleLineTextControl(false)) {
         mInputData.mState->SetValue(value, aUserInput, aSetValueChanged);
+        if (mType == NS_FORM_INPUT_EMAIL) {
+          UpdateAllValidityStates(mParserCreating);
+        }
       } else {
         mInputData.mValue = ToNewUnicode(value);
         if (aSetValueChanged) {
           SetValueChanged(true);
         }
-        OnValueChanged(!mParserCreating);
-
         if (mType == NS_FORM_INPUT_NUMBER) {
+          // This has to happen before OnValueChanged is called because that
+          // method needs the new value of our frame's anon text control.
           nsNumberControlFrame* numberControlFrame =
             do_QueryFrame(GetPrimaryFrame());
           if (numberControlFrame) {
-            numberControlFrame->UpdateForValueChange(value);
+            numberControlFrame->SetValueOfAnonTextControl(value);
           }
         }
+        OnValueChanged(!mParserCreating);
       }
 
       // Call parent's SetAttr for color input so its control frame is notified
@@ -3455,11 +3482,11 @@ HTMLInputElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
     if (textControl && aVisitor.mEvent->originalTarget == textControl) {
       if (aVisitor.mEvent->message == NS_FORM_INPUT) {
         // Propogate the anon text control's new value to our HTMLInputElement:
-        numberControlFrame->HandlingInputEvent(true);
         nsAutoString value;
-        textControl->GetValue(value);
+        numberControlFrame->GetValueOfAnonTextControl(value);
+        numberControlFrame->HandlingInputEvent(true);
         nsWeakFrame weakNumberControlFrame(numberControlFrame);
-        SetValueInternal(value, false, true);
+        SetValueInternal(value, true, true);
         if (weakNumberControlFrame.IsAlive()) {
           numberControlFrame->HandlingInputEvent(false);
         }
@@ -3495,7 +3522,7 @@ HTMLInputElement::StartRangeThumbDrag(WidgetGUIEvent* aEvent)
   // because the 'focus' event is handled after the 'mousedown' event that
   // we're being called for (i.e. too late to update mFocusedValue, since we'll
   // have changed it by then).
-  GetValueInternal(mFocusedValue);
+  GetValue(mFocusedValue);
 
   SetValueOfRangeForUserEvent(rangeFrame->GetValueAtEventPoint(aEvent));
 }
@@ -3607,6 +3634,20 @@ HTMLInputElement::StopNumberControlSpinnerSpin()
 void
 HTMLInputElement::StepNumberControlForUserEvent(int32_t aDirection)
 {
+  if (!IsValid()) {
+    // If the user has typed a value into the control and inadvertently made a
+    // mistake (e.g. put a thousand separator at the wrong point) we do not
+    // want to wipe out what they typed if they try to increment/decrement the
+    // value. Better is to highlight the value as being invalid so that they
+    // can correct what they typed.
+    // We pass 'true' for UpdateValidityUIBits' aIsFocused argument regardless
+    // because we need the UI to update _now_ or the user will wonder why the
+    // step behavior isn't functioning.
+    UpdateValidityUIBits(true);
+    UpdateState(true);
+    return;
+  }
+
   Decimal newValue = Decimal::nan(); // unchanged if value will not change
 
   nsresult rv = GetValueIfStepped(aDirection, CALLED_FOR_USER_EVENT, &newValue);
@@ -3709,7 +3750,7 @@ HTMLInputElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
     if (aVisitor.mEvent->message == NS_FOCUS_CONTENT &&
         MayFireChangeOnBlur() &&
         !mIsDraggingRange) { // StartRangeThumbDrag already set mFocusedValue
-      GetValueInternal(mFocusedValue);
+      GetValue(mFocusedValue);
     }
 
     if (aVisitor.mEvent->message == NS_BLUR_CONTENT) {
@@ -3745,8 +3786,11 @@ HTMLInputElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
     WidgetMouseEvent* mouseEvent = aVisitor.mEvent->AsMouseEvent();
     if (mouseEvent && mouseEvent->IsLeftClickEvent() &&
         !ShouldPreventDOMActivateDispatch(aVisitor.mEvent->originalTarget)) {
+      // XXX Activating actually occurs even if it's caused by untrusted event.
+      //     Therefore, shouldn't this be always trusted event?
       InternalUIEvent actEvent(aVisitor.mEvent->mFlags.mIsTrusted,
-                               NS_UI_ACTIVATE, 1);
+                               NS_UI_ACTIVATE);
+      actEvent.detail = 1;
 
       nsCOMPtr<nsIPresShell> shell = aVisitor.mPresContext->GetPresShell();
       if (shell) {
@@ -3978,8 +4022,7 @@ HTMLInputElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
            */
 
           if (aVisitor.mEvent->message == NS_KEY_PRESS &&
-              (keyEvent->keyCode == NS_VK_RETURN ||
-               keyEvent->keyCode == NS_VK_ENTER) &&
+              keyEvent->keyCode == NS_VK_RETURN &&
                (IsSingleLineTextControl(false, mType) ||
                 mType == NS_FORM_INPUT_NUMBER ||
                 IsExperimentalMobileType(mType))) {
@@ -4424,7 +4467,7 @@ HTMLInputElement::HandleTypeChange(uint8_t aNewType)
   // Otherwise, if the new type doesn't fire a change event on blur, but the
   // previous type does, we should clear out mFocusedValue.
   if (MayFireChangeOnBlur(mType) && !MayFireChangeOnBlur(oldType)) {
-    GetValueInternal(mFocusedValue);
+    GetValue(mFocusedValue);
   } else if (!IsSingleLineTextControl(mType, false) &&
              IsSingleLineTextControl(oldType, false)) {
     mFocusedValue.Truncate();
@@ -6410,6 +6453,103 @@ HTMLInputElement::HasStepMismatch() const
   return NS_floorModulo(value - GetStepBase(), step) != 0;
 }
 
+/**
+ * Splits the string on the first "@" character and punycode encodes the first
+ * and second parts separately before rejoining them with an "@" and returning
+ * the result via the aEncodedEmail out-param. Returns false if there is no
+ * "@" caracter, if the "@" character is at the start or end, or if the
+ * conversion to punycode fails.
+ *
+ * This function exists because ConvertUTF8toACE() treats 'username@domain' as
+ * a single label, but we need to encode the username and domain parts
+ * separately.
+ */
+static bool PunycodeEncodeEmailAddress(const nsAString& aEmail,
+                                       nsAutoCString& aEncodedEmail,
+                                       uint32_t* aIndexOfAt)
+{
+  nsAutoCString value = NS_ConvertUTF16toUTF8(aEmail);
+  uint32_t length = value.Length();
+
+  uint32_t atPos = (uint32_t)value.FindChar('@');
+  // Email addresses must contain a '@', but can't begin or end with it.
+  if (atPos == (uint32_t)kNotFound || atPos == 0 || atPos == length - 1) {
+    return false;
+  }
+
+  nsCOMPtr<nsIIDNService> idnSrv = do_GetService(NS_IDNSERVICE_CONTRACTID);
+  if (!idnSrv) {
+    NS_ERROR("nsIIDNService isn't present!");
+    return false;
+  }
+
+  const nsDependentCSubstring username = Substring(value, 0, atPos);
+  bool ace;
+  if (NS_SUCCEEDED(idnSrv->IsACE(username, &ace)) && !ace) {
+    nsAutoCString usernameACE;
+    // TODO: Bug 901347: Usernames longer than 63 chars are not converted by
+    // ConvertUTF8toACE(). For now, continue on even if the conversion fails.
+    if (NS_SUCCEEDED(idnSrv->ConvertUTF8toACE(username, usernameACE))) {
+      value.Replace(0, atPos, usernameACE);
+      atPos = usernameACE.Length();
+    }
+  }
+
+  const nsDependentCSubstring domain = Substring(value, atPos + 1);
+  if (NS_SUCCEEDED(idnSrv->IsACE(domain, &ace)) && !ace) {
+    nsAutoCString domainACE;
+    if (NS_FAILED(idnSrv->ConvertUTF8toACE(domain, domainACE))) {
+      return false;
+    }
+    value.Replace(atPos + 1, domain.Length(), domainACE);
+  }
+
+  aEncodedEmail = value;
+  *aIndexOfAt = atPos;
+  return true;
+}
+
+bool
+HTMLInputElement::HasBadInput() const
+{
+  if (mType == NS_FORM_INPUT_NUMBER) {
+    nsAutoString value;
+    GetValueInternal(value);
+    if (!value.IsEmpty()) {
+      // The input can't be bad, otherwise it would have been sanitized to the
+      // empty string.
+      NS_ASSERTION(!GetValueAsDecimal().isNaN(), "Should have sanitized");
+      return false;
+    }
+    nsNumberControlFrame* numberControlFrame =
+      do_QueryFrame(GetPrimaryFrame());
+    if (numberControlFrame &&
+        !numberControlFrame->AnonTextControlIsEmpty()) {
+      // The input the user entered failed to parse as a number.
+      return true;
+    }
+    return false;
+  }
+  if (mType == NS_FORM_INPUT_EMAIL) {
+    // With regards to suffering from bad input the spec says that only the
+    // punycode conversion works, so we don't care whether the email address is
+    // valid or not here. (If the email address is invalid then we will be
+    // suffering from a type mismatch.)
+    nsAutoString value;
+    nsAutoCString unused;
+    uint32_t unused2;
+    NS_ENSURE_SUCCESS(GetValueInternal(value), false);
+    HTMLSplitOnSpacesTokenizer tokenizer(value, ',');
+    while (tokenizer.hasMoreTokens()) {
+      if (!PunycodeEncodeEmailAddress(tokenizer.nextToken(), unused, &unused2)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  return false;
+}
+
 void
 HTMLInputElement::UpdateTooLongValidityState()
 {
@@ -6507,6 +6647,12 @@ HTMLInputElement::UpdateStepMismatchValidityState()
 }
 
 void
+HTMLInputElement::UpdateBadInputValidityState()
+{
+  SetValidityState(VALIDITY_STATE_BAD_INPUT, HasBadInput());
+}
+
+void
 HTMLInputElement::UpdateAllValidityStates(bool aNotify)
 {
   bool validBefore = IsValid();
@@ -6517,6 +6663,7 @@ HTMLInputElement::UpdateAllValidityStates(bool aNotify)
   UpdateRangeOverflowValidityState();
   UpdateRangeUnderflowValidityState();
   UpdateStepMismatchValidityState();
+  UpdateBadInputValidityState();
 
   if (validBefore != IsValid()) {
     UpdateState(aNotify);
@@ -6741,6 +6888,22 @@ HTMLInputElement::GetValidationMessage(nsAString& aValidationMessage,
       aValidationMessage = message;
       break;
     }
+    case VALIDITY_STATE_BAD_INPUT:
+    {
+      nsXPIDLString message;
+      nsAutoCString key;
+      if (mType == NS_FORM_INPUT_NUMBER) {
+        key.AssignLiteral("FormValidationBadInputNumber");
+      } else if (mType == NS_FORM_INPUT_EMAIL) {
+        key.AssignLiteral("FormValidationInvalidEmail");
+      } else {
+        return NS_ERROR_UNEXPECTED;
+      }
+      rv = nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
+                                              key.get(), message);
+      aValidationMessage = message;
+      break;
+    }
     default:
       rv = nsIConstraintValidation::GetValidationMessage(aValidationMessage, aType);
   }
@@ -6767,51 +6930,20 @@ HTMLInputElement::IsValidEmailAddressList(const nsAString& aValue)
 bool
 HTMLInputElement::IsValidEmailAddress(const nsAString& aValue)
 {
-  nsAutoCString value = NS_ConvertUTF16toUTF8(aValue);
-  uint32_t i = 0;
-  uint32_t length = value.Length();
-
   // Email addresses can't be empty and can't end with a '.' or '-'.
-  if (length == 0 || value[length - 1] == '.' || value[length - 1] == '-') {
+  if (aValue.IsEmpty() || aValue.Last() == '.' || aValue.Last() == '-') {
     return false;
   }
 
-  uint32_t atPos = (uint32_t)value.FindChar('@');
-  // Email addresses must contain a '@', but can't begin or end with it.
-  if (atPos == (uint32_t)kNotFound || atPos == 0 || atPos == length - 1) {
+  uint32_t atPos;
+  nsAutoCString value;
+  // This call also checks whether aValue contains a correctly-placed '@' sign.
+  if (!PunycodeEncodeEmailAddress(aValue, value, &atPos)) {
     return false;
   }
 
-  // Puny-encode the string if needed before running the validation algorithm.
-  nsCOMPtr<nsIIDNService> idnSrv = do_GetService(NS_IDNSERVICE_CONTRACTID);
-  if (idnSrv) {
-    // ConvertUTF8toACE() treats 'username@domain' as a single label so we need
-    // to puny-encode the username and domain parts separately.
-    const nsDependentCSubstring username = Substring(value, 0, atPos);
-    bool ace;
-    if (NS_SUCCEEDED(idnSrv->IsACE(username, &ace)) && !ace) {
-      nsAutoCString usernameACE;
-      // TODO: Bug 901347: Usernames longer than 63 chars are not converted by
-      // ConvertUTF8toACE(). For now, continue on even if the conversion fails.
-      if (NS_SUCCEEDED(idnSrv->ConvertUTF8toACE(username, usernameACE))) {
-        value.Replace(0, atPos, usernameACE);
-        atPos = usernameACE.Length();
-      }
-    }
-
-    const nsDependentCSubstring domain = Substring(value, atPos + 1);
-    if (NS_SUCCEEDED(idnSrv->IsACE(domain, &ace)) && !ace) {
-      nsAutoCString domainACE;
-      if (NS_FAILED(idnSrv->ConvertUTF8toACE(domain, domainACE))) {
-        return false;
-      }
-      value.Replace(atPos + 1, domain.Length(), domainACE);
-    }
-
-    length = value.Length();
-  } else {
-    NS_ERROR("nsIIDNService isn't present!");
-  }
+  uint32_t length = value.Length();
+  uint32_t i = 0;
 
   // Parsing the username.
   for (; i < atPos; ++i) {

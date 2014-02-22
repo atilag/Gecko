@@ -95,7 +95,6 @@ public class BrowserSearch extends HomeFragment
     private HomeListView mList;
 
     // Client that performs search suggestion queries
-    @RobocopTarget
     private volatile SuggestClient mSuggestClient;
 
     // List of search engines from gecko
@@ -519,8 +518,8 @@ public class BrowserSearch extends HomeFragment
                     // set yet. e.g. Robocop tests might set it directly before search
                     // engines are loaded.
                     if (mSuggestClient == null && !isPrivate) {
-                        mSuggestClient = new SuggestClient(getActivity(), suggestTemplate,
-                                SUGGESTION_TIMEOUT, SUGGESTION_MAX);
+                        setSuggestClient(new SuggestClient(getActivity(), suggestTemplate,
+                                    SUGGESTION_TIMEOUT, SUGGESTION_MAX));
                     }
                 } else {
                     searchEngines.add(engine);
@@ -533,9 +532,9 @@ public class BrowserSearch extends HomeFragment
                 mAdapter.notifyDataSetChanged();
             }
 
-            // Show suggestions opt-in prompt only if user hasn't been prompted
-            // and we're not on a private browsing tab.
-            if (!suggestionsPrompted && mSuggestClient != null) {
+            // Show suggestions opt-in prompt only if suggestions are not enabled yet,
+            // user hasn't been prompted and we're not on a private browsing tab.
+            if (!mSuggestionsEnabled && !suggestionsPrompted && mSuggestClient != null) {
                 showSuggestionsOptIn();
             }
         } catch (JSONException e) {
@@ -543,6 +542,20 @@ public class BrowserSearch extends HomeFragment
         }
 
         filterSuggestions();
+    }
+
+    /**
+     * Sets the private SuggestClient instance. Should only be called if the suggestClient is
+     * null (i.e. has not yet been initialized or has been nulled). Non-private access is
+     * for testing purposes only.
+     */
+    @RobocopTarget
+    public void setSuggestClient(final SuggestClient client) {
+        if (mSuggestClient != null) {
+            throw new IllegalStateException("Can only set the SuggestClient if it has not " +
+                    "yet been initialized!");
+        }
+        mSuggestClient = client;
     }
 
     private void showSuggestionsOptIn() {

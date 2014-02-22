@@ -5672,7 +5672,7 @@ nsContentUtils::CreateBlobBuffer(JSContext* aCx,
     return NS_ERROR_OUT_OF_MEMORY;
   }
   JS::Rooted<JSObject*> scope(aCx, JS::CurrentGlobalOrNull(aCx));
-  return nsContentUtils::WrapNative(aCx, scope, blob, aBlob, true);
+  return nsContentUtils::WrapNative(aCx, scope, blob, aBlob);
 }
 
 void
@@ -5842,9 +5842,7 @@ nsContentUtils::IsUserFocusIgnored(nsINode* aNode)
       return true;
     }
     nsPIDOMWindow* win = aNode->OwnerDoc()->GetWindow();
-    if (win) {
-      aNode = win->GetFrameElementInternal();
-    }
+    aNode = win ? win->GetFrameElementInternal() : nullptr;
   }
 
   return false;

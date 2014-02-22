@@ -60,6 +60,7 @@ using mozilla::unused;
 
 #include "nsString.h"
 #include "GeckoProfiler.h" // For PROFILER_LABEL
+#include "nsIXULRuntime.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -805,8 +806,10 @@ nsWindow::OnGlobalAndroidEvent(AndroidGeckoEvent *ae)
             gAndroidScreenBounds.width = newScreenWidth;
             gAndroidScreenBounds.height = newScreenHeight;
 
-            if (XRE_GetProcessType() != GeckoProcessType_Default)
+            if (XRE_GetProcessType() != GeckoProcessType_Default ||
+                !BrowserTabsRemote()) {
                 break;
+            }
 
             // Tell the content process the new screen size.
             nsTArray<ContentParent*> cplist;
@@ -1246,8 +1249,10 @@ void
 nsWindow::DispatchGestureEvent(uint32_t msg, uint32_t direction, double delta,
                                const nsIntPoint &refPoint, uint64_t time)
 {
-    WidgetSimpleGestureEvent event(true, msg, this, direction, delta);
+    WidgetSimpleGestureEvent event(true, msg, this);
 
+    event.direction = direction;
+    event.delta = delta;
     event.modifiers = 0;
     event.time = time;
     event.refPoint = LayoutDeviceIntPoint::FromUntyped(refPoint);
@@ -1831,7 +1836,10 @@ nsWindow::OnIMEEvent(AndroidGeckoEvent *ae)
             // Use 'INT32_MAX / 2' here because subsequent text changes might
             // combine with this text change, and overflow might occur if
             // we just use INT32_MAX
-            NotifyIMEOfTextChange(0, INT32_MAX / 2, INT32_MAX / 2);
+            IMENotification notification(NOTIFY_IME_OF_TEXT_CHANGE);
+            notification.mTextChangeData.mOldEndOffset =
+                notification.mTextChangeData.mNewEndOffset = INT32_MAX / 2;
+            NotifyIMEOfTextChange(notification);
             FlushIMEChanges();
         }
         GeckoAppShell::NotifyIME(AndroidBridge::NOTIFY_IME_REPLY_EVENT);
@@ -1952,6 +1960,13 @@ nsWindow::OnIMEEvent(AndroidGeckoEvent *ae)
             selEvent.mExpandToClusterBoundary = false;
 
             DispatchEvent(&selEvent);
+
+            // Notify SelectionHandler of final caret position
+            // Required after IME hide via 'Back' button
+            AndroidGeckoEvent* broadcastEvent = AndroidGeckoEvent::MakeBroadcastEvent(
+                NS_LITERAL_CSTRING("TextSelection:UpdateCaretPos"),
+                NS_LITERAL_CSTRING(""));
+            nsAppShell::gAppShell->PostEvent(broadcastEvent);
         }
         break;
     case AndroidGeckoEvent::IME_ADD_COMPOSITION_RANGE:
@@ -2039,6 +2054,13 @@ nsWindow::OnIMEEvent(AndroidGeckoEvent *ae)
 
             DispatchEvent(&event);
             mIMERanges.Clear();
+
+            // Notify SelectionHandler of final caret position
+            // Required in cases of keyboards providing autoCorrections
+            AndroidGeckoEvent* broadcastEvent = AndroidGeckoEvent::MakeBroadcastEvent(
+                NS_LITERAL_CSTRING("TextSelection:UpdateCaretPos"),
+                NS_LITERAL_CSTRING(""));
+            nsAppShell::gAppShell->PostEvent(broadcastEvent);
         }
         break;
     case AndroidGeckoEvent::IME_REMOVE_COMPOSITION:
@@ -2089,9 +2111,9 @@ nsWindow::UserActivity()
 }
 
 NS_IMETHODIMP
-nsWindow::NotifyIME(NotificationToIME aNotification)
+nsWindow::NotifyIME(const IMENotification& aIMENotification)
 {
-    switch (aNotification) {
+    switch (aIMENotification.mMessage) {
         case REQUEST_TO_COMMIT_COMPOSITION:
             //ALOGIME("IME: REQUEST_TO_COMMIT_COMPOSITION: s=%d", aState);
             RemoveIMEComposition();
@@ -2142,6 +2164,8 @@ nsWindow::NotifyIME(NotificationToIME aNotification)
             PostFlushIMEChanges();
             mIMESelectionChanged = true;
             return NS_OK;
+        case NOTIFY_IME_OF_TEXT_CHANGE:
+            return NotifyIMEOfTextChange(aIMENotification);
         default:
             return NS_ERROR_NOT_IMPLEMENTED;
     }
@@ -2268,31 +2292,36 @@ nsWindow::FlushIMEChanges()
     }
 }
 
-NS_IMETHODIMP
-nsWindow::NotifyIMEOfTextChange(uint32_t aStart,
-                                uint32_t aOldEnd,
-                                uint32_t aNewEnd)
+nsresult
+nsWindow::NotifyIMEOfTextChange(const IMENotification& aIMENotification)
 {
+    MOZ_ASSERT(aIMENotification.mMessage == NOTIFY_IME_OF_TEXT_CHANGE,
+               "NotifyIMEOfTextChange() is called with invaild notification");
+
     if (mIMEMaskTextUpdate)
         return NS_OK;
 
     ALOGIME("IME: NotifyIMEOfTextChange: s=%d, oe=%d, ne=%d",
-            aStart, aOldEnd, aNewEnd);
+            aIMENotification.mTextChangeData.mStartOffset,
+            aIMENotification.mTextChangeData.mOldEndOffset,
+            aIMENotification.mTextChangeData.mNewEndOffset);
 
     /* Make sure Java's selection is up-to-date */
     mIMESelectionChanged = false;
     NotifyIME(NOTIFY_IME_OF_SELECTION_CHANGE);
     PostFlushIMEChanges();
 
-    mIMETextChanges.AppendElement(IMEChange(aStart, aOldEnd, aNewEnd));
+    mIMETextChanges.AppendElement(IMEChange(aIMENotification));
     // Now that we added a new range we need to go back and
     // update all the ranges before that.
     // Ranges that have offsets which follow this new range
     // need to be updated to reflect new offsets
-    int32_t delta = (int32_t)(aNewEnd - aOldEnd);
+    int32_t delta = aIMENotification.mTextChangeData.AdditionalLength();
     for (int32_t i = mIMETextChanges.Length() - 2; i >= 0; i--) {
         IMEChange &previousChange = mIMETextChanges[i];
-        if (previousChange.mStart > (int32_t)aOldEnd) {
+        if (previousChange.mStart >
+                static_cast<int32_t>(
+                    aIMENotification.mTextChangeData.mOldEndOffset)) {
             previousChange.mStart += delta;
             previousChange.mOldEnd += delta;
             previousChange.mNewEnd += delta;

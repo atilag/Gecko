@@ -82,7 +82,7 @@ nsCanvasFrame::SetHasFocus(bool aHasFocus)
   return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 nsCanvasFrame::SetInitialChildList(ChildListID     aListID,
                                    nsFrameList&    aChildList)
 {
@@ -92,7 +92,7 @@ nsCanvasFrame::SetInitialChildList(ChildListID     aListID,
   return nsContainerFrame::SetInitialChildList(aListID, aChildList);
 }
 
-NS_IMETHODIMP
+nsresult
 nsCanvasFrame::AppendFrames(ChildListID     aListID,
                             nsFrameList&    aFrameList)
 {
@@ -125,7 +125,7 @@ nsCanvasFrame::AppendFrames(ChildListID     aListID,
   return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 nsCanvasFrame::InsertFrames(ChildListID     aListID,
                             nsIFrame*       aPrevFrame,
                             nsFrameList&    aFrameList)
@@ -139,7 +139,7 @@ nsCanvasFrame::InsertFrames(ChildListID     aListID,
   return AppendFrames(aListID, aFrameList);
 }
 
-NS_IMETHODIMP
+nsresult
 nsCanvasFrame::RemoveFrame(ChildListID     aListID,
                            nsIFrame*       aOldFrame)
 {
@@ -450,7 +450,7 @@ nsCanvasFrame::GetPrefWidth(nsRenderingContext *aRenderingContext)
   return result;
 }
 
-NS_IMETHODIMP
+nsresult
 nsCanvasFrame::Reflow(nsPresContext*           aPresContext,
                       nsHTMLReflowMetrics&     aDesiredSize,
                       const nsHTMLReflowState& aReflowState,
@@ -471,8 +471,7 @@ nsCanvasFrame::Reflow(nsPresContext*           aPresContext,
     if (overflow) {
       NS_ASSERTION(overflow->OnlyChild(),
                    "must have doc root as canvas frame's only child");
-      nsContainerFrame::ReparentFrameViewList(aPresContext, *overflow,
-                                              prevCanvasFrame, this);
+      nsContainerFrame::ReparentFrameViewList(*overflow, prevCanvasFrame, this);
       // Prepend overflow to the our child list. There may already be
       // children placeholders for fixed-pos elements, which don't get
       // reflowed but must not be lost until the canvas frame is destroyed.
@@ -531,7 +530,7 @@ nsCanvasFrame::Reflow(nsPresContext*           aPresContext,
       if (!nextFrame) {
         nextFrame = aPresContext->PresShell()->FrameConstructor()->
           CreateContinuingFrame(aPresContext, kidFrame, this);
-        SetOverflowFrames(aPresContext, nsFrameList(nextFrame, nextFrame));
+        SetOverflowFrames(nsFrameList(nextFrame, nextFrame));
         // Root overflow containers will be normal children of
         // the canvas frame, but that's ok because there
         // aren't any other frames we need to isolate them from
@@ -592,7 +591,7 @@ nsCanvasFrame::GetType() const
   return nsGkAtoms::canvasFrame;
 }
 
-NS_IMETHODIMP 
+nsresult 
 nsCanvasFrame::GetContentForEvent(WidgetEvent* aEvent,
                                   nsIContent** aContent)
 {
@@ -611,7 +610,7 @@ nsCanvasFrame::GetContentForEvent(WidgetEvent* aEvent,
 }
 
 #ifdef DEBUG_FRAME_DUMP
-NS_IMETHODIMP
+nsresult
 nsCanvasFrame::GetFrameName(nsAString& aResult) const
 {
   return MakeFrameName(NS_LITERAL_STRING("Canvas"), aResult);

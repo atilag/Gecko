@@ -230,6 +230,7 @@ public:
   void MozGetUserMediaDevices(const MediaStreamConstraintsInternal& aConstraints,
                               MozGetUserMediaDevicesSuccessCallback& aOnSuccess,
                               NavigatorUserMediaErrorCallback& aOnError,
+                              uint64_t aInnerWindowID,
                               ErrorResult& aRv);
 #endif // MOZ_MEDIA_NAVIGATOR
   bool DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
@@ -264,9 +265,9 @@ public:
                                   JSObject* aGlobal);
   static bool HasIccManagerSupport(JSContext* /* unused */,
                                    JSObject* aGlobal);
-  static bool HasWifiManagerSupport(JSContext* /* unused */,
-                                    JSObject* aGlobal);
 #endif // MOZ_B2G_RIL
+  static bool HasWifiManagerSupport(JSContext* /* unused */,
+                                  JSObject* aGlobal);
 #ifdef MOZ_B2G_BT
   static bool HasBluetoothSupport(JSContext* /* unused */, JSObject* aGlobal);
 #endif // MOZ_B2G_BT

@@ -931,6 +931,19 @@ nsIURI*
 nsHtml5TreeOpExecutor::GetViewSourceBaseURI()
 {
   if (!mViewSourceBaseURI) {
+
+    // We query the channel for the baseURI because in certain situations it
+    // cannot otherwise be determined. If this process fails, fall back to the
+    // standard method.
+    nsCOMPtr<nsIViewSourceChannel> vsc;
+    vsc = do_QueryInterface(mDocument->GetChannel());
+    if (vsc) {
+      nsresult rv =  vsc->GetBaseURI(getter_AddRefs(mViewSourceBaseURI));
+      if (NS_SUCCEEDED(rv) && mViewSourceBaseURI) {
+        return mViewSourceBaseURI;
+      }
+    }
+
     nsCOMPtr<nsIURI> orig = mDocument->GetOriginalURI();
     bool isViewSource;
     orig->SchemeIs("view-source", &isViewSource);

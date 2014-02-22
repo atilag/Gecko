@@ -6,6 +6,9 @@
 #include "base/message_loop.h"
 
 #include "nsBaseAppShell.h"
+#if defined(MOZ_CRASHREPORTER)
+#include "nsExceptionHandler.h"
+#endif
 #include "nsThreadUtils.h"
 #include "nsIObserverService.h"
 #include "nsServiceManagerUtils.h"
@@ -22,7 +25,11 @@ nsBaseAppShell::nsBaseAppShell()
   : mSuspendNativeCount(0)
   , mEventloopNestingLevel(0)
   , mBlockedWait(nullptr)
-  , mNativeEventPending(0)
+  , mFavorPerf(0)
+  , mNativeEventPending(false)
+  , mStarvationDelay(0)
+  , mSwitchTime(0)
+  , mLastNativeEventTime(0)
   , mEventloopNestingState(eEventloopNone)
   , mRunning(false)
   , mExiting(false)
@@ -57,7 +64,7 @@ nsBaseAppShell::Init()
 void
 nsBaseAppShell::NativeEventCallback()
 {
-  if (!mNativeEventPending.exchange(0))
+  if (!mNativeEventPending.exchange(false))
     return;
 
   // If DoProcessNextNativeEvent is on the stack, then we assume that we can
@@ -86,7 +93,7 @@ nsBaseAppShell::NativeEventCallback()
     mBlockNativeEvent = true;
   }
 
-  ++mEventloopNestingLevel;
+  IncrementEventloopNestingLevel();
   EventloopNestingState prevVal = mEventloopNestingState;
   NS_ProcessPendingEvents(thread, THREAD_EVENT_STARVATION_LIMIT);
   mProcessedGeckoEvents = true;
@@ -98,11 +105,11 @@ nsBaseAppShell::NativeEventCallback()
   if (NS_HasPendingEvents(thread))
     DoProcessMoreGeckoEvents();
 
-  --mEventloopNestingLevel;
+  DecrementEventloopNestingLevel();
 }
 
 // Note, this is currently overidden on windows, see comments in nsAppShell for
-// details. 
+// details.
 void
 nsBaseAppShell::DoProcessMoreGeckoEvents()
 {
@@ -128,7 +135,7 @@ nsBaseAppShell::DoProcessNextNativeEvent(bool mayWait, uint32_t recursionDepth)
   EventloopNestingState prevVal = mEventloopNestingState;
   mEventloopNestingState = eEventloopXPCOM;
 
-  ++mEventloopNestingLevel;
+  IncrementEventloopNestingLevel();
 
   bool result = ProcessNextNativeEvent(mayWait);
 
@@ -137,7 +144,7 @@ nsBaseAppShell::DoProcessNextNativeEvent(bool mayWait, uint32_t recursionDepth)
   // to the event loop yet.
   RunSyncSections(false, recursionDepth);
 
-  --mEventloopNestingLevel;
+  DecrementEventloopNestingLevel();
 
   mEventloopNestingState = prevVal;
   return result;
@@ -169,6 +176,20 @@ nsBaseAppShell::Exit(void)
     MessageLoop::current()->Quit();
   }
   mExiting = true;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsBaseAppShell::FavorPerformanceHint(bool favorPerfOverStarvation,
+                                     uint32_t starvationDelay)
+{
+  mStarvationDelay = PR_MillisecondsToInterval(starvationDelay);
+  if (favorPerfOverStarvation) {
+    ++mFavorPerf;
+  } else {
+    --mFavorPerf;
+    mSwitchTime = PR_IntervalNow();
+  }
   return NS_OK;
 }
 
@@ -207,7 +228,7 @@ nsBaseAppShell::OnDispatchedEvent(nsIThreadInternal *thr)
   if (mBlockNativeEvent)
     return NS_OK;
 
-  if (mNativeEventPending.exchange(1))
+  if (mNativeEventPending.exchange(true))
     return NS_OK;
 
   // Returns on the main thread in NativeEventCallback above
@@ -232,6 +253,9 @@ nsBaseAppShell::OnProcessNextEvent(nsIThreadInternal *thr, bool mayWait,
       OnDispatchedEvent(thr); // in case we blocked it earlier
   }
 
+  PRIntervalTime start = PR_IntervalNow();
+  PRIntervalTime limit = THREAD_EVENT_STARVATION_LIMIT;
+
   // Unblock outer nested wait loop (below).
   if (mBlockedWait)
     *mBlockedWait = false;
@@ -247,7 +271,21 @@ nsBaseAppShell::OnProcessNextEvent(nsIThreadInternal *thr, bool mayWait,
   // NativeEventCallback to process gecko events.
   mProcessedGeckoEvents = false;
 
-  DoProcessNextNativeEvent(false, recursionDepth);
+  if (mFavorPerf <= 0 && start > mSwitchTime + mStarvationDelay) {
+    // Favor pending native events
+    PRIntervalTime now = start;
+    bool keepGoing;
+    do {
+      mLastNativeEventTime = now;
+      keepGoing = DoProcessNextNativeEvent(false, recursionDepth);
+    } while (keepGoing && ((now = PR_IntervalNow()) - start) < limit);
+  } else {
+    // Avoid starving native events completely when in performance mode
+    if (start - mLastNativeEventTime > limit) {
+      mLastNativeEventTime = start;
+      DoProcessNextNativeEvent(false, recursionDepth);
+    }
+  }
 
   while (!NS_HasPendingEvents(thr) && !mProcessedGeckoEvents) {
     // If we have been asked to exit from Run, then we should not wait for
@@ -256,6 +294,7 @@ nsBaseAppShell::OnProcessNextEvent(nsIThreadInternal *thr, bool mayWait,
     if (mExiting)
       mayWait = false;
 
+    mLastNativeEventTime = PR_IntervalNow();
     if (!DoProcessNextNativeEvent(mayWait, recursionDepth) || !mayWait)
       break;
   }
@@ -284,6 +323,24 @@ nsBaseAppShell::DispatchDummyEvent(nsIThread* aTarget)
     mDummyEvent = new nsRunnable();
 
   return NS_SUCCEEDED(aTarget->Dispatch(mDummyEvent, NS_DISPATCH_NORMAL));
+}
+
+void
+nsBaseAppShell::IncrementEventloopNestingLevel()
+{
+  ++mEventloopNestingLevel;
+#if defined(MOZ_CRASHREPORTER)
+  CrashReporter::SetEventloopNestingLevel(mEventloopNestingLevel);
+#endif
+}
+
+void
+nsBaseAppShell::DecrementEventloopNestingLevel()
+{
+  --mEventloopNestingLevel;
+#if defined(MOZ_CRASHREPORTER)
+  CrashReporter::SetEventloopNestingLevel(mEventloopNestingLevel);
+#endif
 }
 
 void
@@ -366,7 +423,7 @@ nsBaseAppShell::AfterProcessNextEvent(nsIThreadInternal *thr,
                                       uint32_t recursionDepth,
                                       bool eventWasProcessed)
 {
-  // We've just finished running an event, so we're in a stable state. 
+  // We've just finished running an event, so we're in a stable state.
   RunSyncSections(true, recursionDepth);
   return NS_OK;
 }

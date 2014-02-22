@@ -34,6 +34,9 @@ const SEVERITY_LOG = 3;
 // The indent of a console group in pixels.
 const GROUP_INDENT = 12;
 
+// The default indent in pixels, applied even without any groups.
+const GROUP_INDENT_DEFAULT = 6;
+
 const WEBCONSOLE_STRINGS_URI = "chrome://browser/locale/devtools/webconsole.properties";
 let WCU_l10n = new WebConsoleUtils.l10n(WEBCONSOLE_STRINGS_URI);
 
@@ -750,10 +753,10 @@ function updateVariablesViewProperty(aOptions)
 
   switch (aOptions.field) {
     case "name":
-      EventUtils.synthesizeKey("VK_ENTER", { shiftKey: true }, view.window);
+      EventUtils.synthesizeKey("VK_RETURN", { shiftKey: true }, view.window);
       break;
     case "value":
-      EventUtils.synthesizeKey("VK_ENTER", {}, view.window);
+      EventUtils.synthesizeKey("VK_RETURN", {}, view.window);
       break;
     default:
       throw new Error("options.field is incorrect");
@@ -771,7 +774,7 @@ function updateVariablesViewProperty(aOptions)
       aOptions.webconsole.jsterm.once("variablesview-fetched", aOptions.callback);
     }
 
-    EventUtils.synthesizeKey("VK_ENTER", {}, view.window);
+    EventUtils.synthesizeKey("VK_RETURN", {}, view.window);
 
     if (!aOptions.webconsole) {
       executeSoon(aOptions.callback);
@@ -1134,10 +1137,10 @@ function waitForMessages(aOptions)
     }
 
     if ("groupDepth" in aRule) {
-      let timestamp = aElement.querySelector(".timestamp");
-      let indent = (GROUP_INDENT * aRule.groupDepth) + "px";
-      if (!timestamp || timestamp.style.marginRight != indent) {
-        is(timestamp.style.marginRight, indent,
+      let icon = aElement.querySelector(".icon");
+      let indent = (GROUP_INDENT * aRule.groupDepth + GROUP_INDENT_DEFAULT) + "px";
+      if (!icon || icon.style.marginLeft != indent) {
+        is(icon.style.marginLeft, indent,
            "group depth check failed for message rule: " + displayRule(aRule));
         return false;
       }

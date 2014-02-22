@@ -220,7 +220,7 @@ nsSplitterFrame::DestroyFrom(nsIFrame* aDestructRoot)
 }
 
 
-NS_IMETHODIMP
+nsresult
 nsSplitterFrame::GetCursor(const nsPoint&    aPoint,
                            nsIFrame::Cursor& aCursor)
 {
@@ -236,7 +236,7 @@ nsSplitterFrame::GetCursor(const nsPoint&    aPoint,
   */
 }
 
-NS_IMETHODIMP
+nsresult
 nsSplitterFrame::AttributeChanged(int32_t aNameSpaceID,
                                   nsIAtom* aAttribute,
                                   int32_t aModType)
@@ -374,7 +374,7 @@ nsSplitterFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   }
 }
 
-NS_IMETHODIMP
+nsresult
 nsSplitterFrame::HandleEvent(nsPresContext* aPresContext,
                              WidgetGUIEvent* aEvent,
                              nsEventStatus* aEventStatus)
@@ -602,7 +602,7 @@ nsSplitterFrameInner::MouseDown(nsIDOMEvent* aMouseEvent)
   if (!mouseEvent)
     return NS_OK;
 
-  uint16_t button = 0;
+  int16_t button = 0;
   mouseEvent->GetButton(&button);
 
   // only if left button

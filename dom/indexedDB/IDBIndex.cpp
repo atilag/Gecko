@@ -36,6 +36,7 @@ USING_INDEXEDDB_NAMESPACE
 using namespace mozilla::dom;
 using namespace mozilla::dom::indexedDB::ipc;
 using mozilla::ErrorResult;
+using mozilla::Move;
 
 namespace {
 
@@ -778,7 +779,7 @@ IDBIndex::OpenCursorFromChildProcess(
   nsRefPtr<IDBCursor> cursor =
     IDBCursor::Create(aRequest, mObjectStore->Transaction(), this, direction,
                       Key(), EmptyCString(), EmptyCString(), aKey, aObjectKey,
-                      cloneInfo);
+                      Move(cloneInfo));
   IDB_ENSURE_TRUE(cursor, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   NS_ASSERTION(!cloneInfo.mCloneBuffer.data(), "Should have swapped!");
@@ -895,7 +896,7 @@ IDBIndex::GetKey(JSContext* aCx, JS::Handle<JS::Value> aKey, ErrorResult& aRv)
 }
 
 already_AddRefed<IDBRequest>
-IDBIndex::GetAll(JSContext* aCx, const Optional<JS::Handle<JS::Value> >& aKey,
+IDBIndex::GetAll(JSContext* aCx, JS::Handle<JS::Value> aKey,
                  const Optional<uint32_t>& aLimit, ErrorResult& aRv)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
@@ -907,10 +908,8 @@ IDBIndex::GetAll(JSContext* aCx, const Optional<JS::Handle<JS::Value> >& aKey,
   }
 
   nsRefPtr<IDBKeyRange> keyRange;
-  if (aKey.WasPassed()) {
-    aRv = IDBKeyRange::FromJSVal(aCx, aKey.Value(), getter_AddRefs(keyRange));
-    ENSURE_SUCCESS(aRv, nullptr);
-  }
+  aRv = IDBKeyRange::FromJSVal(aCx, aKey, getter_AddRefs(keyRange));
+  ENSURE_SUCCESS(aRv, nullptr);
 
   uint32_t limit = UINT32_MAX;
   if (aLimit.WasPassed() && aLimit.Value() > 0) {
@@ -922,7 +921,7 @@ IDBIndex::GetAll(JSContext* aCx, const Optional<JS::Handle<JS::Value> >& aKey,
 
 already_AddRefed<IDBRequest>
 IDBIndex::GetAllKeys(JSContext* aCx,
-                     const Optional<JS::Handle<JS::Value> >& aKey,
+                     JS::Handle<JS::Value> aKey,
                      const Optional<uint32_t>& aLimit, ErrorResult& aRv)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
@@ -934,10 +933,8 @@ IDBIndex::GetAllKeys(JSContext* aCx,
   }
 
   nsRefPtr<IDBKeyRange> keyRange;
-  if (aKey.WasPassed()) {
-    aRv = IDBKeyRange::FromJSVal(aCx, aKey.Value(), getter_AddRefs(keyRange));
-    ENSURE_SUCCESS(aRv, nullptr);
-  }
+  aRv = IDBKeyRange::FromJSVal(aCx, aKey, getter_AddRefs(keyRange));
+  ENSURE_SUCCESS(aRv, nullptr);
 
   uint32_t limit = UINT32_MAX;
   if (aLimit.WasPassed() && aLimit.Value() > 0) {
@@ -949,7 +946,7 @@ IDBIndex::GetAllKeys(JSContext* aCx,
 
 already_AddRefed<IDBRequest>
 IDBIndex::OpenCursor(JSContext* aCx,
-                     const Optional<JS::Handle<JS::Value> >& aRange,
+                     JS::Handle<JS::Value> aRange,
                      IDBCursorDirection aDirection, ErrorResult& aRv)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
@@ -961,10 +958,8 @@ IDBIndex::OpenCursor(JSContext* aCx,
   }
 
   nsRefPtr<IDBKeyRange> keyRange;
-  if (aRange.WasPassed()) {
-    aRv = IDBKeyRange::FromJSVal(aCx, aRange.Value(), getter_AddRefs(keyRange));
-    ENSURE_SUCCESS(aRv, nullptr);
-  }
+  aRv = IDBKeyRange::FromJSVal(aCx, aRange, getter_AddRefs(keyRange));
+  ENSURE_SUCCESS(aRv, nullptr);
 
   IDBCursor::Direction direction = IDBCursor::ConvertDirection(aDirection);
 
@@ -990,7 +985,7 @@ IDBIndex::OpenCursor(JSContext* aCx,
 
 already_AddRefed<IDBRequest>
 IDBIndex::OpenKeyCursor(JSContext* aCx,
-                        const Optional<JS::Handle<JS::Value> >& aRange,
+                        JS::Handle<JS::Value> aRange,
                         IDBCursorDirection aDirection, ErrorResult& aRv)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
@@ -1002,10 +997,8 @@ IDBIndex::OpenKeyCursor(JSContext* aCx,
   }
 
   nsRefPtr<IDBKeyRange> keyRange;
-  if (aRange.WasPassed()) {
-    aRv = IDBKeyRange::FromJSVal(aCx, aRange.Value(), getter_AddRefs(keyRange));
-    ENSURE_SUCCESS(aRv, nullptr);
-  }
+  aRv = IDBKeyRange::FromJSVal(aCx, aRange, getter_AddRefs(keyRange));
+  ENSURE_SUCCESS(aRv, nullptr);
 
   IDBCursor::Direction direction = IDBCursor::ConvertDirection(aDirection);
 
@@ -1013,7 +1006,7 @@ IDBIndex::OpenKeyCursor(JSContext* aCx,
 }
 
 already_AddRefed<IDBRequest>
-IDBIndex::Count(JSContext* aCx, const Optional<JS::Handle<JS::Value> >& aKey,
+IDBIndex::Count(JSContext* aCx, JS::Handle<JS::Value> aKey,
                 ErrorResult& aRv)
 {
   IDBTransaction* transaction = mObjectStore->Transaction();
@@ -1023,10 +1016,8 @@ IDBIndex::Count(JSContext* aCx, const Optional<JS::Handle<JS::Value> >& aKey,
   }
 
   nsRefPtr<IDBKeyRange> keyRange;
-  if (aKey.WasPassed()) {
-    aRv = IDBKeyRange::FromJSVal(aCx, aKey.Value(), getter_AddRefs(keyRange));
-    ENSURE_SUCCESS(aRv, nullptr);
-  }
+  aRv = IDBKeyRange::FromJSVal(aCx, aKey, getter_AddRefs(keyRange));
+  ENSURE_SUCCESS(aRv, nullptr);
 
   return CountInternal(keyRange, aRv);
 }
@@ -1446,7 +1437,7 @@ GetAllKeysHelper::GetSuccessResult(JSContext* aCx,
   nsTArray<Key> keys;
   mKeys.SwapElements(keys);
 
-  JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, 0, nullptr));
+  JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, 0));
   if (!array) {
     IDB_WARNING("Failed to make array!");
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
@@ -2304,7 +2295,7 @@ OpenCursorHelper::EnsureCursor()
   nsRefPtr<IDBCursor> cursor =
     IDBCursor::Create(mRequest, mTransaction, mIndex, mDirection, mRangeKey,
                       mContinueQuery, mContinueToQuery, mKey, mObjectKey,
-                      mCloneReadInfo);
+                      Move(mCloneReadInfo));
   IDB_ENSURE_TRUE(cursor, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   NS_ASSERTION(!mCloneReadInfo.mCloneBuffer.data(), "Should have swapped!");

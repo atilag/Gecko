@@ -9,7 +9,7 @@
 #include "jsinfer.h"
 #include "jsprf.h"
 
-#include "builtin/TypeRepresentation.h"
+#include "builtin/TypedObject.h"
 #include "jit/Bailouts.h"
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineIC.h"
@@ -375,7 +375,7 @@ static void
 StoreToTypedFloatArray(MacroAssembler &masm, int arrayType, const S &value, const T &dest)
 {
     switch (arrayType) {
-      case ScalarTypeRepresentation::TYPE_FLOAT32:
+      case ScalarTypeDescr::TYPE_FLOAT32:
         if (LIRGenerator::allowFloat32Optimizations()) {
             masm.storeFloat32(value, dest);
         } else {
@@ -387,7 +387,7 @@ StoreToTypedFloatArray(MacroAssembler &masm, int arrayType, const S &value, cons
             masm.storeFloat32(ScratchFloatReg, dest);
         }
         break;
-      case ScalarTypeRepresentation::TYPE_FLOAT64:
+      case ScalarTypeDescr::TYPE_FLOAT64:
 #ifdef JS_MORE_DETERMINISTIC
         // See the comment in ToDoubleForTypedArray.
         masm.canonicalizeDouble(value);
@@ -418,23 +418,23 @@ MacroAssembler::loadFromTypedArray(int arrayType, const T &src, AnyRegister dest
                                    Label *fail)
 {
     switch (arrayType) {
-      case ScalarTypeRepresentation::TYPE_INT8:
+      case ScalarTypeDescr::TYPE_INT8:
         load8SignExtend(src, dest.gpr());
         break;
-      case ScalarTypeRepresentation::TYPE_UINT8:
-      case ScalarTypeRepresentation::TYPE_UINT8_CLAMPED:
+      case ScalarTypeDescr::TYPE_UINT8:
+      case ScalarTypeDescr::TYPE_UINT8_CLAMPED:
         load8ZeroExtend(src, dest.gpr());
         break;
-      case ScalarTypeRepresentation::TYPE_INT16:
+      case ScalarTypeDescr::TYPE_INT16:
         load16SignExtend(src, dest.gpr());
         break;
-      case ScalarTypeRepresentation::TYPE_UINT16:
+      case ScalarTypeDescr::TYPE_UINT16:
         load16ZeroExtend(src, dest.gpr());
         break;
-      case ScalarTypeRepresentation::TYPE_INT32:
+      case ScalarTypeDescr::TYPE_INT32:
         load32(src, dest.gpr());
         break;
-      case ScalarTypeRepresentation::TYPE_UINT32:
+      case ScalarTypeDescr::TYPE_UINT32:
         if (dest.isFloat()) {
             load32(src, temp);
             convertUInt32ToDouble(temp, dest.fpu());
@@ -448,7 +448,7 @@ MacroAssembler::loadFromTypedArray(int arrayType, const T &src, AnyRegister dest
             j(Assembler::Signed, fail);
         }
         break;
-      case ScalarTypeRepresentation::TYPE_FLOAT32:
+      case ScalarTypeDescr::TYPE_FLOAT32:
         if (LIRGenerator::allowFloat32Optimizations()) {
             loadFloat32(src, dest.fpu());
             canonicalizeFloat(dest.fpu());
@@ -457,7 +457,7 @@ MacroAssembler::loadFromTypedArray(int arrayType, const T &src, AnyRegister dest
             canonicalizeDouble(dest.fpu());
         }
         break;
-      case ScalarTypeRepresentation::TYPE_FLOAT64:
+      case ScalarTypeDescr::TYPE_FLOAT64:
         loadDouble(src, dest.fpu());
         canonicalizeDouble(dest.fpu());
         break;
@@ -477,16 +477,16 @@ MacroAssembler::loadFromTypedArray(int arrayType, const T &src, const ValueOpera
                                    bool allowDouble, Register temp, Label *fail)
 {
     switch (arrayType) {
-      case ScalarTypeRepresentation::TYPE_INT8:
-      case ScalarTypeRepresentation::TYPE_UINT8:
-      case ScalarTypeRepresentation::TYPE_UINT8_CLAMPED:
-      case ScalarTypeRepresentation::TYPE_INT16:
-      case ScalarTypeRepresentation::TYPE_UINT16:
-      case ScalarTypeRepresentation::TYPE_INT32:
+      case ScalarTypeDescr::TYPE_INT8:
+      case ScalarTypeDescr::TYPE_UINT8:
+      case ScalarTypeDescr::TYPE_UINT8_CLAMPED:
+      case ScalarTypeDescr::TYPE_INT16:
+      case ScalarTypeDescr::TYPE_UINT16:
+      case ScalarTypeDescr::TYPE_INT32:
         loadFromTypedArray(arrayType, src, AnyRegister(dest.scratchReg()), InvalidReg, nullptr);
         tagValue(JSVAL_TYPE_INT32, dest.scratchReg(), dest);
         break;
-      case ScalarTypeRepresentation::TYPE_UINT32:
+      case ScalarTypeDescr::TYPE_UINT32:
         // Don't clobber dest when we could fail, instead use temp.
         load32(src, temp);
         test32(temp, temp);
@@ -511,14 +511,14 @@ MacroAssembler::loadFromTypedArray(int arrayType, const T &src, const ValueOpera
             tagValue(JSVAL_TYPE_INT32, temp, dest);
         }
         break;
-      case ScalarTypeRepresentation::TYPE_FLOAT32:
+      case ScalarTypeDescr::TYPE_FLOAT32:
         loadFromTypedArray(arrayType, src, AnyRegister(ScratchFloatReg), dest.scratchReg(),
                            nullptr);
         if (LIRGenerator::allowFloat32Optimizations())
             convertFloat32ToDouble(ScratchFloatReg, ScratchFloatReg);
         boxDouble(ScratchFloatReg, dest);
         break;
-      case ScalarTypeRepresentation::TYPE_FLOAT64:
+      case ScalarTypeDescr::TYPE_FLOAT64:
         loadFromTypedArray(arrayType, src, AnyRegister(ScratchFloatReg), dest.scratchReg(),
                            nullptr);
         boxDouble(ScratchFloatReg, dest);
@@ -708,23 +708,23 @@ MacroAssembler::newGCShortString(const Register &result, Label *fail)
 }
 
 void
-MacroAssembler::newGCThingPar(const Register &result, const Register &slice,
+MacroAssembler::newGCThingPar(const Register &result, const Register &cx,
                               const Register &tempReg1, const Register &tempReg2,
                               gc::AllocKind allocKind, Label *fail)
 {
     // Similar to ::newGCThing(), except that it allocates from a custom
-    // Allocator in the ForkJoinSlice*, rather than being hardcoded to the
+    // Allocator in the ForkJoinContext*, rather than being hardcoded to the
     // compartment allocator.  This requires two temporary registers.
     //
     // Subtle: I wanted to reuse `result` for one of the temporaries, but the
-    // register allocator was assigning it to the same register as `slice`.
+    // register allocator was assigning it to the same register as `cx`.
     // Then we overwrite that register which messed up the OOL code.
 
     uint32_t thingSize = (uint32_t)gc::Arena::thingSize(allocKind);
 
     // Load the allocator:
-    // tempReg1 = (Allocator*) forkJoinSlice->allocator()
-    loadPtr(Address(slice, ThreadSafeContext::offsetOfAllocator()),
+    // tempReg1 = (Allocator*) forkJoinCx->allocator()
+    loadPtr(Address(cx, ThreadSafeContext::offsetOfAllocator()),
             tempReg1);
 
     // Get a pointer to the relevant free list:
@@ -756,40 +756,36 @@ MacroAssembler::newGCThingPar(const Register &result, const Register &slice,
 }
 
 void
-MacroAssembler::newGCThingPar(const Register &result, const Register &slice,
+MacroAssembler::newGCThingPar(const Register &result, const Register &cx,
                               const Register &tempReg1, const Register &tempReg2,
                               JSObject *templateObject, Label *fail)
 {
     gc::AllocKind allocKind = templateObject->tenuredGetAllocKind();
     JS_ASSERT(allocKind >= gc::FINALIZE_OBJECT0 && allocKind <= gc::FINALIZE_OBJECT_LAST);
 
-    newGCThingPar(result, slice, tempReg1, tempReg2, allocKind, fail);
+    newGCThingPar(result, cx, tempReg1, tempReg2, allocKind, fail);
 }
 
 void
-MacroAssembler::newGCStringPar(const Register &result, const Register &slice,
+MacroAssembler::newGCStringPar(const Register &result, const Register &cx,
                                const Register &tempReg1, const Register &tempReg2,
                                Label *fail)
 {
-    newGCThingPar(result, slice, tempReg1, tempReg2, js::gc::FINALIZE_STRING, fail);
+    newGCThingPar(result, cx, tempReg1, tempReg2, js::gc::FINALIZE_STRING, fail);
 }
 
 void
-MacroAssembler::newGCShortStringPar(const Register &result, const Register &slice,
+MacroAssembler::newGCShortStringPar(const Register &result, const Register &cx,
                                     const Register &tempReg1, const Register &tempReg2,
                                     Label *fail)
 {
-    newGCThingPar(result, slice, tempReg1, tempReg2, js::gc::FINALIZE_SHORT_STRING, fail);
+    newGCThingPar(result, cx, tempReg1, tempReg2, js::gc::FINALIZE_SHORT_STRING, fail);
 }
 
 void
 MacroAssembler::initGCThing(const Register &obj, JSObject *templateObject)
 {
     // Fast initialization of an empty object returned by NewGCThing().
-
-    AutoThreadSafeAccess ts0(templateObject);
-    AutoThreadSafeAccess ts1(templateObject->lastProperty());
-    AutoThreadSafeAccess ts2(templateObject->lastProperty()->base()); // For isNative() assertions.
 
     JS_ASSERT(!templateObject->hasDynamicElements());
 
@@ -822,7 +818,7 @@ MacroAssembler::initGCThing(const Register &obj, JSObject *templateObject)
 
         // Fixed slots of non-array objects are required to be initialized.
         // Use the values currently in the template object.
-        size_t nslots = Min(templateObject->numFixedSlotsForCompilation(),
+        size_t nslots = Min(templateObject->numFixedSlots(),
                             templateObject->lastProperty()->slotSpan(templateObject->getClass()));
         for (unsigned i = 0; i < nslots; i++) {
             storeValue(templateObject->getFixedSlot(i),
@@ -875,11 +871,14 @@ MacroAssembler::compareStrings(JSOp op, Register left, Register right, Register 
 }
 
 void
-MacroAssembler::checkInterruptFlagsPar(const Register &tempReg,
-                                            Label *fail)
+MacroAssembler::checkInterruptFlagPar(const Register &tempReg, Label *fail)
 {
-    movePtr(ImmPtr(GetIonContext()->runtime->addressOfInterrupt()), tempReg);
+#ifdef JS_THREADSAFE
+    movePtr(ImmPtr(GetIonContext()->runtime->addressOfInterruptPar()), tempReg);
     branch32(Assembler::NonZero, Address(tempReg, 0), Imm32(0), fail);
+#else
+    MOZ_ASSUME_UNREACHABLE("JSRuntime::interruptPar doesn't exist on non-threadsafe builds.");
+#endif
 }
 
 static void
@@ -1094,15 +1093,15 @@ MacroAssembler::loadBaselineFramePtr(Register framePtr, Register dest)
 }
 
 void
-MacroAssembler::loadForkJoinSlice(Register slice, Register scratch)
+MacroAssembler::loadForkJoinContext(Register cx, Register scratch)
 {
-    // Load the current ForkJoinSlice *. If we need a parallel exit frame,
+    // Load the current ForkJoinContext *. If we need a parallel exit frame,
     // chances are we are about to do something very slow anyways, so just
-    // call ForkJoinSlicePar again instead of using the cached version.
+    // call ForkJoinContextPar again instead of using the cached version.
     setupUnalignedABICall(0, scratch);
-    callWithABI(JS_FUNC_TO_DATA_PTR(void *, ForkJoinSlicePar));
-    if (ReturnReg != slice)
-        movePtr(ReturnReg, slice);
+    callWithABI(JS_FUNC_TO_DATA_PTR(void *, ForkJoinContextPar));
+    if (ReturnReg != cx)
+        movePtr(ReturnReg, cx);
 }
 
 void
@@ -1114,7 +1113,7 @@ MacroAssembler::loadContext(Register cxReg, Register scratch, ExecutionMode exec
         loadJSContext(cxReg);
         break;
       case ParallelExecution:
-        loadForkJoinSlice(cxReg, scratch);
+        loadForkJoinContext(cxReg, scratch);
         break;
       default:
         MOZ_ASSUME_UNREACHABLE("No such execution mode");
@@ -1122,12 +1121,12 @@ MacroAssembler::loadContext(Register cxReg, Register scratch, ExecutionMode exec
 }
 
 void
-MacroAssembler::enterParallelExitFrameAndLoadSlice(const VMFunction *f, Register slice,
-                                                   Register scratch)
+MacroAssembler::enterParallelExitFrameAndLoadContext(const VMFunction *f, Register cx,
+                                                     Register scratch)
 {
-    loadForkJoinSlice(slice, scratch);
-    // Load the PerThreadData from from the slice.
-    loadPtr(Address(slice, offsetof(ForkJoinSlice, perThreadData)), scratch);
+    loadForkJoinContext(cx, scratch);
+    // Load the PerThreadData from from the cx.
+    loadPtr(Address(cx, offsetof(ForkJoinContext, perThreadData)), scratch);
     linkParallelExitFrame(scratch);
     // Push the ioncode.
     exitCodePatch_ = PushWithPatch(ImmWord(-1));
@@ -1136,11 +1135,11 @@ MacroAssembler::enterParallelExitFrameAndLoadSlice(const VMFunction *f, Register
 }
 
 void
-MacroAssembler::enterFakeParallelExitFrame(Register slice, Register scratch,
+MacroAssembler::enterFakeParallelExitFrame(Register cx, Register scratch,
                                            JitCode *codeVal)
 {
-    // Load the PerThreadData from from the slice.
-    loadPtr(Address(slice, offsetof(ForkJoinSlice, perThreadData)), scratch);
+    // Load the PerThreadData from from the cx.
+    loadPtr(Address(cx, offsetof(ForkJoinContext, perThreadData)), scratch);
     linkParallelExitFrame(scratch);
     Push(ImmPtr(codeVal));
     Push(ImmPtr(nullptr));
@@ -1157,7 +1156,7 @@ MacroAssembler::enterExitFrameAndLoadContext(const VMFunction *f, Register cxReg
         loadJSContext(cxReg);
         break;
       case ParallelExecution:
-        enterParallelExitFrameAndLoadSlice(f, cxReg, scratch);
+        enterParallelExitFrameAndLoadContext(f, cxReg, scratch);
         break;
       default:
         MOZ_ASSUME_UNREACHABLE("No such execution mode");
@@ -1585,7 +1584,7 @@ MacroAssembler::convertValueToInt(ValueOperand value, MDefinition *maybeInput,
     Label done, isInt32, isBool, isDouble, isNull, isString;
 
     branchEqualTypeIfNeeded(MIRType_Int32, maybeInput, tag, &isInt32);
-    if (conversion == IntConversion_Any)
+    if (conversion == IntConversion_Any || conversion == IntConversion_NumbersOrBoolsOnly)
         branchEqualTypeIfNeeded(MIRType_Boolean, maybeInput, tag, &isBool);
     branchEqualTypeIfNeeded(MIRType_Double, maybeInput, tag, &isDouble);
 

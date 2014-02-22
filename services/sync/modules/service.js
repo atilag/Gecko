@@ -60,7 +60,6 @@ Sync11Service.prototype = {
   _locked: false,
   _loggedIn: false,
 
-  userBaseURL: null,
   infoURL: null,
   storageURL: null,
   metaURL: null,
@@ -156,13 +155,18 @@ Sync11Service.prototype = {
     return Utils.catch.call(this, func, lockExceptions);
   },
 
+  get userBaseURL() {
+    if (!this._clusterManager) {
+      return null;
+    }
+    return this._clusterManager.getUserBaseURL();
+  },
+
   _updateCachedURLs: function _updateCachedURLs() {
     // Nothing to cache yet if we don't have the building blocks
     if (this.clusterURL == "" || this.identity.username == "")
       return;
 
-    let storageAPI = this.clusterURL + SYNC_API_VERSION + "/";
-    this.userBaseURL = storageAPI + this.identity.username + "/";
     this._log.debug("Caching URLs under storage user base: " + this.userBaseURL);
 
     // Generate and cache various URLs under the storage API for this user
@@ -885,7 +889,32 @@ Sync11Service.prototype = {
 
     this.identity.deleteSyncCredentials();
 
-    Svc.Obs.notify("weave:service:start-over:finish");
+    // If necessary, reset the identity manager, then re-initialize it so the
+    // FxA manager is used.  This is configurable via a pref - mainly for tests.
+    let keepIdentity = false;
+    try {
+      keepIdentity = Services.prefs.getBoolPref("services.sync-testing.startOverKeepIdentity");
+    } catch (_) { /* no such pref */ }
+    if (keepIdentity) {
+      Svc.Obs.notify("weave:service:start-over:finish");
+      return;
+    }
+
+    this.identity.username = "";
+    Services.prefs.clearUserPref("services.sync.fxaccounts.enabled");
+    this.status.__authManager = null;
+    this.identity = Status._authManager;
+    this._clusterManager = this.identity.createClusterManager(this);
+
+    // Tell the new identity manager to initialize itself
+    this.identity.initialize().then(() => {
+      Svc.Obs.notify("weave:service:start-over:finish");
+    }).then(null, err => {
+      this._log.error("startOver failed to re-initialize the identity manager: " + err);
+      // Still send the observer notification so the current state is
+      // reflected in the UI.
+      Svc.Obs.notify("weave:service:start-over:finish");
+    });
   },
 
   persistLogin: function persistLogin() {

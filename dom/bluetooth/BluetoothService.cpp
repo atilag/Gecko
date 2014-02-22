@@ -47,7 +47,7 @@
  * B2G blueZ:
  *   MOZ_B2G_BT and MOZ_B2G_BT_BLUEZ are both defined.
  */
-#include "BluetoothGonkService.h"
+#include "BluetoothDBusService.h"
 #elif defined(MOZ_B2G_BT_BLUEDROID)
 /**
  * B2G bluedroid:
@@ -315,7 +315,7 @@ BluetoothService::Create()
   }
 
 #if defined(MOZ_B2G_BT_BLUEZ)
-  return new BluetoothGonkService();
+  return new BluetoothDBusService();
 #elif defined(MOZ_B2G_BT_BLUEDROID)
   return new BluetoothServiceBluedroid();
 #endif
@@ -565,7 +565,7 @@ BluetoothService::HandleStartup()
   NS_ENSURE_TRUE(settings, NS_ERROR_UNEXPECTED);
 
   nsCOMPtr<nsISettingsServiceLock> settingsLock;
-  nsresult rv = settings->CreateLock(getter_AddRefs(settingsLock));
+  nsresult rv = settings->CreateLock(nullptr, getter_AddRefs(settingsLock));
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsRefPtr<StartupTask> callback = new StartupTask();
@@ -605,10 +605,10 @@ BluetoothService::HandleSettingsChanged(const nsAString& aData)
     return NS_OK;
   }
 
-  JSObject& obj(val.toObject());
+  JS::Rooted<JSObject*> obj(cx, &val.toObject());
 
   JS::Rooted<JS::Value> key(cx);
-  if (!JS_GetProperty(cx, &obj, "key", &key)) {
+  if (!JS_GetProperty(cx, obj, "key", &key)) {
     MOZ_ASSERT(!JS_IsExceptionPending(cx));
     return NS_ERROR_OUT_OF_MEMORY;
   }
@@ -626,7 +626,7 @@ BluetoothService::HandleSettingsChanged(const nsAString& aData)
 
   if (match) {
     JS::Rooted<JS::Value> value(cx);
-    if (!JS_GetProperty(cx, &obj, "value", &value)) {
+    if (!JS_GetProperty(cx, obj, "value", &value)) {
       MOZ_ASSERT(!JS_IsExceptionPending(cx));
       return NS_ERROR_OUT_OF_MEMORY;
     }
@@ -649,7 +649,7 @@ BluetoothService::HandleSettingsChanged(const nsAString& aData)
 
   if (match) {
     JS::Rooted<JS::Value> value(cx);
-    if (!JS_GetProperty(cx, &obj, "value", &value)) {
+    if (!JS_GetProperty(cx, obj, "value", &value)) {
       MOZ_ASSERT(!JS_IsExceptionPending(cx));
       return NS_ERROR_OUT_OF_MEMORY;
     }

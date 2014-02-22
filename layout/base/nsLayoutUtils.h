@@ -654,14 +654,6 @@ public:
                                    uint32_t aFlags = 0);
 
   /**
-   * Transform aRect relative to aAncestor down to the coordinate system of
-   * aFrame. Computes the bounding-box of the true quadrilateral.
-   */
-  static nsRect TransformAncestorRectToFrame(nsIFrame* aFrame,
-                                             const nsRect& aRect,
-                                             const nsIFrame* aAncestor);
-
-  /**
    * Transform aRect relative to aFrame up to the coordinate system of
    * aAncestor. Computes the bounding-box of the true quadrilateral.
    * Pass non-null aPreservesAxisAlignedRectangles and it will be set to true if
@@ -1019,24 +1011,25 @@ public:
   static nsIFrame* GetParentOrPlaceholderForCrossDoc(nsIFrame* aFrame);
 
   /**
-   * Get a frame's next-in-flow, or, if it doesn't have one, its special sibling.
+   * Get a frame's next-in-flow, or, if it doesn't have one, its
+   * block-in-inline-split sibling.
    */
   static nsIFrame*
-  GetNextContinuationOrSpecialSibling(nsIFrame *aFrame);
+  GetNextContinuationOrIBSplitSibling(nsIFrame *aFrame);
 
   /**
-   * Get the first frame in the continuation-plus-special-sibling chain
+   * Get the first frame in the continuation-plus-ib-split-sibling chain
    * containing aFrame.
    */
   static nsIFrame*
-  FirstContinuationOrSpecialSibling(nsIFrame *aFrame);
+  FirstContinuationOrIBSplitSibling(nsIFrame *aFrame);
 
   /**
-   * Is FirstContinuationOrSpecialSibling(aFrame) going to return
+   * Is FirstContinuationOrIBSplitSibling(aFrame) going to return
    * aFrame?
    */
   static bool
-  IsFirstContinuationOrSpecialSibling(nsIFrame *aFrame);
+  IsFirstContinuationOrIBSplitSibling(nsIFrame *aFrame);
 
   /**
    * Check whether aFrame is a part of the scrollbar or scrollcorner of
@@ -1083,9 +1076,9 @@ public:
    * @param aFrame Frame whose (min-/max-/)width is being computed
    * @param aContainingBlockWidth Width of aFrame's containing block.
    * @param aContentEdgeToBoxSizing The sum of any left/right padding and
-   *          border that goes inside the rect chosen by -moz-box-sizing.
+   *          border that goes inside the rect chosen by box-sizing.
    * @param aBoxSizingToMarginEdge The sum of any left/right padding, border,
-   *          and margin that goes outside the rect chosen by -moz-box-sizing.
+   *          and margin that goes outside the rect chosen by box-sizing.
    * @param aCoord The width value to compute.
    */
   static nscoord ComputeWidthValue(
@@ -1532,6 +1525,7 @@ public:
    */
   static uint32_t GetTextRunFlagsForStyle(nsStyleContext* aStyleContext,
                                           const nsStyleFont* aStyleFont,
+                                          const nsStyleText* aStyleText,
                                           nscoord aLetterSpacing);
 
   /**
@@ -1734,11 +1728,14 @@ public:
   static bool IsAnimationLoggingEnabled();
 
   /**
-   * Find the maximum scale for an element (aContent) over the course of any
-   * animations and transitions on the element. Will return 1,1 if there is no
-   * animated scaling.
+   * Find a suitable scale for an element (aContent) over the course of any
+   * animations and transitions on the element.
+   * It will check the maximum and minimum scale during the animations and
+   * transitions and return a suitable value for performance and quality.
+   * Will return scale(1,1) if there is no animated scaling.
+   * Always return positive value.
    */
-  static gfxSize GetMaximumAnimatedScale(nsIContent* aContent);
+  static gfxSize ComputeSuitableScaleForAnimation(nsIContent* aContent);
 
   /**
    * Checks if we should forcibly use nearest pixel filtering for the

@@ -784,7 +784,7 @@ CSS_PROP_BORDER(
         CSS_PROPERTY_APPLIES_TO_FIRST_LETTER |
         CSS_PROPERTY_START_IMAGE_LOADS,
     "",
-    VARIANT_HUO,
+    VARIANT_IMAGE | VARIANT_INHERIT,
     nullptr,
     CSS_PROP_NO_OFFSET,
     eStyleAnimType_None)
@@ -1534,6 +1534,18 @@ CSS_PROP_CONTENT(
     kContentKTable,
     CSS_PROP_NO_OFFSET,
     eStyleAnimType_None)
+#ifndef CSS_PROP_LIST_EXCLUDE_INTERNAL
+CSS_PROP_TEXT(
+    -moz-control-character-visibility,
+    _moz_control_character_visibility,
+    CSS_PROP_DOMPROP_PREFIXED(ControlCharacterVisibility),
+    CSS_PROPERTY_PARSE_VALUE,
+    "",
+    VARIANT_HK,
+    kControlCharacterVisibilityKTable,
+    CSS_PROP_NO_OFFSET,
+    eStyleAnimType_None)
+#endif
 CSS_PROP_CONTENT(
     counter-increment,
     counter_increment,
@@ -2377,7 +2389,8 @@ CSS_PROP_DISPLAY(
     mix-blend-mode,
     mix_blend_mode,
     MixBlendMode,
-    CSS_PROPERTY_PARSE_VALUE,
+    CSS_PROPERTY_PARSE_VALUE |
+        CSS_PROPERTY_CREATES_STACKING_CONTEXT,
     "layout.css.mix-blend-mode.enabled",
     VARIANT_HK,
     kBlendModeKTable,
@@ -2747,7 +2760,9 @@ CSS_PROP_DISPLAY(
     position,
     position,
     Position,
-    CSS_PROPERTY_PARSE_VALUE,
+    CSS_PROPERTY_PARSE_VALUE |
+        // For position: sticky
+        CSS_PROPERTY_CREATES_STACKING_CONTEXT,
     "",
     VARIANT_HK,
     kPositionKTable,
@@ -2962,7 +2977,8 @@ CSS_PROP_DISPLAY(
     transform,
     Transform,
     CSS_PROPERTY_PARSE_FUNCTION |
-        CSS_PROPERTY_GETCS_NEEDS_LAYOUT_FLUSH,
+        CSS_PROPERTY_GETCS_NEEDS_LAYOUT_FLUSH |
+        CSS_PROPERTY_CREATES_STACKING_CONTEXT,
     "",
     0,
     nullptr,
@@ -2996,7 +3012,8 @@ CSS_PROP_DISPLAY(
     perspective,
     perspective,
     Perspective,
-    CSS_PROPERTY_PARSE_VALUE,
+    CSS_PROPERTY_PARSE_VALUE |
+        CSS_PROPERTY_CREATES_STACKING_CONTEXT,
     "",
     VARIANT_NONE | VARIANT_INHERIT | VARIANT_LENGTH | VARIANT_POSITIVE_DIMENSION,
     nullptr,
@@ -3006,7 +3023,8 @@ CSS_PROP_DISPLAY(
     transform-style,
     transform_style,
     TransformStyle,
-    CSS_PROPERTY_PARSE_VALUE,
+    CSS_PROPERTY_PARSE_VALUE |
+        CSS_PROPERTY_CREATES_STACKING_CONTEXT,
     "",
     VARIANT_HK,
     kTransformStyleKTable,
@@ -3277,7 +3295,8 @@ CSS_PROP_POSITION(
     z-index,
     z_index,
     ZIndex,
-    CSS_PROPERTY_PARSE_VALUE,
+    CSS_PROPERTY_PARSE_VALUE |
+        CSS_PROPERTY_CREATES_STACKING_CONTEXT,
     "",
     VARIANT_AHI,
     nullptr,
@@ -3425,7 +3444,8 @@ CSS_PROP_SVGRESET(
     clip-path,
     clip_path,
     ClipPath,
-    CSS_PROPERTY_PARSE_VALUE,
+    CSS_PROPERTY_PARSE_VALUE |
+        CSS_PROPERTY_CREATES_STACKING_CONTEXT,
     "",
     VARIANT_HUO,
     nullptr,
@@ -3505,7 +3525,8 @@ CSS_PROP_SVGRESET(
     filter,
     filter,
     Filter,
-    CSS_PROPERTY_PARSE_FUNCTION,
+    CSS_PROPERTY_PARSE_FUNCTION |
+        CSS_PROPERTY_CREATES_STACKING_CONTEXT,
     "",
     0,
     nullptr,
@@ -3591,7 +3612,8 @@ CSS_PROP_SVGRESET(
     mask,
     mask,
     Mask,
-    CSS_PROPERTY_PARSE_VALUE,
+    CSS_PROPERTY_PARSE_VALUE |
+        CSS_PROPERTY_CREATES_STACKING_CONTEXT,
     "",
     VARIANT_HUO,
     nullptr,

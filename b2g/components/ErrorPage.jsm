@@ -9,7 +9,7 @@ this.EXPORTED_SYMBOLS = ['ErrorPage'];
 const Cu = Components.utils;
 const Cc = Components.classes;
 const Ci = Components.interfaces;
-const kErrorPageFrameScript = 'chrome://browser/content/ErrorPage.js';
+const kErrorPageFrameScript = 'chrome://b2g/content/ErrorPage.js';
 
 Cu.import('resource://gre/modules/Services.jsm');
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -170,12 +170,16 @@ let ErrorPage = {
   },
 
   init: function errorPageInit() {
-    Services.obs.addObserver(this, 'in-process-browser-or-app-frame-shown', false);
-    Services.obs.addObserver(this, 'remote-browser-frame-shown', false);
+    Services.obs.addObserver(this, 'inprocess-browser-shown', false);
+    Services.obs.addObserver(this, 'remote-browser-shown', false);
   },
 
   observe: function errorPageObserve(aSubject, aTopic, aData) {
     let frameLoader = aSubject.QueryInterface(Ci.nsIFrameLoader);
+    // Ignore notifications that aren't from a BrowserOrApp
+    if (!frameLoader.ownerIsBrowserOrAppFrame) {
+      return;
+    }
     this._listenError(frameLoader);
   }
 };

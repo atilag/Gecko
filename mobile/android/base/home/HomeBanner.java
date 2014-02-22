@@ -38,21 +38,21 @@ public class HomeBanner extends LinearLayout
                         implements GeckoEventListener {
     private static final String LOGTAG = "GeckoHomeBanner";
 
-    final TextView mTextView;
-    final ImageView mIconView;
-    final ImageButton mCloseButton;
-
     // Used for tracking scroll length
     private float mTouchY = -1;
 
     // Used to detect for upwards scroll to push banner all the way up
     private boolean mSnapBannerToTop;
 
-    // Used so that we don't move the banner when scrolling between pages
+    // Tracks if the banner has been enabled by HomePager to avoid race conditions.
+    private boolean mEnabled = false;
+
+    // The user is currently swiping between HomePager pages
     private boolean mScrollingPages = false;
 
-    // User has dismissed the banner using the close button
-    private boolean mDismissed = false;
+    // Tracks whether the user swiped the banner down, preventing us from autoshowing when the user
+    // switches back to the default page.
+    private boolean mUserSwipedDown = false;
 
     public HomeBanner(Context context) {
         this(context, null);
@@ -62,18 +62,25 @@ public class HomeBanner extends LinearLayout
         super(context, attrs);
 
         LayoutInflater.from(context).inflate(R.layout.home_banner, this);
-        mTextView = (TextView) findViewById(R.id.text);
-        mIconView = (ImageView) findViewById(R.id.icon);
-        mCloseButton = (ImageButton) findViewById(R.id.close);
+    }
 
-        mCloseButton.getDrawable().setAlpha(127);
+    @Override
+    public void onAttachedToWindow() {
+        super.onAttachedToWindow();
+
         // Tapping on the close button will ensure that the banner is never
         // showed again on this session.
-        mCloseButton.setOnClickListener(new View.OnClickListener() {
+        final ImageButton closeButton = (ImageButton) findViewById(R.id.close);
+
+        // The drawable should have 50% opacity.
+        closeButton.getDrawable().setAlpha(127);
+
+        closeButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                animateDown();
-                mDismissed = true;
+                HomeBanner.this.setVisibility(View.GONE);
+                // Send the current message id back to JS.
+                GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("HomeBanner:Dismiss", (String) getTag()));
             }
         });
 
@@ -81,66 +88,55 @@ public class HomeBanner extends LinearLayout
             @Override
             public void onClick(View v) {
                 // Send the current message id back to JS.
-                GeckoAppShell.sendEventToGecko(
-                    GeckoEvent.createBroadcastEvent("HomeBanner:Click",(String) getTag()));
+                GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("HomeBanner:Click", (String) getTag()));
             }
         });
-    }
 
-    @Override
-    public void onAttachedToWindow() {
         GeckoAppShell.getEventDispatcher().registerEventListener("HomeBanner:Data", this);
+        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("HomeBanner:Get", null));
     }
 
     @Override
     public void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+
         GeckoAppShell.getEventDispatcher().unregisterEventListener("HomeBanner:Data", this);
-    }
+     }
 
-    public void showBanner() {
-        if (!mDismissed) {
-            GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("HomeBanner:Get", null));
-        }
-    }
-
-    public void hideBanner() {
-        animateDown();
-    }
-
-    public void setScrollingPages(boolean scrollingPages) {
-        mScrollingPages = scrollingPages;
-    }
+     public void setScrollingPages(boolean scrollingPages) {
+         mScrollingPages = scrollingPages;
+     }
 
     @Override
-    public void handleMessage(final String event, final JSONObject message) {
-        ThreadUtils.postToUiThread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    // Store the current message id to pass back to JS in the view's OnClickListener.
-                    setTag(message.getString("id"));
-                    setText(message.getString("text"));
-                    setIcon(message.optString("iconURI"));
+    public void handleMessage(String event, JSONObject message) {
+        try {
+            // Store the current message id to pass back to JS in the view's OnClickListener.
+            setTag(message.getString("id"));
+
+            // Display styled text from an HTML string.
+            final Spanned text = Html.fromHtml(message.getString("text"));
+            final TextView textView = (TextView) findViewById(R.id.text);
+
+            // Update the banner message on the UI thread.
+            ThreadUtils.postToUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    textView.setText(text);
+                    setVisibility(VISIBLE);
                     animateUp();
-                } catch (JSONException e) {
-                    Log.e(LOGTAG, "Exception handling " + event + " message", e);
                 }
-            }
-        });
-    }
+            });
+        } catch (JSONException e) {
+            Log.e(LOGTAG, "Exception handling " + event + " message", e);
+            return;
+        }
 
-    private void setText(String text) {
-        // Display styled text from an HTML string.
-        final Spanned html = Html.fromHtml(text);
+        final String iconURI = message.optString("iconURI");
+        final ImageView iconView = (ImageView) findViewById(R.id.icon);
 
-        // Update the banner message on the UI thread.
-        mTextView.setText(html);
-    }
-
-    private void setIcon(String iconURI) {
         if (TextUtils.isEmpty(iconURI)) {
             // Hide the image view if we don't have an icon to show.
-            mIconView.setVisibility(View.GONE);
+            iconView.setVisibility(View.GONE);
             return;
         }
 
@@ -149,69 +145,77 @@ public class HomeBanner extends LinearLayout
             public void onBitmapFound(final Drawable d) {
                 // Bail if getDrawable doesn't find anything.
                 if (d == null) {
-                    mIconView.setVisibility(View.GONE);
+                    iconView.setVisibility(View.GONE);
                     return;
                 }
 
-                // Update the banner icon
-                mIconView.setImageDrawable(d);
+                // Update the banner icon on the UI thread.
+                ThreadUtils.postToUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        iconView.setImageDrawable(d);
+                    }
+                });
             }
         });
     }
 
-    private void animateDown() {
+    public void setEnabled(boolean enabled) {
+        // No need to animate if not changing
+        if (mEnabled == enabled) {
+            return;
+        }
+
+        mEnabled = enabled;
+        if (enabled) {
+            animateUp();
+        } else {
+            animateDown();
+        }
+    }
+
+    private void animateUp() {
+        // Check to make sure that message has been received and the banner has been enabled.
+        // Necessary to avoid race conditions between show() and handleMessage() calls.
+        TextView textView = (TextView) findViewById(R.id.text);
+        if (!mEnabled || TextUtils.isEmpty(textView.getText()) || mUserSwipedDown) {
+            return;
+        }
+
         // No need to animate if already translated.
-        if (getVisibility() == GONE && ViewHelper.getTranslationY(this) == getHeight()) {
+        if (ViewHelper.getTranslationY(this) == 0) {
+            return;
+        }
+
+        final PropertyAnimator animator = new PropertyAnimator(100);
+        animator.attach(this, Property.TRANSLATION_Y, 0);
+        animator.start();
+    }
+
+    private void animateDown() {
+        // No need to animate if already translated or gone.
+        if (ViewHelper.getTranslationY(this) == getHeight()) {
             return;
         }
 
         final PropertyAnimator animator = new PropertyAnimator(100);
         animator.attach(this, Property.TRANSLATION_Y, getHeight());
         animator.start();
-        animator.addPropertyAnimationListener(new PropertyAnimationListener() {
-            @Override
-            public void onPropertyAnimationStart() {}
-            public void onPropertyAnimationEnd() {
-                HomeBanner.this.setVisibility(GONE);
-            }
-        });
     }
 
-    private void animateUp() {
-        // No need to animate if already translated.
-        if (getVisibility() == VISIBLE && ViewHelper.getTranslationY(this) == 0) {
-            return;
-        }
-
-        setVisibility(View.VISIBLE);
-        final PropertyAnimator animator = new PropertyAnimator(100);
-        animator.attach(this, Property.TRANSLATION_Y, 0);
-        animator.start();
-    }
-
-    /**
-     * Touches to the HomePager are forwarded here to handle the hiding / showing of the banner
-     * on scroll.
-     */
     public void handleHomeTouch(MotionEvent event) {
-        if (mDismissed || mScrollingPages) {
+        if (!mEnabled || getVisibility() == GONE || mScrollingPages) {
             return;
         }
 
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN: {
+                // Track the beginning of the touch
                 mTouchY = event.getRawY();
                 break;
             }
 
             case MotionEvent.ACTION_MOVE: {
-                // There is a chance that we won't receive ACTION_DOWN, if the touch event
-                // actually started on the Grid instead of the List. Treat this as first event.
-                if (mTouchY == -1) {
-                    mTouchY = event.getRawY();
-                    return;
-                }
-
                 final float curY = event.getRawY();
                 final float delta = mTouchY - curY;
                 mSnapBannerToTop = delta <= 0.0f;
@@ -224,6 +228,11 @@ public class HomeBanner extends LinearLayout
                     newTranslationY = 0.0f;
                 } else if (newTranslationY > height) {
                     newTranslationY = height;
+                }
+
+                // Don't change this value if it wasn't a significant movement
+                if (delta >= 10 || delta <= -10) {
+                    mUserSwipedDown = newTranslationY == height;
                 }
 
                 ViewHelper.setTranslationY(this, newTranslationY);
@@ -241,6 +250,7 @@ public class HomeBanner extends LinearLayout
                         animateUp();
                     } else {
                         animateDown();
+                        mUserSwipedDown = true;
                     }
                 }
                 break;

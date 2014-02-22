@@ -58,7 +58,7 @@ public:
   // tiling.
   virtual TiledLayerComposer* AsTiledLayerComposer() { return nullptr; }
 
-  virtual void UpdateThebes(const ThebesBufferData& aData,
+  virtual bool UpdateThebes(const ThebesBufferData& aData,
                             const nsIntRegion& aUpdated,
                             const nsIntRegion& aOldValidRegionBack,
                             nsIntRegion* aUpdatedRegionBack) = 0;
@@ -116,6 +116,8 @@ public:
   virtual TextureHost* GetAsTextureHost() MOZ_OVERRIDE;
 
   virtual void UseTextureHost(TextureHost* aTexture) MOZ_OVERRIDE;
+  virtual void UseComponentAlphaTextures(TextureHost* aTextureOnBlack,
+                                         TextureHost* aTextureOnWhite) MOZ_OVERRIDE;
 
   virtual void SetPaintWillResample(bool aResample) { mPaintWillResample = aResample; }
 
@@ -218,7 +220,7 @@ public:
 
   virtual CompositableType GetType() { return COMPOSITABLE_CONTENT_DOUBLE; }
 
-  virtual void UpdateThebes(const ThebesBufferData& aData,
+  virtual bool UpdateThebes(const ThebesBufferData& aData,
                             const nsIntRegion& aUpdated,
                             const nsIntRegion& aOldValidRegionBack,
                             nsIntRegion* aUpdatedRegionBack);
@@ -238,7 +240,7 @@ public:
 
   virtual CompositableType GetType() { return BUFFER_CONTENT_DIRECT; }
 
-  virtual void UpdateThebes(const ThebesBufferData& aData,
+  virtual bool UpdateThebes(const ThebesBufferData& aData,
                             const nsIntRegion& aUpdated,
                             const nsIntRegion& aOldValidRegionBack,
                             nsIntRegion* aUpdatedRegionBack);
@@ -279,7 +281,7 @@ public:
 
   virtual CompositableType GetType() { return COMPOSITABLE_CONTENT_SINGLE; }
 
-  virtual void UpdateThebes(const ThebesBufferData& aData,
+  virtual bool UpdateThebes(const ThebesBufferData& aData,
                             const nsIntRegion& aUpdated,
                             const nsIntRegion& aOldValidRegionBack,
                             nsIntRegion* aUpdatedRegionBack);
@@ -295,7 +297,7 @@ public:
 
   virtual CompositableType GetType() { return BUFFER_CONTENT; }
 
-  virtual void UpdateThebes(const ThebesBufferData& aData,
+  virtual bool UpdateThebes(const ThebesBufferData& aData,
                             const nsIntRegion& aUpdated,
                             const nsIntRegion& aOldValidRegionBack,
                             nsIntRegion* aUpdatedRegionBack);
@@ -347,12 +349,13 @@ public:
                                  const nsIntRect& aBufferRect,
                                  const nsIntPoint& aBufferRotation) MOZ_OVERRIDE;
 
-  virtual void UpdateThebes(const ThebesBufferData& aData,
+  virtual bool UpdateThebes(const ThebesBufferData& aData,
                             const nsIntRegion& aUpdated,
                             const nsIntRegion& aOldValidRegionBack,
                             nsIntRegion* aUpdatedRegionBack)
   {
-    NS_RUNTIMEABORT("Shouldn't call this");
+    NS_ERROR("Shouldn't call this");
+    return false;
   }
 
   virtual void Composite(EffectChain& aEffectChain,

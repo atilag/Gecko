@@ -17,6 +17,14 @@ namespace jit {
 typedef uint32_t SnapshotOffset;
 typedef uint32_t BailoutId;
 
+// The maximum size of any buffer associated with an assembler or code object.
+// This is chosen to not overflow a signed integer, leaving room for an extra
+// bit on offsets.
+static const uint32_t MAX_BUFFER_SIZE = (1 << 30) - 1;
+
+// Maximum number of scripted arg slots.
+static const uint32_t SNAPSHOT_MAX_NARGS = 127;
+
 static const SnapshotOffset INVALID_SNAPSHOT_OFFSET = uint32_t(-1);
 
 // Different kinds of bailouts. When extending this enum, make sure to check
@@ -40,6 +48,9 @@ enum BailoutKind
     // A bailout caused by invalid assumptions based on Baseline code.
     Bailout_BaselineInfo
 };
+
+static const uint32_t BAILOUT_KIND_BITS = 3;
+static const uint32_t BAILOUT_RESUME_BITS = 1;
 
 #ifdef DEBUG
 inline const char *
@@ -89,8 +100,8 @@ enum MIRType
     MIRType_Elements,      // An elements vector
     MIRType_Pointer,       // An opaque pointer that receives no special treatment
     MIRType_Shape,         // A Shape pointer.
-    MIRType_ForkJoinSlice, // js::ForkJoinSlice*
-    MIRType_Last = MIRType_ForkJoinSlice,
+    MIRType_ForkJoinContext, // js::ForkJoinContext*
+    MIRType_Last = MIRType_ForkJoinContext,
     MIRType_Float32x4 = MIRType_Float32 | (2 << VECTOR_SCALE_SHIFT),
     MIRType_Int32x4   = MIRType_Int32   | (2 << VECTOR_SCALE_SHIFT),
     MIRType_Doublex2  = MIRType_Double  | (1 << VECTOR_SCALE_SHIFT)
@@ -199,8 +210,8 @@ StringFromMIRType(MIRType type)
       return "Elements";
     case MIRType_Pointer:
       return "Pointer";
-    case MIRType_ForkJoinSlice:
-      return "ForkJoinSlice";
+    case MIRType_ForkJoinContext:
+      return "ForkJoinContext";
     default:
       MOZ_ASSUME_UNREACHABLE("Unknown MIRType.");
   }

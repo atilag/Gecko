@@ -140,7 +140,7 @@ protected:
       mCursor->mObjectKey = mObjectKey;
       mCursor->mContinueToKey.Unset();
 
-      mCursor->mCloneReadInfo.Swap(mCloneReadInfo);
+      mCursor->mCloneReadInfo = Move(mCloneReadInfo);
       mCloneReadInfo.mCloneBuffer.clear();
     }
   }
@@ -228,7 +228,7 @@ IDBCursor::Create(IDBRequest* aRequest,
                   const nsACString& aContinueQuery,
                   const nsACString& aContinueToQuery,
                   const Key& aKey,
-                  StructuredCloneReadInfo& aCloneReadInfo)
+                  StructuredCloneReadInfo&& aCloneReadInfo)
 {
   NS_ASSERTION(aObjectStore, "Null pointer!");
   NS_ASSERTION(!aKey.IsUnset(), "Bad key!");
@@ -241,7 +241,7 @@ IDBCursor::Create(IDBRequest* aRequest,
   cursor->mObjectStore = aObjectStore;
   cursor->mType = OBJECTSTORE;
   cursor->mKey = aKey;
-  cursor->mCloneReadInfo.Swap(aCloneReadInfo);
+  cursor->mCloneReadInfo = Move(aCloneReadInfo);
 
   return cursor.forget();
 }
@@ -313,7 +313,7 @@ IDBCursor::Create(IDBRequest* aRequest,
                   const nsACString& aContinueToQuery,
                   const Key& aKey,
                   const Key& aObjectKey,
-                  StructuredCloneReadInfo& aCloneReadInfo)
+                  StructuredCloneReadInfo&& aCloneReadInfo)
 {
   NS_ASSERTION(aIndex, "Null pointer!");
   NS_ASSERTION(!aKey.IsUnset(), "Bad key!");
@@ -329,7 +329,7 @@ IDBCursor::Create(IDBRequest* aRequest,
   cursor->mType = INDEXOBJECT;
   cursor->mKey = aKey;
   cursor->mObjectKey = aObjectKey;
-  cursor->mCloneReadInfo.Swap(aCloneReadInfo);
+  cursor->mCloneReadInfo = Move(aCloneReadInfo);
 
   return cursor.forget();
 }
@@ -697,16 +697,14 @@ IDBCursor::GetValue(JSContext* aCx, ErrorResult& aRv)
 
 void
 IDBCursor::Continue(JSContext* aCx,
-                    const Optional<JS::Handle<JS::Value> >& aKey,
+                    JS::Handle<JS::Value> aKey,
                     ErrorResult &aRv)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
   Key key;
-  if (aKey.WasPassed()) {
-    aRv = key.SetFromJSVal(aCx, aKey.Value());
-    ENSURE_SUCCESS_VOID(aRv);
-  }
+  aRv = key.SetFromJSVal(aCx, aKey);
+  ENSURE_SUCCESS_VOID(aRv);
 
   if (!key.IsUnset()) {
     switch (mDirection) {
@@ -809,9 +807,7 @@ IDBCursor::Update(JSContext* aCx, JS::Handle<JS::Value> aValue,
       return nullptr;
     }
 
-    JS::Rooted<JS::Value> value(aCx, aValue);
-    Optional<JS::Handle<JS::Value> > keyValue(aCx);
-    request = mObjectStore->Put(aCx, value, keyValue, aRv);
+    request = mObjectStore->Put(aCx, aValue, JS::UndefinedHandleValue, aRv);
     if (aRv.Failed()) {
       return nullptr;
     }
@@ -821,9 +817,7 @@ IDBCursor::Update(JSContext* aCx, JS::Handle<JS::Value> aValue,
     aRv = objectKey.ToJSVal(aCx, &keyVal);
     ENSURE_SUCCESS(aRv, nullptr);
 
-    JS::Rooted<JS::Value> value(aCx, aValue);
-    Optional<JS::Handle<JS::Value> > keyValue(aCx, keyVal);
-    request = mObjectStore->Put(aCx, value, keyValue, aRv);
+    request = mObjectStore->Put(aCx, aValue, keyVal, aRv);
     if (aRv.Failed()) {
       return nullptr;
     }

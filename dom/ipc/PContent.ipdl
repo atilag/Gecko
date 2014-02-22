@@ -80,6 +80,12 @@ struct DeviceStorageAvailableParams
   nsString storageName;
 };
 
+struct DeviceStorageStatusParams
+{
+  nsString type;
+  nsString storageName;
+};
+
 struct DeviceStorageFormatParams
 {
   nsString type;
@@ -134,6 +140,7 @@ union DeviceStorageParams
   DeviceStorageFreeSpaceParams;
   DeviceStorageUsedSpaceParams;
   DeviceStorageAvailableParams;
+  DeviceStorageStatusParams;
   DeviceStorageFormatParams;
 };
 
@@ -388,12 +395,6 @@ parent:
     async StartVisitedQuery(URIParams uri);
     async VisitURI(URIParams uri, OptionalURIParams referrer, uint32_t flags);
     async SetURITitle(URIParams uri, nsString title);
-    
-    // filepicker remoting
-    sync ShowFilePicker(int16_t mode, int16_t selectedType, bool addToRecentDocs,
-                        nsString title, nsString defaultFile, nsString defaultExtension,
-                        nsString[] filters, nsString[] filterNames)
-        returns (nsString[] files, int16_t retValue, nsresult result);
 
     async LoadURIExternal(URIParams uri);
 
@@ -422,9 +423,14 @@ parent:
 
     CloseAlert(nsString name, Principal principal);
 
-    PExternalHelperApp(OptionalURIParams uri, nsCString aMimeContentType,
-                       nsCString aContentDisposition, bool aForceSave,
-                       int64_t aContentLength, OptionalURIParams aReferrer,
+    PExternalHelperApp(OptionalURIParams uri, 
+                       nsCString aMimeContentType,
+                       nsCString aContentDisposition, 
+                       uint32_t aContentDispositionHint, 
+                       nsString aContentDispositionFilename, 
+                       bool aForceSave,
+                       int64_t aContentLength,
+                       OptionalURIParams aReferrer,
                        nullable PBrowser aBrowser);
 
     AddGeolocationListener(Principal principal, bool highAccuracy);
@@ -439,13 +445,11 @@ parent:
     // nsIPermissionManager messages
     sync ReadPermissions() returns (Permission[] permissions);
 
-    // These clipboard methods are only really used on Android since
-    // the clipboard is not available in the content process.
     SetClipboardText(nsString text, bool isPrivateData, int32_t whichClipboard);
     sync GetClipboardText(int32_t whichClipboard)
         returns (nsString text);
-    EmptyClipboard();
-    sync ClipboardHasText()
+    EmptyClipboard(int32_t whichClipboard);
+    sync ClipboardHasText(int32_t whichClipboard)
         returns (bool hasText);
 
     sync GetSystemColors(uint32_t colorsCount)
@@ -519,6 +523,20 @@ parent:
 
     AddIdleObserver(uint64_t observerId, uint32_t idleTimeInS);
     RemoveIdleObserver(uint64_t observerId, uint32_t idleTimeInS);
+
+    /**
+     * This message is only used on X11 platforms.
+     *
+     * Send a dup of the plugin process's X socket to the parent
+     * process.  In theory, this scheme keeps the plugin's X resources
+     * around until after both the plugin process shuts down *and* the
+     * parent process closes the dup fd.  This is used to prevent the
+     * parent process from crashing on X errors if, e.g., the plugin
+     * crashes *just before* a repaint and the parent process tries to
+     * use the newly-invalid surface.
+     */
+    BackUpXResources(FileDescriptor aXSocketFd);
+
 both:
      AsyncMessage(nsString aMessage, ClonedMessageData aData,
                   CpowEntry[] aCpows, Principal aPrincipal);

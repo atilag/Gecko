@@ -161,10 +161,10 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitMaybeToDoubleElement(MMaybeToDoubleElement *ins);
     bool visitLoadSlot(MLoadSlot *ins);
     bool visitFunctionEnvironment(MFunctionEnvironment *ins);
-    bool visitForkJoinSlice(MForkJoinSlice *ins);
+    bool visitForkJoinContext(MForkJoinContext *ins);
     bool visitGuardThreadExclusive(MGuardThreadExclusive *ins);
     bool visitInterruptCheck(MInterruptCheck *ins);
-    bool visitCheckInterruptPar(MCheckInterruptPar *ins);
+    bool visitInterruptCheckPar(MInterruptCheckPar *ins);
     bool visitStoreSlot(MStoreSlot *ins);
     bool visitTypeBarrier(MTypeBarrier *ins);
     bool visitMonitorTypes(MMonitorTypes *ins);
@@ -173,6 +173,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitSetArrayLength(MSetArrayLength *ins);
     bool visitTypedArrayLength(MTypedArrayLength *ins);
     bool visitTypedArrayElements(MTypedArrayElements *ins);
+    bool visitNeuterCheck(MNeuterCheck *lir);
     bool visitTypedObjectElements(MTypedObjectElements *ins);
     bool visitInitializedLength(MInitializedLength *ins);
     bool visitSetInitializedLength(MSetInitializedLength *ins);

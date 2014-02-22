@@ -24,10 +24,13 @@ MOZBASE_PACKAGES = \
   moznetwork \
   mozsystemmonitor \
   moztest \
+  mozversion \
   $(NULL)
 
 MOZBASE_EXTRAS = \
   setup_development.py \
+  test.py \
+  test-manifest.ini \
   $(NULL)
 
 _DEST_DIR = $(DEPTH)/_tests/mozbase

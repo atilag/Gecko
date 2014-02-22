@@ -76,10 +76,7 @@ static const char kXPConnectServiceContractID[] = "@mozilla.org/js/xpc/XPConnect
 static const char kObserverServiceContractID[] = "@mozilla.org/observer-service;1";
 static const char kJSCachePrefix[] = "jsloader";
 
-/* Some platforms don't have an implementation of PR_MemMap(). */
-#ifndef XP_OS2
 #define HAVE_PR_MEMMAP
-#endif
 
 /**
  * Buffer sizes for serialization and deserialization of scripts.
@@ -456,7 +453,8 @@ mozJSComponentLoader::LoadModule(FileLocation &aFile)
     }
 
     nsCOMPtr<nsIXPConnectJSObjectHolder> file_holder;
-    rv = xpc->WrapNative(cx, entry->obj, file,
+    RootedObject entryObj(cx, entry->obj);
+    rv = xpc->WrapNative(cx, entryObj, file,
                          NS_GET_IID(nsIFile),
                          getter_AddRefs(file_holder));
 
@@ -472,7 +470,7 @@ mozJSComponentLoader::LoadModule(FileLocation &aFile)
     JSCLAutoErrorReporterSetter aers(cx, xpc::SystemErrorReporter);
 
     RootedValue NSGetFactory_val(cx);
-    if (!JS_GetProperty(cx, entry->obj, "NSGetFactory", &NSGetFactory_val) ||
+    if (!JS_GetProperty(cx, entryObj, "NSGetFactory", &NSGetFactory_val) ||
         JSVAL_IS_VOID(NSGetFactory_val)) {
         return nullptr;
     }
@@ -508,7 +506,7 @@ mozJSComponentLoader::LoadModule(FileLocation &aFile)
     // Set the location information for the new global, so that tools like
     // about:memory may use that information
     if (!mReuseLoaderGlobal) {
-        xpc::SetLocationForGlobal(entry->obj, spec);
+        xpc::SetLocationForGlobal(entryObj, spec);
     }
 
     // The hash owns the ModuleEntry now, forget about it
@@ -1015,7 +1013,7 @@ mozJSComponentLoader::ObjectForLocation(nsIFile *aComponentFile,
             ok = JS_ExecuteScriptVersion(cx, obj, script, nullptr, JSVERSION_LATEST);
         } else {
             RootedValue rval(cx);
-            ok = JS_CallFunction(cx, obj, function, 0, nullptr, rval.address());
+            ok = JS_CallFunction(cx, obj, function, JS::EmptyValueArray, &rval);
         }
      }
 
@@ -1265,7 +1263,8 @@ mozJSComponentLoader::ImportInto(const nsACString &aLocation,
         JSAutoCompartment ac(mContext, mod->obj);
 
         RootedValue symbols(mContext);
-        if (!JS_GetProperty(mContext, mod->obj,
+        RootedObject modObj(mContext, mod->obj);
+        if (!JS_GetProperty(mContext, modObj,
                             "EXPORTED_SYMBOLS", &symbols)) {
             return ReportOnCaller(cxhelper, ERROR_NOT_PRESENT,
                                   PromiseFlatCString(aLocation).get());
@@ -1300,7 +1299,8 @@ mozJSComponentLoader::ImportInto(const nsACString &aLocation,
                                       PromiseFlatCString(aLocation).get(), i);
             }
 
-            if (!JS_GetPropertyById(mContext, mod->obj, symbolId, &value)) {
+            RootedObject modObj(mContext, mod->obj);
+            if (!JS_GetPropertyById(mContext, modObj, symbolId, &value)) {
                 JSAutoByteString bytes(mContext, JSID_TO_STRING(symbolId));
                 if (!bytes)
                     return NS_ERROR_FAILURE;

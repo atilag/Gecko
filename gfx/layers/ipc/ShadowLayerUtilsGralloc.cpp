@@ -254,6 +254,7 @@ int64_t GrallocReporter::sAmount = 0;
 
 GrallocBufferActor::GrallocBufferActor()
 : mAllocBytes(0)
+, mTextureHost(nullptr)
 {
   static bool registered;
   if (!registered) {
@@ -290,6 +291,16 @@ GrallocBufferActor::Create(const gfx::IntSize& aSize,
     return actor;
   }
 
+  // If the requested size is too big (i.e. exceeds the commonly used max GL texture size)
+  // then we risk OOMing the parent process. It's better to just deny the allocation and
+  // kill the child process, which is what the following code does.
+  // TODO: actually use GL_MAX_TEXTURE_SIZE instead of hardcoding 4096
+  if (aSize.width > 4096 || aSize.height > 4096) {
+    printf_stderr("GrallocBufferActor::Create -- requested gralloc buffer is too big. Killing child instead.");
+    delete actor;
+    return nullptr;
+  }
+
   sp<GraphicBuffer> buffer(new GraphicBuffer(aSize.width, aSize.height, format, usage));
   if (buffer->initCheck() != OK)
     return actor;
@@ -304,11 +315,17 @@ GrallocBufferActor::Create(const gfx::IntSize& aSize,
   return actor;
 }
 
-// used only for hacky fix for bug 862324
 void GrallocBufferActor::ActorDestroy(ActorDestroyReason)
 {
+  // used only for hacky fix for bug 862324
   for (size_t i = 0; i < mDeprecatedTextureHosts.Length(); i++) {
     mDeprecatedTextureHosts[i]->ForgetBuffer();
+  }
+
+  // Used only for hacky fix for bug 966446.
+  if (mTextureHost) {
+    mTextureHost->ForgetBufferActor();
+    mTextureHost = nullptr;
   }
 }
 
@@ -325,6 +342,16 @@ void GrallocBufferActor::RemoveDeprecatedTextureHost(DeprecatedTextureHost* aDep
   // that should be the only occurence, otherwise we'd leak this TextureHost...
   // assert that that's not happening.
   MOZ_ASSERT(!mDeprecatedTextureHosts.Contains(aDeprecatedTextureHost));
+}
+
+void GrallocBufferActor::AddTextureHost(TextureHost* aTextureHost)
+{
+  mTextureHost = aTextureHost;
+}
+
+void GrallocBufferActor::RemoveTextureHost()
+{
+  mTextureHost = nullptr;
 }
 
 /*static*/ bool

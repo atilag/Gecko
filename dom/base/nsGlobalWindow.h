@@ -266,7 +266,7 @@ public:
   nsresult Get(nsIPrincipal* aSubject, nsIVariant** aResult)
   {
     nsCOMPtr<nsIVariant> result;
-    if (aSubject->Subsumes(mOrigin)) {
+    if (aSubject->SubsumesConsideringDomain(mOrigin)) {
       result = mValue;
     } else {
       result = CreateVoidVariant();
@@ -475,6 +475,8 @@ public:
 
   void GetSupportedNames(nsTArray<nsString>& aNames);
 
+  static bool IsChromeWindow(JSContext* /* unused */, JSObject* aObj);
+
   bool DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObj,
                     JS::Handle<jsid> aId,
                     JS::MutableHandle<JSPropertyDescriptor> aDesc);
@@ -601,6 +603,12 @@ public:
 
   NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS_AMBIGUOUS(nsGlobalWindow,
                                                                    nsIDOMEventTarget)
+
+#ifdef DEBUG
+  // Call Unlink on this window. This may cause bad things to happen, so use
+  // with caution.
+  void RiskyUnlink();
+#endif
 
   virtual NS_HIDDEN_(JSObject*)
     GetCachedXBLPrototypeHandler(nsXBLPrototypeHandler* aKey);
@@ -811,12 +819,18 @@ public:
                                       mozilla::ErrorResult& aError);
   mozilla::dom::Navigator* GetNavigator(mozilla::ErrorResult& aError);
   nsIDOMOfflineResourceList* GetApplicationCache(mozilla::ErrorResult& aError);
+
+protected:
+  bool AlertOrConfirm(bool aAlert, const nsAString& aMessage,
+                      mozilla::ErrorResult& aError);
+
+public:
   void Alert(const nsAString& aMessage, mozilla::ErrorResult& aError);
   bool Confirm(const nsAString& aMessage, mozilla::ErrorResult& aError);
   void Prompt(const nsAString& aMessage, const nsAString& aInitial,
               nsAString& aReturn, mozilla::ErrorResult& aError);
   void Print(mozilla::ErrorResult& aError);
-  JS::Value ShowModalDialog(JSContext* aCx, const nsAString& aUrl, const mozilla::dom::Optional<JS::Handle<JS::Value> >& aArgument, const nsAString& aOptions, mozilla::ErrorResult& aError);
+  JS::Value ShowModalDialog(JSContext* aCx, const nsAString& aUrl, JS::Handle<JS::Value> aArgument, const nsAString& aOptions, mozilla::ErrorResult& aError);
   void PostMessageMoz(JSContext* aCx, JS::Handle<JS::Value> aMessage,
                       const nsAString& aTargetOrigin,
                       const mozilla::dom::Optional<mozilla::dom::Sequence<JS::Value > >& aTransfer,
@@ -826,7 +840,9 @@ public:
                      const mozilla::dom::Sequence<JS::Value>& aArguments,
                      mozilla::ErrorResult& aError);
   int32_t SetTimeout(JSContext* aCx, const nsAString& aHandler,
-                     int32_t aTimeout, mozilla::ErrorResult& aError);
+                     int32_t aTimeout,
+                     const mozilla::dom::Sequence<JS::Value>& /* unused */,
+                     mozilla::ErrorResult& aError);
   void ClearTimeout(int32_t aHandle, mozilla::ErrorResult& aError);
   int32_t SetInterval(JSContext* aCx, mozilla::dom::Function& aFunction,
                       const mozilla::dom::Optional<int32_t>& aTimeout,
@@ -834,6 +850,7 @@ public:
                       mozilla::ErrorResult& aError);
   int32_t SetInterval(JSContext* aCx, const nsAString& aHandler,
                       const mozilla::dom::Optional<int32_t>& aTimeout,
+                      const mozilla::dom::Sequence<JS::Value>& /* unused */,
                       mozilla::ErrorResult& aError);
   void ClearInterval(int32_t aHandle, mozilla::ErrorResult& aError);
   void Atob(const nsAString& aAsciiBase64String, nsAString& aBinaryData,
@@ -938,6 +955,26 @@ public:
     }
     return GetContent(aCx, aError);
   }
+
+  // ChromeWindow bits.  Do NOT call these unless your window is in
+  // fact an nsGlobalChromeWindow.
+  uint16_t WindowState();
+  nsIBrowserDOMWindow* GetBrowserDOMWindow(mozilla::ErrorResult& aError);
+  void SetBrowserDOMWindow(nsIBrowserDOMWindow* aBrowserWindow,
+                           mozilla::ErrorResult& aError);
+  void GetAttention(mozilla::ErrorResult& aError);
+  void GetAttentionWithCycleCount(int32_t aCycleCount,
+                                  mozilla::ErrorResult& aError);
+  void SetCursor(const nsAString& aCursor, mozilla::ErrorResult& aError);
+  void Maximize(mozilla::ErrorResult& aError);
+  void Minimize(mozilla::ErrorResult& aError);
+  void Restore(mozilla::ErrorResult& aError);
+  void NotifyDefaultButtonLoaded(mozilla::dom::Element& aDefaultButton,
+                                 mozilla::ErrorResult& aError);
+  nsIMessageBroadcaster* GetMessageManager(mozilla::ErrorResult& aError);
+  void BeginWindowMove(nsDOMEvent& aMouseDownEvent,
+                       mozilla::dom::Element* aPanel,
+                       mozilla::ErrorResult& aError);
 
 protected:
   // Array of idle observers that are notified of idle events.
@@ -1376,6 +1413,10 @@ protected:
   // should be displayed.
   bool                   mFocusByKeyOccurred : 1;
 
+  // Ensure that a call to ResumeTimeouts() after FreeInnerObjects() does nothing.
+  // This member is only used by inner windows.
+  bool                   mInnerObjectsFreed : 1;
+
   // Indicates whether this window wants gamepad input events
   bool                   mHasGamepad : 1;
 #ifdef MOZ_GAMEPAD
@@ -1558,6 +1599,18 @@ public:
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsGlobalChromeWindow,
                                            nsGlobalWindow)
+
+  using nsGlobalWindow::GetBrowserDOMWindow;
+  using nsGlobalWindow::SetBrowserDOMWindow;
+  using nsGlobalWindow::GetAttention;
+  using nsGlobalWindow::GetAttentionWithCycleCount;
+  using nsGlobalWindow::SetCursor;
+  using nsGlobalWindow::Maximize;
+  using nsGlobalWindow::Minimize;
+  using nsGlobalWindow::Restore;
+  using nsGlobalWindow::NotifyDefaultButtonLoaded;
+  using nsGlobalWindow::GetMessageManager;
+  using nsGlobalWindow::BeginWindowMove;
 
   nsCOMPtr<nsIBrowserDOMWindow> mBrowserDOMWindow;
   nsCOMPtr<nsIMessageBroadcaster> mMessageManager;

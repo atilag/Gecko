@@ -3,13 +3,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/layers/CompositorParent.h"
+#include "nsDOMWindowUtils.h"
+
+#include "mozilla/layers/CompositorChild.h"
 #include "mozilla/layers/LayerTransactionChild.h"
 #include "nsPresContext.h"
 #include "nsDOMClassInfoID.h"
 #include "nsError.h"
 #include "nsIDOMEvent.h"
-#include "nsDOMWindowUtils.h"
 #include "nsQueryContentEventResult.h"
 #include "CompositionStringSynthesizer.h"
 #include "nsGlobalWindow.h"
@@ -753,6 +754,88 @@ nsDOMWindowUtils::SendMouseEventCommon(const nsAString& aType,
 }
 
 NS_IMETHODIMP
+nsDOMWindowUtils::SendPointerEvent(const nsAString& aType,
+                                   float aX,
+                                   float aY,
+                                   int32_t aButton,
+                                   int32_t aClickCount,
+                                   int32_t aModifiers,
+                                   bool aIgnoreRootScrollFrame,
+                                   float aPressure,
+                                   unsigned short aInputSourceArg,
+                                   int32_t aPointerId,
+                                   int32_t aWidth,
+                                   int32_t aHeight,
+                                   int32_t tiltX,
+                                   int32_t tiltY,
+                                   bool aIsPrimary,
+                                   bool aIsSynthesized,
+                                   uint8_t aOptionalArgCount,
+                                   bool* aPreventDefault)
+{
+  if (!nsContentUtils::IsCallerChrome()) {
+    return NS_ERROR_DOM_SECURITY_ERR;
+  }
+
+  // get the widget to send the event to
+  nsPoint offset;
+  nsCOMPtr<nsIWidget> widget = GetWidget(&offset);
+  if (!widget) {
+    return NS_ERROR_FAILURE;
+  }
+
+  int32_t msg;
+  if (aType.EqualsLiteral("pointerdown")) {
+    msg = NS_POINTER_DOWN;
+  } else if (aType.EqualsLiteral("pointerup")) {
+    msg = NS_POINTER_UP;
+  } else if (aType.EqualsLiteral("pointermove")) {
+    msg = NS_POINTER_MOVE;
+  } else if (aType.EqualsLiteral("pointerover")) {
+    msg = NS_POINTER_OVER;
+  } else if (aType.EqualsLiteral("pointerout")) {
+    msg = NS_POINTER_OUT;
+  } else {
+    return NS_ERROR_FAILURE;
+  }
+
+  if (aInputSourceArg == nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN) {
+    aInputSourceArg = nsIDOMMouseEvent::MOZ_SOURCE_MOUSE;
+  }
+
+  WidgetPointerEvent event(true, msg, widget);
+  event.modifiers = GetWidgetModifiers(aModifiers);
+  event.button = aButton;
+  event.buttons = GetButtonsFlagForButton(aButton);
+  event.widget = widget;
+  event.pressure = aPressure;
+  event.inputSource = aInputSourceArg;
+  event.pointerId = aPointerId;
+  event.width = aWidth;
+  event.height = aHeight;
+  event.tiltX = tiltX;
+  event.tiltY = tiltY;
+  event.isPrimary = aIsPrimary;
+  event.clickCount = aClickCount;
+  event.time = PR_IntervalNow();
+  event.mFlags.mIsSynthesizedForTests = aOptionalArgCount >= 10 ? aIsSynthesized : true;
+
+  nsPresContext* presContext = GetPresContext();
+  if (!presContext) {
+    return NS_ERROR_FAILURE;
+  }
+
+  event.refPoint = ToWidgetPoint(CSSPoint(aX, aY), offset, presContext);
+  event.ignoreRootScrollFrame = aIgnoreRootScrollFrame;
+
+  nsEventStatus status;
+  nsresult rv = widget->DispatchEvent(&event, status);
+  *aPreventDefault = (status == nsEventStatus_eConsumeNoDefault);
+
+  return rv;
+}
+
+NS_IMETHODIMP
 nsDOMWindowUtils::SendWheelEvent(float aX,
                                  float aY,
                                  double aDeltaX,
@@ -1389,8 +1472,10 @@ nsDOMWindowUtils::SendSimpleGestureEvent(const nsAString& aType,
   else
     return NS_ERROR_FAILURE;
  
-  WidgetSimpleGestureEvent event(true, msg, widget, aDirection, aDelta);
+  WidgetSimpleGestureEvent event(true, msg, widget);
   event.modifiers = GetWidgetModifiers(aModifiers);
+  event.direction = aDirection;
+  event.delta = aDelta;
   event.clickCount = aClickCount;
   event.time = PR_IntervalNow();
 
@@ -2464,7 +2549,14 @@ nsDOMWindowUtils::AdvanceTimeAndRefresh(int64_t aMilliseconds)
 
   nsRefreshDriver* driver = GetPresContext()->RefreshDriver();
   driver->AdvanceTimeAndRefresh(aMilliseconds);
-  CompositorParent::SetTimeAndSampleAnimations(driver->MostRecentRefresh(), true);
+
+  nsIWidget* widget = GetWidget();
+  if (widget) {
+    CompositorChild* compositor = widget->GetRemoteRenderer();
+    if (compositor) {
+      compositor->SendSetTestSampleTime(driver->MostRecentRefresh());
+    }
+  }
 
   return NS_OK;
 }
@@ -2476,9 +2568,19 @@ nsDOMWindowUtils::RestoreNormalRefresh()
     return NS_ERROR_DOM_SECURITY_ERR;
   }
 
+  // Kick the compositor out of test mode before the refresh driver, so that
+  // the refresh driver doesn't send an update that gets ignored by the
+  // compositor.
+  nsIWidget* widget = GetWidget();
+  if (widget) {
+    CompositorChild* compositor = widget->GetRemoteRenderer();
+    if (compositor) {
+      compositor->SendLeaveTestMode();
+    }
+  }
+
   nsRefreshDriver* driver = GetPresContext()->RefreshDriver();
   driver->RestoreNormalRefresh();
-  CompositorParent::SetTimeAndSampleAnimations(driver->MostRecentRefresh(), false);
 
   return NS_OK;
 }
@@ -2835,8 +2937,8 @@ GetXPConnectNative(JSContext* aCx, JSObject* aObj) {
 }
 
 static nsresult
-GetFileOrBlob(const nsAString& aName, const JS::Value& aBlobParts,
-              const JS::Value& aParameters, JSContext* aCx,
+GetFileOrBlob(const nsAString& aName, JS::Handle<JS::Value> aBlobParts,
+              JS::Handle<JS::Value> aParameters, JSContext* aCx,
               uint8_t aOptionalArgCount, nsISupports** aResult)
 {
   if (!nsContentUtils::IsCallerChrome()) {
@@ -2858,9 +2960,12 @@ GetFileOrBlob(const nsAString& aName, const JS::Value& aBlobParts,
   nsDOMMultipartFile* domFile =
     static_cast<nsDOMMultipartFile*>(static_cast<nsIDOMFile*>(file.get()));
 
-  JS::Value args[2] = { aBlobParts, aParameters };
+  JS::AutoValueVector args(aCx);
+  MOZ_ALWAYS_TRUE(args.resize(2));
+  args[0] = aBlobParts;
+  args[1] = aParameters;
 
-  rv = domFile->InitBlob(aCx, aOptionalArgCount, args, GetXPConnectNative);
+  rv = domFile->InitBlob(aCx, aOptionalArgCount, args.begin(), GetXPConnectNative);
   NS_ENSURE_SUCCESS(rv, rv);
 
   file.forget(aResult);

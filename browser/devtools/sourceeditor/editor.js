@@ -10,6 +10,7 @@ const { Cu, Cc, Ci, components } = require("chrome");
 const TAB_SIZE    = "devtools.editor.tabsize";
 const EXPAND_TAB  = "devtools.editor.expandtab";
 const KEYMAP      = "devtools.editor.keymap";
+const AUTO_CLOSE  = "devtools.editor.autoclosebrackets";
 const L10N_BUNDLE = "chrome://browser/locale/devtools/sourceeditor.properties";
 const XUL_NS      = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 
@@ -132,6 +133,7 @@ function Editor(config) {
   const tabSize = Services.prefs.getIntPref(TAB_SIZE);
   const useTabs = !Services.prefs.getBoolPref(EXPAND_TAB);
   const keyMap = Services.prefs.getCharPref(KEYMAP);
+  const useAutoClose = Services.prefs.getBoolPref(AUTO_CLOSE);
 
   this.version = null;
   this.config = {
@@ -144,14 +146,15 @@ function Editor(config) {
     extraKeys:         {},
     indentWithTabs:    useTabs,
     styleActiveLine:   true,
-    autoCloseBrackets: true,
+    autoCloseBrackets: "()[]{}''\"\"",
+    autoCloseEnabled:  useAutoClose,
     theme:             "mozilla"
   };
 
   // Additional shortcuts.
   this.config.extraKeys[Editor.keyFor("jumpToLine")] = () => this.jumpToLine();
-  this.config.extraKeys[Editor.keyFor("moveLineUp")] = () => this.moveLineUp();
-  this.config.extraKeys[Editor.keyFor("moveLineDown")] = () => this.moveLineDown();
+  this.config.extraKeys[Editor.keyFor("moveLineUp", { noaccel: true })] = () => this.moveLineUp();
+  this.config.extraKeys[Editor.keyFor("moveLineDown", { noaccel: true })] = () => this.moveLineDown();
   this.config.extraKeys[Editor.keyFor("toggleComment")] = "toggleComment";
 
   // Disable ctrl-[ and ctrl-] because toolbox uses those shortcuts.
@@ -186,6 +189,10 @@ function Editor(config) {
       this.config.gutters.push("CodeMirror-foldgutter");
     }
   }
+
+  // Configure automatic bracket closing.
+  if (!this.config.autoCloseEnabled)
+    this.config.autoCloseBrackets = false;
 
   // Overwrite default tab behavior. If something is selected,
   // indent those lines. If nothing is selected and we're
@@ -752,6 +759,25 @@ Editor.prototype = {
   },
 
   /**
+   * Returns current font size for the editor area, in pixels.
+   */
+  getFontSize: function () {
+    let cm  = editors.get(this);
+    let el  = cm.getWrapperElement();
+    let win = el.ownerDocument.defaultView;
+
+    return parseInt(win.getComputedStyle(el).getPropertyValue("font-size"), 10);
+  },
+
+  /**
+   * Sets font size for the editor area.
+   */
+  setFontSize: function (size) {
+    let cm = editors.get(this);
+    cm.getWrapperElement().style.fontSize = parseInt(size, 10) + "px";
+  },
+
+  /**
    * Extends an instance of the Editor object with additional
    * functions. Each function will be called with context as
    * the first argument. Context is a {ed, cm} object where
@@ -818,12 +844,13 @@ Editor.accel = function (key, modifiers={}) {
 
 /**
  * Returns a string representation of a shortcut for a
- * specified command 'cmd'. Cmd- for macs, Ctrl- for other
- * platforms. Useful when overwriting or disabling default
- * shortcuts.
+ * specified command 'cmd'. Append Cmd- for macs, Ctrl- for other
+ * platforms unless noaccel is specified in the options. Useful when overwriting
+ * or disabling default shortcuts.
  */
-Editor.keyFor = function (cmd) {
-  return Editor.accel(L10N.GetStringFromName(cmd + ".commandkey"));
+Editor.keyFor = function (cmd, opts={ noaccel: false }) {
+  let key = L10N.GetStringFromName(cmd + ".commandkey");
+  return opts.noaccel ? key : Editor.accel(key);
 };
 
 // Since Gecko already provide complete and up to date list of CSS property

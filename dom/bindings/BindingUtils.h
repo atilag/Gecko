@@ -93,6 +93,11 @@ ThrowInvalidThis(JSContext* aCx, const JS::CallArgs& aArgs,
                  const ErrNum aErrorNumber,
                  const char* aInterfaceName);
 
+bool
+ThrowInvalidThis(JSContext* aCx, const JS::CallArgs& aArgs,
+                 const ErrNum aErrorNumber,
+                 prototypes::ID aProtoId);
+
 inline bool
 ThrowMethodFailedWithDetails(JSContext* cx, ErrorResult& rv,
                              const char* ifaceName,
@@ -130,6 +135,19 @@ IsDOMClass(const js::Class* clasp)
   return IsDOMClass(Jsvalify(clasp));
 }
 
+// Return true if the JSClass is used for non-proxy DOM objects.
+inline bool
+IsNonProxyDOMClass(const js::Class* clasp)
+{
+  return IsDOMClass(clasp) && !clasp->isProxy();
+}
+
+inline bool
+IsNonProxyDOMClass(const JSClass* clasp)
+{
+  return IsNonProxyDOMClass(js::Valueify(clasp));
+}
+
 // Returns true if the JSClass is used for DOM interface and interface 
 // prototype objects.
 inline bool
@@ -151,7 +169,7 @@ template <class T>
 inline T*
 UnwrapDOMObject(JSObject* obj)
 {
-  MOZ_ASSERT(IsDOMClass(js::GetObjectClass(obj)) || IsDOMProxy(obj),
+  MOZ_ASSERT(IsDOMClass(js::GetObjectClass(obj)),
              "Don't pass non-DOM objects to this function");
 
   JS::Value val = js::GetReservedSlot(obj, DOM_OBJECT_SLOT);
@@ -165,14 +183,6 @@ GetDOMClass(JSObject* obj)
   if (IsDOMClass(clasp)) {
     return &DOMJSClass::FromJSClass(clasp)->mClass;
   }
-
-  if (js::IsProxyClass(clasp)) {
-    js::BaseProxyHandler* handler = js::GetProxyHandler(obj);
-    if (handler->family() == ProxyFamily()) {
-      return &static_cast<DOMProxyHandler*>(handler)->mClass;
-    }
-  }
-
   return nullptr;
 }
 
@@ -190,8 +200,7 @@ UnwrapDOMObjectToISupports(JSObject* aObject)
 inline bool
 IsDOMObject(JSObject* obj)
 {
-  const js::Class* clasp = js::GetObjectClass(obj);
-  return IsDOMClass(clasp) || IsDOMProxy(obj, clasp);
+  return IsDOMClass(js::GetObjectClass(obj));
 }
 
 #define UNWRAP_OBJECT(Interface, obj, value)                                 \
@@ -202,9 +211,10 @@ IsDOMObject(JSObject* obj)
 // (for example, overload resolution uses unwrapping to tell what sort
 // of thing it's looking at).
 // U must be something that a T* can be assigned to (e.g. T* or an nsRefPtr<T>).
-template <prototypes::ID PrototypeID, class T, typename U>
+template <class T, typename U>
 MOZ_ALWAYS_INLINE nsresult
-UnwrapObject(JSObject* obj, U& value)
+UnwrapObject(JSObject* obj, U& value, prototypes::ID protoID,
+             uint32_t protoDepth)
 {
   /* First check to see whether we have a DOM object */
   const DOMClass* domClass = GetDOMClass(obj);
@@ -230,14 +240,21 @@ UnwrapObject(JSObject* obj, U& value)
   /* This object is a DOM object.  Double-check that it is safely
      castable to T by checking whether it claims to inherit from the
      class identified by protoID. */
-  if (domClass->mInterfaceChain[PrototypeTraits<PrototypeID>::Depth] ==
-      PrototypeID) {
+  if (domClass->mInterfaceChain[protoDepth] == protoID) {
     value = UnwrapDOMObject<T>(obj);
     return NS_OK;
   }
 
   /* It's the wrong sort of DOM object */
   return NS_ERROR_XPC_BAD_CONVERT_JS;
+}
+
+template <prototypes::ID PrototypeID, class T, typename U>
+MOZ_ALWAYS_INLINE nsresult
+UnwrapObject(JSObject* obj, U& value)
+{
+  return UnwrapObject<T>(obj, value, PrototypeID,
+                         PrototypeTraits<PrototypeID>::Depth);
 }
 
 inline bool
@@ -508,14 +525,14 @@ CouldBeDOMBinding(nsWrapperCache* aCache)
 inline const JS::Value&
 GetSystemOnlyWrapperSlot(JSObject* obj)
 {
-  MOZ_ASSERT(IsDOMClass(js::GetObjectJSClass(obj)) &&
+  MOZ_ASSERT(IsNonProxyDOMClass(js::GetObjectJSClass(obj)) &&
              !(js::GetObjectJSClass(obj)->flags & JSCLASS_DOM_GLOBAL));
   return js::GetReservedSlot(obj, DOM_OBJECT_SLOT_SOW);
 }
 inline void
 SetSystemOnlyWrapperSlot(JSObject* obj, const JS::Value& v)
 {
-  MOZ_ASSERT(IsDOMClass(js::GetObjectJSClass(obj)) &&
+  MOZ_ASSERT(IsNonProxyDOMClass(js::GetObjectJSClass(obj)) &&
              !(js::GetObjectJSClass(obj)->flags & JSCLASS_DOM_GLOBAL));
   js::SetReservedSlot(obj, DOM_OBJECT_SLOT_SOW, v);
 }
@@ -525,7 +542,9 @@ GetSameCompartmentWrapperForDOMBinding(JSObject*& obj)
 {
   const js::Class* clasp = js::GetObjectClass(obj);
   if (dom::IsDOMClass(clasp)) {
-    if (!(clasp->flags & JSCLASS_DOM_GLOBAL)) {
+    if (!clasp->isProxy() &&
+        !(clasp->flags & JSCLASS_DOM_GLOBAL))
+    {
       JS::Value v = GetSystemOnlyWrapperSlot(obj);
       if (v.isObject()) {
         obj = &v.toObject();
@@ -533,7 +552,7 @@ GetSameCompartmentWrapperForDOMBinding(JSObject*& obj)
     }
     return true;
   }
-  return IsDOMProxy(obj, clasp);
+  return false;
 }
 
 inline void
@@ -1936,14 +1955,12 @@ extern NativePropertyHooks sWorkerNativePropertyHooks;
 // the real JSNative in the mNative member of a JSNativeHolder in the
 // CONSTRUCTOR_NATIVE_HOLDER_RESERVED_SLOT slot of the JSFunction object for a
 // specific interface object. We also store the NativeProperties in the
-// JSNativeHolder. The CONSTRUCTOR_XRAY_EXPANDO_SLOT is used to store the
-// expando chain of the Xray for the interface object.
+// JSNativeHolder.
 // Note that some interface objects are not yet a JSFunction but a normal
 // JSObject with a DOMJSClass, those do not use these slots.
 
 enum {
-  CONSTRUCTOR_NATIVE_HOLDER_RESERVED_SLOT = 0,
-  CONSTRUCTOR_XRAY_EXPANDO_SLOT
+  CONSTRUCTOR_NATIVE_HOLDER_RESERVED_SLOT = 0
 };
 
 bool
@@ -1954,7 +1971,6 @@ UseDOMXray(JSObject* obj)
 {
   const js::Class* clasp = js::GetObjectClass(obj);
   return IsDOMClass(clasp) ||
-         IsDOMProxy(obj, clasp) ||
          JS_IsNativeFunction(obj, Constructor) ||
          IsDOMIfaceAndProtoClass(clasp);
 }
@@ -1988,11 +2004,6 @@ inline void
 MustInheritFromNonRefcountedDOMObject(NonRefcountedDOMObject*)
 {
 }
-
-// Set the chain of expando objects for various consumers of the given object.
-// For Paris Bindings only. See the relevant infrastructure in XrayWrapper.cpp.
-JSObject* GetXrayExpandoChain(JSObject *obj);
-void SetXrayExpandoChain(JSObject *obj, JSObject *chain);
 
 /**
  * This creates a JSString containing the value that the toString function for
@@ -2346,8 +2357,19 @@ public:
   }
 };
 
+/*
+ * Helper function for testing whether the given object comes from a
+ * privileged app.
+ */
 bool
-ThreadsafeCheckIsChrome(JSContext* aCx, JSObject* aObj);
+IsInPrivilegedApp(JSContext* aCx, JSObject* aObj);
+
+/*
+ * Helper function for testing whether the given object comes from a
+ * certified app.
+ */
+bool
+IsInCertifiedApp(JSContext* aCx, JSObject* aObj);
 
 void
 TraceGlobal(JSTracer* aTrc, JSObject* aObj);
@@ -2422,7 +2444,6 @@ class InternedStringId
   InternedStringId() : id(JSID_VOID) {}
 
   bool init(JSContext *cx, const char *string) {
-    MOZ_ASSERT(id == JSID_VOID);
     JSString* str = JS_InternString(cx, string);
     if (!str)
       return false;
@@ -2439,6 +2460,15 @@ class InternedStringId
     return JS::Handle<jsid>::fromMarkedLocation(&id);
   }
 };
+
+bool
+GenericBindingGetter(JSContext* cx, unsigned argc, JS::Value* vp);
+
+bool
+GenericBindingSetter(JSContext* cx, unsigned argc, JS::Value* vp);
+
+bool
+GenericBindingMethod(JSContext* cx, unsigned argc, JS::Value* vp);
 
 } // namespace dom
 } // namespace mozilla

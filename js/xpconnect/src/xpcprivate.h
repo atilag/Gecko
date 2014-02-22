@@ -80,6 +80,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/CycleCollectedJSRuntime.h"
 #include "mozilla/GuardObjects.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
 
 #include <math.h>
@@ -89,6 +90,7 @@
 
 #include "xpcpublic.h"
 #include "js/Tracer.h"
+#include "js/WeakMapPtr.h"
 #include "pldhash.h"
 #include "nscore.h"
 #include "nsXPCOM.h"
@@ -211,16 +213,9 @@ extern const char XPC_XPCONNECT_CONTRACTID[];
     return (result || !src) ? NS_OK : NS_ERROR_OUT_OF_MEMORY
 
 
-#define WRAPPER_SLOTS (JSCLASS_HAS_PRIVATE | JSCLASS_IMPLEMENTS_BARRIERS | \
-                       JSCLASS_HAS_RESERVED_SLOTS(1))
+#define WRAPPER_SLOTS (JSCLASS_HAS_PRIVATE | JSCLASS_IMPLEMENTS_BARRIERS )
 
 #define INVALID_OBJECT ((JSObject *)1)
-
-// NB: This slot isn't actually reserved for us on globals, because SpiderMonkey
-// uses the first N slots on globals internally. The fact that we use it for
-// wrapped global objects is totally broken. But due to a happy coincidence, the
-// JS engine never uses that slot. This still needs fixing though. See bug 760095.
-#define WN_XRAYEXPANDOCHAIN_SLOT 0
 
 // If IS_WN_CLASS for the JSClass of an object is true, the object is a
 // wrappednative wrapper, holding the XPCWrappedNative in its private slot.
@@ -232,18 +227,6 @@ static inline bool IS_WN_CLASS(const js::Class* clazz)
 static inline bool IS_WN_REFLECTOR(JSObject *obj)
 {
     return IS_WN_CLASS(js::GetObjectClass(obj));
-}
-
-inline void SetWNExpandoChain(JSObject *obj, JSObject *chain)
-{
-    MOZ_ASSERT(IS_WN_REFLECTOR(obj));
-    JS_SetReservedSlot(obj, WN_XRAYEXPANDOCHAIN_SLOT, JS::ObjectOrNullValue(chain));
-}
-
-inline JSObject* GetWNExpandoChain(JSObject *obj)
-{
-    MOZ_ASSERT(IS_WN_REFLECTOR(obj));
-    return JS_GetReservedSlot(obj, WN_XRAYEXPANDOCHAIN_SLOT).toObjectOrNull();
 }
 
 /***************************************************************************
@@ -343,12 +326,12 @@ protected:
 
 private:
     // Singleton instance
-    static nsXPConnect*      gSelf;
-    static bool              gOnceAliveNowDead;
+    static nsXPConnect*             gSelf;
+    static bool                     gOnceAliveNowDead;
 
-    XPCJSRuntime*            mRuntime;
-    nsIXPCSecurityManager*   mDefaultSecurityManager;
-    bool                     mShuttingDown;
+    XPCJSRuntime*                   mRuntime;
+    nsRefPtr<nsIXPCSecurityManager> mDefaultSecurityManager;
+    bool                            mShuttingDown;
 
     // nsIThreadInternal doesn't remember which observers it called
     // OnProcessNextEvent on when it gets around to calling AfterProcessNextEvent.
@@ -392,33 +375,6 @@ private:
 };
 
 /***************************************************************************/
-
-// class to export a JSString as an const nsAString, no refcounting :(
-class XPCReadableJSStringWrapper : public nsDependentString
-{
-public:
-    typedef nsDependentString::char_traits char_traits;
-
-    XPCReadableJSStringWrapper(const char16_t *chars, size_t length) :
-        nsDependentString(chars, length)
-    { }
-
-    XPCReadableJSStringWrapper() :
-        nsDependentString(char_traits::sEmptyBuffer, char_traits::sEmptyBuffer)
-    { SetIsVoid(true); }
-
-    bool init(JSContext* aContext, JSString* str)
-    {
-        size_t length;
-        const jschar* chars = JS_GetStringCharsZAndLength(aContext, str, &length);
-        if (!chars)
-            return false;
-
-        MOZ_ASSERT(IsEmpty(), "init() on initialized string");
-        new(static_cast<nsDependentString *>(this)) nsDependentString(chars, length);
-        return true;
-    }
-};
 
 // In the current xpconnect system there can only be one XPCJSRuntime.
 // So, xpconnect can only be used on one JSRuntime within the process.
@@ -580,8 +536,8 @@ public:
 
     ~XPCJSRuntime();
 
-    XPCReadableJSStringWrapper *NewStringWrapper(const char16_t *str, uint32_t len);
-    void DeleteString(nsAString *string);
+    nsString* NewShortLivedString();
+    void DeleteShortLivedString(nsString *string);
 
     void AddGCCallback(xpcGCCallback cb);
     void RemoveGCCallback(xpcGCCallback cb);
@@ -593,6 +549,7 @@ public:
     static void CTypesActivityCallback(JSContext *cx,
                                        js::CTypesActivityType type);
     static bool OperationCallback(JSContext *cx);
+    static void OutOfMemoryCallback(JSContext *cx);
 
     size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
 
@@ -646,20 +603,7 @@ private:
 
 #define XPCCCX_STRING_CACHE_SIZE 2
 
-    // String wrapper entry, holds a string, and a boolean that tells
-    // whether the string is in use or not.
-    //
-    // NB: The string is not stored by value so that we avoid the cost of
-    // construction/destruction.
-    struct StringWrapperEntry
-    {
-        StringWrapperEntry() : mInUse(false) { }
-
-        mozilla::AlignedStorage2<XPCReadableJSStringWrapper> mString;
-        bool mInUse;
-    };
-
-    StringWrapperEntry mScratchStrings[XPCCCX_STRING_CACHE_SIZE];
+    mozilla::Maybe<nsString> mScratchStrings[XPCCCX_STRING_CACHE_SIZE];
 
     friend class Watchdog;
     friend class AutoLockWatchdog;
@@ -712,14 +656,12 @@ public:
 
     nsresult GetException(nsIException** e)
         {
-            NS_IF_ADDREF(mException);
-            *e = mException;
+            nsCOMPtr<nsIException> rval = mException;
+            rval.forget(e);
             return NS_OK;
         }
     void SetException(nsIException* e)
         {
-            NS_IF_ADDREF(e);
-            NS_IF_RELEASE(mException);
             mException = e;
         }
 
@@ -750,7 +692,7 @@ private:
     JSContext*  mJSContext;
     nsresult mLastResult;
     nsresult mPendingResult;
-    nsIException* mException;
+    nsCOMPtr<nsIException> mException;
     LangType mCallingLangType;
     bool mErrorUnreported;
 
@@ -1077,6 +1019,12 @@ public:
         return nsJSPrincipals::get(JS_GetCompartmentPrincipals(c));
     }
 
+    JSObject*
+    GetExpandoChain(JSObject *target);
+
+    bool
+    SetExpandoChain(JSContext *cx, JS::HandleObject target, JS::HandleObject chain);
+
     void RemoveWrappedNativeProtos();
 
     static void
@@ -1090,6 +1038,8 @@ public:
         mGlobalJSObject.trace(trc, "XPCWrappedNativeScope::mGlobalJSObject");
         if (mXBLScope)
             mXBLScope.trace(trc, "XPCWrappedNativeScope::mXBLScope");
+        if (mXrayExpandos.initialized())
+            mXrayExpandos.trace(trc);
     }
 
     static void
@@ -1208,6 +1158,8 @@ private:
     XPCContext*                      mContext;
 
     nsAutoPtr<DOMExpandoSet> mDOMExpandoSet;
+
+    JS::WeakMapPtr<JSObject*, JSObject*> mXrayExpandos;
 
     bool mIsXBLScope;
 
@@ -2104,6 +2056,7 @@ public:
     static nsresult
     WrapNewGlobal(xpcObjectHelper &nativeHelper,
                   nsIPrincipal *principal, bool initStandardClasses,
+                  bool fireOnNewGlobalHook,
                   JS::CompartmentOptions& aOptions,
                   XPCWrappedNative **wrappedGlobal);
 
@@ -2301,10 +2254,9 @@ class nsXPCWrappedJSClass : public nsIXPCWrappedJSClass
     NS_IMETHOD DebugDump(int16_t depth);
 public:
 
-    static nsresult
+    static already_AddRefed<nsXPCWrappedJSClass>
     GetNewOrUsed(JSContext* cx,
-                 REFNSIID aIID,
-                 nsXPCWrappedJSClass** clazz);
+                 REFNSIID aIID);
 
     REFNSIID GetIID() const {return mIID;}
     XPCJSRuntime* GetRuntime() const {return mRuntime;}
@@ -2376,7 +2328,7 @@ private:
 
 private:
     XPCJSRuntime* mRuntime;
-    nsIInterfaceInfo* mInfo;
+    nsCOMPtr<nsIInterfaceInfo> mInfo;
     char* mName;
     nsIID mIID;
     uint32_t* mDescriptors;
@@ -3217,7 +3169,7 @@ public:
     // if a given nsIVariant is in fact an XPCVariant.
     NS_DECLARE_STATIC_IID_ACCESSOR(XPCVARIANT_IID)
 
-    static XPCVariant* newVariant(JSContext* cx, jsval aJSVal);
+    static already_AddRefed<XPCVariant> newVariant(JSContext* cx, jsval aJSVal);
 
     /**
      * This getter clears the gray bit before handing out the jsval if the jsval
@@ -3560,7 +3512,8 @@ public:
     }
     bool GetLocationURI(LocationHint aLocationHint, nsIURI **aURI) {
         if (locationURI) {
-            NS_IF_ADDREF(*aURI = locationURI);
+            nsCOMPtr<nsIURI> rval = locationURI;
+            rval.forget(aURI);
             return true;
         }
         return TryParseLocationURI(aLocationHint, aURI);

@@ -36,6 +36,12 @@ NS_DECLARE_FRAME_PROPERTY(FontSizeInflationProperty, nullptr)
 
 NS_IMPL_FRAMEARENA_HELPERS(nsBulletFrame)
 
+#ifdef DEBUG
+NS_QUERYFRAME_HEAD(nsBulletFrame)
+  NS_QUERYFRAME_ENTRY(nsBulletFrame)
+NS_QUERYFRAME_TAIL_INHERITING(nsFrame)
+#endif
+
 nsBulletFrame::~nsBulletFrame()
 {
 }
@@ -62,7 +68,7 @@ nsBulletFrame::DestroyFrom(nsIFrame* aDestructRoot)
 }
 
 #ifdef DEBUG_FRAME_DUMP
-NS_IMETHODIMP
+nsresult
 nsBulletFrame::GetFrameName(nsAString& aResult) const
 {
   return MakeFrameName(NS_LITERAL_STRING("Bullet"), aResult);
@@ -1645,7 +1651,7 @@ nsBulletFrame::GetDesiredSize(nsPresContext*  aCX,
   }
 }
 
-NS_IMETHODIMP
+nsresult
 nsBulletFrame::Reflow(nsPresContext* aPresContext,
                       nsHTMLReflowMetrics& aMetrics,
                       const nsHTMLReflowState& aReflowState,

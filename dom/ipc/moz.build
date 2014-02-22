@@ -23,6 +23,7 @@ EXPORTS.mozilla.dom += [
     'ContentProcess.h',
     'CrashReporterChild.h',
     'CrashReporterParent.h',
+    'FilePickerParent.h',
     'PermissionMessageUtils.h',
     'StructuredCloneUtils.h',
     'TabChild.h',
@@ -43,6 +44,7 @@ UNIFIED_SOURCES += [
     'ContentParent.cpp',
     'ContentProcess.cpp',
     'CrashReporterParent.cpp',
+    'FilePickerParent.cpp',
     'PermissionMessageUtils.cpp',
     'PreallocatedProcessManager.cpp',
     'ProcessPriorityManager.cpp',
@@ -68,9 +70,11 @@ IPDL_SOURCES += [
     'PBrowser.ipdl',
     'PContent.ipdl',
     'PContentDialog.ipdl',
+    'PContentPermission.ipdlh',
     'PContentPermissionRequest.ipdl',
     'PCrashReporter.ipdl',
     'PDocumentRenderer.ipdl',
+    'PFilePicker.ipdl',
     'PMemoryReportRequest.ipdl',
     'PTabContext.ipdlh',
 ]
@@ -106,6 +110,7 @@ LOCAL_INCLUDES += [
     '/uriloader/exthandler',
     '/widget/xpwidgets',
     '/xpcom/base',
+    '/xpcom/threads',
 ]
 
 DEFINES['BIN_SUFFIX'] = '"%s"' % CONFIG['BIN_SUFFIX']

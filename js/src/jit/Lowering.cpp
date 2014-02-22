@@ -133,7 +133,7 @@ bool
 LIRGenerator::visitCheckOverRecursedPar(MCheckOverRecursedPar *ins)
 {
     LCheckOverRecursedPar *lir =
-        new(alloc()) LCheckOverRecursedPar(useRegister(ins->forkJoinSlice()), temp());
+        new(alloc()) LCheckOverRecursedPar(useRegister(ins->forkJoinContext()), temp());
     if (!add(lir, ins))
         return false;
     if (!assignSafepoint(lir, ins))
@@ -224,7 +224,7 @@ LIRGenerator::visitNewDerivedTypedObject(MNewDerivedTypedObject *ins)
 bool
 LIRGenerator::visitNewCallObjectPar(MNewCallObjectPar *ins)
 {
-    const LAllocation &parThreadContext = useRegister(ins->forkJoinSlice());
+    const LAllocation &parThreadContext = useRegister(ins->forkJoinContext());
     const LDefinition &temp1 = temp();
     const LDefinition &temp2 = temp();
 
@@ -1550,7 +1550,7 @@ LIRGenerator::visitConcat(MConcat *ins)
 bool
 LIRGenerator::visitConcatPar(MConcatPar *ins)
 {
-    MDefinition *slice = ins->forkJoinSlice();
+    MDefinition *cx = ins->forkJoinContext();
     MDefinition *lhs = ins->lhs();
     MDefinition *rhs = ins->rhs();
 
@@ -1558,7 +1558,7 @@ LIRGenerator::visitConcatPar(MConcatPar *ins)
     JS_ASSERT(rhs->type() == MIRType_String);
     JS_ASSERT(ins->type() == MIRType_String);
 
-    LConcatPar *lir = new(alloc()) LConcatPar(useFixed(slice, CallTempReg4),
+    LConcatPar *lir = new(alloc()) LConcatPar(useFixed(cx, CallTempReg4),
                                               useFixedAtStart(lhs, CallTempReg0),
                                               useFixedAtStart(rhs, CallTempReg1),
                                               tempFixed(CallTempReg0),
@@ -1837,10 +1837,22 @@ LIRGenerator::visitToString(MToString *ins)
     MDefinition *opd = ins->input();
 
     switch (opd->type()) {
-      case MIRType_Null:
-      case MIRType_Undefined:
-      case MIRType_Boolean:
-        MOZ_ASSUME_UNREACHABLE("NYI: Lower MToString");
+      case MIRType_Null: {
+        const JSAtomState &names = GetIonContext()->runtime->names();
+        LPointer *lir = new(alloc()) LPointer(names.null);
+        return define(lir, ins);
+      }
+
+      case MIRType_Undefined: {
+        const JSAtomState &names = GetIonContext()->runtime->names();
+        LPointer *lir = new(alloc()) LPointer(names.undefined);
+        return define(lir, ins);
+      }
+
+      case MIRType_Boolean: {
+        LBooleanToString *lir = new(alloc()) LBooleanToString(useRegister(opd));
+        return define(lir, ins);
+      }
 
       case MIRType_Double: {
         LDoubleToString *lir = new(alloc()) LDoubleToString(useRegister(opd), temp());
@@ -1853,6 +1865,16 @@ LIRGenerator::visitToString(MToString *ins)
       case MIRType_Int32: {
         LIntToString *lir = new(alloc()) LIntToString(useRegister(opd));
 
+        if (!define(lir, ins))
+            return false;
+        return assignSafepoint(lir, ins);
+      }
+
+      case MIRType_Value: {
+        JS_ASSERT(!opd->mightBeType(MIRType_Object));
+        LPrimitiveToString *lir = new(alloc()) LPrimitiveToString(tempToUnbox());
+        if (!useBox(lir, LPrimitiveToString::Input, opd))
+            return false;
         if (!define(lir, ins))
             return false;
         return assignSafepoint(lir, ins);
@@ -2004,7 +2026,7 @@ LIRGenerator::visitLambdaPar(MLambdaPar *ins)
 {
     JS_ASSERT(!ins->info().singletonType);
     JS_ASSERT(!ins->info().useNewTypeForClone);
-    LLambdaPar *lir = new(alloc()) LLambdaPar(useRegister(ins->forkJoinSlice()),
+    LLambdaPar *lir = new(alloc()) LLambdaPar(useRegister(ins->forkJoinContext()),
                                               useRegister(ins->scopeChain()),
                                               temp(), temp());
     return define(lir, ins);
@@ -2079,9 +2101,9 @@ LIRGenerator::visitFunctionEnvironment(MFunctionEnvironment *ins)
 }
 
 bool
-LIRGenerator::visitForkJoinSlice(MForkJoinSlice *ins)
+LIRGenerator::visitForkJoinContext(MForkJoinContext *ins)
 {
-    LForkJoinSlice *lir = new(alloc()) LForkJoinSlice(tempFixed(CallTempReg0));
+    LForkJoinContext *lir = new(alloc()) LForkJoinContext(tempFixed(CallTempReg0));
     return defineReturn(lir, ins);
 }
 
@@ -2093,7 +2115,7 @@ LIRGenerator::visitGuardThreadExclusive(MGuardThreadExclusive *ins)
     // to optimize this if we know that the object being tested is a
     // typed object or know that it is definitely NOT a typed object.
     LGuardThreadExclusive *lir =
-        new(alloc()) LGuardThreadExclusive(useFixed(ins->forkJoinSlice(), CallTempReg0),
+        new(alloc()) LGuardThreadExclusive(useFixed(ins->forkJoinContext(), CallTempReg0),
                                            useFixed(ins->object(), CallTempReg1),
                                            tempFixed(CallTempReg2));
     lir->setMir(ins);
@@ -2118,10 +2140,10 @@ LIRGenerator::visitInterruptCheck(MInterruptCheck *ins)
 }
 
 bool
-LIRGenerator::visitCheckInterruptPar(MCheckInterruptPar *ins)
+LIRGenerator::visitInterruptCheckPar(MInterruptCheckPar *ins)
 {
-    LCheckInterruptPar *lir =
-        new(alloc()) LCheckInterruptPar(useRegister(ins->forkJoinSlice()), temp());
+    LInterruptCheckPar *lir =
+        new(alloc()) LInterruptCheckPar(useRegister(ins->forkJoinContext()), temp());
     if (!add(lir, ins))
         return false;
     if (!assignSafepoint(lir, ins))
@@ -2132,7 +2154,7 @@ LIRGenerator::visitCheckInterruptPar(MCheckInterruptPar *ins)
 bool
 LIRGenerator::visitNewPar(MNewPar *ins)
 {
-    LNewPar *lir = new(alloc()) LNewPar(useRegister(ins->forkJoinSlice()), temp(), temp());
+    LNewPar *lir = new(alloc()) LNewPar(useRegister(ins->forkJoinContext()), temp(), temp());
     return define(lir, ins);
 }
 
@@ -2140,7 +2162,7 @@ bool
 LIRGenerator::visitNewDenseArrayPar(MNewDenseArrayPar *ins)
 {
     LNewDenseArrayPar *lir =
-        new(alloc()) LNewDenseArrayPar(useFixed(ins->forkJoinSlice(), CallTempReg0),
+        new(alloc()) LNewDenseArrayPar(useFixed(ins->forkJoinContext(), CallTempReg0),
                                        useFixed(ins->length(), CallTempReg1),
                                        tempFixed(CallTempReg2),
                                        tempFixed(CallTempReg3),
@@ -2382,6 +2404,16 @@ LIRGenerator::visitNot(MNot *ins)
       default:
         MOZ_ASSUME_UNREACHABLE("Unexpected MIRType.");
     }
+}
+
+bool
+LIRGenerator::visitNeuterCheck(MNeuterCheck *ins)
+{
+    LNeuterCheck *chk = new(alloc()) LNeuterCheck(useRegister(ins->object()),
+                                                  temp());
+    if (!assignSnapshot(chk, Bailout_BoundsCheck))
+        return false;
+    return redefine(ins, ins->input()) && add(chk, ins);
 }
 
 bool
@@ -2630,7 +2662,7 @@ LIRGenerator::visitLoadTypedArrayElement(MLoadTypedArrayElement *ins)
 
     // We need a temp register for Uint32Array with known double result.
     LDefinition tempDef = LDefinition::BogusTemp();
-    if (ins->arrayType() == ScalarTypeRepresentation::TYPE_UINT32 && IsFloatingPointType(ins->type()))
+    if (ins->arrayType() == ScalarTypeDescr::TYPE_UINT32 && IsFloatingPointType(ins->type()))
         tempDef = temp();
 
     LLoadTypedArrayElement *lir = new(alloc()) LLoadTypedArrayElement(elements, index, tempDef);
@@ -2703,9 +2735,9 @@ LIRGenerator::visitStoreTypedArrayElement(MStoreTypedArrayElement *ins)
 
     if (ins->isFloatArray()) {
         DebugOnly<bool> optimizeFloat32 = allowFloat32Optimizations();
-        JS_ASSERT_IF(optimizeFloat32 && ins->arrayType() == ScalarTypeRepresentation::TYPE_FLOAT32,
+        JS_ASSERT_IF(optimizeFloat32 && ins->arrayType() == ScalarTypeDescr::TYPE_FLOAT32,
                      ins->value()->type() == MIRType_Float32);
-        JS_ASSERT_IF(!optimizeFloat32 || ins->arrayType() == ScalarTypeRepresentation::TYPE_FLOAT64,
+        JS_ASSERT_IF(!optimizeFloat32 || ins->arrayType() == ScalarTypeDescr::TYPE_FLOAT64,
                      ins->value()->type() == MIRType_Double);
     } else {
         JS_ASSERT(ins->value()->type() == MIRType_Int32);
@@ -2732,9 +2764,9 @@ LIRGenerator::visitStoreTypedArrayElementHole(MStoreTypedArrayElementHole *ins)
 
     if (ins->isFloatArray()) {
         DebugOnly<bool> optimizeFloat32 = allowFloat32Optimizations();
-        JS_ASSERT_IF(optimizeFloat32 && ins->arrayType() == ScalarTypeRepresentation::TYPE_FLOAT32,
+        JS_ASSERT_IF(optimizeFloat32 && ins->arrayType() == ScalarTypeDescr::TYPE_FLOAT32,
                      ins->value()->type() == MIRType_Float32);
-        JS_ASSERT_IF(!optimizeFloat32 || ins->arrayType() == ScalarTypeRepresentation::TYPE_FLOAT64,
+        JS_ASSERT_IF(!optimizeFloat32 || ins->arrayType() == ScalarTypeDescr::TYPE_FLOAT64,
                      ins->value()->type() == MIRType_Double);
     } else {
         JS_ASSERT(ins->value()->type() == MIRType_Int32);
@@ -3201,7 +3233,7 @@ LIRGenerator::visitRestPar(MRestPar *ins)
 {
     JS_ASSERT(ins->numActuals()->type() == MIRType_Int32);
 
-    LRestPar *lir = new(alloc()) LRestPar(useFixed(ins->forkJoinSlice(), CallTempReg0),
+    LRestPar *lir = new(alloc()) LRestPar(useFixed(ins->forkJoinContext(), CallTempReg0),
                                           useFixed(ins->numActuals(), CallTempReg1),
                                           tempFixed(CallTempReg2),
                                           tempFixed(CallTempReg3),

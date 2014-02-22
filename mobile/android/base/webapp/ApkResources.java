@@ -21,7 +21,7 @@ import android.os.Environment;
 import android.util.Log;
 
 public class ApkResources {
-    private static final String LOGTAG = "GeckoWebAppApkResources";
+    private static final String LOGTAG = "GeckoWebappApkResources";
     private final String mPackageName;
     private final ApplicationInfo mInfo;
     private final Context mContext;
@@ -58,7 +58,11 @@ public class ApkResources {
     }
 
     public boolean isPackaged() {
-        return "packaged".equals(getWebAppType());
+        return "packaged".equals(getWebappType());
+    }
+
+    public boolean isDebuggable() {
+        return (mInfo.flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
     }
 
     private String readResource(Context context, String resourceName) {
@@ -90,7 +94,7 @@ public class ApkResources {
         return info().loadIcon(mContext.getPackageManager());
     }
 
-    public String getWebAppType() {
+    public String getWebappType() {
         return metadata().getString("webapp");
     }
 

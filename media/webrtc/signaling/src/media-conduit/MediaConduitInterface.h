@@ -143,11 +143,13 @@ public:
   /**
    * Functions returning stats needed by w3c stats model.
    */
-  virtual bool GetRTPJitter(unsigned int* jitterMs) = 0;
+  virtual bool GetRTPStats(unsigned int* jitterMs,
+                           unsigned int* cumulativeLost) = 0;
   virtual bool GetRTCPReceiverReport(DOMHighResTimeStamp* timestamp,
                                      unsigned int* jitterMs,
                                      unsigned int* packetsReceived,
-                                     uint64_t* bytesReceived) = 0;
+                                     uint64_t* bytesReceived,
+                                     unsigned int* cumulativeLost) = 0;
   virtual bool GetRTCPSenderReport(DOMHighResTimeStamp* timestamp,
                                    unsigned int* packetsSent,
                                    uint64_t* bytesSent) = 0;
@@ -344,15 +346,17 @@ public:
     */
   virtual MediaConduitErrorCode ConfigureRecvMediaCodecs(
                                 const std::vector<AudioCodecConfig* >& recvCodecConfigList) = 0;
+   /**
+    * Function to enable the audio level extension
+    * @param enabled: enable extension
+    * @param id: id to be used for this rtp header extension
+    * NOTE: See AudioConduit for more information
+    */
+  virtual MediaConduitErrorCode EnableAudioLevelExtension(bool enabled, uint8_t id) = 0;
 
 };
-
-
 }
-
 #endif
-
-
 
 
 

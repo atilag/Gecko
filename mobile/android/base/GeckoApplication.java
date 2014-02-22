@@ -6,6 +6,7 @@ package org.mozilla.gecko;
 
 import org.mozilla.gecko.db.BrowserContract;
 import org.mozilla.gecko.db.BrowserDB;
+import org.mozilla.gecko.home.HomeConfigInvalidator;
 import org.mozilla.gecko.mozglue.GeckoLoader;
 import org.mozilla.gecko.util.Clipboard;
 import org.mozilla.gecko.util.HardwareUtils;
@@ -68,6 +69,7 @@ public class GeckoApplication extends Application {
         GeckoBatteryManager.getInstance().start();
         GeckoNetworkManager.getInstance().init(getApplicationContext());
         MemoryMonitor.getInstance().init(getApplicationContext());
+        HomeConfigInvalidator.getInstance().init(getApplicationContext());
 
         mInited = true;
     }
@@ -112,6 +114,7 @@ public class GeckoApplication extends Application {
     public void onCreate() {
         HardwareUtils.init(getApplicationContext());
         Clipboard.init(getApplicationContext());
+        FilePicker.init(getApplicationContext());
         GeckoLoader.loadMozGlue();
         super.onCreate();
     }

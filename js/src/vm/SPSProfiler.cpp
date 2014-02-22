@@ -25,14 +25,21 @@ SPSProfiler::SPSProfiler(JSRuntime *rt)
     size_(nullptr),
     max_(0),
     slowAssertions(false),
-    enabled_(false)
+    enabled_(false),
+    lock_(nullptr)
 {
     JS_ASSERT(rt != nullptr);
+}
+
+bool
+SPSProfiler::init()
+{
 #ifdef JS_THREADSAFE
     lock_ = PR_NewLock();
     if (lock_ == nullptr)
-        MOZ_CRASH("Couldn't allocate lock!");
+        return false;
 #endif
+    return true;
 }
 
 SPSProfiler::~SPSProfiler()
@@ -42,7 +49,8 @@ SPSProfiler::~SPSProfiler()
             js_free(const_cast<char *>(e.front().value()));
     }
 #ifdef JS_THREADSAFE
-    PR_DestroyLock(lock_);
+    if (lock_)
+        PR_DestroyLock(lock_);
 #endif
 }
 
@@ -130,8 +138,17 @@ SPSProfiler::enter(JSScript *script, JSFunction *maybeFun)
     if (str == nullptr)
         return false;
 
-    JS_ASSERT_IF(*size_ > 0 && *size_ - 1 < max_ && stack_[*size_ - 1].js(),
-                 stack_[*size_ - 1].pc() != nullptr);
+#ifdef DEBUG
+    // In debug builds, assert the JS pseudo frames already on the stack
+    // have a non-null pc. Only look at the top frames to avoid quadratic
+    // behavior.
+    if (*size_ > 0 && *size_ - 1 < max_) {
+        size_t start = (*size_ > 4) ? *size_ - 4 : 0;
+        for (size_t i = start; i < *size_ - 1; i++)
+            MOZ_ASSERT_IF(stack_[i].js(), stack_[i].pc() != nullptr);
+    }
+#endif
+
     push(str, nullptr, script, script->code());
     return true;
 }

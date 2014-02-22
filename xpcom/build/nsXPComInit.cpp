@@ -60,7 +60,7 @@
 
 #include "nsIFile.h"
 #include "nsLocalFile.h"
-#if defined(XP_UNIX) || defined(XP_OS2)
+#if defined(XP_UNIX)
 #include "nsNativeCharsetUtils.h"
 #endif
 #include "nsDirectoryService.h"
@@ -468,7 +468,7 @@ NS_InitXPCOM2(nsIServiceManager* *result,
         setlocale(LC_ALL, "");
 #endif
 
-#if defined(XP_UNIX) || defined(XP_OS2)
+#if defined(XP_UNIX)
     NS_StartupNativeCharsetUtils();
 #endif
 
@@ -554,10 +554,7 @@ NS_InitXPCOM2(nsIServiceManager* *result,
     // can't define the alloc/free functions in the JS engine, because it can't
     // depend on the XPCOM-based memory reporting goop.  So for now, we have
     // this oddness.
-    if (!JS_SetICUMemoryFunctions(ICUReporter::Alloc, ICUReporter::Realloc,
-                                  ICUReporter::Free)) {
-        NS_RUNTIMEABORT("JS_SetICUMemoryFunctions failed.");
-    }
+    mozilla::SetICUMemoryFunctions();
 
     // Initialize the JS engine.
     if (!JS_Init()) {
@@ -657,6 +654,19 @@ NS_ShutdownXPCOM(nsIServiceManager* servMgr)
 }
 
 namespace mozilla {
+
+void
+SetICUMemoryFunctions()
+{
+    static bool sICUReporterInitialized = false;
+    if (!sICUReporterInitialized) {
+        if (!JS_SetICUMemoryFunctions(ICUReporter::Alloc, ICUReporter::Realloc,
+                                      ICUReporter::Free)) {
+            NS_RUNTIMEABORT("JS_SetICUMemoryFunctions failed.");
+        }
+        sICUReporterInitialized = true;
+    }
+}
 
 nsresult
 ShutdownXPCOM(nsIServiceManager* servMgr)
@@ -821,6 +831,20 @@ ShutdownXPCOM(nsIServiceManager* servMgr)
     } else {
         NS_WARNING("Component Manager was never created ...");
     }
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
+    // In optimized builds we don't do shutdown collections by default, so
+    // uncollected (garbage) objects may keep the nsXPConnect singleton alive,
+    // and its XPCJSRuntime along with it. However, we still destroy various
+    // bits of state in JS_ShutDown(), so we need to make sure the profiler
+    // can't access them when it shuts down. This call nulls out the
+    // JS pseudo-stack's internal reference to the main thread JSRuntime,
+    // duplicating the call in XPCJSRuntime::~XPCJSRuntime() in case that
+    // never fired.
+    if (PseudoStack *stack = mozilla_get_pseudo_stack()) {
+        stack->sampleRuntime(nullptr);
+    }
+#endif
 
     // Shut down the JS engine.
     JS_ShutDown();

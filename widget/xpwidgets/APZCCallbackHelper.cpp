@@ -85,9 +85,19 @@ MaybeAlignAndClampDisplayPort(mozilla::layers::FrameMetrics& aFrameMetrics,
     - aActualScrollOffset;
 }
 
-static CSSPoint
-ScrollFrameTo(nsIScrollableFrame* aFrame, const CSSPoint& aPoint)
+static void
+RecenterDisplayPort(mozilla::layers::FrameMetrics& aFrameMetrics)
 {
+    CSSRect compositionBounds = aFrameMetrics.CalculateCompositedRectInCssPixels();
+    aFrameMetrics.mDisplayPort.x = (compositionBounds.width - aFrameMetrics.mDisplayPort.width) / 2;
+    aFrameMetrics.mDisplayPort.y = (compositionBounds.height - aFrameMetrics.mDisplayPort.height) / 2;
+}
+
+static CSSPoint
+ScrollFrameTo(nsIScrollableFrame* aFrame, const CSSPoint& aPoint, bool& aSuccessOut)
+{
+  aSuccessOut = false;
+
   if (!aFrame) {
     return CSSPoint();
   }
@@ -97,15 +107,10 @@ ScrollFrameTo(nsIScrollableFrame* aFrame, const CSSPoint& aPoint)
   // Also if the scrollable frame got a scroll request from something other than us
   // since the last layers update, then we don't want to push our scroll request
   // because we'll clobber that one, which is bad.
-  // Note that content may have just finished sending a layers update with a scroll
-  // offset update to the APZ, in which case the origin will be reset to null and we
-  // might actually be clobbering the content-side scroll offset with a stale APZ
-  // scroll offset. This is unavoidable because of the async communication between
-  // APZ and content; however the code in NotifyLayersUpdated should reissue a new
-  // repaint request to bring everything back into sync.
   if (!aFrame->IsProcessingAsyncScroll() &&
      (!aFrame->OriginOfLastScroll() || aFrame->OriginOfLastScroll() == nsGkAtoms::apz)) {
     aFrame->ScrollToCSSPixelsApproximate(aPoint, nsGkAtoms::apz);
+    aSuccessOut = true;
   }
   // Return the final scroll position after setting it so that anything that relies
   // on it can have an accurate value. Note that even if we set it above re-querying it
@@ -135,12 +140,23 @@ APZCCallbackHelper::UpdateRootFrame(nsIDOMWindowUtils* aUtils,
 
     // Scroll the window to the desired spot
     nsIScrollableFrame* sf = nsLayoutUtils::FindScrollableFrameFor(aMetrics.mScrollId);
-    CSSPoint actualScrollOffset = ScrollFrameTo(sf, aMetrics.mScrollOffset);
+    bool scrollUpdated = false;
+    CSSPoint actualScrollOffset = ScrollFrameTo(sf, aMetrics.mScrollOffset, scrollUpdated);
 
-    // Correct the display port due to the difference between mScrollOffset and the
-    // actual scroll offset, possibly align it to tile boundaries (if tiled layers are
-    // enabled), and clamp it to the scrollable rect.
-    MaybeAlignAndClampDisplayPort(aMetrics, actualScrollOffset);
+    if (scrollUpdated) {
+        // Correct the display port due to the difference between mScrollOffset and the
+        // actual scroll offset, possibly align it to tile boundaries (if tiled layers are
+        // enabled), and clamp it to the scrollable rect.
+        MaybeAlignAndClampDisplayPort(aMetrics, actualScrollOffset);
+    } else {
+        // For whatever reason we couldn't update the scroll offset on the scroll frame,
+        // which means the data APZ used for its displayport calculation is stale. Fall
+        // back to a sane default behaviour. Note that we don't tile-align the recentered
+        // displayport because tile-alignment depends on the scroll position, and the
+        // scroll position here is out of our control. See bug 966507 comment 21 for a
+        // more detailed explanation.
+        RecenterDisplayPort(aMetrics);
+    }
     aMetrics.mScrollOffset = actualScrollOffset;
 
     // The mZoom variable on the frame metrics stores the CSS-to-screen scale for this
@@ -193,11 +209,16 @@ APZCCallbackHelper::UpdateSubFrame(nsIContent* aContent,
     // be scrolled, so here we only have to set the scroll position and displayport.
 
     nsIScrollableFrame* sf = nsLayoutUtils::FindScrollableFrameFor(aMetrics.mScrollId);
-    CSSPoint actualScrollOffset = ScrollFrameTo(sf, aMetrics.mScrollOffset);
+    bool scrollUpdated = false;
+    CSSPoint actualScrollOffset = ScrollFrameTo(sf, aMetrics.mScrollOffset, scrollUpdated);
 
     nsCOMPtr<nsIDOMElement> element = do_QueryInterface(aContent);
     if (element) {
-        MaybeAlignAndClampDisplayPort(aMetrics, actualScrollOffset);
+        if (scrollUpdated) {
+            MaybeAlignAndClampDisplayPort(aMetrics, actualScrollOffset);
+        } else {
+            RecenterDisplayPort(aMetrics);
+        }
         utils->SetDisplayPortForElement(aMetrics.mDisplayPort.x,
                                         aMetrics.mDisplayPort.y,
                                         aMetrics.mDisplayPort.width,
@@ -240,6 +261,45 @@ APZCCallbackHelper::GetScrollIdentifiers(const nsIContent* aContent,
     }
     nsCOMPtr<nsIDOMWindowUtils> utils = GetDOMWindowUtils(aContent);
     return utils && (utils->GetPresShellId(aPresShellIdOut) == NS_OK);
+}
+
+class AcknowledgeScrollUpdateEvent : public nsRunnable
+{
+    typedef mozilla::layers::FrameMetrics::ViewID ViewID;
+
+public:
+    AcknowledgeScrollUpdateEvent(const ViewID& aScrollId, const uint32_t& aScrollGeneration)
+        : mScrollId(aScrollId)
+        , mScrollGeneration(aScrollGeneration)
+    {
+    }
+
+    NS_IMETHOD Run() {
+        MOZ_ASSERT(NS_IsMainThread());
+
+        nsIScrollableFrame* sf = nsLayoutUtils::FindScrollableFrameFor(mScrollId);
+        if (sf) {
+            sf->ResetOriginIfScrollAtGeneration(mScrollGeneration);
+        }
+
+        return NS_OK;
+    }
+
+protected:
+    ViewID mScrollId;
+    uint32_t mScrollGeneration;
+};
+
+void
+APZCCallbackHelper::AcknowledgeScrollUpdate(const FrameMetrics::ViewID& aScrollId,
+                                            const uint32_t& aScrollGeneration)
+{
+    nsCOMPtr<nsIRunnable> r1 = new AcknowledgeScrollUpdateEvent(aScrollId, aScrollGeneration);
+    if (!NS_IsMainThread()) {
+        NS_DispatchToMainThread(r1);
+    } else {
+        r1->Run();
+    }
 }
 
 }

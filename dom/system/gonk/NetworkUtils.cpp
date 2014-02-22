@@ -17,6 +17,7 @@
 
 #include <android/log.h>
 #include <cutils/properties.h>
+#include <limits>
 #include "mozilla/dom/network/NetUtils.h"
 
 #define _DEBUG 0
@@ -226,6 +227,15 @@ static void split(char* str, const char* sep, nsTArray<nsCString>& result)
   char *s = strtok(str, sep);
   while (s != nullptr) {
     result.AppendElement(s);
+    s = strtok(nullptr, sep);
+  }
+}
+
+static void split(char* str, const char* sep, nsTArray<nsString>& result)
+{
+  char *s = strtok(str, sep);
+  while (s != nullptr) {
+    result.AppendElement(NS_ConvertUTF8toUTF16(s));
     s = strtok(nullptr, sep);
   }
 }
@@ -532,7 +542,7 @@ void NetworkUtils::setQuota(CommandChain* aChain,
                             NetworkResultOptions& aResult)
 {
   char command[MAX_COMMAND_SIZE];
-  snprintf(command, MAX_COMMAND_SIZE - 1, "bandwidth setiquota %s %lld", GET_CHAR(mIfname), atoll("0xffffffffffffffff"));
+  snprintf(command, MAX_COMMAND_SIZE - 1, "bandwidth setiquota %s %lld", GET_CHAR(mIfname), LLONG_MAX);
 
   doCommand(command, aChain, aCallback);
 }

@@ -414,9 +414,7 @@ protected:
                                         uint32_t& aSaneLength,
                                         bool aIsCompressed);
 
-#ifdef MOZ_OTS_REPORT_ERRORS
     static bool OTSMessage(void *aUserData, const char *format, ...);
-#endif
 
     // font families defined by @font-face rules
     nsRefPtrHashtable<nsStringHashKey, gfxMixedFontFamily> mFontFamilies;
@@ -428,7 +426,7 @@ protected:
 private:
     static void CopyWOFFMetadata(const uint8_t* aFontData,
                                  uint32_t aLength,
-                                 nsTArray<uint8_t>* aMetadata,
+                                 FallibleTArray<uint8_t>* aMetadata,
                                  uint32_t* aMetaOrigLen);
 };
 

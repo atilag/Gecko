@@ -519,7 +519,7 @@ function waitForImageLoad(aWindow, aImageId) {
  * @param aTimeoutMs the number of miliseconds to wait before giving up
  * @returns a Promise that resolves to true, or to an Error
  */
-function waitForObserver(aObsEvent, aTimeoutMs) {
+function waitForObserver(aObsEvent, aTimeoutMs, aObsData) {
   try {
 
   let deferred = Promise.defer();
@@ -540,7 +540,8 @@ function waitForObserver(aObsEvent, aTimeoutMs) {
     },
 
     observe: function (aSubject, aTopic, aData) {
-      if (aTopic == aObsEvent) {
+      if (aTopic == aObsEvent &&
+        (!aObsData || (aObsData == aData))) {
         this.onEvent();
       }
     },
@@ -1032,11 +1033,14 @@ function runTests() {
 function spyOnMethod(aObj, aMethod) {
   let origFunc = aObj[aMethod];
   let spy = function() {
-    spy.calledWith = Array.slice(arguments);
+    let callArguments = Array.slice(arguments);
     spy.callCount++;
+    spy.calledWith = callArguments;
+    spy.argsForCall.push(callArguments);
     return (spy.returnValue = origFunc.apply(aObj, arguments));
   };
   spy.callCount = 0;
+  spy.argsForCall = [];
   spy.restore = function() {
     return (aObj[aMethod] = origFunc);
   };

@@ -217,6 +217,8 @@
 #include "mozilla/dom/XPathEvaluator.h"
 #include "nsIDocumentEncoder.h"
 #include "nsIStructuredCloneContainer.h"
+#include "nsIMutableArray.h"
+#include "nsContentPermissionHelper.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -240,9 +242,6 @@ nsIdentifierMapEntry::Traverse(nsCycleCollectionTraversalCallback* aCallback)
   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(*aCallback,
                                      "mIdentifierMap mNameContentList");
   aCallback->NoteXPCOMChild(static_cast<nsIDOMNodeList*>(mNameContentList));
-
-  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(*aCallback, "mIdentifierMap mDocAllList");
-  aCallback->NoteXPCOMChild(static_cast<nsIDOMNodeList*>(mDocAllList));
 
   if (mImageElement) {
     NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(*aCallback,
@@ -5403,15 +5402,18 @@ nsDocument::GetElementsByTagName(const nsAString& aTagname,
 
 already_AddRefed<nsContentList>
 nsIDocument::GetElementsByTagNameNS(const nsAString& aNamespaceURI,
-                                    const nsAString& aLocalName)
+                                    const nsAString& aLocalName,
+                                    ErrorResult& aResult)
 {
   int32_t nameSpaceId = kNameSpaceID_Wildcard;
 
   if (!aNamespaceURI.EqualsLiteral("*")) {
-    nsresult rv =
+    aResult =
       nsContentUtils::NameSpaceManager()->RegisterNameSpace(aNamespaceURI,
                                                             nameSpaceId);
-    NS_ENSURE_SUCCESS(rv, nullptr);
+    if (aResult.Failed()) {
+      return nullptr;
+    }
   }
 
   NS_ASSERTION(nameSpaceId != kNameSpaceID_Unknown, "Unexpected namespace ID!");
@@ -5424,9 +5426,12 @@ nsDocument::GetElementsByTagNameNS(const nsAString& aNamespaceURI,
                                    const nsAString& aLocalName,
                                    nsIDOMNodeList** aReturn)
 {
+  ErrorResult rv;
   nsRefPtr<nsContentList> list =
-    nsIDocument::GetElementsByTagNameNS(aNamespaceURI, aLocalName);
-  NS_ENSURE_TRUE(list, NS_ERROR_OUT_OF_MEMORY);
+    nsIDocument::GetElementsByTagNameNS(aNamespaceURI, aLocalName, rv);
+  if (rv.Failed()) {
+    return rv.ErrorCode();
+  }
 
   // transfer ref to aReturn
   *aReturn = list.forget().get();
@@ -5660,10 +5665,6 @@ already_AddRefed<nsINode>
 nsIDocument::ImportNode(nsINode& aNode, bool aDeep, ErrorResult& rv) const
 {
   nsINode* imported = &aNode;
-  rv = nsContentUtils::CheckSameOrigin(this, imported);
-  if (rv.Failed()) {
-    return nullptr;
-  }
 
   switch (imported->NodeType()) {
     case nsIDOMNode::ATTRIBUTE_NODE:
@@ -5920,12 +5921,6 @@ nsIDocument::CreateNodeIterator(nsINode& aRoot, uint32_t aWhatToShow,
                                 ErrorResult& rv) const
 {
   nsINode* root = &aRoot;
-  nsresult res = nsContentUtils::CheckSameOrigin(this, root);
-  if (NS_FAILED(res)) {
-    rv.Throw(res);
-    return nullptr;
-  }
-
   nsRefPtr<NodeIterator> iterator = new NodeIterator(root, aWhatToShow,
                                                      aFilter);
   return iterator.forget();
@@ -5969,12 +5964,6 @@ nsIDocument::CreateTreeWalker(nsINode& aRoot, uint32_t aWhatToShow,
                               ErrorResult& rv) const
 {
   nsINode* root = &aRoot;
-  nsresult res = nsContentUtils::CheckSameOrigin(this, root);
-  if (NS_FAILED(res)) {
-    rv.Throw(res);
-    return nullptr;
-  }
-
   nsRefPtr<TreeWalker> walker = new TreeWalker(root, aWhatToShow, aFilter);
   return walker.forget();
 }
@@ -6683,10 +6672,6 @@ nsINode*
 nsIDocument::AdoptNode(nsINode& aAdoptedNode, ErrorResult& rv)
 {
   nsINode* adoptedNode = &aAdoptedNode;
-  rv = nsContentUtils::CheckSameOrigin(this, adoptedNode);
-  if (rv.Failed()) {
-    return nullptr;
-  }
 
   // Scope firing mutation events so that we don't carry any state that
   // might be stale
@@ -6909,6 +6894,14 @@ nsDocument::GetViewportInfo(const ScreenIntSize& aDisplaySize)
       // app that does not use it.
       nsCOMPtr<nsIDocShell> docShell(mDocumentContainer);
       if (docShell && docShell->GetIsApp()) {
+        nsString uri;
+        GetDocumentURI(uri);
+        if (!uri.EqualsLiteral("about:blank")) {
+          nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
+                                          NS_LITERAL_CSTRING("DOM"), this,
+                                          nsContentUtils::eDOM_PROPERTIES,
+                                          "ImplicitMetaViewportTagFallback");
+        }
         mViewportType = DisplayWidthHeightNoZoom;
         return nsViewportInfo(aDisplaySize, /* allowZoom */ false);
       }
@@ -10760,17 +10753,11 @@ NS_IMPL_ISUPPORTS_INHERITED1(nsPointerLockPermissionRequest,
                              nsIContentPermissionRequest)
 
 NS_IMETHODIMP
-nsPointerLockPermissionRequest::GetType(nsACString& aType)
+nsPointerLockPermissionRequest::GetTypes(nsIArray** aTypes)
 {
-  aType = "pointerLock";
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsPointerLockPermissionRequest::GetAccess(nsACString& aAccess)
-{
-  aAccess = "unused";
-  return NS_OK;
+  return CreatePermissionArray(NS_LITERAL_CSTRING("pointerLock"),
+                               NS_LITERAL_CSTRING("unused"),
+                               aTypes);
 }
 
 NS_IMETHODIMP
@@ -11106,14 +11093,10 @@ nsIDocument::GetMozPointerLockElement()
     return nullptr;
   }
 
-  // Make sure pointer locked element is in the same document and domain.
+  // Make sure pointer locked element is in the same document.
   nsCOMPtr<nsIDocument> pointerLockedDoc =
     do_QueryReferent(nsEventStateManager::sPointerLockedDoc);
   if (pointerLockedDoc != this) {
-    return nullptr;
-  }
-  nsresult rv = nsContentUtils::CheckSameOrigin(this, pointerLockedElement);
-  if (NS_FAILED(rv)) {
     return nullptr;
   }
 
@@ -11440,7 +11423,7 @@ nsDocument::Evaluate(const nsAString& aExpression, nsIDOMNode* aContextNode,
 {
   return XPathEvaluator()->Evaluate(aExpression, aContextNode, aResolver, aType,
                                     aInResult, aResult);
-} 
+}
 
 // This is just a hack around the fact that window.document is not
 // [Unforgeable] yet.
@@ -11470,12 +11453,14 @@ nsIDocument::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aScope)
   JS::Rooted<JS::Value> winVal(aCx);
   nsresult rv = nsContentUtils::WrapNative(aCx, obj, win,
                                            &NS_GET_IID(nsIDOMWindow),
-                                           &winVal,
-                                           false);
+                                           &winVal);
   if (NS_FAILED(rv)) {
     Throw(aCx, rv);
     return nullptr;
   }
+
+  MOZ_ASSERT(&winVal.toObject() == js::UncheckedUnwrap(&winVal.toObject()),
+             "WrapNative shouldn't create a cross-compartment wrapper");
 
   NS_NAMED_LITERAL_STRING(doc_str, "document");
 

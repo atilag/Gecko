@@ -132,9 +132,12 @@
   #TabsToolbar:not(:-moz-lwtheme) {
     background-color: transparent !important;
     color: black;
-    text-shadow: 0 0 .5em white, 0 0 .5em white, 0 1px 0 rgba(255,255,255,.4);
     border-left-style: none !important;
     border-right-style: none !important;
+  }
+
+  #toolbar-menubar:not(:-moz-lwtheme) {
+    text-shadow: 0 0 .5em white, 0 0 .5em white, 0 1px 0 rgba(255,255,255,.4);
   }
 
   /* Vertical toolbar border */
@@ -197,10 +200,6 @@
     border-radius: 4px;
   }
 
-  .tabbrowser-tab:not(:-moz-lwtheme) {
-    text-shadow: none;
-  }
-
   #ctrlTab-panel {
     background: transparent;
     -moz-appearance: -moz-win-glass;
@@ -261,7 +260,7 @@
   }
 
   /* Need to constrain the glass fog to avoid overlapping layers, see bug 886281. */
-  #main-window:not([customizing]) #navigator-toolbox:not(:-moz-lwtheme) {
+  #navigator-toolbox:not(:-moz-lwtheme) {
     overflow: -moz-hidden-unscrollable;
   }
 

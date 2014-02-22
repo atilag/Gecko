@@ -102,7 +102,13 @@ gTests.push({
     edit.select();
 
     let editCoords = logicalCoordsForElement(edit);
-    SelectionHelperUI.attachEditSession(ChromeSelectionHandler, editCoords.x, editCoords.y);
+
+    // wait for popup animation to complete, it interferes with edit selection testing
+    let autocompletePopup = document.getElementById("urlbar-autocomplete-scroll");
+    yield waitForEvent(autocompletePopup, "transitionend");
+
+    SelectionHelperUI.attachEditSession(ChromeSelectionHandler, editCoords.x,
+        editCoords.y, edit);
     ok(SelectionHelperUI.isSelectionUIVisible, "selection enabled");
 
     let selection = edit.QueryInterface(Components.interfaces.nsIDOMXULTextBoxElement)
@@ -131,7 +137,8 @@ gTests.push({
     edit.value = "wikipedia.org";
     edit.select();
     let editCoords = logicalCoordsForElement(edit);
-    SelectionHelperUI.attachEditSession(ChromeSelectionHandler, editCoords.x, editCoords.y);
+    SelectionHelperUI.attachEditSession(ChromeSelectionHandler, editCoords.x,
+        editCoords.y, edit);
     edit.blur();
     ok(!SelectionHelperUI.isSelectionUIVisible, "selection no longer enabled");
     clearSelection(edit);
@@ -169,8 +176,112 @@ gTests.push({
     let promise = waitForCondition(condition);
     sendElementTap(window, copy);
     ok((yield promise), "copy text onto clipboard")
+
+    clearSelection(edit);
+    edit.blur();
   }
 })
+
+gTests.push({
+  desc: "bug 965832 - selection monocles move with the nav bar",
+  run: function() {
+    yield showNavBar();
+
+    let originalUtils = Services.metro;
+    Services.metro = {
+      keyboardHeight: 0,
+      keyboardVisible: false
+    };
+    registerCleanupFunction(function() {
+      Services.metro = originalUtils;
+    });
+
+    let edit = document.getElementById("urlbar-edit");
+    edit.value = "http://www.wikipedia.org/";
+
+    sendElementTap(window, edit);
+    
+    let promise = waitForEvent(window, "MozDeckOffsetChanged");
+    Services.metro.keyboardHeight = 300;
+    Services.metro.keyboardVisible = true;
+    Services.obs.notifyObservers(null, "metro_softkeyboard_shown", null);
+    yield promise;
+
+    yield waitForCondition(function () {
+      return SelectionHelperUI.isSelectionUIVisible;
+    });
+
+    promise = waitForEvent(window, "MozDeckOffsetChanged");
+    Services.metro.keyboardHeight = 0;
+    Services.metro.keyboardVisible = false;
+    Services.obs.notifyObservers(null, "metro_softkeyboard_hidden", null);
+    yield promise;
+
+    yield waitForCondition(function () {
+      return SelectionHelperUI.isSelectionUIVisible;
+    });
+
+    clearSelection(edit);
+    edit.blur();
+
+    yield waitForCondition(function () {
+      return !SelectionHelperUI.isSelectionUIVisible;
+    });
+  }
+});
+
+gTests.push({
+  desc: "Bug 957646 - Selection monocles sometimes don't display when tapping" +
+        " text ion the nav bar.",
+  run: function() {
+    yield showNavBar();
+
+    let edit = document.getElementById("urlbar-edit");
+    edit.value = "about:mozilla";
+
+    let editRectangle = edit.getBoundingClientRect();
+
+    // Tap outside the input but close enough for fluffing to take effect.
+    sendTap(window, editRectangle.left + 50, editRectangle.top - 2);
+
+    yield waitForCondition(function () {
+      return SelectionHelperUI.isSelectionUIVisible;
+    });
+  }
+});
+
+gTests.push({
+  desc: "Bug 972428 - grippers not appearing under the URL field when adding " +
+        "text.",
+  run: function() {
+    let inputField = document.getElementById("urlbar-edit").inputField;
+    let inputFieldRectangle = inputField.getBoundingClientRect();
+
+    let chromeHandlerSpy = spyOnMethod(ChromeSelectionHandler, "msgHandler");
+
+    // Reset URL to empty string
+    inputField.value = "";
+    inputField.blur();
+
+    // Activate URL input
+    sendTap(window, inputFieldRectangle.left + 50, inputFieldRectangle.top + 5);
+
+    // Wait until ChromeSelectionHandler tries to attach selection
+    yield waitForCondition(() => chromeHandlerSpy.argsForCall.some(
+        (args) => args[0] == "Browser:SelectionAttach"));
+
+    ok(!SelectHelperUI.isSelectionUIVisible && !SelectHelperUI.isCaretUIVisible,
+        "Neither CaretUI nor SelectionUI is visible on empty input.");
+
+    inputField.value = "Test text";
+
+    sendTap(window, inputFieldRectangle.left + 10, inputFieldRectangle.top + 5);
+
+    yield waitForCondition(() => SelectionHelperUI.isCaretUIVisible);
+
+    chromeHandlerSpy.restore();
+  }
+});
 
 function test() {
   if (!isLandscapeMode()) {

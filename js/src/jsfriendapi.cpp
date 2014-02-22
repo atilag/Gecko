@@ -70,7 +70,7 @@ JS_FRIEND_API(JSString *)
 JS_GetAnonymousString(JSRuntime *rt)
 {
     JS_ASSERT(rt->hasContexts());
-    return rt->atomState.anonymous;
+    return rt->commonNames->anonymous;
 }
 
 JS_FRIEND_API(void)
@@ -586,12 +586,6 @@ void
 js::SetPreserveWrapperCallback(JSRuntime *rt, PreserveWrapperCallback callback)
 {
     rt->preserveWrapperCallback = callback;
-}
-
-JS_FRIEND_API(JSErrorReport*)
-js::ErrorFromException(Value val)
-{
-    return js_ErrorFromException(val);
 }
 
 /*

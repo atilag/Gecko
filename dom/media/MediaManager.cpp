@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -41,7 +43,7 @@
 #include "MediaEngineWebRTC.h"
 #endif
 
-#ifdef MOZ_WIDGET_GONK
+#ifdef MOZ_B2G
 #include "MediaPermissionGonk.h"
 #endif
 
@@ -98,7 +100,8 @@ static nsresult CompareDictionaries(JSContext* aCx, JSObject *aA,
 
   for (size_t i = 0; i < props.length(); i++) {
     JS::Rooted<JS::Value> bprop(aCx);
-    if (!JS_GetPropertyById(aCx, b, props[i], &bprop)) {
+    JS::Rooted<jsid> id(aCx, props[i]);
+    if (!JS_GetPropertyById(aCx, b, id, &bprop)) {
       LOG(("Error parsing dictionary!\n"));
       return NS_ERROR_UNEXPECTED;
     }
@@ -224,20 +227,30 @@ class DeviceSuccessCallbackRunnable: public nsRunnable
 {
 public:
   DeviceSuccessCallbackRunnable(
+    uint64_t aWindowID,
     already_AddRefed<nsIGetUserMediaDevicesSuccessCallback> aSuccess,
     already_AddRefed<nsIDOMGetUserMediaErrorCallback> aError,
     nsTArray<nsCOMPtr<nsIMediaDevice> >* aDevices)
     : mSuccess(aSuccess)
     , mError(aError)
-    , mDevices(aDevices) {}
+    , mDevices(aDevices)
+    , mWindowID(aWindowID)
+    , mManager(MediaManager::GetInstance()) {}
 
   NS_IMETHOD
   Run()
   {
     NS_ASSERTION(NS_IsMainThread(), "Only call on main thread");
 
-    nsCOMPtr<nsIGetUserMediaDevicesSuccessCallback> success(mSuccess);
-    nsCOMPtr<nsIDOMGetUserMediaErrorCallback> error(mError);
+    nsCOMPtr<nsIGetUserMediaDevicesSuccessCallback> success;
+    nsCOMPtr<nsIDOMGetUserMediaErrorCallback> error;
+    success.swap(mSuccess);
+    error.swap(mError);
+
+    // Only run if window is still on our active list.
+    if (!mManager->IsWindowStillActive(mWindowID)) {
+      return NS_OK;
+    }
 
     nsCOMPtr<nsIWritableVariant> devices =
       do_CreateInstance("@mozilla.org/variant;1");
@@ -269,9 +282,11 @@ public:
   }
 
 private:
-  already_AddRefed<nsIGetUserMediaDevicesSuccessCallback> mSuccess;
-  already_AddRefed<nsIDOMGetUserMediaErrorCallback> mError;
+  nsCOMPtr<nsIGetUserMediaDevicesSuccessCallback> mSuccess;
+  nsCOMPtr<nsIDOMGetUserMediaErrorCallback> mError;
   nsAutoPtr<nsTArray<nsCOMPtr<nsIMediaDevice> > > mDevices;
+  uint64_t mWindowID;
+  nsRefPtr<MediaManager> mManager;
 };
 
 // Handle removing GetUserMediaCallbackMediaStreamListener from main thread
@@ -779,7 +794,7 @@ public:
     , mListener(aListener)
     , mPrefs(aPrefs)
     , mDeviceChosen(false)
-    , mBackendChosen(false)
+    , mBackend(nullptr)
     , mManager(MediaManager::GetInstance())
   {}
 
@@ -803,15 +818,11 @@ public:
     , mListener(aListener)
     , mPrefs(aPrefs)
     , mDeviceChosen(false)
-    , mBackendChosen(true)
     , mBackend(aBackend)
     , mManager(MediaManager::GetInstance())
   {}
 
   ~GetUserMediaRunnable() {
-    if (mBackendChosen) {
-      delete mBackend;
-    }
   }
 
   /**
@@ -833,14 +844,15 @@ public:
     MOZ_ASSERT(mSuccess.mRawPtr);
     MOZ_ASSERT(mError.mRawPtr);
 
+    MediaEngine* backend = mBackend;
     // Was a backend provided?
-    if (!mBackendChosen) {
-      mBackend = mManager->GetBackend(mWindowID);
+    if (!backend) {
+      backend = mManager->GetBackend(mWindowID);
     }
 
     // Was a device provided?
     if (!mDeviceChosen) {
-      nsresult rv = SelectDevice();
+      nsresult rv = SelectDevice(backend);
       if (rv != NS_OK) {
         return rv;
       }
@@ -916,12 +928,12 @@ public:
   }
 
   nsresult
-  SelectDevice()
+  SelectDevice(MediaEngine* backend)
   {
     MOZ_ASSERT(mSuccess.mRawPtr);
     MOZ_ASSERT(mError.mRawPtr);
     if (mConstraints.mPicture || mConstraints.mVideo) {
-      ScopedDeletePtr<SourceSet> sources (GetSources(mBackend,
+      ScopedDeletePtr<SourceSet> sources (GetSources(backend,
           mConstraints.mVideom, &MediaEngine::EnumerateVideoDevices));
 
       if (!sources->Length()) {
@@ -935,7 +947,7 @@ public:
     }
 
     if (mConstraints.mAudio) {
-      ScopedDeletePtr<SourceSet> sources (GetSources(mBackend,
+      ScopedDeletePtr<SourceSet> sources (GetSources(backend,
           mConstraints.mAudiom, &MediaEngine::EnumerateAudioDevices));
 
       if (!sources->Length()) {
@@ -1035,9 +1047,8 @@ private:
   MediaEnginePrefs mPrefs;
 
   bool mDeviceChosen;
-  bool mBackendChosen;
 
-  MediaEngine* mBackend;
+  RefPtr<MediaEngine> mBackend;
   nsRefPtr<MediaManager> mManager; // get ref to this when creating the runnable
 };
 
@@ -1079,17 +1090,20 @@ public:
                                         mLoopbackAudioDevice));
       final->MoveElementsFrom(*s);
     }
-    NS_DispatchToMainThread(new DeviceSuccessCallbackRunnable(mSuccess, mError,
+    NS_DispatchToMainThread(new DeviceSuccessCallbackRunnable(mWindowId,
+                                                              mSuccess.forget(),
+                                                              mError.forget(),
                                                               final.forget()));
     return NS_OK;
   }
 
 private:
   MediaStreamConstraintsInternal mConstraints;
-  already_AddRefed<nsIGetUserMediaDevicesSuccessCallback> mSuccess;
-  already_AddRefed<nsIDOMGetUserMediaErrorCallback> mError;
+  nsCOMPtr<nsIGetUserMediaDevicesSuccessCallback> mSuccess;
+  nsCOMPtr<nsIDOMGetUserMediaErrorCallback> mError;
   nsRefPtr<MediaManager> mManager;
   uint64_t mWindowId;
+  const nsString mCallId;
   // Audio & Video loopback devices to be used based on
   // the preference settings. This is currently used for
   // automated media tests only.
@@ -1327,10 +1341,10 @@ MediaManager::GetUserMedia(JSContext* aCx, bool aPrivileged,
     // Force MediaManager to startup before we try to access it from other threads
     // Hack: should init singleton earlier unless it's expensive (mem or CPU)
     (void) MediaManager::Get();
-#ifdef MOZ_WIDGET_GONK
+#ifdef MOZ_B2G
     // Initialize MediaPermissionManager before send out any permission request.
     (void) MediaPermissionManager::GetInstance();
-#endif //MOZ_WIDGET_GONK
+#endif //MOZ_B2G
   }
 
   // Store the WindowID in a hash table and mark as active. The entry is removed
@@ -1452,7 +1466,8 @@ nsresult
 MediaManager::GetUserMediaDevices(nsPIDOMWindow* aWindow,
   const MediaStreamConstraintsInternal& aConstraints,
   nsIGetUserMediaDevicesSuccessCallback* aOnSuccess,
-  nsIDOMGetUserMediaErrorCallback* aOnError)
+  nsIDOMGetUserMediaErrorCallback* aOnError,
+  uint64_t aInnerWindowID)
 {
   NS_ASSERTION(NS_IsMainThread(), "Only call on main thread");
 
@@ -1477,9 +1492,9 @@ MediaManager::GetUserMediaDevices(nsPIDOMWindow* aWindow,
 #endif
 
   nsCOMPtr<nsIRunnable> gUMDRunnable = new GetUserMediaDevicesRunnable(
-    aConstraints, onSuccess.forget(), onError.forget(), aWindow->WindowID(),
-    loopbackAudioDevice, loopbackVideoDevice
-  );
+    aConstraints, onSuccess.forget(), onError.forget(),
+    (aInnerWindowID ? aInnerWindowID : aWindow->WindowID()),
+    loopbackAudioDevice, loopbackVideoDevice);
 
   nsCOMPtr<nsIThread> deviceThread;
   rv = NS_NewThread(getter_AddRefs(deviceThread));
@@ -1499,11 +1514,7 @@ MediaManager::GetBackend(uint64_t aWindowId)
   MutexAutoLock lock(mMutex);
   if (!mBackend) {
 #if defined(MOZ_WEBRTC)
-  #ifndef MOZ_B2G_CAMERA
     mBackend = new MediaEngineWebRTC(mPrefs);
-  #else
-    mBackend = new MediaEngineWebRTC(mCameraManager, aWindowId);
-  #endif
 #else
     mBackend = new MediaEngineDefault();
 #endif

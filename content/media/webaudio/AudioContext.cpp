@@ -66,7 +66,7 @@ NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
 
 static uint8_t gWebAudioOutputKey;
 
-float GetSampleRateForAudioContext(bool aIsOffline, float aSampleRate)
+static float GetSampleRateForAudioContext(bool aIsOffline, float aSampleRate)
 {
   if (aIsOffline) {
     return aSampleRate;
@@ -563,8 +563,6 @@ AudioContext::Shutdown()
   if (!mIsOffline) {
     Mute();
   }
-
-  mDecoder.Shutdown();
 
   // Release references to active nodes.
   // Active AudioNodes don't unregister in destructors, at which point the

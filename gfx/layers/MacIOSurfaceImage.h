@@ -51,10 +51,10 @@ public:
 
   virtual TemporaryRef<gfx::SourceSurface> GetAsSourceSurface();
 
-  virtual TextureClient* GetTextureClient() MOZ_OVERRIDE;
+  virtual TextureClient* GetTextureClient(CompositableClient* aClient) MOZ_OVERRIDE;
   virtual uint8_t* GetBuffer() MOZ_OVERRIDE { return nullptr; }
 
-  MacIOSurfaceImage() : Image(nullptr, MAC_IOSURFACE) {}
+  MacIOSurfaceImage() : Image(nullptr, ImageFormat::MAC_IOSURFACE) {}
 
 private:
   RefPtr<MacIOSurface> mSurface;

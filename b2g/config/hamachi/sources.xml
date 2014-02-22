@@ -11,12 +11,12 @@
     <copyfile dest="Makefile" src="core/root.mk"/>
   </project>
   <project name="fake-dalvik" path="dalvik" remote="b2g" revision="ca1f327d5acc198bb4be62fa51db2c039032c9ce"/>
-  <project name="gaia.git" path="gaia" remote="mozillaorg" revision="09064f43116d1b965cb3ab6516fa0f1fa3c98a4c"/>
-  <project name="gonk-misc" path="gonk-misc" remote="b2g" revision="e9b6626eddbc85873eaa2a9174a9bd5101e5c05f"/>
+  <project name="gaia.git" path="gaia" remote="mozillaorg" revision="7c320aa3291761196ccd6ed3131faffb255f3fb6"/>
+  <project name="gonk-misc" path="gonk-misc" remote="b2g" revision="15e8982284c4560f9c74c2b9fe8bb361ebfe0cb6"/>
   <project name="rilproxy" path="rilproxy" remote="b2g" revision="827214fcf38d6569aeb5c6d6f31cb296d1f09272"/>
   <project name="librecovery" path="librecovery" remote="b2g" revision="84f2f2fce22605e17d511ff1767e54770067b5b5"/>
-  <project name="moztt" path="external/moztt" remote="b2g" revision="e33ea242b4328fb0d1824c951f379332b5021512"/>
-  <project name="apitrace" path="external/apitrace" remote="apitrace" revision="0ff2eb11982b9d3c7a3333900cf0d3a5c0f77e32"/>
+  <project name="moztt" path="external/moztt" remote="b2g" revision="3d5c964015967ca8c86abe6dbbebee3cb82b1609"/>
+  <project name="apitrace" path="external/apitrace" remote="apitrace" revision="a314508e397c8f1814228d36259ea8708034444e"/>
   <!-- Stock Android things -->
   <project name="platform/abi/cpp" path="abi/cpp" revision="6426040f1be4a844082c9769171ce7f5341a5528"/>
   <project name="platform/bionic" path="bionic" revision="d2eb6c7b6e1bc7643c17df2d9d9bcb1704d0b9ab"/>
@@ -84,13 +84,13 @@
   <project name="platform/ndk" path="ndk" revision="9f555971e1481854d5b4dc11b3e6af9fff4f241f"/>
   <project name="platform/prebuilt" path="prebuilt" revision="248d92592df169569c387a91db56b1fedd6e5d29"/>
   <project name="platform/system/bluetooth" path="system/bluetooth" revision="395aff045276107a285daf0392d0884a98b9f538"/>
-  <project name="platform/system/core" path="system/core" revision="f792bc7b4a6f49643232278286284333ca3f83c6"/>
+  <project name="platform/system/core" path="system/core" revision="70229cf62037cfb70ec2257f7c78b5550628fb53"/>
   <project name="platform/system/extras" path="system/extras" revision="a5dd0ea60ce973c2c762b41835a43316fb4ff9e3"/>
   <project name="platform/system/media" path="system/media" revision="fbb3d9b4c5bf59071424e820e872e3f64f0a244a"/>
   <project name="platform/system/netd" path="system/netd" revision="2e226e6e636ca0a8cc4c51093e46f4baba1ffcce"/>
   <project name="platform/system/vold" path="system/vold" revision="8ac5eef8ea3a456b96d52ce2091bf6d814782d8c"/>
   <!-- hamachi specific things -->
-  <project name="quic/lf/b2g/build" path="device/qcom/b2g_common" revision="9b2d2215ee4b3413addf6222fb4ee520b2858472"/>
+  <project name="quic/lf/b2g/build" path="device/qcom/b2g_common" revision="43829d56fab6ad16883f1ac9f55ffb9aa5863543"/>
   <project name="quic/lf/b2g/external/jsmin" path="external/jsmin" revision="cec896f0affaa0226c02605ad28d42df1bc0e393"/>
   <project name="device/qcom/common" path="device/qcom/common" revision="d13aaf080177b7c48f243d51827db5c7a7873cd0"/>
   <project name="platform/vendor/qcom/msm7627a" path="device/qcom/msm7627a" revision="f06bcacc6f13cec895dc5d4c2385c076396194ec"/>

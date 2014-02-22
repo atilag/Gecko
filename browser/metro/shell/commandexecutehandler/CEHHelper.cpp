@@ -13,17 +13,17 @@
 HANDLE sCon;
 LPCWSTR metroDX10Available = L"MetroD3DAvailable";
 LPCWSTR metroLastAHE = L"MetroLastAHE";
-
-typedef HRESULT (WINAPI*D3D10CreateDevice1Func)
-  (IDXGIAdapter *, D3D10_DRIVER_TYPE, HMODULE, UINT,
-   D3D10_FEATURE_LEVEL1, UINT, ID3D10Device1 **);
-typedef HRESULT(WINAPI*CreateDXGIFactory1Func)(REFIID , void **);
+LPCWSTR cehDumpDebugStrings = L"CEHDump";
+extern const WCHAR* kFirefoxExe;
 
 void
 Log(const wchar_t *fmt, ...)
 {
 #if !defined(SHOW_CONSOLE)
-  return;
+  DWORD dwRes = 0;
+  if (!GetDWORDRegKey(cehDumpDebugStrings, dwRes) || !dwRes) {
+    return;
+  }
 #endif
   va_list a = nullptr;
   wchar_t szDebugString[1024];
@@ -39,10 +39,8 @@ Log(const wchar_t *fmt, ...)
   WriteConsoleW(sCon, szDebugString, lstrlenW(szDebugString), &len, nullptr);
   WriteConsoleW(sCon, L"\n", 1, &len, nullptr);
 
-  if (IsDebuggerPresent()) {  
-    OutputDebugStringW(szDebugString);
-    OutputDebugStringW(L"\n");
-  }
+  OutputDebugStringW(szDebugString);
+  OutputDebugStringW(L"\n");
 }
 
 #if defined(SHOW_CONSOLE)
@@ -67,10 +65,9 @@ IsImmersiveProcessDynamic(HANDLE process)
     return false;
   }
 
-  typedef BOOL (WINAPI* IsImmersiveProcessFunc)(HANDLE process);
-  IsImmersiveProcessFunc IsImmersiveProcessPtr =
-    (IsImmersiveProcessFunc)GetProcAddress(user32DLL,
-                                           "IsImmersiveProcess");
+  decltype(IsImmersiveProcess)* IsImmersiveProcessPtr =
+    (decltype(IsImmersiveProcess)*) GetProcAddress(user32DLL,
+                                                   "IsImmersiveProcess");
   if (!IsImmersiveProcessPtr) {
     FreeLibrary(user32DLL);
     return false;
@@ -108,6 +105,18 @@ IsProcessRunning(const wchar_t *processName, bool bCheckIfMetro)
   return exists;
 }
 
+bool
+IsMetroProcessRunning()
+{
+  return IsProcessRunning(kFirefoxExe, true);
+}
+
+bool
+IsDesktopProcessRunning()
+{
+  return IsProcessRunning(kFirefoxExe, false);
+}
+
 /*
  * Retrieve the last front end ui we launched so we can target it
  * again. This value is updated down in nsAppRunner when the browser
@@ -136,8 +145,8 @@ IsDX10Available()
     SetDWORDRegKey(metroDX10Available, 0);
     return false;
   }
-  CreateDXGIFactory1Func createDXGIFactory1 =
-    (CreateDXGIFactory1Func) GetProcAddress(dxgiModule, "CreateDXGIFactory1");
+  decltype(CreateDXGIFactory1)* createDXGIFactory1 =
+    (decltype(CreateDXGIFactory1)*) GetProcAddress(dxgiModule, "CreateDXGIFactory1");
   if (!createDXGIFactory1) {
     SetDWORDRegKey(metroDX10Available, 0);
     return false;
@@ -148,9 +157,9 @@ IsDX10Available()
     SetDWORDRegKey(metroDX10Available, 0);
     return false;
   }
-  D3D10CreateDevice1Func createD3DDevice =
-    (D3D10CreateDevice1Func) GetProcAddress(d3d10module,
-                                            "D3D10CreateDevice1");
+  decltype(D3D10CreateDevice1)* createD3DDevice =
+    (decltype(D3D10CreateDevice1)*) GetProcAddress(d3d10module,
+                                                   "D3D10CreateDevice1");
   if (!createD3DDevice) {
     SetDWORDRegKey(metroDX10Available, 0);
     return false;

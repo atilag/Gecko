@@ -18,6 +18,7 @@
 #include "nsSVGMarkerFrame.h"
 #include "nsSVGPathGeometryElement.h"
 #include "nsSVGUtils.h"
+#include "mozilla/ArrayUtils.h"
 #include "SVGAnimatedTransformList.h"
 #include "SVGGraphicsElement.h"
 
@@ -111,7 +112,7 @@ nsSVGPathGeometryFrame::Init(nsIContent* aContent,
   nsSVGPathGeometryFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 
-NS_IMETHODIMP
+nsresult
 nsSVGPathGeometryFrame::AttributeChanged(int32_t         aNameSpaceID,
                                          nsIAtom*        aAttribute,
                                          int32_t         aModType)
@@ -196,7 +197,7 @@ nsSVGPathGeometryFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 //----------------------------------------------------------------------
 // nsISVGChildFrame methods
 
-NS_IMETHODIMP
+nsresult
 nsSVGPathGeometryFrame::PaintSVG(nsRenderingContext *aContext,
                                  const nsIntRect *aDirtyRect,
                                  nsIFrame* aTransformRoot)
@@ -230,7 +231,7 @@ nsSVGPathGeometryFrame::PaintSVG(nsRenderingContext *aContext,
   return NS_OK;
 }
 
-NS_IMETHODIMP_(nsIFrame*)
+nsIFrame*
 nsSVGPathGeometryFrame::GetFrameForPoint(const nsPoint &aPoint)
 {
   gfxMatrix canvasTM = GetCanvasTM(FOR_HIT_TESTING);
@@ -286,7 +287,7 @@ nsSVGPathGeometryFrame::GetFrameForPoint(const nsPoint &aPoint)
   return nullptr;
 }
 
-NS_IMETHODIMP_(nsRect)
+nsRect
 nsSVGPathGeometryFrame::GetCoveredRegion()
 {
   return nsSVGUtils::TransformFrameRectToOuterSVG(
@@ -486,7 +487,7 @@ nsSVGPathGeometryFrame::GetBBoxContribution(const Matrix &aToBBoxUserspace,
         properties.GetMarkerMidFrame(),
         properties.GetMarkerEndFrame(),
       };
-      PR_STATIC_ASSERT(NS_ARRAY_LENGTH(markerFrames) == nsSVGMark::eTypeCount);
+      PR_STATIC_ASSERT(MOZ_ARRAY_LENGTH(markerFrames) == nsSVGMark::eTypeCount);
 
       for (uint32_t i = 0; i < num; i++) {
         nsSVGMark& mark = marks[i];
@@ -707,7 +708,7 @@ nsSVGPathGeometryFrame::PaintMarkers(nsRenderingContext* aContext)
           properties.GetMarkerMidFrame(),
           properties.GetMarkerEndFrame(),
         };
-        PR_STATIC_ASSERT(NS_ARRAY_LENGTH(markerFrames) == nsSVGMark::eTypeCount);
+        PR_STATIC_ASSERT(MOZ_ARRAY_LENGTH(markerFrames) == nsSVGMark::eTypeCount);
 
         for (uint32_t i = 0; i < num; i++) {
           nsSVGMark& mark = marks[i];

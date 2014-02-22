@@ -199,20 +199,25 @@ using namespace mozilla;
 
 // Cycle collector environment variables
 //
-// XPCOM_CC_LOG_ALL: If defined, always log cycle collector heaps.
+// MOZ_CC_LOG_ALL: If defined, always log cycle collector heaps.
 //
-// XPCOM_CC_LOG_SHUTDOWN: If defined, log cycle collector heaps at shutdown.
+// MOZ_CC_LOG_SHUTDOWN: If defined, log cycle collector heaps at shutdown.
 //
-// XPCOM_CC_ALL_TRACES_AT_SHUTDOWN: If defined, any cycle collector
+// MOZ_CC_LOG_THREAD: If set to "main", only automatically log main thread
+// CCs. If set to "worker", only automatically log worker CCs. If set to "all",
+// log either. The default value is "all". This must be used with either
+// MOZ_CC_LOG_ALL or MOZ_CC_LOG_SHUTDOWN for it to do anything.
+//
+// MOZ_CC_ALL_TRACES_AT_SHUTDOWN: If defined, any cycle collector
 // logging done at shutdown will be WantAllTraces, which disables
 // various cycle collector optimizations to give a fuller picture of
 // the heap.
 //
-// XPCOM_CC_RUN_DURING_SHUTDOWN: In non-DEBUG or builds, if this is set,
+// MOZ_CC_RUN_DURING_SHUTDOWN: In non-DEBUG or builds, if this is set,
 // run cycle collections at shutdown.
 //
 // MOZ_CC_LOG_DIRECTORY: The directory in which logs are placed (such as
-// logs from XPCOM_CC_LOG_ALL and XPCOM_CC_LOG_SHUTDOWN, or other uses
+// logs from MOZ_CC_LOG_ALL and MOZ_CC_LOG_SHUTDOWN, or other uses
 // of nsICycleCollectorListener)
 
 MOZ_NEVER_INLINE void
@@ -230,12 +235,27 @@ struct nsCycleCollectorParams
     bool mLogAll;
     bool mLogShutdown;
     bool mAllTracesAtShutdown;
+    bool mLogThisThread;
 
     nsCycleCollectorParams() :
-        mLogAll      (PR_GetEnv("XPCOM_CC_LOG_ALL") != nullptr),
-        mLogShutdown (PR_GetEnv("XPCOM_CC_LOG_SHUTDOWN") != nullptr),
-        mAllTracesAtShutdown (PR_GetEnv("XPCOM_CC_ALL_TRACES_AT_SHUTDOWN") != nullptr)
+        mLogAll      (PR_GetEnv("MOZ_CC_LOG_ALL") != nullptr),
+        mLogShutdown (PR_GetEnv("MOZ_CC_LOG_SHUTDOWN") != nullptr),
+        mAllTracesAtShutdown (PR_GetEnv("MOZ_CC_ALL_TRACES_AT_SHUTDOWN") != nullptr),
+        mLogThisThread(true)
     {
+        const char* logThreadEnv = PR_GetEnv("MOZ_CC_LOG_THREAD");
+        if (logThreadEnv && !!strcmp(logThreadEnv, "all")) {
+            if (NS_IsMainThread()) {
+                mLogThisThread = !strcmp(logThreadEnv, "main");
+            } else {
+                mLogThisThread = !strcmp(logThreadEnv, "worker");
+            }
+        }
+    }
+
+    bool LogThisCC(bool aIsShutdown)
+    {
+        return (mLogAll || (aIsShutdown && mLogShutdown)) && mLogThisThread;
     }
 };
 
@@ -1103,6 +1123,7 @@ class nsCycleCollector : public nsIMemoryReporter
     NS_DECL_NSIMEMORYREPORTER
 
     bool mActivelyCollecting;
+    bool mFreeingSnowWhite;
     // mScanInProgress should be false when we're collecting white objects.
     bool mScanInProgress;
     CycleCollectorResults mResults;
@@ -1407,6 +1428,18 @@ public:
         return NS_OK;
     }
 
+    NS_IMETHOD GetGcLogPath(nsAString &aPath)
+    {
+      aPath = mGCLogPath;
+      return NS_OK;
+    }
+
+    NS_IMETHOD GetCcLogPath(nsAString &aPath)
+    {
+      aPath = mCCLogPath;
+      return NS_OK;
+    }
+
     NS_IMETHOD Begin()
     {
         mCurrentAddress.AssignLiteral("0x");
@@ -1459,6 +1492,8 @@ public:
             nsString msg = NS_LITERAL_STRING("Garbage Collector log dumped to ") +
                            gcLogPath;
             cs->LogStringMessage(msg.get());
+
+            mGCLogPath = gcLogPath;
         }
 
         // Open a file for dumping the CC graph.  We again prefix with
@@ -1616,6 +1651,8 @@ public:
                 nsString msg = NS_LITERAL_STRING("Cycle Collector log dumped to ") +
                                ccLogPath;
                 cs->LogStringMessage(msg.get());
+
+                mCCLogPath = ccLogPath;
             }
         }
         return NS_OK;
@@ -1713,6 +1750,8 @@ private:
     bool mDisableLog;
     bool mWantAfterProcessing;
     nsString mFilenameIdentifier;
+    nsString mGCLogPath;
+    nsString mCCLogPath;
     nsCString mCurrentAddress;
     mozilla::LinkedList<CCGraphDescriber> mDescribers;
 };
@@ -2446,6 +2485,13 @@ nsCycleCollector::FreeSnowWhite(bool aUntilNoSWInPurpleBuffer)
 {
     CheckThreadSafety();
 
+    if (mFreeingSnowWhite) {
+        return false;
+    }
+
+    AutoRestore<bool> ar(mFreeingSnowWhite);
+    mFreeingSnowWhite = true;
+
     bool hadSnowWhiteObjects = false;
     do {
         SnowWhiteKiller visitor(this, mPurpleBuf.Count());
@@ -2964,6 +3010,7 @@ nsCycleCollector::CollectReports(nsIHandleReportCallback* aHandleReport,
 
 nsCycleCollector::nsCycleCollector() :
     mActivelyCollecting(false),
+    mFreeingSnowWhite(false),
     mScanInProgress(false),
     mJSRuntime(nullptr),
     mIncrementalPhase(IdlePhase),
@@ -3092,13 +3139,6 @@ nsCycleCollector::CleanupAfterCollection()
     MOZ_ASSERT(mIncrementalPhase == CleanupPhase);
     mGraph.Clear();
 
-#ifdef XP_OS2
-    // Now that the cycle collector has freed some memory, we can try to
-    // force the C library to give back as much memory to the system as
-    // possible.
-    _heapmin();
-#endif
-
     uint32_t interval = (uint32_t) ((TimeStamp::Now() - mCollectionStart).ToMilliseconds());
 #ifdef COLLECT_TIME_DEBUG
     printf("cc: total cycle collector time was %ums\n", interval);
@@ -3148,9 +3188,10 @@ nsCycleCollector::Collect(ccType aCCType,
     CheckThreadSafety();
 
     // This can legitimately happen in a few cases. See bug 383651.
-    if (mActivelyCollecting) {
+    if (mActivelyCollecting || mFreeingSnowWhite) {
         return false;
     }
+    AutoRestore<bool> ar(mActivelyCollecting);
     mActivelyCollecting = true;
 
     bool startedIdle = (mIncrementalPhase == IdlePhase);
@@ -3190,8 +3231,6 @@ nsCycleCollector::Collect(ccType aCCType,
             break;
         }
     } while (!aBudget.checkOverBudget() && !finished);
-
-    mActivelyCollecting = false;
 
     if (aCCType != SliceCC && !startedIdle) {
         // We were in the middle of an incremental CC (using its own listener).
@@ -3287,14 +3326,12 @@ nsCycleCollector::BeginCollection(ccType aCCType,
     MOZ_ASSERT(!mListener, "Forgot to clear a previous listener?");
     mListener = aManualListener;
     aManualListener = nullptr;
-    if (!mListener) {
-        if (mParams.mLogAll || (isShutdown && mParams.mLogShutdown)) {
-            nsRefPtr<nsCycleCollectorLogger> logger = new nsCycleCollectorLogger();
-            if (isShutdown && mParams.mAllTracesAtShutdown) {
-                logger->SetAllTraces();
-            }
-            mListener = logger.forget();
+    if (!mListener && mParams.LogThisCC(isShutdown)) {
+        nsRefPtr<nsCycleCollectorLogger> logger = new nsCycleCollectorLogger();
+        if (isShutdown && mParams.mAllTracesAtShutdown) {
+            logger->SetAllTraces();
         }
+        mListener = logger.forget();
     }
 
     bool forceGC = isShutdown;
@@ -3354,7 +3391,7 @@ nsCycleCollector::Shutdown()
     FreeSnowWhite(true);
 
 #ifndef DEBUG
-    if (PR_GetEnv("XPCOM_CC_RUN_DURING_SHUTDOWN"))
+    if (PR_GetEnv("MOZ_CC_RUN_DURING_SHUTDOWN"))
 #endif
     {
         ShutdownCollect();

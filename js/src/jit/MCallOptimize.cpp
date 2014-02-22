@@ -143,7 +143,8 @@ IonBuilder::inlineNativeCall(CallInfo &callInfo, JSNative native)
         return inlineUnsafeGetReservedSlot(callInfo);
 
     // Parallel intrinsics.
-    if (native == intrinsic_ShouldForceSequential)
+    if (native == intrinsic_ShouldForceSequential ||
+        native == intrinsic_InParallelSection)
         return inlineForceSequentialOrInParallelSection(callInfo);
 
     // Utility intrinsics.
@@ -256,13 +257,10 @@ IonBuilder::inlineArray(CallInfo &callInfo)
 
     types::TemporaryTypeSet::DoubleConversion conversion =
         getInlineReturnTypeSet()->convertDoubleElements(constraints());
-    {
-        AutoThreadSafeAccess ts(templateObject);
-        if (conversion == types::TemporaryTypeSet::AlwaysConvertToDoubles)
-            templateObject->setShouldConvertDoubleElements();
-        else
-            templateObject->clearShouldConvertDoubleElements();
-    }
+    if (conversion == types::TemporaryTypeSet::AlwaysConvertToDoubles)
+        templateObject->setShouldConvertDoubleElements();
+    else
+        templateObject->clearShouldConvertDoubleElements();
 
     MNewArray *ins = MNewArray::New(alloc(), constraints(), initLength, templateObject,
                                     templateObject->type()->initialHeap(constraints()),
@@ -622,6 +620,21 @@ IonBuilder::inlineMathCeil(CallInfo &callInfo)
         return InliningStatus_Inlined;
     }
 
+    if (IsFloatingPointType(argType) && returnType == MIRType_Int32) {
+        // Math.ceil(x) == -Math.floor(-x)
+        callInfo.setImplicitlyUsedUnchecked();
+        MConstant *minusOne = MConstant::New(alloc(), DoubleValue(-1.0));
+        current->add(minusOne);
+        MMul *mul = MMul::New(alloc(), callInfo.getArg(0), minusOne, argType);
+        current->add(mul);
+        MFloor *floor = MFloor::New(alloc(), mul);
+        current->add(floor);
+        MMul *result = MMul::New(alloc(), floor, minusOne, MIRType_Int32);
+        current->add(result);
+        current->push(result);
+        return InliningStatus_Inlined;
+    }
+
     if (IsFloatingPointType(argType) && returnType == MIRType_Double) {
         callInfo.setImplicitlyUsedUnchecked();
         MMathFunction *ins = MMathFunction::New(alloc(), callInfo.getArg(0), MMathFunction::Ceil, nullptr);
@@ -762,9 +775,9 @@ IonBuilder::inlineMathPow(CallInfo &callInfo)
 
     if (outputType != MIRType_Int32 && outputType != MIRType_Double)
         return InliningStatus_NotInlined;
-    if (baseType != MIRType_Int32 && baseType != MIRType_Double)
+    if (!IsNumberType(baseType))
         return InliningStatus_NotInlined;
-    if (powerType != MIRType_Int32 && powerType != MIRType_Double)
+    if (!IsNumberType(powerType))
         return InliningStatus_NotInlined;
 
     callInfo.setImplicitlyUsedUnchecked();
@@ -829,6 +842,8 @@ IonBuilder::inlineMathPow(CallInfo &callInfo)
 
     // Use MPow for other powers
     if (!output) {
+        if (powerType == MIRType_Float32)
+            powerType = MIRType_Double;
         MPow *pow = MPow::New(alloc(), base, power, powerType);
         current->add(pow);
         output = pow;
@@ -973,9 +988,8 @@ IonBuilder::inlineStringObject(CallInfo &callInfo)
     if (callInfo.argc() != 1 || !callInfo.constructing())
         return InliningStatus_NotInlined;
 
-    // MToString only supports int32 or string values.
-    MIRType type = callInfo.getArg(0)->type();
-    if (type != MIRType_Int32 && type != MIRType_String)
+    // ConvertToString doesn't support objects.
+    if (callInfo.getArg(0)->mightBeType(MIRType_Object))
         return InliningStatus_NotInlined;
 
     JSObject *templateObj = inspector->getTemplateObjectForNative(pc, js_String);
@@ -1133,7 +1147,7 @@ IonBuilder::inlineRegExpExec(CallInfo &callInfo)
     if (clasp != &RegExpObject::class_)
         return InliningStatus_NotInlined;
 
-    if (callInfo.getArg(0)->type() != MIRType_String)
+    if (callInfo.getArg(0)->mightBeType(MIRType_Object))
         return InliningStatus_NotInlined;
 
     callInfo.setImplicitlyUsedUnchecked();
@@ -1141,7 +1155,11 @@ IonBuilder::inlineRegExpExec(CallInfo &callInfo)
     MInstruction *exec = MRegExpExec::New(alloc(), callInfo.thisArg(), callInfo.getArg(0));
     current->add(exec);
     current->push(exec);
+
     if (!resumeAfter(exec))
+        return InliningStatus_Error;
+
+    if (!pushTypeBarrier(exec, getInlineReturnTypeSet(), true))
         return InliningStatus_Error;
 
     return InliningStatus_Inlined;
@@ -1163,7 +1181,7 @@ IonBuilder::inlineRegExpTest(CallInfo &callInfo)
     const Class *clasp = thisTypes ? thisTypes->getKnownClass() : nullptr;
     if (clasp != &RegExpObject::class_)
         return InliningStatus_NotInlined;
-    if (callInfo.getArg(0)->type() != MIRType_String)
+    if (callInfo.getArg(0)->mightBeType(MIRType_Object))
         return InliningStatus_NotInlined;
 
     callInfo.setImplicitlyUsedUnchecked();
@@ -1253,7 +1271,7 @@ IonBuilder::inlineUnsafePutElements(CallInfo &callInfo)
 
         // We can only inline setelem on dense arrays that do not need type
         // barriers and on typed arrays.
-        ScalarTypeRepresentation::Type arrayType;
+        ScalarTypeDescr::Type arrayType;
         if ((!isDenseNative || writeNeedsBarrier) &&
             !ElementAccessIsTypedArray(obj, id, &arrayType))
         {
@@ -1282,7 +1300,7 @@ IonBuilder::inlineUnsafePutElements(CallInfo &callInfo)
             continue;
         }
 
-        ScalarTypeRepresentation::Type arrayType;
+        ScalarTypeDescr::Type arrayType;
         if (ElementAccessIsTypedArray(obj, id, &arrayType)) {
             if (!inlineUnsafeSetTypedArrayElement(callInfo, base, arrayType))
                 return InliningStatus_Error;
@@ -1319,7 +1337,7 @@ IonBuilder::inlineUnsafeSetDenseArrayElement(CallInfo &callInfo, uint32_t base)
 bool
 IonBuilder::inlineUnsafeSetTypedArrayElement(CallInfo &callInfo,
                                              uint32_t base,
-                                             ScalarTypeRepresentation::Type arrayType)
+                                             ScalarTypeDescr::Type arrayType)
 {
     // Note: we do not check the conditions that are asserted as true
     // in intrinsic_UnsafePutElements():
@@ -1414,7 +1432,7 @@ IonBuilder::inlineNewDenseArrayForParallelExecution(CallInfo &callInfo)
     callInfo.setImplicitlyUsedUnchecked();
 
     MNewDenseArrayPar *newObject = MNewDenseArrayPar::New(alloc(),
-                                                          graph().forkJoinSlice(),
+                                                          graph().forkJoinContext(),
                                                           callInfo.getArg(0),
                                                           templateObject);
     current->add(newObject);

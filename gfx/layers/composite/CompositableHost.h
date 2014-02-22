@@ -60,6 +60,7 @@ struct EffectChain;
 class CompositableBackendSpecificData : public RefCounted<CompositableBackendSpecificData>
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_TYPENAME(CompositableBackendSpecificData)
   CompositableBackendSpecificData()
   {
     MOZ_COUNT_CTOR(CompositableBackendSpecificData);
@@ -89,6 +90,7 @@ public:
 class CompositableHost : public RefCounted<CompositableHost>
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_TYPENAME(CompositableHost)
   CompositableHost(const TextureInfo& aTextureInfo);
 
   virtual ~CompositableHost();
@@ -130,12 +132,13 @@ public:
    * aUpdated is the region which should be updated
    * aUpdatedRegionBack is the region in aNewBackResult which has been updated
    */
-  virtual void UpdateThebes(const ThebesBufferData& aData,
+  virtual bool UpdateThebes(const ThebesBufferData& aData,
                             const nsIntRegion& aUpdated,
                             const nsIntRegion& aOldValidRegionBack,
                             nsIntRegion* aUpdatedRegionBack)
   {
-    MOZ_ASSERT(false, "should be implemented or not used");
+    NS_ERROR("should be implemented or not used");
+    return false;
   }
 
   /**
@@ -265,7 +268,6 @@ public:
         aLayer == mLayer ||
         aFlags & FORCE_DETACH) {
       SetLayer(nullptr);
-      SetCompositor(nullptr);
       mAttached = false;
       mKeepAttached = false;
       if (mBackendData) {
@@ -288,6 +290,10 @@ public:
   virtual void PrintInfo(nsACString& aTo, const char* aPrefix) { }
 
   virtual void UseTextureHost(TextureHost* aTexture);
+  virtual void UseComponentAlphaTextures(TextureHost* aTextureOnBlack,
+                                         TextureHost* aTextureOnWhite);
+
+  virtual void RemoveTextureHost(TextureHost* aTexture);
 
 protected:
   TextureInfo mTextureInfo;

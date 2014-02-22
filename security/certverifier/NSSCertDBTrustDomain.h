@@ -43,6 +43,39 @@ char* DefaultServerNicknameForCert(CERTCertificate* cert);
 
 void SaveIntermediateCerts(const insanity::pkix::ScopedCERTCertList& certList);
 
+class NSSCertDBTrustDomain : public insanity::pkix::TrustDomain
+{
+
+public:
+  NSSCertDBTrustDomain(SECTrustType certDBTrustType,
+                       bool ocspDownloadEnabled, bool ocspStrict,
+                       void* pinArg);
+
+  virtual SECStatus FindPotentialIssuers(
+                        const SECItem* encodedIssuerName,
+                        PRTime time,
+                /*out*/ insanity::pkix::ScopedCERTCertList& results);
+
+  virtual SECStatus GetCertTrust(insanity::pkix::EndEntityOrCA endEntityOrCA,
+                                 const CERTCertificate* candidateCert,
+                         /*out*/ TrustLevel* trustLevel);
+
+  virtual SECStatus VerifySignedData(const CERTSignedData* signedData,
+                                     const CERTCertificate* cert);
+
+  virtual SECStatus CheckRevocation(insanity::pkix::EndEntityOrCA endEntityOrCA,
+                                    const CERTCertificate* cert,
+                          /*const*/ CERTCertificate* issuerCert,
+                                    PRTime time,
+                       /*optional*/ const SECItem* stapledOCSPResponse);
+
+private:
+  const SECTrustType mCertDBTrustType;
+  const bool mOCSPDownloadEnabled;
+  const bool mOCSPStrict;
+  void* mPinArg; // non-owning!
+};
+
 } } // namespace mozilla::psm
 
 #endif // mozilla_psm__NSSCertDBTrustDomain_h

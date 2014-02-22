@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#if defined(XP_OS2) || defined(XP_WIN)
+#if defined(XP_WIN)
 # include <io.h>     // for isatty()
 #else
 # include <unistd.h> // for isatty()
@@ -25,12 +25,15 @@
 # include "vm/Monitor.h"
 #endif
 
-#if defined(DEBUG) && defined(JS_THREADSAFE) && defined(JS_ION)
-# include "jit/Ion.h"
-# include "jit/JitCompartment.h"
-# include "jit/MIR.h"
-# include "jit/MIRGraph.h"
-#endif // DEBUG && THREADSAFE && ION
+#if defined(JS_THREADSAFE) && defined(JS_ION)
+# include "jit/JitCommon.h"
+# ifdef DEBUG
+#  include "jit/Ion.h"
+#  include "jit/JitCompartment.h"
+#  include "jit/MIR.h"
+#  include "jit/MIRGraph.h"
+# endif
+#endif // THREADSAFE && ION
 
 #include "vm/Interpreter-inl.h"
 
@@ -48,62 +51,59 @@ using mozilla::ThreadLocal;
 // altogether.
 
 static bool
-ExecuteSequentially(JSContext *cx_, HandleValue funVal, bool *complete,
-                    uint16_t sliceStart, uint16_t numSlices);
+ExecuteSequentially(JSContext *cx_, HandleValue funVal);
 
 #if !defined(JS_THREADSAFE) || !defined(JS_ION)
 bool
 js::ForkJoin(JSContext *cx, CallArgs &args)
 {
     RootedValue argZero(cx, args[0]);
-    bool complete = false; // since warmup is false, will always complete
-    uint32_t numSlices = args[2].toInt32();
-    return ExecuteSequentially(cx, argZero, &complete, 0, numSlices);
+    return ExecuteSequentially(cx, argZero);
 }
 
 JSContext *
-ForkJoinSlice::acquireContext()
+ForkJoinContext::acquireJSContext()
 {
     return nullptr;
 }
 
 void
-ForkJoinSlice::releaseContext()
+ForkJoinContext::releaseJSContext()
 {
 }
 
 bool
-ForkJoinSlice::isMainThread() const
+ForkJoinContext::isMainThread() const
 {
     return true;
 }
 
 JSRuntime *
-ForkJoinSlice::runtime()
+ForkJoinContext::runtime()
 {
     MOZ_ASSUME_UNREACHABLE("Not THREADSAFE build");
 }
 
 bool
-ForkJoinSlice::check()
+ForkJoinContext::check()
 {
     MOZ_ASSUME_UNREACHABLE("Not THREADSAFE build");
 }
 
 void
-ForkJoinSlice::requestGC(JS::gcreason::Reason reason)
+ForkJoinContext::requestGC(JS::gcreason::Reason reason)
 {
     MOZ_ASSUME_UNREACHABLE("Not THREADSAFE build");
 }
 
 void
-ForkJoinSlice::requestZoneGC(JS::Zone *zone, JS::gcreason::Reason reason)
+ForkJoinContext::requestZoneGC(JS::Zone *zone, JS::gcreason::Reason reason)
 {
     MOZ_ASSUME_UNREACHABLE("Not THREADSAFE build");
 }
 
 bool
-ForkJoinSlice::setPendingAbortFatal(ParallelBailoutCause cause)
+ForkJoinContext::setPendingAbortFatal(ParallelBailoutCause cause)
 {
     MOZ_ASSUME_UNREACHABLE("Not THREADSAFE build");
     return false;
@@ -153,7 +153,7 @@ js::intrinsic_SetForkJoinTargetRegion(JSContext *cx, unsigned argc, Value *vp)
 }
 
 static bool
-intrinsic_SetForkJoinTargetRegionPar(ForkJoinSlice *slice, unsigned argc, Value *vp)
+intrinsic_SetForkJoinTargetRegionPar(ForkJoinContext *cx, unsigned argc, Value *vp)
 {
     return true;
 }
@@ -169,34 +169,25 @@ JS_JITINFO_NATIVE_PARALLEL(js::intrinsic_SetForkJoinTargetRegionInfo,
 // Some code that is shared between degenerate and parallel configurations.
 
 static bool
-ExecuteSequentially(JSContext *cx, HandleValue funVal, bool *complete,
-                    uint16_t sliceStart, uint16_t numSlices)
+ExecuteSequentially(JSContext *cx, HandleValue funVal)
 {
-    bool allComplete = true;
-    for (uint16_t i = sliceStart; i < numSlices; i++) {
-        FastInvokeGuard fig(cx, funVal);
-        InvokeArgs &args = fig.args();
-        if (!args.init(2))
-            return false;
-        args.setCallee(funVal);
-        args.setThis(UndefinedValue());
-        args[0].setInt32(i);
-        args[1].setBoolean(!!cx->runtime()->parallelWarmup);
-        if (!fig.invoke(cx))
-            return false;
-        allComplete = allComplete & args.rval().toBoolean();
-    }
-    *complete = allComplete;
-    return true;
+    FastInvokeGuard fig(cx, funVal);
+    InvokeArgs &args = fig.args();
+    if (!args.init(1))
+        return false;
+    args.setCallee(funVal);
+    args.setThis(UndefinedValue());
+    args[0].setBoolean(!!cx->runtime()->forkJoinWarmup);
+    return fig.invoke(cx);
 }
 
-ThreadLocal<ForkJoinSlice*> ForkJoinSlice::tlsForkJoinSlice;
+ThreadLocal<ForkJoinContext*> ForkJoinContext::tlsForkJoinContext;
 
 /* static */ bool
-ForkJoinSlice::initialize()
+ForkJoinContext::initialize()
 {
-    if (!tlsForkJoinSlice.initialized()) {
-        if (!tlsForkJoinSlice.init())
+    if (!tlsForkJoinContext.initialized()) {
+        if (!tlsForkJoinContext.init())
             return false;
     }
     return true;
@@ -260,7 +251,8 @@ class ForkJoinOperation
     RootedScript bailoutScript;
     jsbytecode *bailoutBytecode;
 
-    ForkJoinOperation(JSContext *cx, HandleObject fun, ForkJoinMode mode, uint16_t numSlices);
+    ForkJoinOperation(JSContext *cx, HandleFunction fun, HandleFunction boundsFun,
+                      ForkJoinMode mode);
     ExecutionStatus apply();
 
   private:
@@ -298,18 +290,16 @@ class ForkJoinOperation
     };
 
     JSContext *cx_;
-    HandleObject fun_;
+    HandleFunction fun_;
+    HandleFunction boundsFun_;
     Vector<ParallelBailoutRecord, 16> bailoutRecords_;
     AutoScriptVector worklist_;
     Vector<WorklistData, 16> worklistData_;
     ForkJoinMode mode_;
-    uint16_t warmupSlice_;
-    uint16_t numSlices_;
 
     TrafficLight enqueueInitialScript(ExecutionStatus *status);
     TrafficLight compileForParallelExecution(ExecutionStatus *status);
-    TrafficLight warmupExecution(bool stopIfComplete,
-                                 ExecutionStatus *status);
+    TrafficLight warmupExecution(bool stopIfComplete, ExecutionStatus *status);
     TrafficLight parallelExecution(ExecutionStatus *status);
     TrafficLight sequentialExecution(bool disqualified, ExecutionStatus *status);
     TrafficLight recoverFromBailout(ExecutionStatus *status);
@@ -318,12 +308,12 @@ class ForkJoinOperation
     bool invalidateBailedOutScripts();
     ExecutionStatus sequentialExecution(bool disqualified);
 
-    TrafficLight appendCallTargetsToWorklist(uint32_t index,
-                                             ExecutionStatus *status);
-    TrafficLight appendCallTargetToWorklist(HandleScript script,
-                                            ExecutionStatus *status);
+    TrafficLight appendCallTargetsToWorklist(uint32_t index, ExecutionStatus *status);
+    TrafficLight appendCallTargetToWorklist(HandleScript script, ExecutionStatus *status);
     bool addToWorklist(HandleScript script);
     inline bool hasScript(Vector<types::RecompileInfo> &scripts, JSScript *script);
+
+    bool computeBounds(uint16_t *start, uint16_t *end);
 }; // class ForkJoinOperation
 
 class ForkJoinShared : public ParallelJob, public Monitor
@@ -331,12 +321,13 @@ class ForkJoinShared : public ParallelJob, public Monitor
     /////////////////////////////////////////////////////////////////////////
     // Constant fields
 
-    JSContext *const cx_;          // Current context
-    ThreadPool *const threadPool_; // The thread pool.
-    HandleObject fun_;             // The JavaScript function to execute.
-    uint16_t numSlices_;           // Total number of slices. Dynamically changed
-    PRLock *cxLock_;               // Locks cx_ for parallel VM calls.
-    ParallelBailoutRecord *const records_; // Bailout records for each slice
+    JSContext *const cx_;                  // Current context
+    ThreadPool *const threadPool_;         // The thread pool
+    HandleFunction fun_;                   // The JavaScript function to execute
+    uint16_t sliceFrom_;                   // The starting slice id.
+    uint16_t sliceTo_;                     // The ending slice id + 1.
+    PRLock *cxLock_;                       // Locks cx_ for parallel VM calls
+    ParallelBailoutRecord *const records_; // Bailout records for each worker
 
     /////////////////////////////////////////////////////////////////////////
     // Per-thread arenas
@@ -369,8 +360,9 @@ class ForkJoinShared : public ParallelJob, public Monitor
   public:
     ForkJoinShared(JSContext *cx,
                    ThreadPool *threadPool,
-                   HandleObject fun,
-                   uint16_t numSlices,
+                   HandleFunction fun,
+                   uint16_t sliceFrom,
+                   uint16_t sliceTo,
                    ParallelBailoutRecord *records);
     ~ForkJoinShared();
 
@@ -379,14 +371,13 @@ class ForkJoinShared : public ParallelJob, public Monitor
     ParallelResult execute();
 
     // Invoked from parallel worker threads:
-    virtual bool executeFromWorker(uint16_t sliceId, uint32_t workerId,
-                                   uintptr_t stackLimit) MOZ_OVERRIDE;
+    virtual bool executeFromWorker(uint32_t workerId, uintptr_t stackLimit) MOZ_OVERRIDE;
 
     // Invoked only from the main thread:
-    virtual bool executeFromMainThread(uint16_t sliceId) MOZ_OVERRIDE;
+    virtual bool executeFromMainThread() MOZ_OVERRIDE;
 
-    // Executes slice |sliceId| either from a worker or the main thread.
-    void executePortion(PerThreadData *perThread, uint16_t sliceId, uint32_t workerId);
+    // Executes the user-supplied function a worker or the main thread.
+    void executePortion(PerThreadData *perThread, uint32_t workerId);
 
     // Moves all the per-thread arenas into the main compartment and processes
     // any pending requests for a GC. This can only safely be invoked on the
@@ -394,14 +385,14 @@ class ForkJoinShared : public ParallelJob, public Monitor
     void transferArenasToCompartmentAndProcessGCRequests();
 
     // Invoked during processing by worker threads to "check in".
-    bool check(ForkJoinSlice &threadCx);
+    bool check(ForkJoinContext &cx);
 
     // Requests a GC, either full or specific to a zone.
     void requestGC(JS::gcreason::Reason reason);
     void requestZoneGC(JS::Zone *zone, JS::gcreason::Reason reason);
 
     // Requests that computation abort.
-    void setAbortFlag(bool fatal);
+    void setAbortFlagAndTriggerOperationCallback(bool fatal);
 
     // Set the fatal flag for the next abort.
     void setPendingAbortFatal() { fatal_ = true; }
@@ -410,8 +401,8 @@ class ForkJoinShared : public ParallelJob, public Monitor
     JS::Zone *zone() { return cx_->zone(); }
     JSCompartment *compartment() { return cx_->compartment(); }
 
-    JSContext *acquireContext() { PR_Lock(cxLock_); return cx_; }
-    void releaseContext() { PR_Unlock(cxLock_); }
+    JSContext *acquireJSContext() { PR_Lock(cxLock_); return cx_; }
+    void releaseJSContext() { PR_Unlock(cxLock_); }
 };
 
 class AutoEnterWarmup
@@ -419,19 +410,19 @@ class AutoEnterWarmup
     JSRuntime *runtime_;
 
   public:
-    AutoEnterWarmup(JSRuntime *runtime) : runtime_(runtime) { runtime_->parallelWarmup++; }
-    ~AutoEnterWarmup() { runtime_->parallelWarmup--; }
+    AutoEnterWarmup(JSRuntime *runtime) : runtime_(runtime) { runtime_->forkJoinWarmup++; }
+    ~AutoEnterWarmup() { runtime_->forkJoinWarmup--; }
 };
 
-class AutoSetForkJoinSlice
+class AutoSetForkJoinContext
 {
   public:
-    AutoSetForkJoinSlice(ForkJoinSlice *threadCx) {
-        ForkJoinSlice::tlsForkJoinSlice.set(threadCx);
+    AutoSetForkJoinContext(ForkJoinContext *threadCx) {
+        ForkJoinContext::tlsForkJoinContext.set(threadCx);
     }
 
-    ~AutoSetForkJoinSlice() {
-        ForkJoinSlice::tlsForkJoinSlice.set(nullptr);
+    ~AutoSetForkJoinContext() {
+        ForkJoinContext::tlsForkJoinContext.set(nullptr);
     }
 };
 
@@ -489,16 +480,16 @@ js::ForkJoin(JSContext *cx, CallArgs &args)
     JS_ASSERT(args.length() == 3); // else the self-hosted code is wrong
     JS_ASSERT(args[0].isObject());
     JS_ASSERT(args[0].toObject().is<JSFunction>());
-    JS_ASSERT(args[1].isInt32());
-    JS_ASSERT(args[1].toInt32() < NumForkJoinModes);
+    JS_ASSERT(args[1].isObject());
+    JS_ASSERT(args[1].toObject().is<JSFunction>());
     JS_ASSERT(args[2].isInt32());
+    JS_ASSERT(args[2].toInt32() < NumForkJoinModes);
 
-    RootedObject fun(cx, &args[0].toObject());
-    ForkJoinMode mode = (ForkJoinMode) args[1].toInt32();
-    uint32_t numSlices = args[2].toInt32();
-    MOZ_ASSERT(uint32_t(uint16_t(numSlices)) == numSlices);
+    RootedFunction fun(cx, &args[0].toObject().as<JSFunction>());
+    RootedFunction boundsFun(cx, &args[1].toObject().as<JSFunction>());
+    ForkJoinMode mode = (ForkJoinMode) args[2].toInt32();
 
-    ForkJoinOperation op(cx, fun, mode, numSlices);
+    ForkJoinOperation op(cx, fun, boundsFun, mode);
     ExecutionStatus status = op.apply();
     if (status == ExecutionFatal)
         return false;
@@ -557,24 +548,23 @@ ForkJoinModeString(ForkJoinMode mode) {
     return "???";
 }
 
-js::ForkJoinOperation::ForkJoinOperation(JSContext *cx, HandleObject fun, ForkJoinMode mode,
-                                         uint16_t numSlices)
+ForkJoinOperation::ForkJoinOperation(JSContext *cx, HandleFunction fun, HandleFunction boundsFun,
+                                     ForkJoinMode mode)
   : bailouts(0),
     bailoutCause(ParallelBailoutNone),
     bailoutScript(cx),
     bailoutBytecode(nullptr),
     cx_(cx),
     fun_(fun),
+    boundsFun_(boundsFun),
     bailoutRecords_(cx),
     worklist_(cx),
     worklistData_(cx),
-    mode_(mode),
-    warmupSlice_(0),
-    numSlices_(numSlices)
+    mode_(mode)
 { }
 
 ExecutionStatus
-js::ForkJoinOperation::apply()
+ForkJoinOperation::apply()
 {
     ExecutionStatus status;
 
@@ -660,8 +650,8 @@ js::ForkJoinOperation::apply()
     return SpewEndOp(sequentialExecution(true));
 }
 
-js::ForkJoinOperation::TrafficLight
-js::ForkJoinOperation::enqueueInitialScript(ExecutionStatus *status)
+ForkJoinOperation::TrafficLight
+ForkJoinOperation::enqueueInitialScript(ExecutionStatus *status)
 {
     // GreenLight: script successfully enqueued if necessary
     // RedLight: fatal error or fell back to sequential
@@ -698,8 +688,8 @@ js::ForkJoinOperation::enqueueInitialScript(ExecutionStatus *status)
     return GreenLight;
 }
 
-js::ForkJoinOperation::TrafficLight
-js::ForkJoinOperation::compileForParallelExecution(ExecutionStatus *status)
+ForkJoinOperation::TrafficLight
+ForkJoinOperation::compileForParallelExecution(ExecutionStatus *status)
 {
     // GreenLight: all scripts compiled
     // RedLight: fatal error or completed work via warmups or fallback
@@ -854,18 +844,8 @@ js::ForkJoinOperation::compileForParallelExecution(ExecutionStatus *status)
             }
         }
 
-        if (allScriptsPresent) {
-            // For testing modes, we want to make sure that all off thread
-            // compilation tasks are finished, so we don't race with
-            // off-main-thread-compilation setting an interrupt flag while we
-            // are in the middle of a test, causing unexpected bailouts.
-            if (mode_ != ForkJoinModeNormal) {
-                StopAllOffThreadCompilations(cx_->compartment());
-                if (!js_HandleExecutionInterrupt(cx_))
-                    return fatalError(status);
-            }
+        if (allScriptsPresent)
             break;
-        }
     }
 
     Spew(SpewCompile, "Compilation complete (final worklist length %d)",
@@ -889,8 +869,8 @@ js::ForkJoinOperation::compileForParallelExecution(ExecutionStatus *status)
     return GreenLight;
 }
 
-js::ForkJoinOperation::TrafficLight
-js::ForkJoinOperation::appendCallTargetsToWorklist(uint32_t index, ExecutionStatus *status)
+ForkJoinOperation::TrafficLight
+ForkJoinOperation::appendCallTargetsToWorklist(uint32_t index, ExecutionStatus *status)
 {
     // GreenLight: call targets appended
     // RedLight: fatal error or completed work via warmups or fallback
@@ -918,8 +898,8 @@ js::ForkJoinOperation::appendCallTargetsToWorklist(uint32_t index, ExecutionStat
     return GreenLight;
 }
 
-js::ForkJoinOperation::TrafficLight
-js::ForkJoinOperation::appendCallTargetToWorklist(HandleScript script, ExecutionStatus *status)
+ForkJoinOperation::TrafficLight
+ForkJoinOperation::appendCallTargetToWorklist(HandleScript script, ExecutionStatus *status)
 {
     // GreenLight: call target appended if necessary
     // RedLight: fatal error or completed work via warmups or fallback
@@ -949,7 +929,7 @@ js::ForkJoinOperation::appendCallTargetToWorklist(HandleScript script, Execution
 }
 
 bool
-js::ForkJoinOperation::addToWorklist(HandleScript script)
+ForkJoinOperation::addToWorklist(HandleScript script)
 {
     for (uint32_t i = 0; i < worklist_.length(); i++) {
         if (worklist_[i] == script) {
@@ -977,8 +957,8 @@ js::ForkJoinOperation::addToWorklist(HandleScript script)
     return true;
 }
 
-js::ForkJoinOperation::TrafficLight
-js::ForkJoinOperation::sequentialExecution(bool disqualified, ExecutionStatus *status)
+ForkJoinOperation::TrafficLight
+ForkJoinOperation::sequentialExecution(bool disqualified, ExecutionStatus *status)
 {
     // RedLight: fatal error or completed work
 
@@ -987,26 +967,21 @@ js::ForkJoinOperation::sequentialExecution(bool disqualified, ExecutionStatus *s
 }
 
 ExecutionStatus
-js::ForkJoinOperation::sequentialExecution(bool disqualified)
+ForkJoinOperation::sequentialExecution(bool disqualified)
 {
     // XXX use disqualified to set parallelIon to ION_DISABLED_SCRIPT?
 
     Spew(SpewOps, "Executing sequential execution (disqualified=%d).",
          disqualified);
 
-    bool complete = false;
     RootedValue funVal(cx_, ObjectValue(*fun_));
-    if (!ExecuteSequentially(cx_, funVal, &complete, 0, numSlices_))
+    if (!ExecuteSequentially(cx_, funVal))
         return ExecutionFatal;
-
-    // When invoked without the warmup flag set to true, the kernel
-    // function OUGHT to complete successfully, barring an exception.
-    JS_ASSERT(complete);
     return ExecutionSequential;
 }
 
-js::ForkJoinOperation::TrafficLight
-js::ForkJoinOperation::fatalError(ExecutionStatus *status)
+ForkJoinOperation::TrafficLight
+ForkJoinOperation::fatalError(ExecutionStatus *status)
 {
     // RedLight: fatal error
 
@@ -1058,7 +1033,7 @@ BailoutExplanation(ParallelBailoutCause cause)
 }
 
 void
-js::ForkJoinOperation::determineBailoutCause()
+ForkJoinOperation::determineBailoutCause()
 {
     bailoutCause = ParallelBailoutNone;
     for (uint32_t i = 0; i < bailoutRecords_.length(); i++) {
@@ -1096,7 +1071,7 @@ js::ForkJoinOperation::determineBailoutCause()
 }
 
 bool
-js::ForkJoinOperation::invalidateBailedOutScripts()
+ForkJoinOperation::invalidateBailedOutScripts()
 {
     Vector<types::RecompileInfo> invalid(cx_);
     for (uint32_t i = 0; i < bailoutRecords_.length(); i++) {
@@ -1148,48 +1123,52 @@ js::ForkJoinOperation::invalidateBailedOutScripts()
     return true;
 }
 
-js::ForkJoinOperation::TrafficLight
-js::ForkJoinOperation::warmupExecution(bool stopIfComplete, ExecutionStatus *status)
+ForkJoinOperation::TrafficLight
+ForkJoinOperation::warmupExecution(bool stopIfComplete, ExecutionStatus *status)
 {
     // GreenLight: warmup succeeded, still more work to do
     // RedLight: fatal error or warmup completed all work (check status)
 
-    Spew(SpewOps, "Executing warmup of slice %u.", warmupSlice_);
-
-    AutoEnterWarmup warmup(cx_->runtime());
-    RootedValue funVal(cx_, ObjectValue(*fun_));
-    bool complete;
-    uint32_t warmupTo = Min<uint16_t>(warmupSlice_ + 1, numSlices_);
-    if (!ExecuteSequentially(cx_, funVal, &complete, warmupSlice_, warmupTo)) {
+    uint16_t from, to;
+    if (!computeBounds(&from, &to)) {
         *status = ExecutionFatal;
         return RedLight;
     }
 
-    if (complete) {
-        warmupSlice_ = warmupTo;
-        if (warmupSlice_ == numSlices_) {
-            if (stopIfComplete) {
-                Spew(SpewOps, "Warmup execution finished all the work.");
-                *status = ExecutionWarmup;
-                return RedLight;
-            }
+    if (from == to) {
+        Spew(SpewOps, "Warmup execution finished all the work.");
 
-            // If we finished all slices in warmup, be sure check the
-            // interrupt flag. This is because we won't be running more JS
-            // code, and thus no more automatic checking of the interrupt
-            // flag.
-            if (!js_HandleExecutionInterrupt(cx_)) {
-                *status = ExecutionFatal;
-                return RedLight;
-            }
+        if (stopIfComplete) {
+            *status = ExecutionWarmup;
+            return RedLight;
         }
+
+        // If we finished all slices in warmup, be sure check the
+        // interrupt flag. This is because we won't be running more JS
+        // code, and thus no more automatic checking of the interrupt
+        // flag.
+        if (!js_HandleExecutionInterrupt(cx_)) {
+            *status = ExecutionFatal;
+            return RedLight;
+        }
+
+        return GreenLight;
+    }
+
+    Spew(SpewOps, "Executing warmup.");
+
+    AutoEnterWarmup warmup(cx_->runtime());
+    RootedValue funVal(cx_, ObjectValue(*fun_));
+    if (!ExecuteSequentially(cx_, funVal)) {
+        *status = ExecutionFatal;
+        return RedLight;
     }
 
     return GreenLight;
 }
 
-js::ForkJoinOperation::TrafficLight
-js::ForkJoinOperation::parallelExecution(ExecutionStatus *status)
+ForkJoinOperation::TrafficLight
+ForkJoinOperation::parallelExecution(ExecutionStatus *status)
 {
     // GreenLight: bailout occurred, keep trying
     // RedLight: fatal error or all work completed
@@ -1197,14 +1176,23 @@ js::ForkJoinOperation::parallelExecution(ExecutionStatus *status)
     // Recursive use of the ThreadPool is not supported.  Right now we
     // cannot get here because parallel code cannot invoke native
     // functions such as ForkJoin().
-    JS_ASSERT(ForkJoinSlice::current() == nullptr);
+    JS_ASSERT(ForkJoinContext::current() == nullptr);
+
+    uint16_t from, to;
+    if (!computeBounds(&from, &to)) {
+        *status = ExecutionFatal;
+        return RedLight;
+    }
+
+    if (from == to) {
+        Spew(SpewOps, "Warmup execution finished all the work.");
+        *status = ExecutionWarmup;
+        return RedLight;
+    }
 
     ForkJoinActivation activation(cx_);
-
     ThreadPool *threadPool = &cx_->runtime()->threadPool;
-
-    RootedObject rootedFun(cx_, fun_);
-    ForkJoinShared shared(cx_, threadPool, rootedFun, numSlices_, &bailoutRecords_[0]);
+    ForkJoinShared shared(cx_, threadPool, fun_, from, to, &bailoutRecords_[0]);
     if (!shared.init()) {
         *status = ExecutionFatal;
         return RedLight;
@@ -1227,8 +1215,8 @@ js::ForkJoinOperation::parallelExecution(ExecutionStatus *status)
     return GreenLight;
 }
 
-js::ForkJoinOperation::TrafficLight
-js::ForkJoinOperation::recoverFromBailout(ExecutionStatus *status)
+ForkJoinOperation::TrafficLight
+ForkJoinOperation::recoverFromBailout(ExecutionStatus *status)
 {
     // GreenLight: bailout recovered, try to compile-and-run again
     // RedLight: fatal error
@@ -1240,7 +1228,7 @@ js::ForkJoinOperation::recoverFromBailout(ExecutionStatus *status)
 
     // After any bailout, we always scan over callee list of main
     // function, if nothing else
-    RootedScript mainScript(cx_, fun_->as<JSFunction>().nonLazyScript());
+    RootedScript mainScript(cx_, fun_->nonLazyScript());
     if (!addToWorklist(mainScript))
         return fatalError(status);
 
@@ -1256,13 +1244,43 @@ js::ForkJoinOperation::recoverFromBailout(ExecutionStatus *status)
 }
 
 bool
-js::ForkJoinOperation::hasScript(Vector<types::RecompileInfo> &scripts, JSScript *script)
+ForkJoinOperation::hasScript(Vector<types::RecompileInfo> &scripts, JSScript *script)
 {
     for (uint32_t i = 0; i < scripts.length(); i++) {
         if (scripts[i] == script->parallelIonScript()->recompileInfo())
             return true;
     }
     return false;
+}
+
+bool
+ForkJoinOperation::computeBounds(uint16_t *start, uint16_t *end)
+{
+    RootedValue funVal(cx_, ObjectValue(*boundsFun_));
+    FastInvokeGuard fig(cx_, funVal);
+
+    InvokeArgs &args = fig.args();
+    if (!args.init(0))
+        return false;
+    args.setCallee(funVal);
+    args.setThis(UndefinedValue());
+
+    if (!fig.invoke(cx_))
+        return false;
+
+    MOZ_ASSERT(args.rval().toObject().is<ArrayObject>());
+    MOZ_ASSERT(args.rval().toObject().getDenseInitializedLength() == 2);
+
+    int32_t start32 = args.rval().toObject().getDenseElement(0).toInt32();
+    int32_t end32 = args.rval().toObject().getDenseElement(1).toInt32();
+
+    MOZ_ASSERT(int32_t(uint16_t(start32)) == start32);
+    MOZ_ASSERT(int32_t(uint16_t(end32)) == end32);
+
+    *start = uint16_t(start32);
+    *end = uint16_t(end32);
+
+    return true;
 }
 
 // Can only enter callees with a valid IonScript.
@@ -1312,13 +1330,15 @@ class ParallelIonInvoke
 
 ForkJoinShared::ForkJoinShared(JSContext *cx,
                                ThreadPool *threadPool,
-                               HandleObject fun,
-                               uint16_t numSlices,
+                               HandleFunction fun,
+                               uint16_t sliceFrom,
+                               uint16_t sliceTo,
                                ParallelBailoutRecord *records)
   : cx_(cx),
     threadPool_(threadPool),
     fun_(fun),
-    numSlices_(numSlices),
+    sliceFrom_(sliceFrom),
+    sliceTo_(sliceTo),
     cxLock_(nullptr),
     records_(records),
     allocators_(cx),
@@ -1378,7 +1398,7 @@ ForkJoinShared::execute()
     // Sometimes a GC request occurs *just before* we enter into the
     // parallel section.  Rather than enter into the parallel section
     // and then abort, we just check here and abort early.
-    if (cx_->runtime()->interrupt)
+    if (cx_->runtime()->interruptPar)
         return TP_RETRY_SEQUENTIALLY;
 
     AutoLockMonitor lock(*this);
@@ -1388,7 +1408,7 @@ ForkJoinShared::execute()
         AutoUnlockMonitor unlock(*this);
 
         // Push parallel tasks and wait until they're all done.
-        jobResult = threadPool_->executeJob(cx_, this, numSlices_);
+        jobResult = threadPool_->executeJob(cx_, this, sliceFrom_, sliceTo_);
         if (jobResult == TP_FATAL)
             return TP_FATAL;
     }
@@ -1404,7 +1424,7 @@ ForkJoinShared::execute()
 
 #ifdef DEBUG
     Spew(SpewOps, "Completed parallel job [slices %d, threads: %d (+1), stolen: %d (work stealing:%s)]",
-         numSlices_,
+         sliceTo_ - sliceFrom_,
          threadPool_->numWorkers(),
          threadPool_->stolenSlices(),
          threadPool_->workStealing() ? "ON" : "OFF");
@@ -1432,13 +1452,11 @@ ForkJoinShared::transferArenasToCompartmentAndProcessGCRequests()
 }
 
 bool
-ForkJoinShared::executeFromWorker(uint16_t sliceId, uint32_t workerId, uintptr_t stackLimit)
+ForkJoinShared::executeFromWorker(uint32_t workerId, uintptr_t stackLimit)
 {
-    JS_ASSERT(sliceId <= numSlices_);
-
     PerThreadData thisThread(cx_->runtime());
     if (!thisThread.init()) {
-        setAbortFlag(true);
+        setAbortFlagAndTriggerOperationCallback(true);
         return false;
     }
     TlsPerThreadData.set(&thisThread);
@@ -1450,41 +1468,40 @@ ForkJoinShared::executeFromWorker(uint16_t sliceId, uint32_t workerId, uintptr_t
     // Don't use setIonStackLimit() because that acquires the ionStackLimitLock, and the
     // lock has not been initialized in these cases.
     thisThread.ionStackLimit = stackLimit;
-    executePortion(&thisThread, sliceId, workerId);
+    executePortion(&thisThread, workerId);
     TlsPerThreadData.set(nullptr);
 
     return !abort_;
 }
 
 bool
-ForkJoinShared::executeFromMainThread(uint16_t sliceId)
+ForkJoinShared::executeFromMainThread()
 {
-    executePortion(&cx_->mainThread(), sliceId, threadPool_->numWorkers());
+    executePortion(&cx_->mainThread(), threadPool_->numWorkers());
     return !abort_;
 }
 
 void
-ForkJoinShared::executePortion(PerThreadData *perThread, uint16_t sliceId, uint32_t workerId)
+ForkJoinShared::executePortion(PerThreadData *perThread, uint32_t workerId)
 {
     // WARNING: This code runs ON THE PARALLEL WORKER THREAD.
     // Be careful when accessing cx_.
 
-    // ForkJoinSlice already contains an AutoAssertNoGC; however, the analysis
+    // ForkJoinContext already contains an AutoAssertNoGC; however, the analysis
     // does not propagate this type information. We duplicate the assertion
     // here for maximum clarity.
     JS::AutoAssertNoGC nogc(runtime());
 
     Allocator *allocator = allocators_[workerId];
-    ForkJoinSlice slice(perThread, sliceId, workerId, allocator, this, &records_[workerId]);
-    AutoSetForkJoinSlice autoContext(&slice);
+    ForkJoinContext cx(perThread, workerId, allocator, this, &records_[workerId]);
+    AutoSetForkJoinContext autoContext(&cx);
 
 #ifdef DEBUG
     // Set the maximum worker and slice number for prettier spewing.
-    slice.maxSliceId = numSlices_ - 1;
-    slice.maxWorkerId = threadPool_->numWorkers();
+    cx.maxWorkerId = threadPool_->numWorkers();
 #endif
 
-    Spew(SpewOps, "Slice up");
+    Spew(SpewOps, "Up");
 
     // Make a new IonContext for the slice, which is needed if we need to
     // re-enter the VM.
@@ -1492,38 +1509,34 @@ ForkJoinShared::executePortion(PerThreadData *perThread, uint16_t sliceId, uint3
                    CompileCompartment::get(cx_->compartment()),
                    nullptr);
 
-    JS_ASSERT(slice.bailoutRecord->topScript == nullptr);
+    JS_ASSERT(cx.bailoutRecord->topScript == nullptr);
 
-    RootedObject fun(perThread, fun_);
-    JS_ASSERT(fun->is<JSFunction>());
-    RootedFunction callee(perThread, &fun->as<JSFunction>());
-    if (!callee->nonLazyScript()->hasParallelIonScript()) {
+    if (!fun_->nonLazyScript()->hasParallelIonScript()) {
         // Sometimes, particularly with GCZeal, the parallel ion
         // script can be collected between starting the parallel
         // op and reaching this point.  In that case, we just fail
         // and fallback.
         Spew(SpewOps, "Down (Script no longer present)");
-        slice.bailoutRecord->setCause(ParallelBailoutMainScriptNotPresent);
-        setAbortFlag(false);
+        cx.bailoutRecord->setCause(ParallelBailoutMainScriptNotPresent);
+        setAbortFlagAndTriggerOperationCallback(false);
     } else {
-        ParallelIonInvoke<2> fii(cx_->runtime(), callee, 2);
+        ParallelIonInvoke<2> fii(cx_->runtime(), fun_, 1);
 
-        fii.args[0] = Int32Value(slice.sliceId);
-        fii.args[1] = BooleanValue(false);
+        fii.args[0] = BooleanValue(false);
 
         bool ok = fii.invoke(perThread);
-        JS_ASSERT(ok == !slice.bailoutRecord->topScript);
+        JS_ASSERT(ok == !cx.bailoutRecord->topScript);
         if (!ok)
-            setAbortFlag(false);
+            setAbortFlagAndTriggerOperationCallback(false);
     }
 
-    Spew(SpewOps, "Slice down");
+    Spew(SpewOps, "Down");
 }
 
 bool
-ForkJoinShared::check(ForkJoinSlice &slice)
+ForkJoinShared::check(ForkJoinContext &cx)
 {
-    JS_ASSERT(cx_->runtime()->interrupt);
+    JS_ASSERT(cx_->runtime()->interruptPar);
 
     if (abort_)
         return false;
@@ -1531,17 +1544,17 @@ ForkJoinShared::check(ForkJoinSlice &slice)
     // Note: We must check if the main thread has exited successfully here, as
     // without a main thread the worker threads which are tripping on the
     // interrupt flag would never exit.
-    if (slice.isMainThread() || !threadPool_->isMainThreadActive()) {
+    if (cx.isMainThread() || !threadPool_->isMainThreadActive()) {
         JS_ASSERT(!cx_->runtime()->gcIsNeeded);
 
-        if (cx_->runtime()->interrupt) {
+        if (cx_->runtime()->interruptPar) {
             // The GC Needed flag should not be set during parallel
             // execution.  Instead, one of the requestGC() or
             // requestZoneGC() methods should be invoked.
             JS_ASSERT(!cx_->runtime()->gcIsNeeded);
 
-            slice.bailoutRecord->setCause(ParallelBailoutInterrupt);
-            setAbortFlag(false);
+            cx.bailoutRecord->setCause(ParallelBailoutInterrupt);
+            setAbortFlagAndTriggerOperationCallback(false);
             return false;
         }
     }
@@ -1550,16 +1563,16 @@ ForkJoinShared::check(ForkJoinSlice &slice)
 }
 
 void
-ForkJoinShared::setAbortFlag(bool fatal)
+ForkJoinShared::setAbortFlagAndTriggerOperationCallback(bool fatal)
 {
     AutoLockMonitor lock(*this);
 
     abort_ = true;
     fatal_ = fatal_ || fatal;
 
-    // Note: DontStopIon here avoids the expensive memory protection needed to
+    // Note: The ForkJoin trigger here avoids the expensive memory protection needed to
     // interrupt Ion code compiled for sequential execution.
-    cx_->runtime()->triggerOperationCallback(JSRuntime::TriggerCallbackAnyThreadDontStopIon);
+    cx_->runtime()->triggerOperationCallback(JSRuntime::TriggerCallbackAnyThreadForkJoin);
 }
 
 void
@@ -1592,21 +1605,19 @@ ForkJoinShared::requestZoneGC(JS::Zone *zone, JS::gcreason::Reason reason)
 }
 
 /////////////////////////////////////////////////////////////////////////////
-// ForkJoinSlice
+// ForkJoinContext
 //
 
-ForkJoinSlice::ForkJoinSlice(PerThreadData *perThreadData,
-                             uint16_t sliceId, uint32_t workerId,
-                             Allocator *allocator, ForkJoinShared *shared,
-                             ParallelBailoutRecord *bailoutRecord)
+ForkJoinContext::ForkJoinContext(PerThreadData *perThreadData, uint32_t workerId,
+                                 Allocator *allocator, ForkJoinShared *shared,
+                                 ParallelBailoutRecord *bailoutRecord)
   : ThreadSafeContext(shared->runtime(), perThreadData, Context_ForkJoin),
-    sliceId(sliceId),
     workerId(workerId),
     bailoutRecord(bailoutRecord),
     targetRegionStart(nullptr),
     targetRegionEnd(nullptr),
     shared(shared),
-    acquiredContext_(false),
+    acquiredJSContext_(false),
     nogc_(shared->runtime())
 {
     /*
@@ -1625,67 +1636,67 @@ ForkJoinSlice::ForkJoinSlice(PerThreadData *perThreadData,
 }
 
 bool
-ForkJoinSlice::isMainThread() const
+ForkJoinContext::isMainThread() const
 {
     return perThreadData == &shared->runtime()->mainThread;
 }
 
 JSRuntime *
-ForkJoinSlice::runtime()
+ForkJoinContext::runtime()
 {
     return shared->runtime();
 }
 
 JSContext *
-ForkJoinSlice::acquireContext()
+ForkJoinContext::acquireJSContext()
 {
-    JSContext *cx = shared->acquireContext();
-    JS_ASSERT(!acquiredContext_);
-    acquiredContext_ = true;
+    JSContext *cx = shared->acquireJSContext();
+    JS_ASSERT(!acquiredJSContext_);
+    acquiredJSContext_ = true;
     return cx;
 }
 
 void
-ForkJoinSlice::releaseContext()
+ForkJoinContext::releaseJSContext()
 {
-    JS_ASSERT(acquiredContext_);
-    acquiredContext_ = false;
-    return shared->releaseContext();
+    JS_ASSERT(acquiredJSContext_);
+    acquiredJSContext_ = false;
+    return shared->releaseJSContext();
 }
 
 bool
-ForkJoinSlice::hasAcquiredContext() const
+ForkJoinContext::hasAcquiredJSContext() const
 {
-    return acquiredContext_;
+    return acquiredJSContext_;
 }
 
 bool
-ForkJoinSlice::check()
+ForkJoinContext::check()
 {
-    if (runtime()->interrupt)
+    if (runtime()->interruptPar)
         return shared->check(*this);
     else
         return true;
 }
 
 void
-ForkJoinSlice::requestGC(JS::gcreason::Reason reason)
+ForkJoinContext::requestGC(JS::gcreason::Reason reason)
 {
     shared->requestGC(reason);
     bailoutRecord->setCause(ParallelBailoutRequestedGC);
-    shared->setAbortFlag(false);
+    shared->setAbortFlagAndTriggerOperationCallback(false);
 }
 
 void
-ForkJoinSlice::requestZoneGC(JS::Zone *zone, JS::gcreason::Reason reason)
+ForkJoinContext::requestZoneGC(JS::Zone *zone, JS::gcreason::Reason reason)
 {
     shared->requestZoneGC(zone, reason);
     bailoutRecord->setCause(ParallelBailoutRequestedZoneGC);
-    shared->setAbortFlag(false);
+    shared->setAbortFlagAndTriggerOperationCallback(false);
 }
 
 bool
-ForkJoinSlice::setPendingAbortFatal(ParallelBailoutCause cause)
+ForkJoinContext::setPendingAbortFatal(ParallelBailoutCause cause)
 {
     shared->setPendingAbortFatal();
     bailoutRecord->setCause(cause);
@@ -1882,14 +1893,14 @@ class ParallelSpewer
         // doesn't get interrupted when running with multiple threads.
         char buf[BufferSize];
 
-        if (ForkJoinSlice *slice = ForkJoinSlice::current()) {
+        if (ForkJoinContext *cx = ForkJoinContext::current()) {
             // Print the format first into a buffer to right-justify the
-            // worker and slice ids.
+            // worker ids.
             char bufbuf[BufferSize];
-            JS_snprintf(bufbuf, BufferSize, "[%%sParallel:%%0%du(%%0%du)%%s] ",
-                        NumberOfDigits(slice->maxWorkerId), NumberOfDigits(slice->maxSliceId));
-            JS_snprintf(buf, BufferSize, bufbuf, workerColor(slice->workerId),
-                        slice->workerId, slice->sliceId, reset());
+            JS_snprintf(bufbuf, BufferSize, "[%%sParallel:%%0%du%%s] ",
+                        NumberOfDigits(cx->maxWorkerId));
+            JS_snprintf(buf, BufferSize, bufbuf, workerColor(cx->workerId),
+                        cx->workerId, reset());
         } else {
             JS_snprintf(buf, BufferSize, "[Parallel:M] ");
         }
@@ -2113,7 +2124,7 @@ parallel::SpewBailoutIR(IonLIRTraceData *data)
 bool
 js::InExclusiveParallelSection()
 {
-    return InParallelSection() && ForkJoinSlice::current()->hasAcquiredContext();
+    return InParallelSection() && ForkJoinContext::current()->hasAcquiredJSContext();
 }
 
 bool
@@ -2126,6 +2137,14 @@ js::ParallelTestsShouldPass(JSContext *cx)
            cx->runtime()->gcZeal() == 0;
 }
 
+void
+js::TriggerOperationCallbackForForkJoin(JSRuntime *rt,
+                                        JSRuntime::OperationCallbackTrigger trigger)
+{
+    if (trigger != JSRuntime::TriggerCallbackAnyThreadDontStopIon)
+        rt->interruptPar = true;
+}
+
 bool
 js::intrinsic_SetForkJoinTargetRegion(JSContext *cx, unsigned argc, Value *vp)
 {
@@ -2136,7 +2155,7 @@ js::intrinsic_SetForkJoinTargetRegion(JSContext *cx, unsigned argc, Value *vp)
 }
 
 static bool
-intrinsic_SetForkJoinTargetRegionPar(ForkJoinSlice *slice, unsigned argc, Value *vp)
+intrinsic_SetForkJoinTargetRegionPar(ForkJoinContext *cx, unsigned argc, Value *vp)
 {
     // Sets the *target region*, which is the portion of the output
     // buffer that the current iteration is permitted to write to.
@@ -2152,16 +2171,16 @@ intrinsic_SetForkJoinTargetRegionPar(ForkJoinSlice *slice, unsigned argc, Value 
 
     CallArgs args = CallArgsFromVp(argc, vp);
     JS_ASSERT(argc == 3);
-    JS_ASSERT(args[0].isObject() && IsTypedDatum(args[0].toObject()));
+    JS_ASSERT(args[0].isObject() && args[0].toObject().is<TypedObject>());
     JS_ASSERT(args[1].isInt32());
     JS_ASSERT(args[2].isInt32());
 
-    uint8_t *mem = AsTypedDatum(args[0].toObject()).typedMem();
+    uint8_t *mem = args[0].toObject().as<TypedObject>().typedMem();
     int32_t start = args[1].toInt32();
     int32_t end = args[2].toInt32();
 
-    slice->targetRegionStart = mem + start;
-    slice->targetRegionEnd = mem + end;
+    cx->targetRegionStart = mem + start;
+    cx->targetRegionEnd = mem + end;
     return true;
 }
 

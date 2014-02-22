@@ -557,11 +557,13 @@ nsJSObjWrapper::NP_Invalidate(NPObject *npobj)
 }
 
 static bool
-GetProperty(JSContext *cx, JSObject *obj, NPIdentifier id, JS::MutableHandle<JS::Value> rval)
+GetProperty(JSContext *cx, JSObject *objArg, NPIdentifier npid, JS::MutableHandle<JS::Value> rval)
 {
-  NS_ASSERTION(NPIdentifierIsInt(id) || NPIdentifierIsString(id),
+  NS_ASSERTION(NPIdentifierIsInt(npid) || NPIdentifierIsString(npid),
                "id must be either string or int!\n");
-  return ::JS_GetPropertyById(cx, obj, NPIdentifierToJSId(id), rval);
+  JS::Rooted<JSObject *> obj(cx, objArg);
+  JS::Rooted<jsid> id(cx, NPIdentifierToJSId(npid));
+  return ::JS_GetPropertyById(cx, obj, id, rval);
 }
 
 // static
@@ -621,64 +623,45 @@ doInvoke(NPObject *npobj, NPIdentifier method, const NPVariant *args,
 
   nsCxPusher pusher;
   pusher.Push(cx);
-  JSAutoCompartment ac(cx, npjsobj->mJSObj);
+  JS::Rooted<JSObject*> jsobj(cx, npjsobj->mJSObj);
+  JSAutoCompartment ac(cx, jsobj);
   JS::Rooted<JS::Value> fv(cx);
 
   AutoJSExceptionReporter reporter(cx);
 
   if (method != NPIdentifier_VOID) {
-    if (!GetProperty(cx, npjsobj->mJSObj, method, &fv) ||
+    if (!GetProperty(cx, jsobj, method, &fv) ||
         ::JS_TypeOfValue(cx, fv) != JSTYPE_FUNCTION) {
       return false;
     }
   } else {
-    fv = OBJECT_TO_JSVAL(npjsobj->mJSObj);
+    fv.setObject(*jsobj);
   }
 
-  JS::Value jsargs_buf[8];
-  JS::Value *jsargs = jsargs_buf;
-
-  if (argCount > (sizeof(jsargs_buf) / sizeof(JS::Value))) {
-    // Our stack buffer isn't large enough to hold all arguments,
-    // malloc a buffer.
-    jsargs = (JS::Value *)PR_Malloc(argCount * sizeof(JS::Value));
-    if (!jsargs) {
+  // Convert args
+  JS::AutoValueVector jsargs(cx);
+  if (!jsargs.reserve(argCount)) {
       ::JS_ReportOutOfMemory(cx);
-
       return false;
-    }
+  }
+  for (uint32_t i = 0; i < argCount; ++i) {
+    jsargs.infallibleAppend(NPVariantToJSVal(npp, cx, args + i));
   }
 
   JS::Rooted<JS::Value> v(cx);
-  bool ok;
+  bool ok = false;
 
-  {
-    JS::AutoArrayRooter tvr(cx, 0, jsargs);
+  if (ctorCall) {
+    JSObject *newObj =
+      ::JS_New(cx, jsobj, jsargs.length(), jsargs.begin());
 
-    // Convert args
-    for (uint32_t i = 0; i < argCount; ++i) {
-      jsargs[i] = NPVariantToJSVal(npp, cx, args + i);
-      tvr.changeLength(i + 1);
+    if (newObj) {
+      v.setObject(*newObj);
+      ok = true;
     }
-
-    if (ctorCall) {
-      JSObject *newObj =
-        ::JS_New(cx, npjsobj->mJSObj, argCount, jsargs);
-
-      if (newObj) {
-        v = OBJECT_TO_JSVAL(newObj);
-        ok = true;
-      } else {
-        ok = false;
-      }
-    } else {
-      ok = ::JS_CallFunctionValue(cx, npjsobj->mJSObj, fv, argCount, jsargs, v.address());
-    }
-
+  } else {
+    ok = ::JS_CallFunctionValue(cx, jsobj, fv, jsargs, &v);
   }
-
-  if (jsargs != jsargs_buf)
-    PR_Free(jsargs);
 
   if (ok)
     ok = JSValToNPVariant(npp, cx, v, result);
@@ -1606,7 +1589,7 @@ NPObjWrapper_NewResolve(JSContext *cx, JS::Handle<JSObject*> obj, JS::Handle<jsi
 static bool
 NPObjWrapper_Convert(JSContext *cx, JS::Handle<JSObject*> obj, JSType hint, JS::MutableHandle<JS::Value> vp)
 {
-  JS_ASSERT(hint == JSTYPE_NUMBER || hint == JSTYPE_STRING || hint == JSTYPE_VOID);
+  MOZ_ASSERT(hint == JSTYPE_NUMBER || hint == JSTYPE_STRING || hint == JSTYPE_VOID);
 
   // Plugins do not simply use JS_ConvertStub, and the default [[DefaultValue]]
   // behavior, because that behavior involves calling toString or valueOf on
@@ -1623,7 +1606,7 @@ NPObjWrapper_Convert(JSContext *cx, JS::Handle<JSObject*> obj, JSType hint, JS::
   if (!JS_GetProperty(cx, obj, "toString", &v))
     return false;
   if (!JSVAL_IS_PRIMITIVE(v) && JS_ObjectIsCallable(cx, JSVAL_TO_OBJECT(v))) {
-    if (!JS_CallFunctionValue(cx, obj, v, 0, nullptr, vp.address()))
+    if (!JS_CallFunctionValue(cx, obj, v, JS::EmptyValueArray, vp))
       return false;
     if (JSVAL_IS_PRIMITIVE(vp))
       return true;

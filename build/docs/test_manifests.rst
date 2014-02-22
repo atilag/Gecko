@@ -96,6 +96,12 @@ support-files
    ``data/*`` will match ``data/foo`` but not ``data/subdir/bar`` where
    ``data/**`` will match ``data/foo`` and ``data/subdir/bar``.
 
+   Support files starting with ``/`` are placed in a root directory, rather
+   than a location determined by the manifest location. For mochitests,
+   this allows for the placement of files at the server root. The source
+   file is selected from the base name (e.g., ``foo`` for ``/path/foo``).
+   Files starting with ``/`` cannot be selected using globbing.
+
 generated-files
    List of files that are generated as part of the build and don't exist in
    the source tree.
@@ -176,8 +182,16 @@ Files referenced by manifests are automatically installed into the object
 directory into paths defined in
 :py:func:`mozbuild.frontend.emitter.TreeMetadataEmitter._process_test_manifest`.
 
-Referenced files in the manifest not in the same directory tree as the manifest
-file are **not** installed.
+Relative paths resolving to parent directory (e.g.
+``support-files = ../foo.txt`` have special behavior.
+
+For ``support-files``, the file will be installed to the default destination
+for that manifest. Only the file's base name is used to construct the final
+path: directories are irrelevant.  Files starting with ``/`` are an exception,
+these are installed relative to the root of the destination; the base name is
+instead used to select the file..
+
+For all other entry types, the file installation is skipped.
 
 .. _reftest_manifests:
 

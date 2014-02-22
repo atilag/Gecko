@@ -1549,10 +1549,8 @@ function sendKeysToElement(msg) {
           keyCode = "VK_CLEAR";
           break;
         case '\uE006':
-          keyCode = "VK_RETURN";
-          break;
         case '\uE007':
-          keyCode = "VK_ENTER";
+          keyCode = "VK_RETURN";
           break;
         case '\uE008':
           keyCode = "VK_SHIFT";
@@ -2091,8 +2089,8 @@ function takeScreenshot(msg) {
   if (node == curFrame) {
     // node is a window
     win = node;
-    width = win.innerWidth;
-    height = win.innerHeight;
+    width = document.body.scrollWidth;
+    height = document.body.scrollHeight;
     top = 0;
     left = 0;
   }

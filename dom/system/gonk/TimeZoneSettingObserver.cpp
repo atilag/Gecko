@@ -89,7 +89,7 @@ public:
         ERR("Failed to get settingsLock service!");
         return NS_OK;
       }
-      settingsService->CreateLock(getter_AddRefs(lock));
+      settingsService->CreateLock(nullptr, getter_AddRefs(lock));
       JS::Rooted<JS::Value> value(cx, JS::StringValue(jsStr));
       lock->Set(TIME_TIMEZONE, value, nullptr, nullptr);
       return NS_OK;
@@ -135,7 +135,7 @@ TimeZoneSettingObserver::TimeZoneSettingObserver()
     ERR("Failed to get settingsLock service!");
     return;
   }
-  settingsService->CreateLock(getter_AddRefs(lock));
+  settingsService->CreateLock(nullptr, getter_AddRefs(lock));
   nsCOMPtr<nsISettingsServiceCallback> callback = new TimeZoneSettingCb();
   lock->Get(TIME_TIMEZONE, callback);
 }
@@ -209,9 +209,9 @@ TimeZoneSettingObserver::Observe(nsISupports *aSubject,
   }
 
   // Get the key, which should be the JS string "time.timezone".
-  JSObject &obj(val.toObject());
+  JS::Rooted<JSObject*> obj(cx, &val.toObject());
   JS::Rooted<JS::Value> key(cx);
-  if (!JS_GetProperty(cx, &obj, "key", &key) ||
+  if (!JS_GetProperty(cx, obj, "key", &key) ||
       !key.isString()) {
     return NS_OK;
   }
@@ -223,7 +223,7 @@ TimeZoneSettingObserver::Observe(nsISupports *aSubject,
 
   // Get the value, which should be a JS string like "America/Chicago".
   JS::Rooted<JS::Value> value(cx);
-  if (!JS_GetProperty(cx, &obj, "value", &value) ||
+  if (!JS_GetProperty(cx, obj, "value", &value) ||
       !value.isString()) {
     return NS_OK;
   }

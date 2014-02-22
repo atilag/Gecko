@@ -15,6 +15,17 @@ using namespace js::jit;
 
 using JS::DoubleNaNValue;
 
+static void
+EnsureOperandNotFloat32(TempAllocator &alloc, MInstruction *def, unsigned op)
+{
+    MDefinition *in = def->getOperand(op);
+    if (in->type() == MIRType_Float32) {
+        MToDouble *replace = MToDouble::New(alloc, in);
+        def->block()->insertBefore(def, replace);
+        def->replaceOperand(op, replace);
+    }
+}
+
 MDefinition *
 BoxInputsPolicy::boxAt(TempAllocator &alloc, MInstruction *at, MDefinition *operand)
 {
@@ -79,30 +90,6 @@ ArithPolicy::adjustInputs(TempAllocator &alloc, MInstruction *ins)
             replace = MToFloat32::New(alloc, in);
         else
             replace = MToInt32::New(alloc, in);
-
-        ins->block()->insertBefore(ins, replace);
-        ins->replaceOperand(i, replace);
-    }
-
-    return true;
-}
-
-bool
-BinaryStringPolicy::adjustInputs(TempAllocator &alloc, MInstruction *ins)
-{
-    for (size_t i = 0; i < 2; i++) {
-        MDefinition *in = ins->getOperand(i);
-        if (in->type() == MIRType_String)
-            continue;
-
-        MInstruction *replace = nullptr;
-        if (in->type() == MIRType_Int32 || in->type() == MIRType_Double) {
-            replace = MToString::New(alloc, in);
-        } else {
-            if (in->type() != MIRType_Value)
-                in = boxAt(alloc, ins, in);
-            replace = MUnbox::New(alloc, in, MIRType_String, MUnbox::Fallible);
-        }
 
         ins->block()->insertBefore(ins, replace);
         ins->replaceOperand(i, replace);
@@ -248,15 +235,16 @@ ComparePolicy::adjustInputs(TempAllocator &alloc, MInstruction *def)
                 (compare->compareType() == MCompare::Compare_Int32MaybeCoerceLHS && i == 0) ||
                 (compare->compareType() == MCompare::Compare_Int32MaybeCoerceRHS && i == 1))
             {
-                convert = MacroAssembler::IntConversion_Any;
+                convert = MacroAssembler::IntConversion_NumbersOrBoolsOnly;
             }
             if (convert == MacroAssembler::IntConversion_NumbersOnly) {
                 if (in->type() != MIRType_Int32 && in->type() != MIRType_Value)
                     in = boxAt(alloc, def, in);
             } else {
-                if (in->type() == MIRType_Undefined ||
-                    in->type() == MIRType_String ||
-                    in->type() == MIRType_Object)
+                MOZ_ASSERT(convert == MacroAssembler::IntConversion_NumbersOrBoolsOnly);
+                if (in->type() != MIRType_Int32 &&
+                    in->type() != MIRType_Boolean &&
+                    in->type() != MIRType_Value)
                 {
                     in = boxAt(alloc, def, in);
                 }
@@ -399,29 +387,53 @@ PowPolicy::adjustInputs(TempAllocator &alloc, MInstruction *ins)
 
 template <unsigned Op>
 bool
-StringPolicy<Op>::staticAdjustInputs(TempAllocator &alloc, MInstruction *def)
+StringPolicy<Op>::staticAdjustInputs(TempAllocator &alloc, MInstruction *ins)
 {
-    MDefinition *in = def->getOperand(Op);
+    MDefinition *in = ins->getOperand(Op);
     if (in->type() == MIRType_String)
         return true;
 
-    MInstruction *replace;
-    if (in->type() == MIRType_Int32 || in->type() == MIRType_Double) {
-        replace = MToString::New(alloc, in);
-    } else {
-        if (in->type() != MIRType_Value)
-            in = boxAt(alloc, def, in);
-        replace = MUnbox::New(alloc, in, MIRType_String, MUnbox::Fallible);
-    }
+    if (in->type() != MIRType_Value)
+        in = boxAt(alloc, ins, in);
 
-    def->block()->insertBefore(def, replace);
-    def->replaceOperand(Op, replace);
+    MUnbox *replace = MUnbox::New(alloc, in, MIRType_String, MUnbox::Fallible);
+    ins->block()->insertBefore(ins, replace);
+    ins->replaceOperand(Op, replace);
     return true;
 }
 
 template bool StringPolicy<0>::staticAdjustInputs(TempAllocator &alloc, MInstruction *ins);
 template bool StringPolicy<1>::staticAdjustInputs(TempAllocator &alloc, MInstruction *ins);
 template bool StringPolicy<2>::staticAdjustInputs(TempAllocator &alloc, MInstruction *ins);
+
+template <unsigned Op>
+bool
+ConvertToStringPolicy<Op>::staticAdjustInputs(TempAllocator &alloc, MInstruction *ins)
+{
+    MDefinition *in = ins->getOperand(Op);
+    if (in->type() == MIRType_String)
+        return true;
+
+    MInstruction *replace;
+    if (in->mightBeType(MIRType_Object)) {
+        if (in->type() != MIRType_Value)
+            in = boxAt(alloc, ins, in);
+
+        replace = MUnbox::New(alloc, in, MIRType_String, MUnbox::Fallible);
+    } else {
+        // TODO remove these two lines once 966957 has landed
+        EnsureOperandNotFloat32(alloc, ins, Op);
+        in = ins->getOperand(Op);
+        replace = MToString::New(alloc, in);
+    }
+
+    ins->block()->insertBefore(ins, replace);
+    ins->replaceOperand(Op, replace);
+    return true;
+}
+
+template bool ConvertToStringPolicy<0>::staticAdjustInputs(TempAllocator &alloc, MInstruction *ins);
+template bool ConvertToStringPolicy<1>::staticAdjustInputs(TempAllocator &alloc, MInstruction *ins);
 
 template <unsigned Op>
 bool
@@ -524,17 +536,6 @@ Float32Policy<Op>::staticAdjustInputs(TempAllocator &alloc, MInstruction *def)
 template bool Float32Policy<0>::staticAdjustInputs(TempAllocator &alloc, MInstruction *def);
 template bool Float32Policy<1>::staticAdjustInputs(TempAllocator &alloc, MInstruction *def);
 template bool Float32Policy<2>::staticAdjustInputs(TempAllocator &alloc, MInstruction *def);
-
-static void
-EnsureOperandNotFloat32(TempAllocator &alloc, MInstruction *def, unsigned op)
-{
-    MDefinition *in = def->getOperand(op);
-    if (in->type() == MIRType_Float32) {
-        MToDouble *replace = MToDouble::New(alloc, in);
-        def->block()->insertBefore(def, replace);
-        def->replaceOperand(op, replace);
-    }
-}
 
 template <unsigned Op>
 bool
@@ -733,22 +734,22 @@ StoreTypedArrayPolicy::adjustValueInput(TempAllocator &alloc, MInstruction *ins,
               value->type() == MIRType_Value);
 
     switch (arrayType) {
-      case ScalarTypeRepresentation::TYPE_INT8:
-      case ScalarTypeRepresentation::TYPE_UINT8:
-      case ScalarTypeRepresentation::TYPE_INT16:
-      case ScalarTypeRepresentation::TYPE_UINT16:
-      case ScalarTypeRepresentation::TYPE_INT32:
-      case ScalarTypeRepresentation::TYPE_UINT32:
+      case ScalarTypeDescr::TYPE_INT8:
+      case ScalarTypeDescr::TYPE_UINT8:
+      case ScalarTypeDescr::TYPE_INT16:
+      case ScalarTypeDescr::TYPE_UINT16:
+      case ScalarTypeDescr::TYPE_INT32:
+      case ScalarTypeDescr::TYPE_UINT32:
         if (value->type() != MIRType_Int32) {
             value = MTruncateToInt32::New(alloc, value);
             ins->block()->insertBefore(ins, value->toInstruction());
         }
         break;
-      case ScalarTypeRepresentation::TYPE_UINT8_CLAMPED:
+      case ScalarTypeDescr::TYPE_UINT8_CLAMPED:
         // IonBuilder should have inserted ClampToUint8.
         JS_ASSERT(value->type() == MIRType_Int32);
         break;
-      case ScalarTypeRepresentation::TYPE_FLOAT32:
+      case ScalarTypeDescr::TYPE_FLOAT32:
         if (LIRGenerator::allowFloat32Optimizations()) {
             if (value->type() != MIRType_Float32) {
                 value = MToFloat32::New(alloc, value);
@@ -758,7 +759,7 @@ StoreTypedArrayPolicy::adjustValueInput(TempAllocator &alloc, MInstruction *ins,
         }
         // Fallthrough: if the LIRGenerator cannot directly store Float32, it will expect the
         // stored value to be a double.
-      case ScalarTypeRepresentation::TYPE_FLOAT64:
+      case ScalarTypeDescr::TYPE_FLOAT64:
         if (value->type() != MIRType_Double) {
             value = MToDouble::New(alloc, value);
             ins->block()->insertBefore(ins, value->toInstruction());

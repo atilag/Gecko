@@ -81,6 +81,7 @@ public:
 class TextureSource : public RefCounted<TextureSource>
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_TYPENAME(TextureSource)
   TextureSource();
   virtual ~TextureSource();
 
@@ -411,6 +412,9 @@ public:
   // to forget about the shmem _without_ releasing it.
   virtual void OnShutdown() {}
 
+  // Forget buffer actor. Used only for hacky fix for bug 966446. 
+  virtual void ForgetBufferActor() {}
+
   virtual const char *Name() { return "TextureHost"; }
   virtual void PrintInfo(nsACString& aTo, const char* aPrefix);
 
@@ -441,6 +445,7 @@ public:
   ~BufferTextureHost();
 
   virtual uint8_t* GetBuffer() = 0;
+  virtual size_t GetBufferSize() = 0;
 
   virtual void Updated(const nsIntRegion* aRegion = nullptr) MOZ_OVERRIDE;
 
@@ -503,6 +508,8 @@ public:
 
   virtual uint8_t* GetBuffer() MOZ_OVERRIDE;
 
+  virtual size_t GetBufferSize() MOZ_OVERRIDE;
+
   virtual const char *Name() MOZ_OVERRIDE { return "ShmemTextureHost"; }
 
   virtual void OnShutdown() MOZ_OVERRIDE;
@@ -532,6 +539,8 @@ public:
   virtual void ForgetSharedData() MOZ_OVERRIDE;
 
   virtual uint8_t* GetBuffer() MOZ_OVERRIDE;
+
+  virtual size_t GetBufferSize() MOZ_OVERRIDE;
 
   virtual const char *Name() MOZ_OVERRIDE { return "MemoryTextureHost"; }
 

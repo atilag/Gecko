@@ -33,6 +33,7 @@ const PanelUI = {
     };
   },
 
+  _initialized: false,
   init: function() {
     for (let [k, v] of Iterator(this.kElements)) {
       // Need to do fresh let-bindings per iteration
@@ -46,6 +47,7 @@ const PanelUI = {
 
     this.menuButton.addEventListener("mousedown", this);
     this.menuButton.addEventListener("keypress", this);
+    this._initialized = true;
   },
 
   _eventListenersAdded: false,
@@ -61,7 +63,6 @@ const PanelUI = {
     }
 
     this.helpView.addEventListener("ViewShowing", this._onHelpViewShow, false);
-    this.helpView.addEventListener("ViewHiding", this._onHelpViewHide, false);
     this._eventListenersAdded = true;
   },
 
@@ -74,7 +75,6 @@ const PanelUI = {
       this.panel.removeEventListener(event, this);
     }
     this.helpView.removeEventListener("ViewShowing", this._onHelpViewShow);
-    this.helpView.removeEventListener("ViewHiding", this._onHelpViewHide);
     this.menuButton.removeEventListener("mousedown", this);
     this.menuButton.removeEventListener("keypress", this);
   },
@@ -167,9 +167,6 @@ const PanelUI = {
 
   handleEvent: function(aEvent) {
     switch (aEvent.type) {
-      case "command":
-        this.onCommandHandler(aEvent);
-        break;
       case "popupshowing":
         // Fall through
       case "popupshown":
@@ -206,6 +203,18 @@ const PanelUI = {
       return this._readyPromise;
     }
     this._readyPromise = Task.spawn(function() {
+      if (!this._initialized) {
+        let delayedStartupDeferred = Promise.defer();
+        let delayedStartupObserver = (aSubject, aTopic, aData) => {
+          if (aSubject == window) {
+            Services.obs.removeObserver(delayedStartupObserver, "browser-delayed-startup-finished");
+            delayedStartupDeferred.resolve();
+          }
+        };
+        Services.obs.addObserver(delayedStartupObserver, "browser-delayed-startup-finished", false);
+        yield delayedStartupDeferred.promise;
+      }
+
       this.contents.setAttributeNS("http://www.w3.org/XML/1998/namespace", "lang",
                                    getLocale());
       if (!this._scrollWidth) {
@@ -300,7 +309,7 @@ const PanelUI = {
       tempPanel.setAttribute("type", "arrow");
       tempPanel.setAttribute("id", "customizationui-widget-panel");
       tempPanel.setAttribute("class", "cui-widget-panel");
-      tempPanel.setAttribute("level", "top");
+      tempPanel.setAttribute("context", "");
       document.getElementById(CustomizableUI.AREA_NAVBAR).appendChild(tempPanel);
       // If the view has a footer, set a convenience class on the panel.
       tempPanel.classList.toggle("cui-widget-panelWithFooter",
@@ -308,6 +317,7 @@ const PanelUI = {
 
       let multiView = document.createElement("panelmultiview");
       tempPanel.appendChild(multiView);
+      multiView.setAttribute("mainViewIsSubView", "true");
       multiView.setMainView(viewNode);
       viewNode.classList.add("cui-widget-panelview");
       CustomizableUI.addPanelCloseListeners(tempPanel);
@@ -331,22 +341,6 @@ const PanelUI = {
 
       tempPanel.openPopup(iconAnchor || aAnchor, "bottomcenter topright");
     }
-  },
-
-  /**
-   * This function can be used as a command event listener for subviews
-   * so that the panel knows if and when to close itself.
-   */
-  onCommandHandler: function(aEvent) {
-    let closemenu = aEvent.originalTarget.getAttribute("closemenu");
-    if (closemenu == "none") {
-      return;
-    }
-    if (closemenu == "single") {
-      this.showMainView();
-      return;
-    }
-    this.hide();
   },
 
   /**
@@ -419,24 +413,17 @@ const PanelUI = {
       fragment.appendChild(button);
     }
     items.appendChild(fragment);
-
-    this.addEventListener("command", PanelUI);
-  },
-
-  _onHelpViewHide: function(aEvent) {
-    this.removeEventListener("command", PanelUI);
   },
 
   _updateQuitTooltip: function() {
 #ifndef XP_WIN
 #ifdef XP_MACOSX
     let tooltipId = "quit-button.tooltiptext.mac";
+#else
+    let tooltipId = "quit-button.tooltiptext.linux2";
+#endif
     let brands = Services.strings.createBundle("chrome://branding/locale/brand.properties");
     let stringArgs = [brands.GetStringFromName("brandShortName")];
-#else
-    let tooltipId = "quit-button.tooltiptext.linux";
-    let stringArgs = [];
-#endif
 
     let key = document.getElementById("key_quitApplication");
     stringArgs.push(ShortcutUtils.prettifyShortcut(key));

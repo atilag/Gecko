@@ -30,9 +30,16 @@
 #include "mozilla/layers/PCompositorChild.h"
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/Preferences.h"
-#if defined(MOZ_CONTENT_SANDBOX) && defined(XP_UNIX) && !defined(XP_MACOSX)
+
+#if defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_WIN)
+#define TARGET_SANDBOX_EXPORTS
+#include "mozilla/sandboxTarget.h"
+#elif defined(XP_UNIX) && !defined(XP_MACOSX)
 #include "mozilla/Sandbox.h"
 #endif
+#endif
+
 #include "mozilla/unused.h"
 
 #include "nsIConsoleListener.h"
@@ -54,6 +61,7 @@
 #include "nsHashPropertyBag.h"
 #include "nsLayoutStylesheetCache.h"
 #include "nsIJSRuntimeService.h"
+#include "nsThreadManager.h"
 
 #include "IHistory.h"
 #include "nsNetUtil.h"
@@ -91,6 +99,10 @@
 #define getpid _getpid
 #endif
 
+#ifdef MOZ_X11
+#include "mozilla/X11Util.h"
+#endif
+
 #ifdef ACCESSIBILITY
 #include "nsIAccessibilityService.h"
 #endif
@@ -122,6 +134,7 @@
 #include "AudioChannelService.h"
 #include "JavaScriptChild.h"
 #include "mozilla/dom/telephony/PTelephonyChild.h"
+#include "mozilla/dom/time/DateCacheCleaner.h"
 #include "mozilla/net/NeckoMessageUtils.h"
 
 using namespace base;
@@ -299,6 +312,15 @@ NS_IMPL_ISUPPORTS1(SystemMessageHandledObserver, nsIObserver)
 
 ContentChild* ContentChild::sSingleton;
 
+// Performs initialization that is not fork-safe, i.e. that must be done after
+// forking from the Nuwa process.
+static void
+InitOnContentProcessCreated()
+{
+    // This will register cross-process observer.
+    mozilla::dom::time::InitializeDateCacheCleaner();
+}
+
 ContentChild::ContentChild()
  : mID(uint64_t(-1))
 #ifdef ANDROID
@@ -340,8 +362,23 @@ ContentChild::Init(MessageLoop* aIOLoop,
 
     NS_ASSERTION(!sSingleton, "only one ContentChild per child");
 
+    // Once we start sending IPC messages, we need the thread manager to be
+    // initialized so we can deal with the responses. Do that here before we
+    // try to construct the crash reporter.
+    nsresult rv = nsThreadManager::get()->Init();
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+        return false;
+    }
+
     Open(aChannel, aParentHandle, aIOLoop);
     sSingleton = this;
+
+#ifdef MOZ_X11
+    // Send the parent our X socket to act as a proxy reference for our X
+    // resources.
+    int xSocketFd = ConnectionNumber(DefaultXDisplay());
+    SendBackUpXResources(FileDescriptor(xSocketFd));
+#endif
 
 #ifdef MOZ_CRASHREPORTER
     SendPCrashReporterConstructor(CrashReporter::CurrentThreadId(),
@@ -435,6 +472,10 @@ ContentChild::InitXPCOM()
     nsRefPtr<SystemMessageHandledObserver> sysMsgObserver =
         new SystemMessageHandledObserver();
     sysMsgObserver->Init();
+
+#ifndef MOZ_NUWA_PROCESS
+    InitOnContentProcessCreated();
+#endif
 }
 
 PMemoryReportRequestChild*
@@ -545,8 +586,9 @@ ContentChild::RecvDumpGCAndCCLogsToFile(const nsString& aIdentifier,
 {
     nsCOMPtr<nsIMemoryInfoDumper> dumper = do_GetService("@mozilla.org/memory-info-dumper;1");
 
+    nsString gcLogPath, ccLogPath;
     dumper->DumpGCAndCCLogsToFile(aIdentifier, aDumpAllTraces,
-                                  aDumpChildProcesses);
+                                  aDumpChildProcesses, gcLogPath, ccLogPath);
     return true;
 }
 
@@ -572,12 +614,17 @@ ContentChild::RecvSetProcessPrivileges(const ChildPrivileges& aPrivs)
                           aPrivs;
   // If this fails, we die.
   SetCurrentProcessPrivileges(privs);
-#if defined(MOZ_CONTENT_SANDBOX) && defined(XP_UNIX) && !defined(XP_MACOSX)
+
+#if defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_WIN)
+  mozilla::SandboxTarget::Instance()->StartSandbox();
+#else if defined(XP_UNIX) && !defined(XP_MACOSX)
   // SetCurrentProcessSandbox should be moved close to process initialization
   // time if/when possible. SetCurrentProcessPrivileges should probably be
   // moved as well. Right now this is set ONLY if we receive the
   // RecvSetProcessPrivileges message. See bug 880808.
   SetCurrentProcessSandbox();
+#endif
 #endif
   return true;
 }
@@ -938,6 +985,8 @@ PExternalHelperAppChild*
 ContentChild::AllocPExternalHelperAppChild(const OptionalURIParams& uri,
                                            const nsCString& aMimeContentType,
                                            const nsCString& aContentDisposition,
+                                           const uint32_t& aContentDispositionHint,
+                                           const nsString& aContentDispositionFilename,
                                            const bool& aForceSave,
                                            const int64_t& aContentLength,
                                            const OptionalURIParams& aReferrer,
@@ -1588,6 +1637,10 @@ public:
 
             toplevel = toplevel->getNext();
         }
+
+        // Perform other after-fork initializations.
+        InitOnContentProcessCreated();
+
         return NS_OK;
     }
 };

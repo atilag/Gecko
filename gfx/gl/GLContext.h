@@ -90,6 +90,7 @@ MOZ_BEGIN_ENUM_CLASS(GLFeature)
     element_index_uint,
     ES2_compatibility,
     ES3_compatibility,
+    frag_depth,
     framebuffer_blit,
     framebuffer_multisample,
     framebuffer_object,
@@ -107,6 +108,7 @@ MOZ_BEGIN_ENUM_CLASS(GLFeature)
     texture_float,
     texture_float_linear,
     texture_half_float,
+    texture_half_float_linear,
     texture_non_power_of_two,
     transform_feedback,
     vertex_array_object,
@@ -352,6 +354,7 @@ public:
         IMG_read_format,
         EXT_read_format_bgra,
         APPLE_client_storage,
+        APPLE_texture_range,
         ARB_texture_non_power_of_two,
         ARB_pixel_buffer_object,
         ARB_ES2_compatibility,
@@ -360,6 +363,7 @@ public:
         OES_texture_float_linear,
         ARB_texture_float,
         OES_texture_half_float,
+        OES_texture_half_float_linear,
         NV_half_float,
         EXT_unpack_subimage,
         OES_standard_derivatives,
@@ -406,6 +410,8 @@ public:
         ARB_framebuffer_sRGB,
         EXT_framebuffer_sRGB,
         KHR_debug,
+        ARB_half_float_pixel,
+        EXT_frag_depth,
         Extensions_Max,
         Extensions_End
     };
@@ -856,6 +862,12 @@ public:
         AFTER_GL_CALL;
     }
 
+    void fClientActiveTexture(GLenum texture) {
+        BEFORE_GL_CALL;
+        mSymbols.fClientActiveTexture(texture);
+        AFTER_GL_CALL;
+    }
+
     void fColorMask(realGLboolean red, realGLboolean green, realGLboolean blue, realGLboolean alpha) {
         BEFORE_GL_CALL;
         mSymbols.fColorMask(red, green, blue, alpha);
@@ -948,6 +960,12 @@ public:
         AFTER_GL_CALL;
     }
 
+    void fDisableClientState(GLenum capability) {
+        BEFORE_GL_CALL;
+        mSymbols.fDisableClientState(capability);
+        AFTER_GL_CALL;
+    }
+
     void fDisableVertexAttribArray(GLuint index) {
         BEFORE_GL_CALL;
         mSymbols.fDisableVertexAttribArray(index);
@@ -989,6 +1007,12 @@ public:
     void fEnable(GLenum capability) {
         BEFORE_GL_CALL;
         mSymbols.fEnable(capability);
+        AFTER_GL_CALL;
+    }
+
+    void fEnableClientState(GLenum capability) {
+        BEFORE_GL_CALL;
+        mSymbols.fEnableClientState(capability);
         AFTER_GL_CALL;
     }
 
@@ -1041,7 +1065,7 @@ public:
         AFTER_GL_CALL;
     }
 
-    GLint fGetAttribLocation (GLuint program, const GLchar* name) {
+    GLint fGetAttribLocation(GLuint program, const GLchar* name) {
         BEFORE_GL_CALL;
         GLint retval = mSymbols.fGetAttribLocation(program, name);
         AFTER_GL_CALL;
@@ -1156,7 +1180,7 @@ public:
         AFTER_GL_CALL;
     }
 
-    void fGetObjectPtrLabel(GLvoid* ptr, GLsizei bufSize, GLsizei* length, GLchar* label) {
+    void fGetObjectPtrLabel(const GLvoid* ptr, GLsizei bufSize, GLsizei* length, GLchar* label) {
         BEFORE_GL_CALL;
         ASSERT_SYMBOL_PRESENT(fGetObjectPtrLabel);
         mSymbols.fGetObjectPtrLabel(ptr, bufSize, length, label);
@@ -1187,7 +1211,7 @@ public:
         AFTER_GL_CALL;
     }
 
-    void fTexParameteriv(GLenum target, GLenum pname, GLint* params) {
+    void fTexParameteriv(GLenum target, GLenum pname, const GLint* params) {
         BEFORE_GL_CALL;
         mSymbols.fTexParameteriv(target, pname, params);
         AFTER_GL_CALL;
@@ -1221,13 +1245,13 @@ public:
         AFTER_GL_CALL;
     }
 
-    void fGetTexParameterfv(GLenum target, GLenum pname, const GLfloat *params) {
+    void fGetTexParameterfv(GLenum target, GLenum pname, GLfloat* params) {
         BEFORE_GL_CALL;
         mSymbols.fGetTexParameterfv(target, pname, params);
         AFTER_GL_CALL;
     }
 
-    void fGetTexParameteriv(GLenum target, GLenum pname, const GLint *params) {
+    void fGetTexParameteriv(GLenum target, GLenum pname, GLint* params) {
         BEFORE_GL_CALL;
         mSymbols.fGetTexParameteriv(target, pname, params);
         AFTER_GL_CALL;
@@ -1330,16 +1354,40 @@ public:
         AFTER_GL_CALL;
     }
 
-    void fObjectPtrLabel(GLvoid* ptr, GLsizei length, const GLchar* label) {
+    void fObjectPtrLabel(const GLvoid* ptr, GLsizei length, const GLchar* label) {
         BEFORE_GL_CALL;
         ASSERT_SYMBOL_PRESENT(fObjectPtrLabel);
         mSymbols.fObjectPtrLabel(ptr, length, label);
         AFTER_GL_CALL;
     }
 
+    void fLoadIdentity() {
+        BEFORE_GL_CALL;
+        mSymbols.fLoadIdentity();
+        AFTER_GL_CALL;
+    }
+
+    void fLoadMatrixf(const GLfloat *matrix) {
+        BEFORE_GL_CALL;
+        mSymbols.fLoadMatrixf(matrix);
+        AFTER_GL_CALL;
+    }
+
+    void fMatrixMode(GLenum mode) {
+        BEFORE_GL_CALL;
+        mSymbols.fMatrixMode(mode);
+        AFTER_GL_CALL;
+    }
+
     void fPixelStorei(GLenum pname, GLint param) {
         BEFORE_GL_CALL;
         mSymbols.fPixelStorei(pname, param);
+        AFTER_GL_CALL;
+    }
+
+    void fTextureRangeAPPLE(GLenum target, GLsizei length, GLvoid *pointer) {
+        BEFORE_GL_CALL;
+        mSymbols.fTextureRangeAPPLE(target, length, pointer);
         AFTER_GL_CALL;
     }
 
@@ -1455,6 +1503,24 @@ public:
     void fStencilOpSeparate(GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass) {
         BEFORE_GL_CALL;
         mSymbols.fStencilOpSeparate(face, sfail, dpfail, dppass);
+        AFTER_GL_CALL;
+    }
+
+    void fTexGeni(GLenum coord, GLenum pname, GLint param) {
+        BEFORE_GL_CALL;
+        mSymbols.fTexGeni(coord, pname, param);
+        AFTER_GL_CALL;
+    }
+
+    void fTexGenf(GLenum coord, GLenum pname, GLfloat param) {
+        BEFORE_GL_CALL;
+        mSymbols.fTexGenf(coord, pname, param);
+        AFTER_GL_CALL;
+    }
+
+    void fTexGenfv(GLenum coord, GLenum pname, const GLfloat *params) {
+        BEFORE_GL_CALL;
+        mSymbols.fTexGenfv(coord, pname, params);
         AFTER_GL_CALL;
     }
 
@@ -1661,6 +1727,12 @@ public:
     void fVertexAttrib4fv(GLuint index, const GLfloat* v) {
         BEFORE_GL_CALL;
         mSymbols.fVertexAttrib4fv(index, v);
+        AFTER_GL_CALL;
+    }
+
+    void fVertexPointer(GLint size, GLenum type, GLsizei stride, const GLvoid* pointer) {
+        BEFORE_GL_CALL;
+        mSymbols.fVertexPointer(size, type, stride, pointer);
         AFTER_GL_CALL;
     }
 
@@ -1950,25 +2022,25 @@ private:
         AFTER_GL_CALL;
     }
 
-    void GLAPIENTRY raw_fDeleteBuffers(GLsizei n, GLuint *names) {
+    void GLAPIENTRY raw_fDeleteBuffers(GLsizei n, const GLuint* names) {
         BEFORE_GL_CALL;
         mSymbols.fDeleteBuffers(n, names);
         AFTER_GL_CALL;
     }
 
-    void GLAPIENTRY raw_fDeleteFramebuffers(GLsizei n, GLuint *names) {
+    void GLAPIENTRY raw_fDeleteFramebuffers(GLsizei n, const GLuint* names) {
         BEFORE_GL_CALL;
         mSymbols.fDeleteFramebuffers(n, names);
         AFTER_GL_CALL;
     }
 
-    void GLAPIENTRY raw_fDeleteRenderbuffers(GLsizei n, GLuint *names) {
+    void GLAPIENTRY raw_fDeleteRenderbuffers(GLsizei n, const GLuint* names) {
         BEFORE_GL_CALL;
         mSymbols.fDeleteRenderbuffers(n, names);
         AFTER_GL_CALL;
     }
 
-    void GLAPIENTRY raw_fDeleteTextures(GLsizei n, GLuint *names) {
+    void GLAPIENTRY raw_fDeleteTextures(GLsizei n, const GLuint* names) {
         BEFORE_GL_CALL;
         mSymbols.fDeleteTextures(n, names);
         AFTER_GL_CALL;
@@ -1986,12 +2058,12 @@ public:
         TRACKING_CONTEXT(DeletedShader(this, shader));
     }
 
-    void fDeleteBuffers(GLsizei n, GLuint *names) {
+    void fDeleteBuffers(GLsizei n, const GLuint* names) {
         raw_fDeleteBuffers(n, names);
         TRACKING_CONTEXT(DeletedBuffers(this, n, names));
     }
 
-    void fDeleteFramebuffers(GLsizei n, GLuint *names) {
+    void fDeleteFramebuffers(GLsizei n, const GLuint* names) {
         if (mScreen) {
             // Notify mScreen which framebuffers we're deleting.
             // Otherwise, we will get framebuffer binding mispredictions.
@@ -2008,12 +2080,12 @@ public:
         TRACKING_CONTEXT(DeletedFramebuffers(this, n, names));
     }
 
-    void fDeleteRenderbuffers(GLsizei n, GLuint *names) {
+    void fDeleteRenderbuffers(GLsizei n, const GLuint* names) {
         raw_fDeleteRenderbuffers(n, names);
         TRACKING_CONTEXT(DeletedRenderbuffers(this, n, names));
     }
 
-    void fDeleteTextures(GLsizei n, GLuint *names) {
+    void fDeleteTextures(GLsizei n, const GLuint* names) {
         raw_fDeleteTextures(n, names);
         TRACKING_CONTEXT(DeletedTextures(this, n, names));
     }
@@ -2863,11 +2935,11 @@ public:
     void CreatedRenderbuffers(GLContext *aOrigin, GLsizei aCount, GLuint *aNames);
     void DeletedProgram(GLContext *aOrigin, GLuint aName);
     void DeletedShader(GLContext *aOrigin, GLuint aName);
-    void DeletedBuffers(GLContext *aOrigin, GLsizei aCount, GLuint *aNames);
+    void DeletedBuffers(GLContext *aOrigin, GLsizei aCount, const GLuint *aNames);
     void DeletedQueries(GLContext *aOrigin, GLsizei aCount, const GLuint *aNames);
-    void DeletedTextures(GLContext *aOrigin, GLsizei aCount, GLuint *aNames);
-    void DeletedFramebuffers(GLContext *aOrigin, GLsizei aCount, GLuint *aNames);
-    void DeletedRenderbuffers(GLContext *aOrigin, GLsizei aCount, GLuint *aNames);
+    void DeletedTextures(GLContext *aOrigin, GLsizei aCount, const GLuint *aNames);
+    void DeletedFramebuffers(GLContext *aOrigin, GLsizei aCount, const GLuint *aNames);
+    void DeletedRenderbuffers(GLContext *aOrigin, GLsizei aCount, const GLuint *aNames);
 
     void SharedContextDestroyed(GLContext *aChild);
     void ReportOutstandingNames();

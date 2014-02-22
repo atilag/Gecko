@@ -105,6 +105,7 @@ public:
   class DataConnectionListener : public SupportsWeakPtr<DataConnectionListener>
   {
   public:
+    MOZ_DECLARE_REFCOUNTED_TYPENAME(DataChannelConnection::DataConnectionListener)
     virtual ~DataConnectionListener() {}
 
     // Called when a the connection is open
@@ -189,7 +190,7 @@ public:
   friend class DataChannel;
   Mutex  mLock;
 
-  int32_t ReadBlob(uint16_t aStream, nsIInputStream* aBlob);
+  void ReadBlob(already_AddRefed<DataChannelConnection> aThis, uint16_t aStream, nsIInputStream* aBlob);
 
 protected:
   friend class DataChannelOnMessageAvailable;

@@ -124,7 +124,7 @@ class AndroidBridge MOZ_FINAL : public mozilla::layers::GeckoContentController
 public:
     enum {
         // Values for NotifyIME, in addition to values from the Gecko
-        // NotificationToIME enum; use negative values here to prevent conflict
+        // IMEMessage enum; use negative values here to prevent conflict
         NOTIFY_IME_OPEN_VKB = -2,
         NOTIFY_IME_REPLY_EVENT = -1,
     };
@@ -282,7 +282,7 @@ public:
     bool LockWindow(void *window, unsigned char **bits, int *width, int *height, int *format, int *stride);
     bool UnlockWindow(void *window);
     
-    void HandleGeckoMessage(const nsAString& message, nsAString &aRet);
+    void HandleGeckoMessage(const nsAString& message);
 
     bool InitCamera(const nsCString& contentType, uint32_t camera, uint32_t *width, uint32_t *height, uint32_t *fps);
 
@@ -431,10 +431,20 @@ public:
     NativePanZoomController* SetNativePanZoomController(jobject obj);
     // GeckoContentController methods
     void RequestContentRepaint(const mozilla::layers::FrameMetrics& aFrameMetrics) MOZ_OVERRIDE;
-    void HandleDoubleTap(const CSSIntPoint& aPoint, int32_t aModifiers) MOZ_OVERRIDE;
-    void HandleSingleTap(const CSSIntPoint& aPoint, int32_t aModifiers) MOZ_OVERRIDE;
-    void HandleLongTap(const CSSIntPoint& aPoint, int32_t aModifiers) MOZ_OVERRIDE;
-    void HandleLongTapUp(const CSSIntPoint& aPoint, int32_t aModifiers) MOZ_OVERRIDE;
+    void AcknowledgeScrollUpdate(const mozilla::layers::FrameMetrics::ViewID& aScrollId,
+                                 const uint32_t& aScrollGeneration) MOZ_OVERRIDE;
+    void HandleDoubleTap(const CSSIntPoint& aPoint,
+                         int32_t aModifiers,
+                         const mozilla::layers::ScrollableLayerGuid& aGuid) MOZ_OVERRIDE;
+    void HandleSingleTap(const CSSIntPoint& aPoint,
+                         int32_t aModifiers,
+                         const mozilla::layers::ScrollableLayerGuid& aGuid) MOZ_OVERRIDE;
+    void HandleLongTap(const CSSIntPoint& aPoint,
+                       int32_t aModifiers,
+                       const mozilla::layers::ScrollableLayerGuid& aGuid) MOZ_OVERRIDE;
+    void HandleLongTapUp(const CSSIntPoint& aPoint,
+                         int32_t aModifiers,
+                         const mozilla::layers::ScrollableLayerGuid& aGuid) MOZ_OVERRIDE;
     void SendAsyncScrollDOMEvent(bool aIsRoot,
                                  const CSSRect& aContentRect,
                                  const CSSSize& aScrollableSize) MOZ_OVERRIDE;

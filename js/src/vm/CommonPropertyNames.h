@@ -17,7 +17,9 @@
     macro(apply, apply, "apply") \
     macro(arguments, arguments, "arguments") \
     macro(as, as, "as") \
+    macro(ArrayIteratorNext, ArrayIteratorNext, "ArrayIteratorNext") \
     macro(ArrayType, ArrayType, "ArrayType") \
+    macro(ArrayValues, ArrayValues, "ArrayValues") \
     macro(buffer, buffer, "buffer") \
     macro(builder, builder, "builder") \
     macro(byteLength, byteLength, "byteLength") \
@@ -46,6 +48,7 @@
     macro(DateTimeFormatFormatGet, DateTimeFormatFormatGet, "Intl_DateTimeFormat_format_get") \
     macro(decodeURI, decodeURI, "decodeURI") \
     macro(decodeURIComponent, decodeURIComponent, "decodeURIComponent") \
+    macro(DescrToSource, DescrToSource, "DescrToSource") \
     macro(default_, default_, "default") \
     macro(defineProperty, defineProperty, "defineProperty") \
     macro(defineGetter, defineGetter, "__defineGetter__") \
@@ -64,7 +67,6 @@
     macro(escape, escape, "escape") \
     macro(eval, eval, "eval") \
     macro(false, false_, "false") \
-    macro(fieldNames, fieldNames, "fieldNames") \
     macro(fieldOffsets, fieldOffsets, "fieldOffsets") \
     macro(fieldTypes, fieldTypes, "fieldTypes") \
     macro(fileName, fileName, "fileName") \
@@ -129,8 +131,14 @@
     macro(NumberFormat, NumberFormat, "NumberFormat") \
     macro(NumberFormatFormatGet, NumberFormatFormatGet, "Intl_NumberFormat_format_get") \
     macro(numeric, numeric, "numeric") \
+    macro(objectArray, objectArray, "[object Array]") \
+    macro(objectFunction, objectFunction, "[object Function]") \
     macro(objectNull, objectNull, "[object Null]") \
+    macro(objectNumber, objectNumber, "[object Number]") \
+    macro(objectObject, objectObject, "[object Object]") \
+    macro(objectString, objectString, "[object String]") \
     macro(objectUndefined, objectUndefined, "[object Undefined]") \
+    macro(objectWindow, objectWindow, "[object Window]") \
     macro(of, of, "of") \
     macro(offset, offset, "offset") \
     macro(outOfMemory, outOfMemory, "out of memory") \

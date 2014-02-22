@@ -25,6 +25,7 @@
  */
 
 class JSFreeOp;
+struct JSFunctionSpec;
 
 namespace js {
 
@@ -75,8 +76,8 @@ class SpecialId
     SpecialId(JSObject &obj)
       : bits_(uintptr_t(&obj) | TYPE_OBJECT)
     {
-        JS_ASSERT(&obj != nullptr);
-        JS_ASSERT((uintptr_t(&obj) & TYPE_MASK) == 0);
+        MOZ_ASSERT(&obj != nullptr);
+        MOZ_ASSERT((uintptr_t(&obj) & TYPE_MASK) == 0);
     }
 
     bool isObject() const {
@@ -84,7 +85,7 @@ class SpecialId
     }
 
     JSObject *toObject() const {
-        JS_ASSERT(isObject());
+        MOZ_ASSERT(isObject());
         return reinterpret_cast<JSObject *>(bits_ & ~TYPE_MASK);
     }
 
@@ -92,7 +93,7 @@ class SpecialId
 
     static SpecialId empty() {
         SpecialId sid(TYPE_OBJECT);
-        JS_ASSERT(sid.isEmpty());
+        MOZ_ASSERT(sid.isEmpty());
         return sid;
     }
 
@@ -104,7 +105,7 @@ class SpecialId
 
     static SpecialId voidId() {
         SpecialId sid(TYPE_VOID);
-        JS_ASSERT(sid.isVoid());
+        MOZ_ASSERT(sid.isVoid());
         return sid;
     }
 
@@ -118,9 +119,9 @@ SPECIALID_TO_JSID(const SpecialId &sid)
 {
     jsid id;
     JSID_BITS(id) = sid.bits_;
-    JS_ASSERT_IF(sid.isObject(), JSID_IS_OBJECT(id) && JSID_TO_OBJECT(id) == sid.toObject());
-    JS_ASSERT_IF(sid.isVoid(), JSID_IS_VOID(id));
-    JS_ASSERT_IF(sid.isEmpty(), JSID_IS_EMPTY(id));
+    MOZ_ASSERT_IF(sid.isObject(), JSID_IS_OBJECT(id) && JSID_TO_OBJECT(id) == sid.toObject());
+    MOZ_ASSERT_IF(sid.isVoid(), JSID_IS_VOID(id));
+    MOZ_ASSERT_IF(sid.isEmpty(), JSID_IS_EMPTY(id));
     return id;
 }
 
@@ -133,12 +134,12 @@ JSID_IS_SPECIAL(jsid id)
 static MOZ_ALWAYS_INLINE SpecialId
 JSID_TO_SPECIALID(jsid id)
 {
-    JS_ASSERT(JSID_IS_SPECIAL(id));
+    MOZ_ASSERT(JSID_IS_SPECIAL(id));
     if (JSID_IS_OBJECT(id))
         return SpecialId(*JSID_TO_OBJECT(id));
     if (JSID_IS_EMPTY(id))
         return SpecialId::empty();
-    JS_ASSERT(JSID_IS_VOID(id));
+    MOZ_ASSERT(JSID_IS_VOID(id));
     return SpecialId::voidId();
 }
 
@@ -416,6 +417,23 @@ struct ClassSizeMeasurement
     JS_CLASS_MEMBERS;
 };
 
+// Callback for the creation of constructor and prototype objects.
+typedef JSObject *(*ClassObjectCreationOp)(JSContext *cx, JSProtoKey key);
+
+// Callback for custom post-processing after class initialization via ClassSpec.
+typedef bool (*FinishClassInitOp)(JSContext *cx, JS::HandleObject ctor,
+                                  JS::HandleObject proto);
+
+struct ClassSpec
+{
+    ClassObjectCreationOp createConstructor;
+    ClassObjectCreationOp createPrototype;
+    const JSFunctionSpec *constructorFunctions;
+    const JSFunctionSpec *prototypeFunctions;
+    FinishClassInitOp finishInit;
+    bool defined() const { return !!createConstructor; }
+};
+
 struct ClassExtension
 {
     JSObjectOp          outerObject;
@@ -442,6 +460,7 @@ struct ClassExtension
     JSWeakmapKeyDelegateOp weakmapKeyDelegateOp;
 };
 
+#define JS_NULL_CLASS_SPEC  {nullptr,nullptr,nullptr,nullptr,nullptr}
 #define JS_NULL_CLASS_EXT   {nullptr,nullptr,nullptr,false,nullptr}
 
 struct ObjectOps
@@ -564,7 +583,7 @@ struct JSClass {
 // with the following flags. Failure to use JSCLASS_GLOBAL_FLAGS was
 // previously allowed, but is now an ES5 violation and thus unsupported.
 //
-#define JSCLASS_GLOBAL_SLOT_COUNT      (3 + JSProto_LIMIT * 3 + 30)
+#define JSCLASS_GLOBAL_SLOT_COUNT      (3 + JSProto_LIMIT * 3 + 31)
 #define JSCLASS_GLOBAL_FLAGS_WITH_SLOTS(n)                                    \
     (JSCLASS_IS_GLOBAL | JSCLASS_HAS_RESERVED_SLOTS(JSCLASS_GLOBAL_SLOT_COUNT + (n)))
 #define JSCLASS_GLOBAL_FLAGS                                                  \
@@ -592,9 +611,11 @@ namespace js {
 struct Class
 {
     JS_CLASS_MEMBERS;
+    ClassSpec          spec;
     ClassExtension      ext;
     ObjectOps           ops;
     uint8_t             pad[sizeof(JSClass) - sizeof(ClassSizeMeasurement) -
+                            sizeof(ClassSpec) -
                             sizeof(ClassExtension) - sizeof(ObjectOps)];
 
     /* Class is not native and its map is not a scope. */

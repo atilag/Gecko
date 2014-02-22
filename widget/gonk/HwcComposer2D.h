@@ -34,7 +34,7 @@ class Layer;
 //Holds a dynamically allocated vector of rectangles
 //used to decribe the complex visible region of a layer
 typedef std::vector<hwc_rect_t> RectVector;
-#if ANDROID_VERSION >= 18
+#if ANDROID_VERSION >= 17
 typedef hwc_composer_device_1_t HwcDevice;
 typedef hwc_display_contents_1_t HwcList;
 typedef hwc_layer_1_t HwcLayer;
@@ -70,6 +70,7 @@ private:
     bool ReallocLayerList();
     bool PrepareLayerList(layers::Layer* aContainer, const nsIntRect& aClip,
           const gfxMatrix& aParentTransform, const gfxMatrix& aGLWorldTransform);
+    void setCrop(HwcLayer* layer, hwc_rect_t srcCrop);
 
     HwcDevice*              mHwc;
     HwcList*                mList;

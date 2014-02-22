@@ -33,8 +33,8 @@
 /* We want a 4px gap between the TabsToolbar and the toolbar-menubar when the
    toolbar-menu is displayed, and a 16px gap when it is not. 1px is taken care
    of by the (light) outer shadow of the tab, the remaining 3/15 are these margins. */
-#toolbar-menubar:not([autohide="true"]) ~ #TabsToolbar,
-#toolbar-menubar[autohide="true"]:not([inactive]) ~ #TabsToolbar {
+#toolbar-menubar:not([moz-collapsed=true]):not([autohide=true]) ~ #TabsToolbar,
+#toolbar-menubar:not([moz-collapsed=true])[autohide=true]:not([inactive]) ~ #TabsToolbar {
   margin-top: 3px;
 }
 
@@ -318,6 +318,51 @@ toolbarpaletteitem[place="palette"] > #personal-bookmarks > #bookmarks-toolbar-p
   list-style-image: url("chrome://browser/skin/places/bookmarksToolbar-menuPanel.png") !important;
 }
 
+/* ----- BOOKMARK STAR ANIMATION ----- */
+
+@keyframes animation-bookmarkAdded {
+  from { transform: rotate(0deg) translateX(-16px) rotate(0deg) scale(1); opacity: 0; }
+  60%  { transform: rotate(180deg) translateX(-16px) rotate(-180deg) scale(2.2); opacity: 1; }
+  80%  { opacity: 1; }
+  to   { transform: rotate(180deg) translateX(-16px) rotate(-180deg) scale(1); opacity: 0; }
+}
+
+@keyframes animation-bookmarkPulse {
+  from { transform: scale(1); }
+  50%  { transform: scale(1.3); }
+  to   { transform: scale(1); }
+}
+
+#bookmarked-notification-container {
+  min-height: 1px;
+  min-width: 1px;
+  height: 1px;
+  margin-bottom: -1px;
+  z-index: 5;
+  position: relative;
+}
+
+#bookmarked-notification {
+  background-size: 16px;
+  background-position: center;
+  background-repeat: no-repeat;
+  width: 16px;
+  height: 16px;
+  opacity: 0;
+}
+
+#bookmarked-notification-anchor[notification="finish"] > #bookmarked-notification {
+  background-image: url("chrome://browser/skin/places/bookmarks-notification-finish.png");
+  animation: animation-bookmarkAdded 800ms;
+  animation-timing-function: ease ease ease linear;
+}
+
+#bookmarks-menu-button[notification="finish"] > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon {
+  animation: animation-bookmarkPulse 300ms;
+  animation-delay: 600ms;
+  animation-timing-function: ease-out;
+}
+
 /* ::::: bookmark menus ::::: */
 
 menu.bookmark-item,
@@ -451,6 +496,11 @@ menuitem.bookmark-item {
   -moz-box-pack: center;
 }
 
+#nav-bar #PanelUI-menu-button {
+  -moz-padding-start: 7px;
+  -moz-padding-end: 5px;
+}
+
 #nav-bar .toolbarbutton-1[type=menu]:not(#back-button):not(#forward-button):not(#feed-button):not(#social-provider-button):not(#PanelUI-menu-button) {
   padding-left: 5px;
   padding-right: 5px;
@@ -458,6 +508,10 @@ menuitem.bookmark-item {
 
 #nav-bar .toolbarbutton-1 > menupopup {
   margin-top: -3px;
+}
+
+#nav-bar .toolbarbutton-1 > menupopup.cui-widget-panel {
+  margin-top: -8px;
 }
 
 #nav-bar .toolbarbutton-1 > .toolbarbutton-menubutton-button {
@@ -490,6 +544,16 @@ menuitem.bookmark-item {
 #nav-bar .toolbarbutton-1:not(:-moz-any(@primaryToolbarButtons@)) > .toolbarbutton-badge-container,
 #nav-bar .toolbarbutton-1:not(:-moz-any(@primaryToolbarButtons@)) > .toolbarbutton-menubutton-button > .toolbarbutton-icon {
   padding: 3px 7px;
+}
+
+/* Help SDK icons fit: */
+toolbarbutton[sdk-button="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
+  width: 16px;
+}
+
+#nav-bar toolbarbutton[sdk-button="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
+  /* XXXgijs box models strike again: this is 16px + 2 * 7px padding + 2 * 1px border (from the rules above) */
+  width: 32px;
 }
 
 #nav-bar .toolbarbutton-1[type=menu]:not(#back-button):not(#forward-button):not(#feed-button):not(#social-provider-button):not(#PanelUI-menu-button) > .toolbarbutton-icon,
@@ -909,7 +973,6 @@ html|*.urlbar-input:-moz-lwtheme::-moz-placeholder,
 
 .urlbar-input-box {
   -moz-margin-start: 0;
-  min-width: 4em;
 }
 
 #urlbar-icons {
@@ -1421,7 +1484,7 @@ toolbarbutton[type="socialmark"] > .toolbarbutton-icon {
 }
 
 .panel-promo-box {
-  margin: 10px -10px -10px;
+  margin: 10px -4px -4px;
   padding: 8px 10px;
   border-top: 1px solid ThreeDShadow;
   background-image: linear-gradient(hsla(0,0%,0%,.15), hsla(0,0%,0%,.08) 6px);
@@ -1479,7 +1542,7 @@ toolbarbutton[type="socialmark"] > .toolbarbutton-icon {
   padding: 0;
 }
 
-#TabsToolbar:not(:-moz-lwtheme) {
+#main-window:not([customizing]) #TabsToolbar:not(:-moz-lwtheme) {
   background-image: linear-gradient(to top, @toolbarShadowColor@ 2px, rgba(0,0,0,.05) 2px, transparent 50%);
 }
 
@@ -1530,10 +1593,6 @@ toolbarbutton[type="socialmark"] > .toolbarbutton-icon {
 
 .tab-close-button:not(:hover):not([selected="true"]):-moz-lwtheme-brighttext {
   -moz-image-region: rect(0, 64px, 16px, 48px) !important;
-}
-
-#main-window[tabsintitlebar]:not([inFullscreen]) .tabbrowser-tab:not([selected]):not(:-moz-lwtheme) {
-  color: CaptionText;
 }
 
 /* tabbrowser-tab focus ring */
@@ -2144,10 +2203,6 @@ toolbarbutton.bookmark-item[dragover="true"][open="true"] {
 
 /* Sync Panel */
 
-.sync-panel {
-  padding: 10px;
-}
-
 .sync-panel-icon {
   width: 32px;
   background: url("chrome://browser/content/abouthome/sync.png") top left no-repeat;
@@ -2162,7 +2217,8 @@ toolbarbutton.bookmark-item[dragover="true"][open="true"] {
   margin-top: 1em;
 }
 
-#sync-error-panel-title {
+#sync-error-panel-title,
+#sync-start-panel-title {
   font-weight: bold;
 }
 
@@ -2328,8 +2384,7 @@ toolbarpaletteitem[place="palette"] > #switch-to-metro-button {
 #servicesInstall-notification-icon {
   list-style-image: url(chrome://browser/skin/social/services-16.png);
 }
-#social-undoactivation-button,
-#servicesInstall-learnmore-link {
+#social-undoactivation-button {
   -moz-margin-start: 0; /* override default label margin to match description margin */
 }
 
@@ -2441,14 +2496,15 @@ chatbox {
   background-attachment: fixed;
 }
 
-#main-window:-moz-any([customize-entering],[customize-entered]) #tab-view-deck {
-  padding: 0 2em 2em;
-}
-
 #customization-container {
   border-left: 1px solid @toolbarShadowColor@;
   border-right: 1px solid @toolbarShadowColor@;
   background-clip: padding-box;
+}
+
+#main-window[customizing] #navigator-toolbox::after {
+  margin-left: 2em;
+  margin-right: 2em;
 }
 
 /* End customization mode */

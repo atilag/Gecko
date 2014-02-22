@@ -99,33 +99,29 @@ bool xpc_IsReportableErrorCode(nsresult code)
 }
 
 // static
-nsresult
-nsXPCWrappedJSClass::GetNewOrUsed(JSContext* cx, REFNSIID aIID,
-                                  nsXPCWrappedJSClass** resultClazz)
+already_AddRefed<nsXPCWrappedJSClass>
+nsXPCWrappedJSClass::GetNewOrUsed(JSContext* cx, REFNSIID aIID)
 {
-    nsXPCWrappedJSClass* clazz = nullptr;
     XPCJSRuntime* rt = nsXPConnect::GetRuntimeInstance();
-
     IID2WrappedJSClassMap* map = rt->GetWrappedJSClassMap();
-    clazz = map->Find(aIID);
-    NS_IF_ADDREF(clazz);
+    nsRefPtr<nsXPCWrappedJSClass> clasp = map->Find(aIID);
 
-    if (!clazz) {
+    if (!clasp) {
         nsCOMPtr<nsIInterfaceInfo> info;
         nsXPConnect::XPConnect()->GetInfoForIID(&aIID, getter_AddRefs(info));
         if (info) {
             bool canScript, isBuiltin;
             if (NS_SUCCEEDED(info->IsScriptable(&canScript)) && canScript &&
                 NS_SUCCEEDED(info->IsBuiltinClass(&isBuiltin)) && !isBuiltin &&
-                nsXPConnect::IsISupportsDescendant(info)) {
-                clazz = new nsXPCWrappedJSClass(cx, aIID, info);
-                if (clazz && !clazz->mDescriptors)
-                    NS_RELEASE(clazz);  // sets clazz to nullptr
+                nsXPConnect::IsISupportsDescendant(info))
+            {
+                clasp = new nsXPCWrappedJSClass(cx, aIID, info);
+                if (!clasp->mDescriptors)
+                    clasp = nullptr;
             }
         }
     }
-    *resultClazz = clazz;
-    return NS_OK;
+    return clasp.forget();
 }
 
 nsXPCWrappedJSClass::nsXPCWrappedJSClass(JSContext* cx, REFNSIID aIID,
@@ -136,9 +132,6 @@ nsXPCWrappedJSClass::nsXPCWrappedJSClass(JSContext* cx, REFNSIID aIID,
       mIID(aIID),
       mDescriptors(nullptr)
 {
-    NS_ADDREF(mInfo);
-    NS_ADDREF_THIS();
-
     mRuntime->GetWrappedJSClassMap()->Add(this);
 
     uint16_t methodCount;
@@ -177,7 +170,6 @@ nsXPCWrappedJSClass::~nsXPCWrappedJSClass()
 
     if (mName)
         nsMemory::Free(mName);
-    NS_IF_RELEASE(mInfo);
 }
 
 JSObject*
@@ -190,7 +182,6 @@ nsXPCWrappedJSClass::CallQueryInterfaceOnJSObject(JSContext* cx,
     RootedValue retval(cx);
     RootedObject retObj(cx);
     bool success = false;
-    jsid funid;
     RootedValue fun(cx);
 
     // Don't call the actual function on a content object. We'll determine
@@ -210,7 +201,7 @@ nsXPCWrappedJSClass::CallQueryInterfaceOnJSObject(JSContext* cx,
         return nullptr;
 
     // check upfront for the existence of the function property
-    funid = mRuntime->GetStringID(XPCJSRuntime::IDX_QUERY_INTERFACE);
+    HandleId funid = mRuntime->GetStringID(XPCJSRuntime::IDX_QUERY_INTERFACE);
     if (!JS_GetPropertyById(cx, jsobj, funid, &fun) || JSVAL_IS_PRIMITIVE(fun))
         return nullptr;
 
@@ -240,8 +231,8 @@ nsXPCWrappedJSClass::CallQueryInterfaceOnJSObject(JSContext* cx,
         {
             AutoSaveContextOptions asco(cx);
             ContextOptionsRef(cx).setDontReportUncaught(true);
-            jsval args[1] = {OBJECT_TO_JSVAL(id)};
-            success = JS_CallFunctionValue(cx, jsobj, fun, 1, args, retval.address());
+            RootedValue arg(cx, JS::ObjectValue(*id));
+            success = JS_CallFunctionValue(cx, jsobj, fun, arg, &retval);
         }
 
         if (!success && JS_IsExceptionPending(cx)) {
@@ -294,8 +285,8 @@ nsXPCWrappedJSClass::CallQueryInterfaceOnJSObject(JSContext* cx,
 
 static bool
 GetNamedPropertyAsVariantRaw(XPCCallContext& ccx,
-                             JSObject* aJSObj,
-                             jsid aName,
+                             HandleObject aJSObj,
+                             HandleId aName,
                              nsIVariant** aResult,
                              nsresult* pErr)
 {
@@ -420,7 +411,8 @@ NS_IMETHODIMP xpcProperty::GetName(nsAString & aName)
 /* readonly attribute nsIVariant value; */
 NS_IMETHODIMP xpcProperty::GetValue(nsIVariant * *aValue)
 {
-    NS_ADDREF(*aValue = mValue);
+    nsCOMPtr<nsIVariant> rval = mValue;
+    rval.forget(aValue);
     return NS_OK;
 }
 
@@ -1290,7 +1282,7 @@ pre_call_clean_up:
             AutoSaveContextOptions asco(cx);
             ContextOptionsRef(cx).setDontReportUncaught(true);
 
-            success = JS_CallFunctionValue(cx, thisObj, fval, argc, argv, rval.address());
+            success = JS_CallFunctionValue(cx, thisObj, fval, args, &rval);
         } else {
             // The property was not an object so can't be a function.
             // Let's build and 'throw' an exception.
@@ -1359,11 +1351,15 @@ pre_call_clean_up:
 
         if (param.IsRetval())
             val = rval;
-        else if (JSVAL_IS_PRIMITIVE(argv[i]) ||
-                 !JS_GetPropertyById(cx, JSVAL_TO_OBJECT(argv[i]),
-                                     mRuntime->GetStringID(XPCJSRuntime::IDX_VALUE),
-                                     &val))
+        else if (argv[i].isPrimitive())
             break;
+        else {
+            RootedObject obj(cx, &argv[i].toObject());
+            if (!JS_GetPropertyById(cx, obj,
+                                    mRuntime->GetStringID(XPCJSRuntime::IDX_VALUE),
+                                    &val))
+                break;
+        }
 
         // setup allocator and/or iid
 
@@ -1404,10 +1400,13 @@ pre_call_clean_up:
 
             if (param.IsRetval())
                 val = rval;
-            else if (!JS_GetPropertyById(cx, JSVAL_TO_OBJECT(argv[i]),
-                                         mRuntime->GetStringID(XPCJSRuntime::IDX_VALUE),
-                                         &val))
-                break;
+            else {
+                RootedObject obj(cx, &argv[i].toObject());
+                if (!JS_GetPropertyById(cx, obj,
+                                        mRuntime->GetStringID(XPCJSRuntime::IDX_VALUE),
+                                        &val))
+                    break;
+            }
 
             // setup allocator and/or iid
 
@@ -1556,7 +1555,7 @@ nsXPCWrappedJSClass::DebugDump(int16_t depth)
         XPC_LOG_ALWAYS(("IID number is %s", iid ? iid : "invalid"));
         if (iid)
             NS_Free(iid);
-        XPC_LOG_ALWAYS(("InterfaceInfo @ %x", mInfo));
+        XPC_LOG_ALWAYS(("InterfaceInfo @ %x", mInfo.get()));
         uint16_t methodCount = 0;
         if (depth) {
             uint16_t i;

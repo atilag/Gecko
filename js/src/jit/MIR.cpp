@@ -571,7 +571,7 @@ void
 MLoadTypedArrayElement::printOpcode(FILE *fp) const
 {
     MDefinition::printOpcode(fp);
-    fprintf(fp, " %s", ScalarTypeRepresentation::typeName(arrayType()));
+    fprintf(fp, " %s", ScalarTypeDescr::typeName(arrayType()));
 }
 
 void
@@ -672,10 +672,7 @@ MCall::New(TempAllocator &alloc, JSFunction *target, size_t maxArgc, size_t numA
 AliasSet
 MCallDOMNative::getAliasSet() const
 {
-    JS_ASSERT(getSingleTarget() && getSingleTarget()->isNative());
-
-    const JSJitInfo *jitInfo = getSingleTarget()->jitInfo();
-    JS_ASSERT(jitInfo);
+    const JSJitInfo *jitInfo = getJitInfo();
 
     JS_ASSERT(jitInfo->aliasSet() != JSJitInfo::AliasNone);
     // If we don't know anything about the types of our arguments, we have to
@@ -723,10 +720,7 @@ MCallDOMNative::computeMovable()
     // We are movable if the jitinfo says we can be and if we're also not
     // effectful.  The jitinfo can't check for the latter, since it depends on
     // the types of our arguments.
-    JS_ASSERT(getSingleTarget() && getSingleTarget()->isNative());
-
-    const JSJitInfo *jitInfo = getSingleTarget()->jitInfo();
-    JS_ASSERT(jitInfo);
+    const JSJitInfo *jitInfo = getJitInfo();
 
     JS_ASSERT_IF(jitInfo->isMovable,
                  jitInfo->aliasSet() != JSJitInfo::AliasEverything);
@@ -770,6 +764,17 @@ MCallDOMNative::congruentTo(MDefinition *ins) const
     return true;
 }
 
+const JSJitInfo *
+MCallDOMNative::getJitInfo() const
+{
+    JS_ASSERT(getSingleTarget() && getSingleTarget()->isNative());
+
+    const JSJitInfo *jitInfo = getSingleTarget()->jitInfo();
+    JS_ASSERT(jitInfo);
+
+    return jitInfo;
+}
+
 MApplyArgs *
 MApplyArgs::New(TempAllocator &alloc, JSFunction *target, MDefinition *fun, MDefinition *argc,
                 MDefinition *self)
@@ -783,8 +788,6 @@ MStringLength::foldsTo(TempAllocator &alloc, bool useValueNumbers)
     if ((type() == MIRType_Int32) && (string()->isConstant())) {
         Value value = string()->toConstant()->value();
         JSAtom *atom = &value.toString()->asAtom();
-
-        AutoThreadSafeAccess ts(atom);
         return MConstant::New(alloc, Int32Value(atom->length()));
     }
 
@@ -2602,7 +2605,6 @@ MBeta::printOpcode(FILE *fp) const
 bool
 MNewObject::shouldUseVM() const
 {
-    AutoThreadSafeAccess ts(templateObject());
     return templateObject()->hasSingletonType() ||
            templateObject()->hasDynamicSlots();
 }
@@ -2921,7 +2923,7 @@ jit::ElementAccessIsDenseNative(MDefinition *obj, MDefinition *id)
 
 bool
 jit::ElementAccessIsTypedArray(MDefinition *obj, MDefinition *id,
-                               ScalarTypeRepresentation::Type *arrayType)
+                               ScalarTypeDescr::Type *arrayType)
 {
     if (obj->mightBeType(MIRType_String))
         return false;
@@ -2933,8 +2935,8 @@ jit::ElementAccessIsTypedArray(MDefinition *obj, MDefinition *id,
     if (!types)
         return false;
 
-    *arrayType = (ScalarTypeRepresentation::Type) types->getTypedArrayType();
-    return *arrayType != ScalarTypeRepresentation::TYPE_MAX;
+    *arrayType = (ScalarTypeDescr::Type) types->getTypedArrayType();
+    return *arrayType != ScalarTypeDescr::TYPE_MAX;
 }
 
 bool

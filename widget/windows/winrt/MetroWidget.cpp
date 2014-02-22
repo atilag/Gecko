@@ -889,6 +889,10 @@ MetroWidget::WindowProcedure(HWND aWnd, UINT aMsg, WPARAM aWParam, LPARAM aLPara
       break;
     }
 
+    case WM_APPCOMMAND:
+      processDefault = HandleAppCommandMsg(aWParam, aLParam, &processResult);
+      break;
+
     case WM_GETOBJECT:
     {
       DWORD dwObjId = (LPARAM)(DWORD) aLParam;
@@ -1268,14 +1272,6 @@ MetroWidget::Invalidate(const nsIntRect & aRect)
   return NS_OK;
 }
 
-void
-MetroWidget::Update()
-{
-    if (!ShouldUseOffMainThreadCompositing() && mWnd) {
-        ::UpdateWindow(mWnd);
-    }
-}
-
 nsTransparencyMode
 MetroWidget::GetTransparencyMode()
 {
@@ -1590,9 +1586,9 @@ MetroWidget::GetInputContext()
 }
 
 NS_IMETHODIMP
-MetroWidget::NotifyIME(NotificationToIME aNotification)
+MetroWidget::NotifyIME(const IMENotification& aIMENotification)
 {
-  switch (aNotification) {
+  switch (aIMENotification.mMessage) {
     case REQUEST_TO_COMMIT_COMPOSITION:
       nsTextStore::CommitComposition(false);
       return NS_OK;
@@ -1607,6 +1603,8 @@ MetroWidget::NotifyIME(NotificationToIME aNotification)
                                         mInputContext.mIMEState.mEnabled);
     case NOTIFY_IME_OF_SELECTION_CHANGE:
       return nsTextStore::OnSelectionChange();
+    case NOTIFY_IME_OF_TEXT_CHANGE:
+      return nsTextStore::OnTextChange(aIMENotification);
     default:
       return NS_ERROR_NOT_IMPLEMENTED;
   }
@@ -1618,14 +1616,6 @@ MetroWidget::GetToggledKeyState(uint32_t aKeyCode, bool* aLEDState)
   NS_ENSURE_ARG_POINTER(aLEDState);
   *aLEDState = (::GetKeyState(aKeyCode) & 1) != 0;
   return NS_OK;
-}
-
-NS_IMETHODIMP
-MetroWidget::NotifyIMEOfTextChange(uint32_t aStart,
-                                   uint32_t aOldEnd,
-                                   uint32_t aNewEnd)
-{
-  return nsTextStore::OnTextChange(aStart, aOldEnd, aNewEnd);
 }
 
 nsIMEUpdatePreference

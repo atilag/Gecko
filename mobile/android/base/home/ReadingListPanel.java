@@ -41,11 +41,14 @@ public class ReadingListPanel extends HomeFragment {
     // Cursor loader ID for reading list
     private static final int LOADER_ID_READING_LIST = 0;
 
+    // Formatted string in hint text to be replaced with an icon.
+    private final String MATCH_STRING = "%I";
+
     // Adapter for the list of reading list items
     private ReadingListAdapter mAdapter;
 
     // The view shown by the fragment
-    private ListView mList;
+    private HomeListView mList;
 
     // Reference to the View to display when there are no results.
     private View mEmptyView;
@@ -89,7 +92,7 @@ public class ReadingListPanel extends HomeFragment {
 
         mTopView = view;
 
-        mList = (ListView) view.findViewById(R.id.list);
+        mList = (HomeListView) view.findViewById(R.id.list);
         mList.setTag(HomePager.LIST_TAG_READING_LIST);
 
         mList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
@@ -108,6 +111,17 @@ public class ReadingListPanel extends HomeFragment {
             }
         });
 
+        mList.setContextMenuInfoFactory(new HomeListView.ContextMenuInfoFactory() {
+            @Override
+            public HomeContextMenuInfo makeInfoForCursor(View view, int position, long id, Cursor cursor) {
+                final HomeContextMenuInfo info = new HomeContextMenuInfo(view, position, id);
+                info.url = cursor.getString(cursor.getColumnIndexOrThrow(URLColumns.URL));
+                info.title = cursor.getString(cursor.getColumnIndexOrThrow(URLColumns.TITLE));
+                info.bookmarkId = cursor.getInt(cursor.getColumnIndexOrThrow(Bookmarks._ID));
+                info.inReadingList = true;
+                return info;
+            }
+        });
         registerForContextMenu(mList);
     }
 
@@ -160,17 +174,17 @@ public class ReadingListPanel extends HomeFragment {
             String readingListHint = emptyHint.getText().toString();
 
             // Use an ImageSpan to include the reader icon in the "Tip".
-            int imageSpanIndex = readingListHint.indexOf("%I");
+            int imageSpanIndex = readingListHint.indexOf(MATCH_STRING);
             if (imageSpanIndex != -1) {
                 final ImageSpan readingListIcon = new ImageSpan(getActivity(), R.drawable.reader_cropped, ImageSpan.ALIGN_BOTTOM);
                 final SpannableStringBuilder hintBuilder = new SpannableStringBuilder(readingListHint);
 
                 // Add additional spacing.
-                hintBuilder.insert(imageSpanIndex + 2, " ");
+                hintBuilder.insert(imageSpanIndex + MATCH_STRING.length(), " ");
                 hintBuilder.insert(imageSpanIndex, " ");
 
                 // Add icon.
-                hintBuilder.setSpan(readingListIcon, imageSpanIndex + 1, imageSpanIndex + 3, Spanned.SPAN_INCLUSIVE_INCLUSIVE);
+                hintBuilder.setSpan(readingListIcon, imageSpanIndex + 1, imageSpanIndex + MATCH_STRING.length() + 1, Spanned.SPAN_INCLUSIVE_INCLUSIVE);
 
                 emptyHint.setText(hintBuilder, TextView.BufferType.SPANNABLE);
             }

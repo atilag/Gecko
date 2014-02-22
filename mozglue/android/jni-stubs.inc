@@ -305,25 +305,6 @@ Java_org_mozilla_gecko_GeckoAppShell_cameraCallbackBridge(JNIEnv * arg0, jclass 
 
 #ifdef JNI_STUBS
 
-typedef void (*Java_org_mozilla_gecko_GeckoAppShell_notifyFilePickerResult_t)(JNIEnv *, jclass, jstring, jlong);
-static Java_org_mozilla_gecko_GeckoAppShell_notifyFilePickerResult_t f_Java_org_mozilla_gecko_GeckoAppShell_notifyFilePickerResult;
-extern "C" NS_EXPORT void JNICALL
-Java_org_mozilla_gecko_GeckoAppShell_notifyFilePickerResult(JNIEnv * arg0, jclass arg1, jstring arg2, jlong arg3) {
-    if (!f_Java_org_mozilla_gecko_GeckoAppShell_notifyFilePickerResult) {
-        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
-                       "JNI Function called before it was loaded");
-        return ;
-    }
-     f_Java_org_mozilla_gecko_GeckoAppShell_notifyFilePickerResult(arg0, arg1, arg2, arg3);
-}
-#endif
-
-#ifdef JNI_BINDINGS
-  xul_dlsym("Java_org_mozilla_gecko_GeckoAppShell_notifyFilePickerResult", &f_Java_org_mozilla_gecko_GeckoAppShell_notifyFilePickerResult);
-#endif
-
-#ifdef JNI_STUBS
-
 typedef jdouble (*Java_org_mozilla_gecko_GeckoJavaSampler_getProfilerTime_t)(JNIEnv *, jclass);
 static Java_org_mozilla_gecko_GeckoJavaSampler_getProfilerTime_t f_Java_org_mozilla_gecko_GeckoJavaSampler_getProfilerTime;
 extern "C" NS_EXPORT jdouble JNICALL
@@ -533,16 +514,16 @@ Java_org_mozilla_gecko_gfx_NativePanZoomController_getOverScrollMode(JNIEnv * ar
 
 #ifdef JNI_STUBS
 
-typedef jboolean (*Java_org_mozilla_gecko_ANRReporter_requestNativeStack_t)(JNIEnv *, jclass);
+typedef jboolean (*Java_org_mozilla_gecko_ANRReporter_requestNativeStack_t)(JNIEnv *, jclass, jboolean);
 static Java_org_mozilla_gecko_ANRReporter_requestNativeStack_t f_Java_org_mozilla_gecko_ANRReporter_requestNativeStack;
 extern "C" NS_EXPORT jboolean JNICALL
-Java_org_mozilla_gecko_ANRReporter_requestNativeStack(JNIEnv * arg0, jclass arg1) {
+Java_org_mozilla_gecko_ANRReporter_requestNativeStack(JNIEnv * arg0, jclass arg1, jboolean arg2) {
     if (!f_Java_org_mozilla_gecko_ANRReporter_requestNativeStack) {
         arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
                        "JNI Function called before it was loaded");
         return false;
     }
-    return f_Java_org_mozilla_gecko_ANRReporter_requestNativeStack(arg0, arg1);
+    return f_Java_org_mozilla_gecko_ANRReporter_requestNativeStack(arg0, arg1, arg2);
 }
 #endif
 

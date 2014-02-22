@@ -29,6 +29,9 @@ import java.util.HashMap;
  * provide a framework to improve upon the issues discovered with the previous BaseTest
  * implementation by providing simple test authorship and framework extension, consistency,
  * and reliability.
+ *
+ * For documentation on writing tests and extending the framework, see
+ * https://wiki.mozilla.org/Mobile/Fennec/Android/UITest
  */
 abstract class UITest extends ActivityInstrumentationTestCase2<Activity>
                       implements UITestContext {
@@ -55,6 +58,7 @@ abstract class UITest extends ActivityInstrumentationTestCase2<Activity>
     private String mBaseIpUrl;
 
     protected AboutHomeComponent mAboutHome;
+    protected AppMenuComponent mAppMenu;
     protected ToolbarComponent mToolbar;
 
     static {
@@ -117,6 +121,7 @@ abstract class UITest extends ActivityInstrumentationTestCase2<Activity>
 
     private void initComponents() {
         mAboutHome = new AboutHomeComponent(this);
+        mAppMenu = new AppMenuComponent(this);
         mToolbar = new ToolbarComponent(this);
     }
 
@@ -159,6 +164,9 @@ abstract class UITest extends ActivityInstrumentationTestCase2<Activity>
         switch (type) {
             case ABOUTHOME:
                 return mAboutHome;
+
+            case APPMENU:
+                return mAppMenu;
 
             case TOOLBAR:
                 return mToolbar;

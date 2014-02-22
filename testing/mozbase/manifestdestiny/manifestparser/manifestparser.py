@@ -318,7 +318,7 @@ def read_ini(fp, variables=None, default='DEFAULT',
         fp = file(fp)
 
     # read the lines
-    for line in fp.readlines():
+    for (linenum, line) in enumerate(fp.readlines(), start=1):
 
         stripped = line.strip()
 
@@ -379,8 +379,13 @@ def read_ini(fp, variables=None, default='DEFAULT',
                 value = '%s%s%s' % (value, os.linesep, stripped)
                 current_section[key] = value
             else:
-                # something bad happen!
-                raise Exception("Not sure what you're trying to do")
+                # something bad happened!
+                if hasattr(fp, 'name'):
+                    filename = fp.name
+                else:
+                    filename = 'unknown'
+                raise Exception("Error parsing manifest file '%s', line %s" %
+                                (filename, linenum))
 
     # interpret the variables
     def interpret_variables(global_dict, local_dict):
@@ -400,6 +405,7 @@ class ManifestParser(object):
     def __init__(self, manifests=(), defaults=None, strict=True):
         self._defaults = defaults or {}
         self.tests = []
+        self.manifest_defaults = {}
         self.strict = strict
         self.rootdir = None
         self.relativeRoot = None
@@ -433,6 +439,7 @@ class ManifestParser(object):
 
         # read the configuration
         sections = read_ini(fp=fp, variables=defaults, strict=self.strict)
+        self.manifest_defaults[filename] = defaults
 
         # get the tests
         for section, data in sections:
@@ -514,7 +521,6 @@ class ManifestParser(object):
 
         # process each file
         for filename in filenames:
-
             # set the per file defaults
             defaults = _defaults.copy()
             here = None

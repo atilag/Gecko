@@ -537,10 +537,17 @@ version number is incremented.
 
 All measurements are defined alphabetically in the sections below.
 
-org.mozilla.addons.active
+org.mozilla.addons.addons
 -------------------------
 
 This measurement contains information about the currently-installed add-ons.
+
+Version 2
+^^^^^^^^^
+
+This version adds the human-readable fields *name* and *description*, both
+coming directly from the Addon instance as most properties in version 1.
+Also, all plugin details are now in org.mozilla.addons.plugins.
 
 Version 1
 ^^^^^^^^^
@@ -576,32 +583,99 @@ Example
 ^^^^^^^
 ::
 
-    "org.mozilla.addons.active": {
-      "_v": 1,
-      "SQLiteManager@mrinalkant.blogspot.com": {
+    "org.mozilla.addons.addons": {
+      "_v": 2,
+      "{d10d0bf8-f5b5-c8b4-a8b2-2b9879e08c5d}": {
         "userDisabled": false,
         "appDisabled": false,
-        "version": "0.7.7",
+        "name": "Adblock Plus",
+        "version": "2.4.1",
         "type": "extension",
         "scope": 1,
+        "description": "Ads were yesterday!",
         "foreignInstall": false,
         "hasBinaryComponents": false,
-        "installDay": 15196,
-        "updateDay": 15307
+        "installDay": 16093,
+        "updateDay": 16093
       },
-      "testpilot@labs.mozilla.com": {
-        "userDisabled": false,
+      "{e4a8a97b-f2ed-450b-b12d-ee082ba24781}": {
+        "userDisabled": true,
         "appDisabled": false,
-        "version": "1.2.2",
+        "name": "Greasemonkey",
+        "version": "1.14",
         "type": "extension",
         "scope": 1,
+        "description": "A User Script Manager for Firefox",
         "foreignInstall": false,
         "hasBinaryComponents": false,
-        "installDay": 15176,
-        "updateDay": 15595
+        "installDay": 16093,
+        "updateDay": 16093
       }
     }
 
+org.mozilla.addons.plugins
+-------------------------
+
+This measurement contains information about the currently-installed plugins.
+
+Version 1
+^^^^^^^^^
+
+The measurement object is a mapping of plugin IDs to objects containing
+plugin metadata.
+
+The plugin ID is constructed of the plugins filename, name, version and
+description. Every plugin has at least a filename and a name.
+
+Each plugin contains the following properties:
+
+* name
+* version
+* description
+* blocklisted
+* disabled
+* clicktoplay
+* mimeTypes
+* updateDay
+
+With the exception of *updateDay* and *mimeTypes*, all these properties come
+directly from ``nsIPluginTag`` via ``nsIPluginHost``.
+*updateDay* is the number of days since UNIX epoch of the plugins last modified
+time.
+*mimeTypes* is the list of mimetypes the plugin supports, see
+``nsIPluginTag.getMimeTypes()`.
+
+Example
+^^^^^^^
+
+::
+
+    "org.mozilla.addons.plugins": {
+      "_v": 1,
+      "Flash Player.plugin:Shockwave Flash:12.0.0.38:Shockwave Flash 12.0 r0": {
+        "mimeTypes": [
+          "application/x-shockwave-flash",
+          "application/futuresplash"
+        ],
+        "name": "Shockwave Flash",
+        "version": "12.0.0.38",
+        "description": "Shockwave Flash 12.0 r0",
+        "blocklisted": false,
+        "disabled": false,
+        "clicktoplay": false
+      },
+      "Default Browser.plugin:Default Browser Helper:537:Provides information about the default web browser": {
+        "mimeTypes": [
+          "application/apple-default-browser"
+        ],
+        "name": "Default Browser Helper",
+        "version": "537",
+        "description": "Provides information about the default web browser",
+        "blocklisted": false,
+        "disabled": true,
+        "clicktoplay": false
+      }
+    }
 
 org.mozilla.addons.counts
 -------------------------
@@ -1238,6 +1312,74 @@ Example
       "google.searchbar": 3,
       "google.urlbar": 7
     },
+
+org.mozilla.sync.sync
+---------------------
+
+This daily measurement contains information about the Sync service.
+
+Values should be recorded for every day FHR measurements occurred.
+
+Version 1
+^^^^^^^^^
+
+This version debuted with Firefox 30 on desktop. It contains the following
+properties:
+
+enabled
+   Daily numeric indicating whether Sync is configured and enabled. 1 if so,
+   0 otherwise.
+
+preferredProtocol
+   String version of the maximum Sync protocol version the client supports.
+   This will be ``1.1`` for for legacy Sync and ``1.5`` for clients that
+   speak the Firefox Accounts protocol.
+
+actualProtocol
+   The actual Sync protocol version the client is configured to use.
+
+   This will be ``1.1`` if the client is configured with the legacy Sync
+   service or if the client only supports ``1.1``.
+
+   It will be ``1.5`` if the client supports ``1.5`` and either a) the
+   client is not configured b) the client is using Firefox Accounts Sync.
+
+syncStart
+   Count of sync operations performed.
+
+syncSuccess
+   Count of sync operations that completed successfully.
+
+syncError
+   Count of sync operations that did not complete successfully.
+
+   This is a measure of overall sync success. This does *not* reflect
+   recoverable errors (such as record conflict) that can occur during
+   sync. This is thus a rough proxy of whether the sync service is
+   operating without error.
+
+org.mozilla.sync.devices
+------------------------
+
+This daily measurement contains information about the device type composition
+for the configured Sync account.
+
+Version 1
+^^^^^^^^^
+
+Version 1 was introduced with Firefox 30.
+
+Field names are dynamic according to the client-reported device types from
+Sync records. All fields are daily last seen integer values corresponding to
+the number of devices of that type.
+
+Common values include:
+
+desktop
+   Corresponds to a Firefox desktop client.
+
+mobile
+   Corresponds to a Fennec client.
 
 org.mozilla.sysinfo.sysinfo
 ---------------------------

@@ -1385,21 +1385,21 @@ nsXULPopupManager::GetVisiblePopups(nsTArray<nsIFrame *>& aPopups)
 {
   aPopups.Clear();
 
+  // Iterate over both lists of popups
   nsMenuChainItem* item = mPopups;
-  while (item) {
-    if (item->Frame()->PopupState() == ePopupOpenAndVisible)
-      aPopups.AppendElement(static_cast<nsIFrame*>(item->Frame()));
-    item = item->GetParent();
-  }
+  for (int32_t list = 0; list < 2; list++) {
+    while (item) {
+      // Skip panels which are not open and visible as well as popups that
+      // are transparent to mouse events.
+      if (item->Frame()->PopupState() == ePopupOpenAndVisible &&
+          !item->Frame()->IsMouseTransparent()) {
+        aPopups.AppendElement(item->Frame());
+      }
 
-  item = mNoHidePanels;
-  while (item) {
-    // skip panels which are not open and visible as well as draggable popups,
-    // as those don't respond to events.
-    if (item->Frame()->PopupState() == ePopupOpenAndVisible && !item->Frame()->IsDragPopup()) {
-      aPopups.AppendElement(static_cast<nsIFrame*>(item->Frame()));
+      item = item->GetParent();
     }
-    item = item->GetParent();
+
+    item = mNoHidePanels;
   }
 }
 
@@ -1471,13 +1471,9 @@ nsXULPopupManager::MayShowPopup(nsMenuPopupFrame* aPopup)
   if (!baseWin)
     return false;
 
-  int32_t type = -1;
-  if (NS_FAILED(dsti->GetItemType(&type)))
-    return false;
-
   // chrome shells can always open popups, but other types of shells can only
   // open popups when they are focused and visible
-  if (type != nsIDocShellTreeItem::typeChrome) {
+  if (dsti->ItemType() != nsIDocShellTreeItem::typeChrome) {
     // only allow popups in active windows
     nsCOMPtr<nsIDocShellTreeItem> root;
     dsti->GetRootTreeItem(getter_AddRefs(root));
@@ -2023,7 +2019,6 @@ nsXULPopupManager::HandleKeyboardEventWithKeyCode(
       }
       break;
 
-    case nsIDOMKeyEvent::DOM_VK_ENTER:
     case nsIDOMKeyEvent::DOM_VK_RETURN: {
       // If there is a popup open, check if the current item needs to be opened.
       // Otherwise, tell the active menubar, if any, to activate the menu. The

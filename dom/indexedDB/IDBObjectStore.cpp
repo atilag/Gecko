@@ -59,6 +59,7 @@ using mozilla::dom::quota::FileOutputStream;
 using mozilla::ErrorResult;
 using mozilla::fallible_t;
 using mozilla::LittleEndian;
+using mozilla::Move;
 using mozilla::NativeEndian;
 
 BEGIN_INDEXEDDB_NAMESPACE
@@ -159,14 +160,15 @@ public:
   AddHelper(IDBTransaction* aTransaction,
             IDBRequest* aRequest,
             IDBObjectStore* aObjectStore,
-            StructuredCloneWriteInfo& aCloneWriteInfo,
+            StructuredCloneWriteInfo&& aCloneWriteInfo,
             const Key& aKey,
             bool aOverwrite,
             nsTArray<IndexUpdateInfo>& aIndexUpdateInfo)
-  : ObjectStoreHelper(aTransaction, aRequest, aObjectStore), mKey(aKey),
+  : ObjectStoreHelper(aTransaction, aRequest, aObjectStore),
+    mCloneWriteInfo(Move(aCloneWriteInfo)),
+    mKey(aKey),
     mOverwrite(aOverwrite)
   {
-    mCloneWriteInfo.Swap(aCloneWriteInfo);
     mIndexUpdateInfo.SwapElements(aIndexUpdateInfo);
   }
 
@@ -1905,7 +1907,7 @@ IDBObjectStore::GetAddInfo(JSContext* aCx,
 
 already_AddRefed<IDBRequest>
 IDBObjectStore::AddOrPut(JSContext* aCx, JS::Handle<JS::Value> aValue,
-                         const Optional<JS::Handle<JS::Value> >& aKey,
+                         JS::Handle<JS::Value> aKey,
                          bool aOverwrite, ErrorResult& aRv)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
@@ -1920,15 +1922,12 @@ IDBObjectStore::AddOrPut(JSContext* aCx, JS::Handle<JS::Value> aValue,
     return nullptr;
   }
 
-  JS::Rooted<JS::Value> keyval(aCx, aKey.WasPassed() ? aKey.Value()
-                                                     : JSVAL_VOID);
-
   StructuredCloneWriteInfo cloneWriteInfo;
   Key key;
   nsTArray<IndexUpdateInfo> updateInfo;
 
   JS::Rooted<JS::Value> value(aCx, aValue);
-  aRv = GetAddInfo(aCx, value, keyval, cloneWriteInfo, key, updateInfo);
+  aRv = GetAddInfo(aCx, value, aKey, cloneWriteInfo, key, updateInfo);
   if (aRv.Failed()) {
     return nullptr;
   }
@@ -1941,7 +1940,7 @@ IDBObjectStore::AddOrPut(JSContext* aCx, JS::Handle<JS::Value> aValue,
   }
 
   nsRefPtr<AddHelper> helper =
-    new AddHelper(mTransaction, request, this, cloneWriteInfo, key,
+    new AddHelper(mTransaction, request, this, Move(cloneWriteInfo), key,
                   aOverwrite, updateInfo);
 
   nsresult rv = helper->DispatchToTransactionPool();
@@ -2053,8 +2052,8 @@ IDBObjectStore::AddOrPutInternal(
   nsTArray<IndexUpdateInfo> updateInfo(aUpdateInfoArray);
 
   nsRefPtr<AddHelper> helper =
-    new AddHelper(mTransaction, request, this, cloneWriteInfo, key, aOverwrite,
-                  updateInfo);
+    new AddHelper(mTransaction, request, this, Move(cloneWriteInfo), key,
+                  aOverwrite, updateInfo);
 
   nsresult rv = helper->DispatchToTransactionPool();
   IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
@@ -2403,7 +2402,7 @@ IDBObjectStore::OpenCursorFromChildProcess(
 
   nsRefPtr<IDBCursor> cursor =
     IDBCursor::Create(aRequest, mTransaction, this, direction, Key(),
-                      EmptyCString(), EmptyCString(), aKey, cloneInfo);
+                      EmptyCString(), EmptyCString(), aKey, Move(cloneInfo));
   IDB_ENSURE_TRUE(cursor, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   NS_ASSERTION(!cloneInfo.mCloneBuffer.data(), "Should have swapped!");
@@ -2698,7 +2697,7 @@ IDBObjectStore::Get(JSContext* aCx, JS::Handle<JS::Value> aKey,
 
 already_AddRefed<IDBRequest>
 IDBObjectStore::GetAll(JSContext* aCx,
-                       const Optional<JS::Handle<JS::Value> >& aKey,
+                       JS::Handle<JS::Value> aKey,
                        const Optional<uint32_t>& aLimit, ErrorResult& aRv)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
@@ -2709,10 +2708,8 @@ IDBObjectStore::GetAll(JSContext* aCx,
   }
 
   nsRefPtr<IDBKeyRange> keyRange;
-  if (aKey.WasPassed()) {
-    aRv = IDBKeyRange::FromJSVal(aCx, aKey.Value(), getter_AddRefs(keyRange));
-    ENSURE_SUCCESS(aRv, nullptr);
-  }
+  aRv = IDBKeyRange::FromJSVal(aCx, aKey, getter_AddRefs(keyRange));
+  ENSURE_SUCCESS(aRv, nullptr);
 
   uint32_t limit = UINT32_MAX;
   if (aLimit.WasPassed() && aLimit.Value() != 0) {
@@ -2753,7 +2750,7 @@ IDBObjectStore::Delete(JSContext* aCx, JS::Handle<JS::Value> aKey,
 
 already_AddRefed<IDBRequest>
 IDBObjectStore::OpenCursor(JSContext* aCx,
-                           const Optional<JS::Handle<JS::Value> >& aRange,
+                           JS::Handle<JS::Value> aRange,
                            IDBCursorDirection aDirection, ErrorResult& aRv)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
@@ -2764,10 +2761,8 @@ IDBObjectStore::OpenCursor(JSContext* aCx,
   }
 
   nsRefPtr<IDBKeyRange> keyRange;
-  if (aRange.WasPassed()) {
-    aRv = IDBKeyRange::FromJSVal(aCx, aRange.Value(), getter_AddRefs(keyRange));
-    ENSURE_SUCCESS(aRv, nullptr);
-  }
+  aRv = IDBKeyRange::FromJSVal(aCx, aRange, getter_AddRefs(keyRange));
+  ENSURE_SUCCESS(aRv, nullptr);
 
   IDBCursor::Direction direction = IDBCursor::ConvertDirection(aDirection);
   size_t argDirection = static_cast<size_t>(direction);
@@ -2939,7 +2934,7 @@ IDBObjectStore::DeleteIndex(const nsAString& aName, ErrorResult& aRv)
 
 already_AddRefed<IDBRequest>
 IDBObjectStore::Count(JSContext* aCx,
-                      const Optional<JS::Handle<JS::Value> >& aKey,
+                      JS::Handle<JS::Value> aKey,
                       ErrorResult& aRv)
 {
   if (!mTransaction->IsOpen()) {
@@ -2948,17 +2943,15 @@ IDBObjectStore::Count(JSContext* aCx,
   }
 
   nsRefPtr<IDBKeyRange> keyRange;
-  if (aKey.WasPassed()) {
-    aRv = IDBKeyRange::FromJSVal(aCx, aKey.Value(), getter_AddRefs(keyRange));
-    ENSURE_SUCCESS(aRv, nullptr);
-  }
+  aRv = IDBKeyRange::FromJSVal(aCx, aKey, getter_AddRefs(keyRange));
+  ENSURE_SUCCESS(aRv, nullptr);
 
   return CountInternal(keyRange, aRv);
 }
 
 already_AddRefed<IDBRequest>
 IDBObjectStore::GetAllKeys(JSContext* aCx,
-                           const Optional<JS::Handle<JS::Value>>& aKey,
+                           JS::Handle<JS::Value> aKey,
                            const Optional<uint32_t>& aLimit, ErrorResult& aRv)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -2969,10 +2962,8 @@ IDBObjectStore::GetAllKeys(JSContext* aCx,
   }
 
   nsRefPtr<IDBKeyRange> keyRange;
-  if (aKey.WasPassed()) {
-    aRv = IDBKeyRange::FromJSVal(aCx, aKey.Value(), getter_AddRefs(keyRange));
-    ENSURE_SUCCESS(aRv, nullptr);
-  }
+  aRv = IDBKeyRange::FromJSVal(aCx, aKey, getter_AddRefs(keyRange));
+  ENSURE_SUCCESS(aRv, nullptr);
 
   uint32_t limit = UINT32_MAX;
   if (aLimit.WasPassed() && aLimit.Value() != 0) {
@@ -2984,7 +2975,7 @@ IDBObjectStore::GetAllKeys(JSContext* aCx,
 
 already_AddRefed<IDBRequest>
 IDBObjectStore::OpenKeyCursor(JSContext* aCx,
-                              const Optional<JS::Handle<JS::Value>>& aRange,
+                              JS::Handle<JS::Value> aRange,
                               IDBCursorDirection aDirection, ErrorResult& aRv)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -2995,10 +2986,8 @@ IDBObjectStore::OpenKeyCursor(JSContext* aCx,
   }
 
   nsRefPtr<IDBKeyRange> keyRange;
-  if (aRange.WasPassed()) {
-    aRv = IDBKeyRange::FromJSVal(aCx, aRange.Value(), getter_AddRefs(keyRange));
-    ENSURE_SUCCESS(aRv, nullptr);
-  }
+  aRv = IDBKeyRange::FromJSVal(aCx, aRange, getter_AddRefs(keyRange));
+  ENSURE_SUCCESS(aRv, nullptr);
 
   IDBCursor::Direction direction = IDBCursor::ConvertDirection(aDirection);
 
@@ -3914,7 +3903,7 @@ OpenCursorHelper::EnsureCursor()
   nsRefPtr<IDBCursor> cursor =
     IDBCursor::Create(mRequest, mTransaction, mObjectStore, mDirection,
                       mRangeKey, mContinueQuery, mContinueToQuery, mKey,
-                      mCloneReadInfo);
+                      Move(mCloneReadInfo));
   IDB_ENSURE_TRUE(cursor, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   NS_ASSERTION(!mCloneReadInfo.mCloneBuffer.data(), "Should have swapped!");
@@ -4929,7 +4918,7 @@ GetAllKeysHelper::GetSuccessResult(JSContext* aCx,
   nsTArray<Key> keys;
   mKeys.SwapElements(keys);
 
-  JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, 0, nullptr));
+  JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, 0));
   if (!array) {
     IDB_WARNING("Failed to make array!");
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;

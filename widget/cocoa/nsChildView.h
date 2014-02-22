@@ -490,7 +490,6 @@ public:
   virtual int32_t         RoundsWidgetCoordinatesTo() MOZ_OVERRIDE;
 
   NS_IMETHOD              Invalidate(const nsIntRect &aRect);
-  virtual void            Update() MOZ_OVERRIDE;
 
   virtual void*           GetNativeData(uint32_t aDataType);
   virtual nsresult        ConfigureChildren(const nsTArray<Configuration>& aConfigurations);
@@ -518,7 +517,7 @@ public:
   NS_IMETHOD        ActivateNativeMenuItemAt(const nsAString& indexString);
   NS_IMETHOD        ForceUpdateNativeMenuAt(const nsAString& indexString);
 
-  NS_IMETHOD        NotifyIME(NotificationToIME aNotification) MOZ_OVERRIDE;
+  NS_IMETHOD        NotifyIME(const IMENotification& aIMENotification) MOZ_OVERRIDE;
   NS_IMETHOD_(void) SetInputContext(const InputContext& aContext,
                                     const InputContextAction& aAction);
   NS_IMETHOD_(InputContext) GetInputContext();

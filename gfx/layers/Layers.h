@@ -18,6 +18,7 @@
 #include "GraphicsFilter.h"             // for GraphicsFilter
 #include "gfxPoint.h"                   // for gfxPoint
 #include "gfxRect.h"                    // for gfxRect
+#include "gfx2DGlue.h"
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT_HELPER2, etc
 #include "mozilla/DebugOnly.h"          // for DebugOnly
 #include "mozilla/EventForwards.h"      // for nsPaintEvent
@@ -786,7 +787,7 @@ public:
     }
   }
 
-  void SetMixBlendMode(gfxContext::GraphicsOperator aMixBlendMode)
+  void SetMixBlendMode(gfx::CompositionOp aMixBlendMode)
   {
     if (mMixBlendMode != aMixBlendMode) {
       MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) MixBlendMode", this));
@@ -795,6 +796,11 @@ public:
     }
   }
   
+  void DeprecatedSetMixBlendMode(gfxContext::GraphicsOperator aMixBlendMode)
+  {
+    SetMixBlendMode(gfx::CompositionOpForOp(aMixBlendMode));
+  }
+
   void SetForceIsolatedGroup(bool aForceIsolatedGroup)
   {
     if(mForceIsolatedGroup != aForceIsolatedGroup) {
@@ -1033,7 +1039,7 @@ public:
 
   // These getters can be used anytime.
   float GetOpacity() { return mOpacity; }
-  gfxContext::GraphicsOperator GetMixBlendMode() const { return mMixBlendMode; }
+  gfx::CompositionOp GetMixBlendMode() const { return mMixBlendMode; }
   const nsIntRect* GetClipRect() { return mUseClipRect ? &mClipRect : nullptr; }
   uint32_t GetContentFlags() { return mContentFlags; }
   const nsIntRegion& GetVisibleRegion() { return mVisibleRegion; }
@@ -1207,7 +1213,8 @@ public:
   /**
    * Returns the blendmode of this layer.
    */
-  gfxContext::GraphicsOperator GetEffectiveMixBlendMode();
+  gfx::CompositionOp GetEffectiveMixBlendMode();
+  gfxContext::GraphicsOperator DeprecatedGetEffectiveMixBlendMode();
   
   /**
    * This returns the effective transform computed by
@@ -1323,13 +1330,13 @@ public:
 
   virtual LayerRenderState GetRenderState() { return LayerRenderState(); }
 
-protected:
-  Layer(LayerManager* aManager, void* aImplData);
-
   void Mutated()
   {
     mManager->Mutated(this);
   }
+
+protected:
+  Layer(LayerManager* aManager, void* aImplData);
 
   // Print interesting information about this into aTo.  Internally
   // used to implement Dump*() and Log*().  If subclasses have
@@ -1408,7 +1415,7 @@ protected:
   AnimationArray mAnimations;
   InfallibleTArray<AnimData> mAnimationData;
   float mOpacity;
-  gfxContext::GraphicsOperator mMixBlendMode;
+  gfx::CompositionOp mMixBlendMode;
   bool mForceIsolatedGroup;
   nsIntRect mClipRect;
   nsIntRect mTileSourceRect;
@@ -1554,13 +1561,13 @@ public:
    * If aAfter is non-null, it must be a child of this container and
    * we insert after that layer. If it's null we insert at the start.
    */
-  virtual void InsertAfter(Layer* aChild, Layer* aAfter);
+  virtual bool InsertAfter(Layer* aChild, Layer* aAfter);
   /**
    * CONSTRUCTION PHASE ONLY
    * Remove aChild from the child list of this container. aChild must
    * be a child of this container.
    */
-  virtual void RemoveChild(Layer* aChild);
+  virtual bool RemoveChild(Layer* aChild);
   /**
    * CONSTRUCTION PHASE ONLY
    * Reposition aChild from the child list of this container. aChild must
@@ -1568,7 +1575,7 @@ public:
    * If aAfter is non-null, it must be a child of this container and we
    * reposition after that layer. If it's null, we reposition at the start.
    */
-  virtual void RepositionChild(Layer* aChild, Layer* aAfter);
+  virtual bool RepositionChild(Layer* aChild, Layer* aAfter);
 
   /**
    * CONSTRUCTION PHASE ONLY
@@ -1781,19 +1788,15 @@ class CanvasLayer : public Layer {
 public:
   struct Data {
     Data()
-      : mSurface(nullptr)
-      , mDrawTarget(nullptr)
+      : mDrawTarget(nullptr)
       , mGLContext(nullptr)
       , mSize(0,0)
       , mIsGLAlphaPremult(false)
     { }
 
     // One of these two must be specified for Canvas2D, but never both
-    gfxASurface* mSurface;  // a gfx Surface for the canvas contents
     mozilla::gfx::DrawTarget *mDrawTarget; // a DrawTarget for the canvas contents
-
-    // Or this, for GL.
-    mozilla::gl::GLContext* mGLContext;
+    mozilla::gl::GLContext* mGLContext; // or this, for GL.
 
     // The size of the canvas content
     nsIntSize mSize;
@@ -1959,14 +1962,14 @@ class RefLayer : public ContainerLayer {
   friend class LayerManager;
 
 private:
-  virtual void InsertAfter(Layer* aChild, Layer* aAfter)
-  { MOZ_CRASH(); }
+  virtual bool InsertAfter(Layer* aChild, Layer* aAfter) MOZ_OVERRIDE
+  { MOZ_CRASH(); return false; }
 
-  virtual void RemoveChild(Layer* aChild)
-  { MOZ_CRASH(); }
+  virtual bool RemoveChild(Layer* aChild)
+  { MOZ_CRASH(); return false; }
 
-  virtual void RepositionChild(Layer* aChild, Layer* aAfter)
-  { MOZ_CRASH(); }
+  virtual bool RepositionChild(Layer* aChild, Layer* aAfter)
+  { MOZ_CRASH(); return false; }
 
   using ContainerLayer::SetFrameMetrics;
 

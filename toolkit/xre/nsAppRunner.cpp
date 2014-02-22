@@ -3,19 +3,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#if defined(XP_OS2) && defined(MOZ_OS2_HIGH_MEMORY)
-// os2safe.h has to be included before os2.h, needed for high mem
-#include <os2safe.h>
-#endif
-
 #if defined(MOZ_WIDGET_QT)
-#include <QApplication>
+#include <QGuiApplication>
 #include <QStringList>
 #include "nsQAppInstance.h"
-#if (QT_VERSION < QT_VERSION_CHECK(5, 0, 0))
-#include <QInputContextFactory>
-#include <QInputContext>
-#endif
 #endif // MOZ_WIDGET_QT
 
 #include "mozilla/dom/ContentParent.h"
@@ -47,9 +38,6 @@
 #include <sys/sysctl.h>
 #endif
 
-#ifdef XP_OS2
-#include "private/pprthred.h"
-#endif
 #include "prmem.h"
 #include "prnetdb.h"
 #include "prprf.h"
@@ -138,11 +126,6 @@
 #include "mozilla/LateWriteChecks.h"
 
 #include <stdlib.h>
-
-// for old system jemalloc version check
-#if !defined(MOZ_MEMORY) && defined(__NetBSD__)
-#include <sys/param.h>
-#endif
 
 #ifdef XP_UNIX
 #include <sys/stat.h>
@@ -433,7 +416,7 @@ static void RemoveArg(char **argv)
 /**
  * Check for a commandline flag. If the flag takes a parameter, the
  * parameter is returned in aParam. Flags may be in the form -arg or
- * --arg (or /arg on win32/OS2).
+ * --arg (or /arg on win32).
  *
  * @param aArg the parameter to check. Must be lowercase.
  * @param aCheckOSInt if true returns ARG_BAD if the osint argument is present
@@ -454,7 +437,7 @@ CheckArg(const char* aArg, bool aCheckOSInt = false, const char **aParam = nullp
     char *arg = curarg[0];
 
     if (arg[0] == '-'
-#if defined(XP_WIN) || defined(XP_OS2)
+#if defined(XP_WIN)
         || *arg == '/'
 #endif
         ) {
@@ -472,7 +455,7 @@ CheckArg(const char* aArg, bool aCheckOSInt = false, const char **aParam = nullp
 
         if (*curarg) {
           if (**curarg == '-'
-#if defined(XP_WIN) || defined(XP_OS2)
+#if defined(XP_WIN)
               || **curarg == '/'
 #endif
               )
@@ -1378,7 +1361,7 @@ DumpHelp()
          "  -UILocale <locale> Start with <locale> resources as UI Locale.\n"
          "  -safe-mode         Disables extensions and themes for this session.\n", gAppData->name);
 
-#if defined(XP_WIN) || defined(XP_OS2)
+#if defined(XP_WIN)
   printf("  -console           Start %s with a debugging console.\n", gAppData->name);
 #endif
 
@@ -1564,92 +1547,6 @@ XRE_GetBinaryPath(const char* argv0, nsIFile* *aResult)
 typedef BOOL (WINAPI* SetProcessDEPPolicyFunc)(DWORD dwFlags);
 #endif
 
-#if defined(XP_OS2) && (__KLIBC__ == 0 && __KLIBC_MINOR__ >= 6) // broken kLibc
-// Copy the environment maintained by the C library into an ASCIIZ array
-// that can be used to pass it on to the OS/2 Dos* APIs (which otherwise
-// don't know anything about the stuff set by PR_SetEnv() or setenv()).
-char *createEnv()
-{
-  // just allocate the maximum amount (24 kB = 0x60000 bytes), to be able to
-  // copy the existing environment
-  char *env = (char *)calloc(0x6000, sizeof(char));
-  if (!env) {
-    return nullptr;
-  }
-
-  // walk along the environ string array of the C library and copy
-  // everything (that fits) into the output environment array, leaving
-  // null bytes between the entries
-  char *penv = env; // movable pointer to result environment ASCIIZ array
-  int i = 0, space = 0x6000;
-  while (environ[i] && environ[i][0]) {
-    int len = strlen(environ[i]);
-    if (space - len <= 0) {
-      break;
-    }
-    strcpy(penv, environ[i]);
-    i++; // next environment variable
-    penv += len + 1; // jump to after next null byte
-    space -= len - 1; // subtract consumed length from usable space
-  }
-
-  return env;
-}
-
-// OS2LaunchChild() is there to replace _execv() which is broken in the C
-// runtime library that comes with GCC 3.3.5 on OS/2. It uses createEnv()
-// to copy the process environment and add necessary variables
-//
-// returns -1 on failure and 0 on success
-int OS2LaunchChild(const char *aExePath, int aArgc, char **aArgv)
-{
-  // find total length of aArgv
-  int len = 0;
-  for (int i = 0; i < aArgc; i++) {
-    len += strlen(aArgv[i]) + 1; // plus space in between
-  }
-  len++; // leave space for null byte at end
-  // allocate enough space for all strings and nulls,
-  // calloc helpfully initializes to null
-  char *args = (char *)calloc(len, sizeof(char));
-  if (!args) {
-    return -1;
-  }
-  char *pargs = args; // extra pointer to after the last argument
-  // build argument list in the format the DosStartSession() wants,
-  // adding spaces between the arguments
-  for (int i = 0; i < aArgc; i++, *pargs++ = ' ') {
-    strcpy(pargs, aArgv[i]);
-    pargs += strlen(aArgv[i]);
-  }
-  if (aArgc > 1) {
-    *(pargs-1) = '\0'; // replace last space
-  }
-  *pargs = '\0';
-  // make sure that the program is separated by null byte
-  pargs = strchr(args, ' ');
-  if (pargs) {
-    *pargs = '\0';
-  }
-
-  char *env = createEnv();
-
-  char error[CCHMAXPATH] = { 0 };
-  RESULTCODES crc = { 0 };
-  ULONG rc = DosExecPgm(error, sizeof(error), EXEC_ASYNC, args, env,
-                        &crc, (PSZ)aExePath);
-  free(args); // done with the arguments
-  if (env) {
-    free(env);
-  }
-  if (rc != NO_ERROR) {
-    return -1;
-  }
-
-  return 0;
-}
-#endif
-
 // If aBlankCommandLine is true, then the application will be launched with a
 // blank command line instead of being launched with the same command line that
 // it was initially started with.
@@ -1708,14 +1605,7 @@ static nsresult LaunchChild(nsINativeAppSupport* aNative,
   if (NS_FAILED(rv))
     return rv;
 
-#if defined(XP_OS2) && (__KLIBC__ == 0 && __KLIBC_MINOR__ >= 6)
-  // implementation of _execv() is broken with kLibc 0.6.x and later
-  if (OS2LaunchChild(exePath.get(), gRestartArgc, gRestartArgv) == -1)
-    return NS_ERROR_FAILURE;
-#elif defined(XP_OS2)
-  if (_execv(exePath.get(), gRestartArgv) == -1)
-    return NS_ERROR_FAILURE;
-#elif defined(XP_UNIX)
+#if defined(XP_UNIX)
   if (execv(exePath.get(), gRestartArgv) == -1)
     return NS_ERROR_FAILURE;
 #else
@@ -1727,7 +1617,7 @@ static nsresult LaunchChild(nsINativeAppSupport* aNative,
   PRStatus failed = PR_WaitProcess(process, &exitCode);
   if (failed || exitCode)
     return NS_ERROR_FAILURE;
-#endif // XP_OS2 series
+#endif // XP_UNIX
 #endif // WP_WIN
 #endif // WP_MACOSX
 #endif // MOZ_WIDGET_ANDROID
@@ -2560,7 +2450,7 @@ RemoveComponentRegistries(nsIFile* aProfileDir, nsIFile* aLocalProfileDir,
 
 #if defined(XP_UNIX) || defined(XP_BEOS)
 #define PLATFORM_FASL_SUFFIX ".mfasl"
-#elif defined(XP_WIN) || defined(XP_OS2)
+#elif defined(XP_WIN)
 #define PLATFORM_FASL_SUFFIX ".mfl"
 #endif
 
@@ -2630,18 +2520,6 @@ static void MakeOrSetMinidumpPath(nsIFile* profD)
 #endif
 
 const nsXREAppData* gAppData = nullptr;
-
-#if defined(XP_OS2)
-// because we use early returns, we use a stack-based helper to un-set the OS2 FP handler
-class ScopedFPHandler {
-private:
-  EXCEPTIONREGISTRATIONRECORD excpreg;
-
-public:
-  ScopedFPHandler() { PR_OS2_SetFloatExcpHandler(&excpreg); }
-  ~ScopedFPHandler() { PR_OS2_UnsetFloatExcpHandler(&excpreg); }
-};
-#endif
 
 #ifdef MOZ_WIDGET_GTK
 #include "prlink.h"
@@ -2743,12 +2621,6 @@ NS_VISIBILITY_DEFAULT PRBool nspr_use_zone_allocator = PR_FALSE;
 
 #include <dwrite.h>
 
-typedef HRESULT (WINAPI*DWriteCreateFactoryFunc)(
-  DWRITE_FACTORY_TYPE factoryType,
-  REFIID iid,
-  IUnknown **factory
-);
-
 #ifdef DEBUG_DWRITE_STARTUP
 
 #define LOGREGISTRY(msg) LogRegistryEvent(msg)
@@ -2778,7 +2650,7 @@ static DWORD InitDwriteBG(LPVOID lpdwThreadParam)
   LOGREGISTRY(L"loading dwrite.dll");
   HMODULE dwdll = LoadLibraryW(L"dwrite.dll");
   if (dwdll) {
-    DWriteCreateFactoryFunc createDWriteFactory = (DWriteCreateFactoryFunc)
+    decltype(DWriteCreateFactory)* createDWriteFactory = (decltype(DWriteCreateFactory)*)
       GetProcAddress(dwdll, "DWriteCreateFactory");
     if (createDWriteFactory) {
       LOGREGISTRY(L"creating dwrite factory");
@@ -2804,6 +2676,38 @@ static DWORD InitDwriteBG(LPVOID lpdwThreadParam)
 #ifdef USE_GLX_TEST
 bool fire_glxtest_process();
 #endif
+
+#if defined(XP_WIN) && defined(MOZ_METRO)
+#ifndef AHE_TYPE
+enum AHE_TYPE {
+  AHE_DESKTOP = 0,
+  AHE_IMMERSIVE = 1
+};
+#endif
+
+/*
+ * The Windows launcher uses this value to decide what front end ui
+ * to launch. We always launch the same ui unless the user
+ * specifically asks to switch. Update the value on every startup
+ * based on the environment requested.
+ */
+void
+SetLastWinRunType(AHE_TYPE aType)
+{
+  HKEY key;
+  LONG result = RegOpenKeyExW(HKEY_CURRENT_USER,
+                              L"SOFTWARE\\Mozilla\\Firefox",
+                              0, KEY_WRITE, &key);
+  if (result != ERROR_SUCCESS) {
+    return;
+  }
+  DWORD value = (DWORD)aType;
+  result = RegSetValueEx(key, L"MetroLastAHE", 0, REG_DWORD,
+                         reinterpret_cast<LPBYTE>(&value),
+                         sizeof(DWORD));
+  RegCloseKey(key);
+}
+#endif // defined(XP_WIN) && defined(MOZ_METRO)
 
 #include "GeckoProfiler.h"
 
@@ -2895,6 +2799,19 @@ XREMain::XRE_mainInit(bool* aExitFlag)
   if (fire_glxtest_process()) {
     *aExitFlag = true;
     return 0;
+  }
+#endif
+
+#if defined(XP_WIN) && defined(MOZ_METRO)
+  // Don't remove this arg, we want to pass it on to nsUpdateDriver 
+  if (CheckArg("metro-update", false, nullptr, false) == ARG_FOUND ||
+      XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Metro) {
+    // If we're doing a restart update that was initiated from metro land,
+    // we'll be running desktop to handle the actual update. Request that
+    // after the restart we launch into metro.
+    SetLastWinRunType(AHE_IMMERSIVE);
+  } else {
+    SetLastWinRunType(AHE_DESKTOP);
   }
 #endif
 
@@ -3148,13 +3065,6 @@ XREMain::XRE_mainInit(bool* aExitFlag)
   gRestartArgv[gRestartArgc] = nullptr;
   
 
-#if defined(XP_OS2)
-  bool StartOS2App(int aArgc, char **aArgv);
-  if (!StartOS2App(gArgc, gArgv))
-    return 1;
-  ScopedFPHandler handler;
-#endif /* XP_OS2 */
-
   if (EnvHasValue("MOZ_SAFE_MODE_RESTART")) {
     gSafeMode = true;
     // unset the env variable
@@ -3397,6 +3307,20 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
 
   SetShutdownChecks();
 
+
+  // Enable Telemetry IO Reporting on DEBUG, nightly and local builds
+#ifdef DEBUG
+  mozilla::Telemetry::InitIOReporting(gAppData->xreDirectory);
+#else
+  {
+    const char* releaseChannel = NS_STRINGIFY(MOZ_UPDATE_CHANNEL);
+    if (strcmp(releaseChannel, "nightly") == 0 ||
+        strcmp(releaseChannel, "default") == 0) {
+      mozilla::Telemetry::InitIOReporting(gAppData->xreDirectory);
+    }
+  }
+#endif /* DEBUG */
+
 #if defined(MOZ_WIDGET_GTK) || defined(MOZ_ENABLE_XREMOTE)
   // Stash DESKTOP_STARTUP_ID in malloc'ed memory because gtk_init will clear it.
 #define HAVE_DESKTOP_STARTUP_ID
@@ -3634,6 +3558,12 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
     *aExitFlag = true;
     return 0;
   }
+#if defined(XP_WIN) && defined(MOZ_METRO)
+  if (CheckArg("metro-update", false) == ARG_FOUND) {
+    *aExitFlag = true;
+    return 0;
+  }
+#endif
 #endif
 
   rv = NS_NewToolkitProfileService(getter_AddRefs(mProfileSvc));
@@ -3672,6 +3602,8 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
   NS_ENSURE_SUCCESS(rv, 1);
 
   //////////////////////// NOW WE HAVE A PROFILE ////////////////////////
+
+  mozilla::Telemetry::SetProfileDir(mProfD);
 
 #ifdef MOZ_CRASHREPORTER
   if (mAppData->flags & NS_XRE_ENABLE_CRASH_REPORTER)
@@ -3904,11 +3836,6 @@ XREMain::XRE_mainRun()
   mDirProvider.DoStartup();
 
 #ifdef MOZ_CRASHREPORTER
-  if (BrowserTabsRemote()) {
-    CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("DOMIPCEnabled"),
-                                       NS_LITERAL_CSTRING("1"));
-  }
-
   nsCString userAgentLocale;
   if (NS_SUCCEEDED(Preferences::GetCString("general.useragent.locale", &userAgentLocale))) {
     CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("useragent_locale"), userAgentLocale);
@@ -4056,8 +3983,7 @@ XREMain::XRE_main(int argc, char* argv[], const nsXREAppData* aAppData)
   ScopedLogging log;
 
 #if defined(MOZ_WIDGET_GTK)
-#if defined(MOZ_MEMORY) || defined(__FreeBSD__) \
-  || defined(__NetBSD__) && __NetBSD_Version__ >= 500000000
+#if defined(MOZ_MEMORY) || defined(__FreeBSD__) || defined(__NetBSD__)
   // Disable the slice allocator, since jemalloc already uses similar layout
   // algorithms, and using a sub-allocator tends to increase fragmentation.
   // This must be done before g_thread_init() is called.
@@ -4237,36 +4163,6 @@ public:
   HRESULT mResult;
 };
 
-#ifndef AHE_TYPE
-enum AHE_TYPE {
-  AHE_DESKTOP = 0,
-  AHE_IMMERSIVE = 1
-};
-#endif
-
-/*
- * The Windows launcher uses this value to decide what front end ui
- * to launch. We always launch the same ui unless the user
- * specifically asks to switch. Update the value on every startup
- * based on the environment requested.
- */
-void
-SetLastWinRunType(AHE_TYPE aType)
-{
-  HKEY key;
-  LONG result = RegOpenKeyExW(HKEY_CURRENT_USER,
-                              L"SOFTWARE\\Mozilla\\Firefox",
-                              0, KEY_WRITE, &key);
-  if (result != ERROR_SUCCESS) {
-    return;
-  }
-  DWORD value = (DWORD)aType;
-  result = RegSetValueEx(key, L"MetroLastAHE", 0, REG_DWORD,
-                         reinterpret_cast<LPBYTE>(&value),
-                         sizeof(DWORD));
-  RegCloseKey(key);
-}
-
 int
 XRE_mainMetro(int argc, char* argv[], const nsXREAppData* aAppData)
 {
@@ -4334,9 +4230,6 @@ XRE_main(int argc, char* argv[], const nsXREAppData* aAppData, uint32_t aFlags)
 #else
   if (aFlags == XRE_MAIN_FLAG_USE_METRO) {
     SetWindowsEnvironment(WindowsEnvironmentType_Metro);
-    SetLastWinRunType(AHE_IMMERSIVE);
-  } else {
-    SetLastWinRunType(AHE_DESKTOP);
   }
 
   // Desktop
@@ -4350,6 +4243,8 @@ XRE_main(int argc, char* argv[], const nsXREAppData* aAppData, uint32_t aFlags)
   // Metro
   NS_ASSERTION(XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Metro,
                "Unknown Windows environment");
+
+  SetLastWinRunType(AHE_IMMERSIVE);
 
   int result = XRE_mainMetro(argc, argv, aAppData);
   mozilla::RecordShutdownEndTimeStamp();
@@ -4508,9 +4403,7 @@ SetupErrorHandling(const char* progname)
   _CrtSetReportHook(MSCRTReportHook);
 #endif
 
-#ifndef XP_OS2
   InstallSignalHandlers(progname);
-#endif
 
   // Unbuffer stdout, needed for tinderbox tests.
   setbuf(stdout, 0);

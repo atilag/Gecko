@@ -21,8 +21,7 @@ namespace dom {
 class DOMClass;
 
 enum {
-  JSPROXYSLOT_EXPANDO = 0,
-  JSPROXYSLOT_XRAY_EXPANDO
+  JSPROXYSLOT_EXPANDO = 0
 };
 
 template<typename T> struct Prefable;
@@ -31,16 +30,11 @@ template<typename T> struct Prefable;
 extern const char HandlerFamily;
 inline const void* ProxyFamily() { return &HandlerFamily; }
 
-inline bool IsDOMProxy(JSObject *obj, const js::Class* clasp)
-{
-    MOZ_ASSERT(js::GetObjectClass(obj) == clasp);
-    return js::IsProxyClass(clasp) &&
-           js::GetProxyHandler(obj)->family() == ProxyFamily();
-}
-
 inline bool IsDOMProxy(JSObject *obj)
 {
-    return IsDOMProxy(obj, js::GetObjectClass(obj));
+    const js::Class* clasp = js::GetObjectClass(obj);
+    return clasp->isProxy() &&
+           js::GetProxyHandler(obj)->family() == ProxyFamily();
 }
 
 class BaseDOMProxyHandler : public js::BaseProxyHandler
@@ -68,9 +62,8 @@ public:
 class DOMProxyHandler : public BaseDOMProxyHandler
 {
 public:
-  DOMProxyHandler(const DOMClass& aClass)
-    : BaseDOMProxyHandler(ProxyFamily()),
-      mClass(aClass)
+  DOMProxyHandler()
+    : BaseDOMProxyHandler(ProxyFamily())
   {
   }
 
@@ -109,8 +102,6 @@ public:
   static JSObject* GetAndClearExpandoObject(JSObject* obj);
   static JSObject* EnsureExpandoObject(JSContext* cx,
                                        JS::Handle<JSObject*> obj);
-
-  const DOMClass& mClass;
 };
 
 extern jsid s_length_id;
@@ -154,7 +145,6 @@ FillPropertyDescriptor(JS::MutableHandle<JSPropertyDescriptor> desc, JSObject* o
   desc.setAttributes((readonly ? JSPROP_READONLY : 0) | JSPROP_ENUMERATE);
   desc.setGetter(nullptr);
   desc.setSetter(nullptr);
-  desc.setShortId(0);
 }
 
 inline void
@@ -174,7 +164,6 @@ FillPropertyDescriptor(JS::MutableHandle<JSPropertyDescriptor> desc,
   desc.setAttributes(attributes);
   desc.setGetter(nullptr);
   desc.setSetter(nullptr);
-  desc.setShortId(0);
 }
 
 } // namespace dom

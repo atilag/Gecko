@@ -109,7 +109,6 @@ public:
                 bool aUpdateNCArea = false,
                 bool aIncludeChildren = false);
   NS_IMETHOD    Invalidate(const nsIntRect & aRect);
-  virtual void  Update() MOZ_OVERRIDE;
   NS_IMETHOD    DispatchEvent(mozilla::WidgetGUIEvent* aEvent,
                               nsEventStatus& aStatus);
   NS_IMETHOD    ConstrainPosition(bool aAllowSlop, int32_t *aX, int32_t *aY);
@@ -161,11 +160,8 @@ public:
   NS_IMETHOD_(void) SetInputContext(const InputContext& aContext,
                                     const InputContextAction& aAction);
   NS_IMETHOD_(nsIWidget::InputContext) GetInputContext();
-  NS_IMETHOD    NotifyIME(NotificationToIME aNotification) MOZ_OVERRIDE;
+  NS_IMETHOD    NotifyIME(const IMENotification& aIMENotification) MOZ_OVERRIDE;
   NS_IMETHOD    GetToggledKeyState(uint32_t aKeyCode, bool* aLEDState);
-  NS_IMETHOD    NotifyIMEOfTextChange(uint32_t aStart,
-                                      uint32_t aOldEnd,
-                                      uint32_t aNewEnd) MOZ_OVERRIDE;
   virtual nsIMEUpdatePreference GetIMEUpdatePreference() MOZ_OVERRIDE;
 
   // FrameworkView helpers

@@ -19,11 +19,11 @@ Cu.import("resource://gre/modules/Timer.jsm", this);
 XPCOMUtils.defineLazyModuleGetter(this, "DocShellCapabilities",
   "resource:///modules/sessionstore/DocShellCapabilities.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FormData",
-  "resource:///modules/sessionstore/FormData.jsm");
+  "resource://gre/modules/FormData.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PageStyle",
   "resource:///modules/sessionstore/PageStyle.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ScrollPosition",
-  "resource:///modules/sessionstore/ScrollPosition.jsm");
+  "resource://gre/modules/ScrollPosition.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "SessionHistory",
   "resource:///modules/sessionstore/SessionHistory.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "SessionStorage",
@@ -87,16 +87,15 @@ let EventListener = {
     // If we're in the process of restoring, this load may signal
     // the end of the restoration.
     let epoch = gContentRestore.getRestoreEpoch();
-    if (epoch) {
-      // Restore the form data and scroll position.
-      gContentRestore.restoreDocument();
-
-      // Ask SessionStore.jsm to trigger SSTabRestored.
-      sendAsyncMessage("SessionStore:restoreDocumentComplete", {epoch: epoch});
+    if (!epoch) {
+      return;
     }
 
-    // Send a load message for all loads.
-    sendAsyncMessage("SessionStore:load");
+    // Restore the form data and scroll position.
+    gContentRestore.restoreDocument();
+
+    // Ask SessionStore.jsm to trigger SSTabRestored.
+    sendAsyncMessage("SessionStore:restoreDocumentComplete", {epoch: epoch});
   }
 };
 

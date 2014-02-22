@@ -137,6 +137,9 @@ static DllBlockInfo sWindowsDllBlocklist[] = {
   // Software is discontinued/unsupported
   { "atkdx11disp.dll", ALL_VERSIONS },
 
+  // Topcrash with Conduit SearchProtect, bug 944542
+  { "spvc32.dll", ALL_VERSIONS },
+
   { nullptr, 0 }
 };
 
@@ -611,7 +614,8 @@ DllBlocklist_Initialize()
 
   ReentrancySentinel::InitializeStatics();
 
-  bool ok = NtDllIntercept.AddHook("LdrLoadDll", reinterpret_cast<intptr_t>(patched_LdrLoadDll), (void**) &stub_LdrLoadDll);
+  // Use a shared hook since other software may also hook this API (bug 951827)
+  bool ok = NtDllIntercept.AddSharedHook("LdrLoadDll", reinterpret_cast<intptr_t>(patched_LdrLoadDll), (void**) &stub_LdrLoadDll);
 
   if (!ok) {
     sBlocklistInitFailed = true;

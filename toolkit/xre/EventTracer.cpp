@@ -55,6 +55,7 @@
 
 #include <stdio.h>
 
+#include "mozilla/Preferences.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/WidgetTraceEvent.h"
 #include "nsDebug.h"
@@ -63,6 +64,12 @@
 #include <prinrval.h>
 #include <prthread.h>
 #include <prtime.h>
+
+#ifdef MOZ_WIDGET_GONK
+#include "nsThreadUtils.h"
+#include "nsIObserverService.h"
+#include "mozilla/Services.h"
+#endif
 
 using mozilla::TimeDuration;
 using mozilla::TimeStamp;
@@ -75,7 +82,33 @@ bool sExit = false;
 
 struct TracerStartClosure {
   bool mLogTracing;
+  int32_t mThresholdInterval;
 };
+
+#ifdef MOZ_WIDGET_GONK
+class EventLoopLagDispatcher : public nsRunnable
+{
+  public:
+    explicit EventLoopLagDispatcher(int aLag)
+      : mLag(aLag) {}
+
+    NS_IMETHODIMP Run()
+    {
+      nsCOMPtr<nsIObserverService> obsService =
+        mozilla::services::GetObserverService();
+      if (!obsService) {
+        return NS_ERROR_FAILURE;
+      }
+
+      nsAutoString value;
+      value.AppendInt(mLag);
+      return obsService->NotifyObservers(nullptr, "event-loop-lag", value.get());
+    }
+
+  private:
+    int mLag;
+};
+#endif
 
 /*
  * The tracer thread fires events at the native event loop roughly
@@ -96,9 +129,10 @@ void TracerThread(void *arg)
   // These are the defaults. They can be overridden by environment vars.
   // This should be set to the maximum latency we'd like to allow
   // for responsiveness.
-  PRIntervalTime threshold = PR_MillisecondsToInterval(20);
+  int32_t thresholdInterval = threadArgs->mThresholdInterval;
+  PRIntervalTime threshold = PR_MillisecondsToInterval(thresholdInterval);
   // This is the sampling interval.
-  PRIntervalTime interval = PR_MillisecondsToInterval(10);
+  PRIntervalTime interval = PR_MillisecondsToInterval(thresholdInterval / 2);
 
   sExit = false;
   FILE* log = nullptr;
@@ -146,6 +180,10 @@ void TracerThread(void *arg)
         fprintf(log, "MOZ_EVENT_TRACE sample %llu %lf\n",
                 now,
                 duration.ToMilliseconds());
+#ifdef MOZ_WIDGET_GONK
+        NS_DispatchToMainThread(
+         new EventLoopLagDispatcher(int(duration.ToSecondsSigDigits() * 1000)));
+#endif
       }
 
       if (next_sleep > duration.ToMilliseconds()) {
@@ -190,6 +228,11 @@ bool InitEventTracing(bool aLog)
   // The tracer thread owns the object and will delete it.
   TracerStartClosure* args = new TracerStartClosure();
   args->mLogTracing = aLog;
+
+  // Pass the default threshold interval.
+  int32_t thresholdInterval = 20;
+  Preferences::GetInt("devtools.eventlooplag.threshold", &thresholdInterval);
+  args->mThresholdInterval = thresholdInterval;
 
   // Create a thread that will fire events back at the
   // main thread to measure responsiveness.

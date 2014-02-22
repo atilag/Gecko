@@ -1,18 +1,24 @@
 <!DOCTYPE HTML>
 <html>
 <head>
-  <title>Test for mozCameras</title>
+  <title>Test for mozCameras.getCamera() with separate .setConfiguration() call</title>
   <script type="text/javascript" src="/MochiKit/MochiKit.js"></script>
   <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
 <body>
-<video id="viewfinder" |width = "200" height = "200| autoplay></video>
+<video id="viewfinder" width="200" height="200" autoplay></video>
 <img src="#" alt="This image is going to load" id="testimage"/>
 <script class="testbody" type="text/javascript;version=1.7">
 
+var whichCamera = navigator.mozCameras.getListOfCameras()[0];
 var options = {
-  camera: navigator.mozCameras.getListOfCameras()[0]
+  mode: 'picture',
+  recorderProfile: 'cif',
+  previewSize: {
+    width: 352,
+    height: 288
+  }
 };
 
 var config = {
@@ -27,8 +33,8 @@ function onError(e) {
 }
 
 var capabilities = [ 'previewSizes', 'pictureSizes', 'fileFormats', 'maxFocusAreas', 'minExposureCompensation',
-                     'maxExposureCompensation', 'stepExposureCompensation', 'maxMeteringAreas', 'videoSizes', 
-                     'recorderProfiles'];
+                     'maxExposureCompensation', 'stepExposureCompensation', 'maxMeteringAreas', 'videoSizes',
+                     'recorderProfiles', 'zoomRatios'];
 
 var Camera = {
   cameraObj: null,
@@ -43,6 +49,7 @@ var Camera = {
   _zoomRatios: null,
   _sceneModes: null,
   _focusModes: null,
+  _zoomRatios: null,
   _testsCompleted: 0,
   _shutter: 0,
   _config: {
@@ -60,6 +67,12 @@ var Camera = {
   },
   setFocus: function camera_setfocus(mode) {
     this.cameraObj.focus = mode;
+  },
+  setZoom: function camera_setZoom(zoom) {
+    this.cameraObj.zoom = zoom;
+  },
+  getZoom: function camera_getZoom() {
+    return this.cameraObj.zoom;
   },
   getFileFormats: function camera_formats() {
     this._fileFormats = this.cameraObj.capabilities.fileFormats;
@@ -85,6 +98,9 @@ var Camera = {
   getPreviewSizes: function camera_preview() {
     this._previewSizes = this.cameraObj.capabilities.previewSizes;
   },
+  getZoomRatios: function camera_preview() {
+    this._zoomRatios = this.cameraObj.capabilities.zoomRatios;
+  },
   takePictureSuccess: function taken_foto(blob) {
     var img = new Image();
     var test = this._currentTest;
@@ -96,8 +112,6 @@ var Camera = {
       Camera._testsCompleted++;
       if(Camera._testsCompleted == Camera._tests.length) {
         ok(true, "test finishing");
-        Camera.cameraObj.release();
-        Camera.viewfinder.mozSrcObject = null;
         SimpleTest.finish();
       } else {
         Camera.runTests();
@@ -114,27 +128,16 @@ var Camera = {
                            Camera._shutter + " times");
 
   },
-  streamReady: function onStreamReady (stream) {
-    Camera.viewfinder.mozSrcObject = stream;
-    Camera.viewfinder.play();
-    ok(true, "on Stream is ready and playing");
-    Camera.cameraObj.onPreviewStateChange = function(state) {
-      if (state === 'started') {
-        Camera.cameraObj.onPreviewStateChange = null;
-        Camera.onReady();
-      }
-    };
-
-    //window.setTimeout(Camera.onReady, 500);
-  },
   onReady: function onReady() {
     var camcap = Camera.cameraObj.capabilities;
     var tests = {};
     for (var prop in capabilities) {
       prop = capabilities[prop];
       ok(camcap[prop] || isFinite(camcap[prop]) || camcap[prop] == null, "Camera Capability: " +
-                    prop + " is exposed, value = " +JSON.stringify(camcap[prop]));
-    } 
+                    prop + " is exposed, value = " + JSON.stringify(camcap[prop]));
+    }
+    ok(camcap.maxMeteringAreas >= 0, "maxMeteringAreas = " + camcap.maxMeteringAreas);
+    ok(camcap.maxFocusAreas >= 0, "maxFocusAreas = " + camcap.maxFocusAreas);
     for (var prop in camcap) {
       if(camcap[prop] && camcap[prop].length > 1)  {
         tests[prop] = camcap[prop];
@@ -144,9 +147,35 @@ var Camera = {
     Camera.getPreviewSizes();
     Camera.getFileFormats();
     Camera.getFocusModes();
+    Camera.getZoomRatios();
     ok(Camera._previewSizes.length > 0, "previewSizes length = " + Camera._previewSizes.length);
     ok(Camera._pictureSizes.length > 0, "picturesizes length = " + Camera._pictureSizes.length);
     ok(Camera._fileFormats.length > 0, "file formats length = " + Camera._fileFormats.length);
+    info("zoom ratios length = " + Camera._zoomRatios.length);
+
+    if (Camera._zoomRatios.length > 0) {
+      Camera._zoomRatios.forEach(function(element, index) {
+        info("zoom[" + index + "] = " + element + "x");
+        Camera.setZoom(element);
+        ok(Camera.getZoom() === element, "zoom[" + index + "] = " + element + "x");
+      });
+
+      var zoom = Camera._zoomRatios[0] - 0.1;
+      Camera.setZoom(zoom);
+      ok(Camera.getZoom() === Camera._zoomRatios[0],
+        zoom + "x zoom clamps to minimum: " + Camera._zoomRatios[0]);
+      zoom = Camera._zoomRatios.slice(-1)[0] + 1.0;
+      Camera.setZoom(zoom);
+      ok(Camera.getZoom() === Camera._zoomRatios[0],
+        zoom + "x zoom clamps to maximum: " + Camera._zoomRatios.slice(-1)[0]);
+      if (Camera._zoomRatios.length > 1) {
+        zoom = (Camera._zoomRatios[0] + Camera._zoomRatios[1]) / 2;
+        Camera.setZoom(zoom);
+        ok(Camera.getZoom() === Camera._zoomRatios[0],
+          zoom + "x zoom rounded down to maximum: " + Camera._zoomRatios.slice[0]);
+      }
+    }
+
     Camera._tests = new Array();
     for (var i in Camera._pictureSizes) {
       for (var l in Camera._fileFormats) {
@@ -165,24 +194,34 @@ var Camera = {
     Camera.setFlashMode(test.flashMode);
     config.fileFormat = test.fileFormat;
     config.pictureSize = test.pictureSize;
-    ok(true, JSON.stringify(config.pictureSize));
+    ok(true, "testing picture size " + JSON.stringify(config.pictureSize));
     Camera.cameraObj.takePicture(config, this.takePictureSuccess.bind(this), onError);
+  },
+  onConfigChange: function onConfigChange(config) {
+    ok(config.mode === options.mode, "configuration mode = " + config.mode);
+    ok(config.recorderProfile === options.recorderProfile, "recorder profile = " + config.recorderProfile);
+    ok(config.previewSize.width === options.previewSize.width &&
+      config.previewSize.height === options.previewSize.height,
+      "preview size (w x h) = " + config.previewSize.width + " x " + config.previewSize.height);
   },
   setUp: function setup_tests() {
     function onSuccess(camera) {
       Camera.cameraObj = camera;
-      var size = {
-        profile: 'cif',
-        rotation: 0,
-        width: 352,
-        height: 288
+      Camera.viewfinder.mozSrcObject = camera;
+      Camera.viewfinder.play();
+      Camera.cameraObj.onPreviewStateChange = function(state) {
+        if (state === 'started') {
+          ok(true, "viewfinder is ready and playing");
+          Camera.cameraObj.onPreviewStateChange = null;
+          Camera.onReady();
+        }
       };
-      SimpleTest.expectAssertions(34);
+      SimpleTest.expectAssertions(0);
       ok(true, "Camera Control object has been successfully initialized");
-      Camera.cameraObj.getPreviewStream(size, Camera.streamReady);
+      Camera.cameraObj.setConfiguration(options, Camera.onConfigChange, onError);
       Camera.cameraObj.onShutter = Camera.shutter;
     };
-    navigator.mozCameras.getCamera(options, onSuccess, onError);
+    navigator.mozCameras.getCamera(whichCamera, null, onSuccess, onError);
   }
 }
 
@@ -190,6 +229,8 @@ SimpleTest.waitForExplicitFinish();
 
 window.addEventListener('beforeunload', function() {
   Camera.viewfinder.mozSrcObject = null;
+  Camera.cameraObj.release();
+  Camera.cameraObj = null;
 });
 
 Camera.setUp();

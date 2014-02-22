@@ -318,7 +318,7 @@ CompositorParent::RecvMakeSnapshot(const SurfaceDescriptor& aInSnapshot,
   // do better if AutoOpenSurface uses Moz2D directly.
   RefPtr<DrawTarget> target =
     gfxPlatform::GetPlatform()->CreateDrawTargetForSurface(opener.Get(), size);
-  ComposeToTarget(target);
+  ForceComposeToTarget(target);
   *aOutSnapshot = aInSnapshot;
   return true;
 }
@@ -330,7 +330,8 @@ CompositorParent::RecvFlushRendering()
   // and do it immediately instead.
   if (mCurrentCompositeTask) {
     mCurrentCompositeTask->Cancel();
-    ComposeToTarget(nullptr);
+    mCurrentCompositeTask = nullptr;
+    ForceComposeToTarget(nullptr);
   }
   return true;
 }
@@ -369,6 +370,28 @@ CompositorParent::RecvStopFrameTimeRecording(const uint32_t& aStartIndex,
   if (mLayerManager) {
     mLayerManager->StopFrameTimeRecording(aStartIndex, *intervals);
   }
+  return true;
+}
+
+bool
+CompositorParent::RecvSetTestSampleTime(const TimeStamp& aTime)
+{
+  if (aTime.IsNull()) {
+    return false;
+  }
+
+  mIsTesting = true;
+  mTestTime = aTime;
+  if (mCompositionManager) {
+    mCompositionManager->TransformShadowTree(aTime);
+  }
+  return true;
+}
+
+bool
+CompositorParent::RecvLeaveTestMode()
+{
+  mIsTesting = false;
   return true;
 }
 
@@ -515,7 +538,7 @@ CompositorParent::NotifyShadowTreeTransaction(uint64_t aId, bool aIsFirstPaint, 
     AutoResolveRefLayers resolve(mCompositionManager);
     mApzcTreeManager->UpdatePanZoomControllerTree(this, mLayerManager->GetRoot(), aIsFirstPaint, aId);
 
-    mCompositor->NotifyLayersTransaction();
+    mLayerManager->NotifyShadowTreeTransaction();
   }
   if (aScheduleComposite) {
     ScheduleComposition();
@@ -581,14 +604,11 @@ CompositorParent::ScheduleComposition()
 void
 CompositorParent::Composite()
 {
-  if (CanComposite()) {
-    mLayerManager->BeginTransaction();
-  }
-  CompositeInTransaction();
+  CompositeToTarget(nullptr);
 }
 
 void
-CompositorParent::CompositeInTransaction()
+CompositorParent::CompositeToTarget(DrawTarget* aTarget)
 {
   profiler_tracing("Paint", "Composite", TRACING_INTERVAL_START);
   PROFILER_LABEL("CompositorParent", "Composite");
@@ -603,6 +623,13 @@ CompositorParent::CompositeInTransaction()
   }
 
   AutoResolveRefLayers resolve(mCompositionManager);
+
+  if (aTarget) {
+    mLayerManager->BeginTransactionWithDrawTarget(aTarget);
+  } else {
+    mLayerManager->BeginTransaction();
+  }
+
   if (mForceCompositionTask && !mOverrideComposeReadiness) {
     if (mCompositionManager->ReadyForCompose()) {
       mForceCompositionTask->Cancel();
@@ -653,19 +680,13 @@ CompositorParent::CompositeInTransaction()
 }
 
 void
-CompositorParent::ComposeToTarget(DrawTarget* aTarget)
+CompositorParent::ForceComposeToTarget(DrawTarget* aTarget)
 {
-  PROFILER_LABEL("CompositorParent", "ComposeToTarget");
+  PROFILER_LABEL("CompositorParent", "ForceComposeToTarget");
   AutoRestore<bool> override(mOverrideComposeReadiness);
   mOverrideComposeReadiness = true;
 
-  if (!CanComposite()) {
-    return;
-  }
-  mLayerManager->BeginTransactionWithDrawTarget(aTarget);
-  // Since CanComposite() is true, Composite() must end the layers txn
-  // we opened above.
-  CompositeInTransaction();
+  CompositeToTarget(aTarget);
 }
 
 bool
@@ -733,7 +754,7 @@ CompositorParent::ShadowLayersUpdated(LayerTransactionParent* aLayerTree,
   if (aScheduleComposite) {
     ScheduleComposition();
   }
-  mCompositor->NotifyLayersTransaction();
+  mLayerManager->NotifyShadowTreeTransaction();
 }
 
 void
@@ -862,21 +883,6 @@ CompositorParent* CompositorParent::RemoveCompositor(uint64_t id)
   CompositorParent *retval = it->second;
   sCompositorMap->erase(it);
   return retval;
-}
-
-/* static */ void
-CompositorParent::SetTimeAndSampleAnimations(TimeStamp aTime, bool aIsTesting)
-{
-  if (!sCompositorMap) {
-    return;
-  }
-  for (CompositorMap::iterator it = sCompositorMap->begin(); it != sCompositorMap->end(); ++it) {
-    it->second->mIsTesting = aIsTesting;
-    it->second->mTestTime = aTime;
-    if (it->second->mCompositionManager) {
-      it->second->mCompositionManager->TransformShadowTree(aTime);
-    }
-  }
 }
 
 bool
@@ -1014,6 +1020,8 @@ public:
   virtual bool RecvNotifyRegionInvalidated(const nsIntRegion& aRegion) { return true; }
   virtual bool RecvStartFrameTimeRecording(const int32_t& aBufferSize, uint32_t* aOutStartIndex) MOZ_OVERRIDE { return true; }
   virtual bool RecvStopFrameTimeRecording(const uint32_t& aStartIndex, InfallibleTArray<float>* intervals) MOZ_OVERRIDE  { return true; }
+  virtual bool RecvSetTestSampleTime(const TimeStamp& aTime) MOZ_OVERRIDE { return true; }
+  virtual bool RecvLeaveTestMode() MOZ_OVERRIDE { return true; }
 
   virtual PLayerTransactionParent*
     AllocPLayerTransactionParent(const nsTArray<LayersBackend>& aBackendHints,

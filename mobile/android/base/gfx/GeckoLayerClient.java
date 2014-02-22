@@ -12,7 +12,7 @@ import org.mozilla.gecko.Tabs;
 import org.mozilla.gecko.ZoomConstraints;
 import org.mozilla.gecko.mozglue.RobocopTarget;
 import org.mozilla.gecko.mozglue.generatorannotations.WrapElementForJNI;
-import org.mozilla.gecko.util.EventDispatcher;
+import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.util.FloatUtils;
 
 import android.content.Context;
@@ -887,7 +887,7 @@ public class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
      * You must hold the monitor while calling this.
      */
     @Override
-    public void onSubdocumentScrollBy(float dx, float dy) {
+    public void scrollMarginsBy(float dx, float dy) {
         ImmutableViewportMetrics newMarginsMetrics =
             mMarginsAnimator.scrollBy(mViewportMetrics, dx, dy);
         mViewportMetrics = mViewportMetrics.setMarginsFrom(newMarginsMetrics);
