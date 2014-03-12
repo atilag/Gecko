@@ -22,13 +22,12 @@
 #include "mozilla/dom/RootedDictionary.h"
 #include "mozilla/dom/workers/Workers.h"
 #include "mozilla/ErrorResult.h"
-#include "mozilla/HoldDropJSObjects.h"
 #include "mozilla/Likely.h"
 #include "mozilla/MemoryReporting.h"
 #include "nsCycleCollector.h"
 #include "nsIXPConnect.h"
 #include "MainThreadUtils.h"
-#include "nsTraceRefcnt.h"
+#include "nsISupportsImpl.h"
 #include "qsObjectHelper.h"
 #include "xpcpublic.h"
 #include "nsIVariant.h"
@@ -118,6 +117,7 @@ ThrowMethodFailedWithDetails(JSContext* cx, ErrorResult& rv,
   }
   if (rv.IsNotEnoughArgsError()) {
     rv.ReportNotEnoughArgsError(cx, ifaceName, memberName);
+    return false;
   }
   return Throw(cx, rv.ErrorCode());
 }
@@ -262,12 +262,6 @@ IsNotDateOrRegExp(JSContext* cx, JS::Handle<JSObject*> obj)
 {
   MOZ_ASSERT(obj);
   return !JS_ObjectIsDate(cx, obj) && !JS_ObjectIsRegExp(cx, obj);
-}
-
-MOZ_ALWAYS_INLINE bool
-IsArrayLike(JSContext* cx, JS::Handle<JSObject*> obj)
-{
-  return IsNotDateOrRegExp(cx, obj);
 }
 
 MOZ_ALWAYS_INLINE bool
@@ -1473,6 +1467,9 @@ WantsQueryInterface
 bool
 ThrowingConstructor(JSContext* cx, unsigned argc, JS::Value* vp);
 
+bool
+ThrowConstructorWithoutNew(JSContext* cx, const char* name);
+
 // vp is allowed to be null; in that case no get will be attempted,
 // and *found will simply indicate whether the property exists.
 bool
@@ -2427,7 +2424,9 @@ CreateGlobal(JSContext* aCx, T* aObject, nsWrapperCache* aCache,
     return nullptr;
   }
 
-  mozilla::HoldJSObjects(aObject);
+  MOZ_ALWAYS_TRUE(TryPreserveWrapper(global));
+
+  MOZ_ASSERT(UnwrapDOMObjectToISupports(global));
 
   return global;
 }

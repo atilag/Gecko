@@ -104,7 +104,7 @@ tabbrowser {
 
 .tabbrowser-tab:not([pinned]) {
   -moz-box-flex: 100;
-  max-width: 180px;
+  max-width: 210px;
   min-width: 100px;
   width: 0;
   transition: min-width 200ms ease-out,
@@ -115,8 +115,6 @@ tabbrowser {
   max-width: 0.1px;
   min-width: 0.1px;
   visibility: hidden;
-  transition: min-width 200ms ease-out,
-              max-width 230ms ease-out;
 }
 
 .tab-background {
@@ -257,17 +255,22 @@ toolbarpaletteitem[removable="false"] {
 #bookmarks-toolbar-placeholder,
 toolbarpaletteitem > #personal-bookmarks > #PlacesToolbar,
 #personal-bookmarks[cui-areatype="menu-panel"] > #PlacesToolbar,
-#personal-bookmarks[cui-areatype="toolbar"].overflowedItem > #PlacesToolbar {
+#personal-bookmarks[cui-areatype="toolbar"][overflowedItem=true] > #PlacesToolbar {
   display: none;
+}
+
+#PlacesToolbarDropIndicatorHolder {
+  position: absolute;
+  top: 25%;
 }
 
 toolbarpaletteitem > #personal-bookmarks > #bookmarks-toolbar-placeholder,
 #personal-bookmarks[cui-areatype="menu-panel"] > #bookmarks-toolbar-placeholder,
-#personal-bookmarks[cui-areatype="toolbar"].overflowedItem > #bookmarks-toolbar-placeholder {
+#personal-bookmarks[cui-areatype="toolbar"][overflowedItem=true] > #bookmarks-toolbar-placeholder {
   display: -moz-box;
 }
 
-#zoom-controls[cui-areatype="toolbar"]:not(.overflowedItem) > #zoom-reset-button > .toolbarbutton-text {
+#zoom-controls[cui-areatype="toolbar"]:not([overflowedItem=true]) > #zoom-reset-button > .toolbarbutton-text {
   display: -moz-box;
 }
 
@@ -285,7 +288,7 @@ toolbarpaletteitem > #personal-bookmarks > #bookmarks-toolbar-placeholder,
 }
 
 #urlbar-container {
-  min-width: 28ch;
+  min-width: 50ch;
 }
 
 #search-container {
@@ -360,11 +363,6 @@ panel[noactions] > richlistbox > richlistitem[type~="action"] > .ac-url-box > .a
   display: none;
 }
 
-#wrapper-urlbar-container > #urlbar-container > #urlbar-wrapper > #urlbar {
-  -moz-user-input: disabled;
-  cursor: grab;
-}
-
 #PopupAutoComplete {
   -moz-binding: url("chrome://browser/content/urlbarBindings.xml#browser-autocomplete-result-popup");
 }
@@ -389,7 +387,39 @@ panel[noactions] > richlistbox > richlistitem[type~="action"] > .ac-url-box > .a
 }
 
 #identity-icon-labels {
-  max-width: 12vw;
+  max-width: 18em;
+}
+@media (max-width: 700px) {
+  #urlbar-container {
+    min-width: 45ch;
+  }
+  #identity-icon-labels {
+    max-width: 70px;
+  }
+}
+@media (max-width: 600px) {
+  #urlbar-container {
+    min-width: 40ch;
+  }
+  #identity-icon-labels {
+    max-width: 60px;
+  }
+}
+@media (max-width: 500px) {
+  #urlbar-container {
+    min-width: 35ch;
+  }
+  #identity-icon-labels {
+    max-width: 50px;
+  }
+}
+@media (max-width: 400px) {
+  #urlbar-container {
+    min-width: 28ch;
+  }
+  #identity-icon-labels {
+    max-width: 40px;
+  }
 }
 
 #identity-icon-country-label {
@@ -400,7 +430,7 @@ panel[noactions] > richlistbox > richlistitem[type~="action"] > .ac-url-box > .a
   -moz-margin-end: 0.25em !important;
 }
 
-#wrapper-search-container > #search-container > #searchbar > .searchbar-textbox > .autocomplete-textbox-container > .textbox-input-box > html|*.textbox-input {
+#main-window[customizing] :-moz-any(#urlbar, .searchbar-textbox) > .autocomplete-textbox-container > .textbox-input-box {
   visibility: hidden;
 }
 
@@ -738,10 +768,6 @@ toolbarbutton[type="badged"] {
   -moz-binding: url("chrome://browser/content/urlbarBindings.xml#toolbarbutton-badged");
 }
 
-toolbarpaletteitem[place="palette"] > toolbarbutton[type="badged"] > .toolbarbutton-badge-container {
-  padding: 5px;
-}
-
 toolbarbutton[type="socialmark"] {
   -moz-binding: url("chrome://browser/content/socialmarks.xml#toolbarbutton-marks");
 }
@@ -749,11 +775,9 @@ toolbarbutton[type="socialmark"] {
 toolbarbutton[type="badged"] > .toolbarbutton-badge-container > .toolbarbutton-icon,
 toolbarbutton[type="socialmark"] > .toolbarbutton-icon {
   max-width: 16px;
-  max-height: 16px;
 }
 toolbarpaletteitem[place="palette"] > toolbarbutton[type="badged"] > .toolbarbutton-badge-container > .toolbarbutton-icon {
   max-width: 32px;
-  max-height: 32px;
 }
 
 panelview > .social-panel-frame {
@@ -890,14 +914,14 @@ chatbox:-moz-full-screen-ancestor > .chat-titlebar {
 }
 
 /* Customize mode */
-#navigator-toolbox > toolbar,
+#navigator-toolbox,
 #content-deck {
   transition-property: margin-left, margin-right;
-  transition-duration: 150ms;
-  transition-timing-function: ease-out;
+  transition-duration: 200ms;
+  transition-timing-function: linear;
 }
 
-#tab-view-deck[fastcustomizeanimation] #navigator-toolbox > toolbar,
+#tab-view-deck[fastcustomizeanimation] #navigator-toolbox,
 #tab-view-deck[fastcustomizeanimation] #content-deck {
   transition-duration: 1ms;
   transition-timing-function: linear;

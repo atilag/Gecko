@@ -205,16 +205,12 @@ nsresult HTMLAudioElement::SetAcceptHeader(nsIHttpChannel* aChannel)
 #ifdef MOZ_WEBM
       "audio/webm,"
 #endif
-#ifdef MOZ_OGG
       "audio/ogg,"
-#endif
 #ifdef MOZ_WAVE
       "audio/wav,"
 #endif
       "audio/*;q=0.9,"
-#ifdef MOZ_OGG
       "application/ogg;q=0.7,"
-#endif
       "video/*;q=0.6,*/*;q=0.5");
 
     return aChannel->SetRequestHeader(NS_LITERAL_CSTRING("Accept"),
@@ -250,6 +246,12 @@ HTMLAudioElement::CanPlayChanged(int32_t canPlay)
 }
 
 NS_IMETHODIMP
+HTMLAudioElement::WindowVolumeChanged()
+{
+  return HTMLMediaElement::WindowVolumeChanged();
+}
+
+NS_IMETHODIMP
 HTMLAudioElement::Notify(nsITimer* aTimer)
 {
 #ifdef MOZ_B2G
@@ -278,7 +280,8 @@ HTMLAudioElement::UpdateAudioChannelPlayingState()
         return;
       }
       // Use a weak ref so the audio channel agent can't leak |this|.
-      mAudioChannelAgent->InitWithWeakCallback(mAudioChannelType, this);
+      mAudioChannelAgent->InitWithWeakCallback(OwnerDoc()->GetWindow(),
+                                               mAudioChannelType, this);
 
       mAudioChannelAgent->SetVisibilityState(!OwnerDoc()->Hidden());
     }

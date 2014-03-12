@@ -5,6 +5,8 @@
 
 package org.mozilla.gecko.db;
 
+import java.util.List;
+
 import org.mozilla.gecko.db.BrowserContract.Bookmarks;
 import org.mozilla.gecko.db.BrowserContract.ExpirePriority;
 import org.mozilla.gecko.favicons.decoders.LoadFaviconResult;
@@ -14,11 +16,8 @@ import android.content.ContentResolver;
 import android.database.ContentObserver;
 import android.database.Cursor;
 import android.database.CursorWrapper;
-import android.graphics.Bitmap;
 import android.graphics.drawable.BitmapDrawable;
 import android.util.SparseArray;
-
-import java.util.List;
 
 public class BrowserDB {
     private static boolean sAreContentProvidersEnabled = true;
@@ -69,6 +68,8 @@ public class BrowserDB {
         @RobocopTarget
         public Cursor getBookmarksInFolder(ContentResolver cr, long folderId);
 
+        public Cursor getReadingList(ContentResolver cr);
+
         public boolean isVisited(ContentResolver cr, String uri);
 
         public int getReadingListCount(ContentResolver cr);
@@ -100,6 +101,8 @@ public class BrowserDB {
         public void addReadingListItem(ContentResolver cr, String title, String uri);
 
         public void removeReadingListItemWithURL(ContentResolver cr, String uri);
+
+        public void removeReadingListItem(ContentResolver cr, int id);
 
         public LoadFaviconResult getFaviconForUrl(ContentResolver cr, String uri);
 
@@ -217,6 +220,11 @@ public class BrowserDB {
         return sDb.getBookmarksInFolder(cr, folderId);
     }
 
+    @RobocopTarget
+    public static Cursor getReadingList(ContentResolver cr) {
+        return sDb.getReadingList(cr);
+    }
+
     public static String getUrlForKeyword(ContentResolver cr, String keyword) {
         return sDb.getUrlForKeyword(cr, keyword);
     }
@@ -269,6 +277,10 @@ public class BrowserDB {
 
     public static void removeReadingListItemWithURL(ContentResolver cr, String uri) {
         sDb.removeReadingListItemWithURL(cr, uri);
+    }
+
+    public static void removeReadingListItem(ContentResolver cr, int id) {
+        sDb.removeReadingListItem(cr, id);
     }
 
     public static LoadFaviconResult getFaviconForFaviconUrl(ContentResolver cr, String faviconURL) {

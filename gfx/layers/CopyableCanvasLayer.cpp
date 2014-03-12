@@ -32,9 +32,9 @@ namespace layers {
 
 CopyableCanvasLayer::CopyableCanvasLayer(LayerManager* aLayerManager, void *aImplData) :
   CanvasLayer(aLayerManager, aImplData)
+  , mStream(nullptr)
 {
   MOZ_COUNT_CTOR(CopyableCanvasLayer);
-  mForceReadback = Preferences::GetBool("webgl.force-layers-readback", false);
 }
 
 CopyableCanvasLayer::~CopyableCanvasLayer()
@@ -49,6 +49,7 @@ CopyableCanvasLayer::Initialize(const Data& aData)
 
   if (aData.mGLContext) {
     mGLContext = aData.mGLContext;
+    mStream = aData.mStream;
     mIsGLAlphaPremult = aData.mIsGLAlphaPremult;
     mNeedsYFlip = true;
     MOZ_ASSERT(mGLContext->IsOffscreen(), "canvas gl context isn't offscreen");
@@ -71,7 +72,7 @@ CopyableCanvasLayer::Initialize(const Data& aData)
 bool
 CopyableCanvasLayer::IsDataValid(const Data& aData)
 {
-  return mGLContext == aData.mGLContext;
+  return mGLContext == aData.mGLContext && mStream == aData.mStream;
 }
 
 void
@@ -96,7 +97,7 @@ CopyableCanvasLayer::UpdateTarget(DrawTarget* aDestTarget,
     RefPtr<DataSourceSurface> readSurf;
     RefPtr<SourceSurface> resultSurf;
 
-    SharedSurface* sharedSurf = mGLContext->RequestFrame();
+    SharedSurface_GL* sharedSurf = mGLContext->RequestFrame();
     if (!sharedSurf) {
       NS_WARNING("Null frame received.");
       return;
@@ -191,7 +192,7 @@ CopyableCanvasLayer::DeprecatedUpdateSurface(gfxASurface* aDestSurface,
     RefPtr<DataSourceSurface> readDSurf;
     nsRefPtr<gfxASurface> resultSurf;
 
-    SharedSurface* sharedSurf = mGLContext->RequestFrame();
+    SharedSurface_GL* sharedSurf = mGLContext->RequestFrame();
     if (!sharedSurf) {
       NS_WARNING("Null frame received.");
       return;
@@ -349,7 +350,7 @@ CopyableCanvasLayer::DeprecatedPaintWithOpacity(gfxContext* aContext,
   // Restore surface operator
   if (GetContentFlags() & CONTENT_OPAQUE) {
     aContext->SetOperator(savedOp);
-  }  
+  }
 
   if (mNeedsYFlip) {
     aContext->SetMatrix(m);

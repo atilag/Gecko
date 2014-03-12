@@ -48,7 +48,7 @@ public:
 
   enum TrustLevel {
     TrustAnchor = 1,        // certificate is a trusted root CA certificate or
-                            // equivalent
+                            // equivalent *for the given policy*.
     ActivelyDistrusted = 2, // certificate is known to be bad
     InheritsTrust = 3       // certificate must chain to a trust anchor
   };
@@ -56,15 +56,28 @@ public:
   // Determine the level of trust in the given certificate for the given role.
   // This will be called for every certificate encountered during path
   // building.
+  //
+  // When policy == SEC_OID_X509_ANY_POLICY, then no policy-related checking
+  // should be done. When policy != SEC_OID_X509_ANY_POLICY, then GetCertTrust
+  // MUST NOT return with *trustLevel == TrustAnchor unless the given cert is
+  // considered a trust anchor *for that policy*. In particular, if the user
+  // has marked an intermediate certificate as trusted, but that intermediate
+  // isn't in the list of EV roots, then GetCertTrust must result in
+  // *trustLevel == InheritsTrust instead of *trustLevel == TrustAnchor
+  // (assuming the candidate cert is not actively distrusted).
   virtual SECStatus GetCertTrust(EndEntityOrCA endEntityOrCA,
+                                 SECOidTag policy,
                                  const CERTCertificate* candidateCert,
                          /*out*/ TrustLevel* trustLevel) = 0;
 
   // Find all certificates (intermediate and/or root) in the certificate
   // database that have a subject name matching |encodedIssuerName| at
   // the given time. Certificates where the given time is not within the
-  // certificate's validity period may be excluded. The results should be
-  // added to the |results| certificate list.
+  // certificate's validity period may be excluded. On input, |results|
+  // will be null on input. If no potential issuers are found, then this
+  // function should return SECSuccess with results being either null or
+  // an empty list. Otherwise, this function should construct a
+  // CERTCertList and return it in |results|, transfering ownership.
   virtual SECStatus FindPotentialIssuers(const SECItem* encodedIssuerName,
                                          PRTime time,
                                  /*out*/ ScopedCERTCertList& results) = 0;

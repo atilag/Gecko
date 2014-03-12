@@ -1606,7 +1606,7 @@ NPObjWrapper_Convert(JSContext *cx, JS::Handle<JSObject*> obj, JSType hint, JS::
   if (!JS_GetProperty(cx, obj, "toString", &v))
     return false;
   if (!JSVAL_IS_PRIMITIVE(v) && JS_ObjectIsCallable(cx, JSVAL_TO_OBJECT(v))) {
-    if (!JS_CallFunctionValue(cx, obj, v, JS::EmptyValueArray, vp))
+    if (!JS_CallFunctionValue(cx, obj, v, JS::HandleValueArray::empty(), vp))
       return false;
     if (JSVAL_IS_PRIMITIVE(vp))
       return true;
@@ -1730,13 +1730,8 @@ nsNPObjWrapper::GetNewOrUsed(NPP npp, JSContext *cx, NPObject *npobj)
 
   if (!sNPObjWrappers.ops) {
     // No hash yet (or any more), initialize it.
-
-    if (!PL_DHashTableInit(&sNPObjWrappers, PL_DHashGetStubOps(), nullptr,
-                           sizeof(NPObjWrapperHashEntry), 16)) {
-      NS_ERROR("Error initializing PLDHashTable!");
-
-      return nullptr;
-    }
+    PL_DHashTableInit(&sNPObjWrappers, PL_DHashGetStubOps(), nullptr,
+                      sizeof(NPObjWrapperHashEntry), 16);
   }
 
   NPObjWrapperHashEntry *entry = static_cast<NPObjWrapperHashEntry *>

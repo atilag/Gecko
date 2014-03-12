@@ -6,6 +6,7 @@
 #include "Accessible-inl.h"
 #include "AccIterator.h"
 #include "DocAccessible-inl.h"
+#include "HTMLImageMapAccessible.h"
 #include "nsAccCache.h"
 #include "nsAccessiblePivot.h"
 #include "nsAccUtils.h"
@@ -30,7 +31,7 @@
 #include "nsEventStateManager.h"
 #include "nsIFrame.h"
 #include "nsIInterfaceRequestorUtils.h"
-#include "nsINameSpaceManager.h"
+#include "nsImageFrame.h"
 #include "nsIPersistentProperties2.h"
 #include "nsIPresShell.h"
 #include "nsIServiceManager.h"
@@ -40,6 +41,7 @@
 #include "nsIURI.h"
 #include "nsIWebNavigation.h"
 #include "nsFocusManager.h"
+#include "nsNameSpaceManager.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/dom/DocumentType.h"
@@ -395,8 +397,7 @@ NS_IMETHODIMP
 DocAccessible::GetNameSpaceURIForID(int16_t aNameSpaceID, nsAString& aNameSpaceURI)
 {
   if (mDocumentNode) {
-    nsCOMPtr<nsINameSpaceManager> nameSpaceManager =
-        do_GetService(NS_NAMESPACEMANAGER_CONTRACTID);
+    nsNameSpaceManager* nameSpaceManager = nsNameSpaceManager::GetInstance();
     if (nameSpaceManager)
       return nameSpaceManager->GetNameSpaceURI(aNameSpaceID, aNameSpaceURI);
   }
@@ -1434,6 +1435,30 @@ DocAccessible::ProcessInvalidationList()
   }
 
   mInvalidationList.Clear();
+}
+
+Accessible*
+DocAccessible::GetAccessibleEvenIfNotInMap(nsINode* aNode) const
+{
+if (!aNode->IsContent() || !aNode->AsContent()->IsHTML(nsGkAtoms::area))
+    return GetAccessible(aNode);
+
+  // XXX Bug 135040, incorrect when multiple images use the same map.
+  nsIFrame* frame = aNode->AsContent()->GetPrimaryFrame();
+  nsImageFrame* imageFrame = do_QueryFrame(frame);
+  if (imageFrame) {
+    Accessible* parent = GetAccessible(imageFrame->GetContent());
+    if (parent) {
+      Accessible* area =
+        parent->AsImageMap()->GetChildAccessibleFor(aNode);
+      if (area)
+        return area;
+
+      return nullptr;
+    }
+  }
+
+  return GetAccessible(aNode);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

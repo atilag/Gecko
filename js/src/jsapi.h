@@ -9,7 +9,6 @@
 #ifndef jsapi_h
 #define jsapi_h
 
-#include "mozilla/Atomics.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/RangedPtr.h"
@@ -26,6 +25,7 @@
 #include "js/Class.h"
 #include "js/HashTable.h"
 #include "js/Id.h"
+#include "js/Principals.h"
 #include "js/RootingAPI.h"
 #include "js/Utility.h"
 #include "js/Value.h"
@@ -604,12 +604,11 @@ class JS_PUBLIC_API(CustomAutoRooter) : private AutoGCRooter
 class HandleValueArray
 {
     const size_t length_;
-    const Value *elements_;
+    const Value * const elements_;
 
     HandleValueArray(size_t len, const Value *elements) : length_(len), elements_(elements) {}
 
   public:
-    HandleValueArray() : length_(0), elements_(nullptr) {}
     HandleValueArray(const RootedValue& value) : length_(1), elements_(value.address()) {}
 
     HandleValueArray(const AutoValueVector& values)
@@ -631,6 +630,10 @@ class HandleValueArray
         return HandleValueArray(len, values.begin() + startIndex);
     }
 
+    static HandleValueArray empty() {
+        return HandleValueArray(0, nullptr);
+    }
+
     size_t length() const { return length_; }
     const Value *begin() const { return elements_; }
 
@@ -639,8 +642,6 @@ class HandleValueArray
         return HandleValue::fromMarkedLocation(&elements_[i]);
     }
 };
-
-extern JS_PUBLIC_DATA(const HandleValueArray) EmptyValueArray;
 
 }  /* namespace JS */
 
@@ -719,7 +720,7 @@ typedef void
 (* JSFinalizeCallback)(JSFreeOp *fop, JSFinalizeStatus status, bool isCompartment);
 
 typedef bool
-(* JSOperationCallback)(JSContext *cx);
+(* JSInterruptCallback)(JSContext *cx);
 
 typedef void
 (* JSErrorReporter)(JSContext *cx, const char *message, JSErrorReport *report);
@@ -777,20 +778,6 @@ typedef bool
 
 typedef bool
 (* JSLocaleToUnicode)(JSContext *cx, const char *src, JS::MutableHandleValue rval);
-
-/*
- * Security protocol types.
- */
-
-typedef void
-(* JSDestroyPrincipalsOp)(JSPrincipals *principals);
-
-/*
- * Used to check if a CSP instance wants to disable eval() and friends.
- * See js_CheckCSPPermitsJSAction() in jsobj.
- */
-typedef bool
-(* JSCSPEvalChecker)(JSContext *cx);
 
 /*
  * Callback used to ask the embedding for the cross compartment wrapper handler
@@ -852,7 +839,7 @@ JS_NumberValue(double d)
 {
     int32_t i;
     d = JS::CanonicalizeNaN(d);
-    if (mozilla::DoubleIsInt32(d, &i))
+    if (mozilla::NumberIsInt32(d, &i))
         return INT_TO_JSVAL(i);
     return DOUBLE_TO_JSVAL(d);
 }
@@ -1438,6 +1425,69 @@ JS_StringToVersion(const char *string);
 
 namespace JS {
 
+class JS_PUBLIC_API(RuntimeOptions) {
+  public:
+    RuntimeOptions()
+      : baseline_(false),
+        typeInference_(false),
+        ion_(false),
+        asmJS_(false)
+    {
+    }
+
+    bool baseline() const { return baseline_; }
+    RuntimeOptions &setBaseline(bool flag) {
+        baseline_ = flag;
+        return *this;
+    }
+    RuntimeOptions &toggleBaseline() {
+        baseline_ = !baseline_;
+        return *this;
+    }
+
+    bool typeInference() const { return typeInference_; }
+    RuntimeOptions &setTypeInference(bool flag) {
+        typeInference_ = flag;
+        return *this;
+    }
+    RuntimeOptions &toggleTypeInference() {
+        typeInference_ = !typeInference_;
+        return *this;
+    }
+
+    bool ion() const { return ion_; }
+    RuntimeOptions &setIon(bool flag) {
+        ion_ = flag;
+        return *this;
+    }
+    RuntimeOptions &toggleIon() {
+        ion_ = !ion_;
+        return *this;
+    }
+
+    bool asmJS() const { return asmJS_; }
+    RuntimeOptions &setAsmJS(bool flag) {
+        asmJS_ = flag;
+        return *this;
+    }
+    RuntimeOptions &toggleAsmJS() {
+        asmJS_ = !asmJS_;
+        return *this;
+    }
+
+  private:
+    bool baseline_ : 1;
+    bool typeInference_ : 1;
+    bool ion_ : 1;
+    bool asmJS_ : 1;
+};
+
+JS_PUBLIC_API(RuntimeOptions &)
+RuntimeOptionsRef(JSRuntime *rt);
+
+JS_PUBLIC_API(RuntimeOptions &)
+RuntimeOptionsRef(JSContext *cx);
+
 class JS_PUBLIC_API(ContextOptions) {
   public:
     ContextOptions()
@@ -1449,10 +1499,6 @@ class JS_PUBLIC_API(ContextOptions) {
         noDefaultCompartmentObject_(false),
         noScriptRval_(false),
         strictMode_(false),
-        baseline_(false),
-        typeInference_(false),
-        ion_(false),
-        asmJS_(false),
         cloneSingletons_(false)
     {
     }
@@ -1537,46 +1583,6 @@ class JS_PUBLIC_API(ContextOptions) {
         return *this;
     }
 
-    bool baseline() const { return baseline_; }
-    ContextOptions &setBaseline(bool flag) {
-        baseline_ = flag;
-        return *this;
-    }
-    ContextOptions &toggleBaseline() {
-        baseline_ = !baseline_;
-        return *this;
-    }
-
-    bool typeInference() const { return typeInference_; }
-    ContextOptions &setTypeInference(bool flag) {
-        typeInference_ = flag;
-        return *this;
-    }
-    ContextOptions &toggleTypeInference() {
-        typeInference_ = !typeInference_;
-        return *this;
-    }
-
-    bool ion() const { return ion_; }
-    ContextOptions &setIon(bool flag) {
-        ion_ = flag;
-        return *this;
-    }
-    ContextOptions &toggleIon() {
-        ion_ = !ion_;
-        return *this;
-    }
-
-    bool asmJS() const { return asmJS_; }
-    ContextOptions &setAsmJS(bool flag) {
-        asmJS_ = flag;
-        return *this;
-    }
-    ContextOptions &toggleAsmJS() {
-        asmJS_ = !asmJS_;
-        return *this;
-    }
-
     bool cloneSingletons() const { return cloneSingletons_; }
     ContextOptions &setCloneSingletons(bool flag) {
         cloneSingletons_ = flag;
@@ -1596,10 +1602,6 @@ class JS_PUBLIC_API(ContextOptions) {
     bool noDefaultCompartmentObject_ : 1;
     bool noScriptRval_ : 1;
     bool strictMode_ : 1;
-    bool baseline_ : 1;
-    bool typeInference_ : 1;
-    bool ion_ : 1;
-    bool asmJS_ : 1;
     bool cloneSingletons_ : 1;
 };
 
@@ -1770,8 +1772,23 @@ JS_GetClassObject(JSContext *cx, JSProtoKey key, JS::MutableHandle<JSObject*> ob
 extern JS_PUBLIC_API(bool)
 JS_GetClassPrototype(JSContext *cx, JSProtoKey key, JS::MutableHandle<JSObject*> objp);
 
+namespace JS {
+
+/*
+ * Determine if the given object is an instance or prototype for a standard
+ * class. If so, return the associated JSProtoKey. If not, return JSProto_Null.
+ */
+
 extern JS_PUBLIC_API(JSProtoKey)
-JS_IdentifyClassPrototype(JSObject *obj);
+IdentifyStandardInstance(JSObject *obj);
+
+extern JS_PUBLIC_API(JSProtoKey)
+IdentifyStandardPrototype(JSObject *obj);
+
+extern JS_PUBLIC_API(JSProtoKey)
+IdentifyStandardInstanceOrPrototype(JSObject *obj);
+
+} /* namespace JS */
 
 extern JS_PUBLIC_API(JSProtoKey)
 JS_IdToProtoKey(JSContext *cx, JS::HandleId id);
@@ -2555,7 +2572,7 @@ JS_GetConstructor(JSContext *cx, JS::Handle<JSObject*> proto);
  * and true with *idp containing the unique id on success.
  */
 extern JS_PUBLIC_API(bool)
-JS_GetObjectId(JSContext *cx, JSObject *obj, jsid *idp);
+JS_GetObjectId(JSContext *cx, JS::HandleObject obj, JS::MutableHandleId idp);
 
 namespace JS {
 
@@ -2631,18 +2648,6 @@ class JS_PUBLIC_API(CompartmentOptions)
         return *this;
     }
 
-    bool baseline(JSContext *cx) const;
-    Override &baselineOverride() { return baselineOverride_; }
-
-    bool typeInference(const js::ExclusiveContext *cx) const;
-    Override &typeInferenceOverride() { return typeInferenceOverride_; }
-
-    bool ion(JSContext *cx) const;
-    Override &ionOverride() { return ionOverride_; }
-
-    bool asmJS(JSContext *cx) const;
-    Override &asmJSOverride() { return asmJSOverride_; }
-
     bool cloneSingletons(JSContext *cx) const;
     Override &cloneSingletonsOverride() { return cloneSingletonsOverride_; }
 
@@ -2665,10 +2670,6 @@ class JS_PUBLIC_API(CompartmentOptions)
     JSVersion version_;
     bool invisibleToDebugger_;
     bool mergeable_;
-    Override baselineOverride_;
-    Override typeInferenceOverride_;
-    Override ionOverride_;
-    Override asmJSOverride_;
     Override cloneSingletonsOverride_;
     union {
         ZoneSpecifier spec;
@@ -3188,77 +3189,6 @@ JS_SetReservedSlot(JSObject *obj, uint32_t index, jsval v);
 /************************************************************************/
 
 /*
- * Security protocol.
- */
-struct JSPrincipals {
-    /* Don't call "destroy"; use reference counting macros below. */
-#ifdef JS_THREADSAFE
-    mozilla::Atomic<int32_t> refcount;
-#else
-    int32_t refcount;
-#endif
-
-#ifdef JS_DEBUG
-    /* A helper to facilitate principals debugging. */
-    uint32_t    debugToken;
-#endif
-
-    void setDebugToken(uint32_t token) {
-# ifdef JS_DEBUG
-        debugToken = token;
-# endif
-    }
-
-    /*
-     * This is not defined by the JS engine but should be provided by the
-     * embedding.
-     */
-    JS_PUBLIC_API(void) dump();
-};
-
-extern JS_PUBLIC_API(void)
-JS_HoldPrincipals(JSPrincipals *principals);
-
-extern JS_PUBLIC_API(void)
-JS_DropPrincipals(JSRuntime *rt, JSPrincipals *principals);
-
-struct JSSecurityCallbacks {
-    JSCSPEvalChecker           contentSecurityPolicyAllows;
-    JSSubsumesOp               subsumes;
-};
-
-extern JS_PUBLIC_API(void)
-JS_SetSecurityCallbacks(JSRuntime *rt, const JSSecurityCallbacks *callbacks);
-
-extern JS_PUBLIC_API(const JSSecurityCallbacks *)
-JS_GetSecurityCallbacks(JSRuntime *rt);
-
-/*
- * Code running with "trusted" principals will be given a deeper stack
- * allocation than ordinary scripts. This allows trusted script to run after
- * untrusted script has exhausted the stack. This function sets the
- * runtime-wide trusted principal.
- *
- * This principals is not held (via JS_HoldPrincipals/JS_DropPrincipals) since
- * there is no available JSContext. Instead, the caller must ensure that the
- * given principals stays valid for as long as 'rt' may point to it. If the
- * principals would be destroyed before 'rt', JS_SetTrustedPrincipals must be
- * called again, passing nullptr for 'prin'.
- */
-extern JS_PUBLIC_API(void)
-JS_SetTrustedPrincipals(JSRuntime *rt, const JSPrincipals *prin);
-
-/*
- * Initialize the callback that is called to destroy JSPrincipals instance
- * when its reference counter drops to zero. The initialization can be done
- * only once per JS runtime.
- */
-extern JS_PUBLIC_API(void)
-JS_InitDestroyPrincipalsCallback(JSRuntime *rt, JSDestroyPrincipalsOp destroyPrincipals);
-
-/************************************************************************/
-
-/*
  * Functions and scripts.
  */
 extern JS_PUBLIC_API(JSFunction *)
@@ -3443,8 +3373,9 @@ namespace JS {
  */
 class JS_FRIEND_API(ReadOnlyCompileOptions)
 {
+    friend class CompileOptions;
+
   protected:
-    JSPrincipals *principals_;
     JSPrincipals *originPrincipals_;
     const char *filename_;
     const char *introducerFilename_;
@@ -3455,8 +3386,7 @@ class JS_FRIEND_API(ReadOnlyCompileOptions)
     // classes' constructors take care of that, in ways appropriate to their
     // purpose.
     ReadOnlyCompileOptions()
-      : principals_(nullptr),
-        originPrincipals_(nullptr),
+      : originPrincipals_(nullptr),
         filename_(nullptr),
         introducerFilename_(nullptr),
         sourceMapURL_(nullptr),
@@ -3475,6 +3405,7 @@ class JS_FRIEND_API(ReadOnlyCompileOptions)
         werrorOption(false),
         asmJSOption(false),
         forceAsync(false),
+        installedFile(false),
         sourcePolicy(SAVE_SOURCE),
         introductionType(nullptr),
         introductionLineno(0),
@@ -3489,13 +3420,13 @@ class JS_FRIEND_API(ReadOnlyCompileOptions)
   public:
     // Read-only accessors for non-POD options. The proper way to set these
     // depends on the derived type.
-    JSPrincipals *principals() const { return principals_; }
-    JSPrincipals *originPrincipals() const;
+    JSPrincipals *originPrincipals(js::ExclusiveContext *cx) const;
     const char *filename() const { return filename_; }
     const char *introducerFilename() const { return introducerFilename_; }
     const jschar *sourceMapURL() const { return sourceMapURL_; }
     virtual JSObject *element() const = 0;
     virtual JSString *elementAttributeName() const = 0;
+    virtual JSScript *introductionScript() const = 0;
 
     // POD options.
     JSVersion version;
@@ -3513,6 +3444,7 @@ class JS_FRIEND_API(ReadOnlyCompileOptions)
     bool werrorOption;
     bool asmJSOption;
     bool forceAsync;
+    bool installedFile;  // 'true' iff pre-compiling js file in packaged app
     enum SourcePolicy {
         NO_SOURCE,
         LAZY_SOURCE,
@@ -3553,6 +3485,7 @@ class JS_FRIEND_API(OwningCompileOptions) : public ReadOnlyCompileOptions
     JSRuntime *runtime;
     PersistentRootedObject elementRoot;
     PersistentRootedString elementAttributeNameRoot;
+    PersistentRootedScript introductionScriptRoot;
 
   public:
     // A minimal constructor, for use with OwningCompileOptions::copy. This
@@ -3564,6 +3497,7 @@ class JS_FRIEND_API(OwningCompileOptions) : public ReadOnlyCompileOptions
 
     JSObject *element() const MOZ_OVERRIDE { return elementRoot; }
     JSString *elementAttributeName() const MOZ_OVERRIDE { return elementAttributeNameRoot; }
+    JSScript *introductionScript() const MOZ_OVERRIDE { return introductionScriptRoot; }
 
     // Set this to a copy of |rhs|. Return false on OOM.
     bool copy(JSContext *cx, const ReadOnlyCompileOptions &rhs);
@@ -3584,10 +3518,8 @@ class JS_FRIEND_API(OwningCompileOptions) : public ReadOnlyCompileOptions
         elementAttributeNameRoot = p;
         return *this;
     }
-    OwningCompileOptions &setPrincipals(JSPrincipals *p) {
-        if (p) JS_HoldPrincipals(p);
-        if (principals_) JS_DropPrincipals(runtime, principals_);
-        principals_ = p;
+    OwningCompileOptions &setIntroductionScript(JSScript *s) {
+        introductionScriptRoot = s;
         return *this;
     }
     OwningCompileOptions &setOriginPrincipals(JSPrincipals *p) {
@@ -3609,19 +3541,24 @@ class JS_FRIEND_API(OwningCompileOptions) : public ReadOnlyCompileOptions
     OwningCompileOptions &setSelfHostingMode(bool shm) { selfHostingMode = shm; return *this; }
     OwningCompileOptions &setCanLazilyParse(bool clp) { canLazilyParse = clp; return *this; }
     OwningCompileOptions &setSourcePolicy(SourcePolicy sp) { sourcePolicy = sp; return *this; }
+    OwningCompileOptions &setIntroductionType(const char *t) { introductionType = t; return *this; }
     bool setIntroductionInfo(JSContext *cx, const char *introducerFn, const char *intro,
-                             unsigned line, uint32_t offset)
+                             unsigned line, JSScript *script, uint32_t offset)
     {
         if (!setIntroducerFilename(cx, introducerFn))
             return false;
         introductionType = intro;
         introductionLineno = line;
+        introductionScriptRoot = script;
         introductionOffset = offset;
         hasIntroductionInfo = true;
         return true;
     }
 
     virtual bool wrap(JSContext *cx, JSCompartment *compartment) MOZ_OVERRIDE;
+
+  private:
+    void operator=(const CompileOptions &rhs) MOZ_DELETE;
 };
 
 /*
@@ -3635,24 +3572,27 @@ class MOZ_STACK_CLASS JS_FRIEND_API(CompileOptions) : public ReadOnlyCompileOpti
 {
     RootedObject elementRoot;
     RootedString elementAttributeNameRoot;
+    RootedScript introductionScriptRoot;
 
   public:
     explicit CompileOptions(JSContext *cx, JSVersion version = JSVERSION_UNKNOWN);
     CompileOptions(js::ContextFriendFields *cx, const ReadOnlyCompileOptions &rhs)
-      : ReadOnlyCompileOptions(), elementRoot(cx), elementAttributeNameRoot(cx)
+      : ReadOnlyCompileOptions(), elementRoot(cx), elementAttributeNameRoot(cx),
+        introductionScriptRoot(cx)
     {
         copyPODOptions(rhs);
 
-        principals_ = rhs.principals();
-        originPrincipals_ = rhs.originPrincipals();
+        originPrincipals_ = rhs.originPrincipals_;
         filename_ = rhs.filename();
         sourceMapURL_ = rhs.sourceMapURL();
         elementRoot = rhs.element();
         elementAttributeNameRoot = rhs.elementAttributeName();
+        introductionScriptRoot = rhs.introductionScript();
     }
 
     JSObject *element() const MOZ_OVERRIDE { return elementRoot; }
     JSString *elementAttributeName() const MOZ_OVERRIDE { return elementAttributeNameRoot; }
+    JSScript *introductionScript() const MOZ_OVERRIDE { return introductionScriptRoot; }
 
     CompileOptions &setFile(const char *f) { filename_ = f; return *this; }
     CompileOptions &setLine(unsigned l) { lineno = l; return *this; }
@@ -3665,8 +3605,8 @@ class MOZ_STACK_CLASS JS_FRIEND_API(CompileOptions) : public ReadOnlyCompileOpti
         elementAttributeNameRoot = p;
         return *this;
     }
-    CompileOptions &setPrincipals(JSPrincipals *p) {
-        principals_ = p;
+    CompileOptions &setIntroductionScript(JSScript *s) {
+        introductionScriptRoot = s;
         return *this;
     }
     CompileOptions &setOriginPrincipals(JSPrincipals *p) {
@@ -3686,18 +3626,23 @@ class MOZ_STACK_CLASS JS_FRIEND_API(CompileOptions) : public ReadOnlyCompileOpti
     CompileOptions &setSelfHostingMode(bool shm) { selfHostingMode = shm; return *this; }
     CompileOptions &setCanLazilyParse(bool clp) { canLazilyParse = clp; return *this; }
     CompileOptions &setSourcePolicy(SourcePolicy sp) { sourcePolicy = sp; return *this; }
+    CompileOptions &setIntroductionType(const char *t) { introductionType = t; return *this; }
     CompileOptions &setIntroductionInfo(const char *introducerFn, const char *intro,
-                                        unsigned line, uint32_t offset)
+                                        unsigned line, JSScript *script, uint32_t offset)
     {
         introducerFilename_ = introducerFn;
         introductionType = intro;
         introductionLineno = line;
+        introductionScriptRoot = script;
         introductionOffset = offset;
         hasIntroductionInfo = true;
         return *this;
     }
 
     virtual bool wrap(JSContext *cx, JSCompartment *compartment) MOZ_OVERRIDE;
+
+  private:
+    void operator=(const CompileOptions &rhs) MOZ_DELETE;
 };
 
 extern JS_PUBLIC_API(JSScript *)
@@ -3808,12 +3753,6 @@ extern JS_PUBLIC_API(bool)
 JS_ExecuteScriptVersion(JSContext *cx, JSObject *obj, JSScript *script, jsval *rval,
                         JSVersion version);
 
-/*
- * Execute either the function-defining prolog of a script, or the script's
- * main body, but not both.
- */
-typedef enum JSExecPart { JSEXEC_PROLOG, JSEXEC_MAIN } JSExecPart;
-
 extern JS_PUBLIC_API(bool)
 JS_EvaluateScript(JSContext *cx, JSObject *obj,
                   const char *bytes, unsigned length,
@@ -3821,55 +3760,10 @@ JS_EvaluateScript(JSContext *cx, JSObject *obj,
                   jsval *rval);
 
 extern JS_PUBLIC_API(bool)
-JS_EvaluateScriptForPrincipals(JSContext *cx, JSObject *obj,
-                               JSPrincipals *principals,
-                               const char *bytes, unsigned length,
-                               const char *filename, unsigned lineno,
-                               jsval *rval);
-
-extern JS_PUBLIC_API(bool)
-JS_EvaluateScriptForPrincipalsVersion(JSContext *cx, JSObject *obj,
-                                      JSPrincipals *principals,
-                                      const char *bytes, unsigned length,
-                                      const char *filename, unsigned lineno,
-                                      jsval *rval, JSVersion version);
-
-extern JS_PUBLIC_API(bool)
 JS_EvaluateUCScript(JSContext *cx, JS::Handle<JSObject*> obj,
                     const jschar *chars, unsigned length,
                     const char *filename, unsigned lineno,
                     JS::MutableHandle<JS::Value> rval);
-
-extern JS_PUBLIC_API(bool)
-JS_EvaluateUCScriptForPrincipals(JSContext *cx, JS::Handle<JSObject*> obj,
-                                 JSPrincipals *principals,
-                                 const jschar *chars, unsigned length,
-                                 const char *filename, unsigned lineno,
-                                 JS::MutableHandle<JS::Value> rval);
-
-extern JS_PUBLIC_API(bool)
-JS_EvaluateUCScriptForPrincipalsVersion(JSContext *cx, JS::Handle<JSObject*> obj,
-                                        JSPrincipals *principals,
-                                        const jschar *chars, unsigned length,
-                                        const char *filename, unsigned lineno,
-                                        JS::MutableHandle<JS::Value> rval, JSVersion version);
-
-/*
- * JSAPI clients may optionally specify the 'originPrincipals' of a script.
- * A script's originPrincipals may be retrieved through the debug API (via
- * JS_GetScriptOriginPrincipals) and the originPrincipals are transitively
- * assigned to any nested scripts (including scripts dynamically created via
- * eval and the Function constructor). If originPrincipals is null, then the
- * value of principals is used as origin principals for the script.
- */
-extern JS_PUBLIC_API(bool)
-JS_EvaluateUCScriptForPrincipalsVersionOrigin(JSContext *cx, JS::Handle<JSObject*> obj,
-                                              JSPrincipals *principals,
-                                              JSPrincipals *originPrincipals,
-                                              const jschar *chars, unsigned length,
-                                              const char *filename, unsigned lineno,
-                                              JS::MutableHandle<JS::Value> rval,
-                                              JSVersion version);
 
 namespace JS {
 
@@ -3938,26 +3832,26 @@ Call(JSContext *cx, JS::HandleValue thisv, JS::HandleObject funObj, const JS::Ha
 } /* namespace JS */
 
 /*
- * These functions allow setting an operation callback that will be called
+ * These functions allow setting an interrupt callback that will be called
  * from the JS thread some time after any thread triggered the callback using
- * JS_TriggerOperationCallback(rt).
+ * JS_RequestInterruptCallback(rt).
  *
  * To schedule the GC and for other activities the engine internally triggers
- * operation callbacks. The embedding should thus not rely on callbacks being
+ * interrupt callbacks. The embedding should thus not rely on callbacks being
  * triggered through the external API only.
  *
  * Important note: Additional callbacks can occur inside the callback handler
  * if it re-enters the JS engine. The embedding must ensure that the callback
  * is disconnected before attempting such re-entry.
  */
-extern JS_PUBLIC_API(JSOperationCallback)
-JS_SetOperationCallback(JSRuntime *rt, JSOperationCallback callback);
+extern JS_PUBLIC_API(JSInterruptCallback)
+JS_SetInterruptCallback(JSRuntime *rt, JSInterruptCallback callback);
 
-extern JS_PUBLIC_API(JSOperationCallback)
-JS_GetOperationCallback(JSRuntime *rt);
+extern JS_PUBLIC_API(JSInterruptCallback)
+JS_GetInterruptCallback(JSRuntime *rt);
 
 extern JS_PUBLIC_API(void)
-JS_TriggerOperationCallback(JSRuntime *rt);
+JS_RequestInterruptCallback(JSRuntime *rt);
 
 extern JS_PUBLIC_API(bool)
 JS_IsRunning(JSContext *cx);
@@ -3982,7 +3876,7 @@ JS_RestoreFrameChain(JSContext *cx);
 #ifdef MOZ_TRACE_JSCALLS
 /*
  * The callback is expected to be quick and noninvasive. It should not
- * trigger interrupts, turn on debugging, or produce uncaught JS
+ * request interrupts, turn on debugging, or produce uncaught JS
  * exceptions. The state of the stack and registers in the context
  * cannot be relied upon, since this callback may be invoked directly
  * from either JIT. The 'entering' field means we are entering a
@@ -4563,17 +4457,60 @@ JS_ClearPendingException(JSContext *cx);
 extern JS_PUBLIC_API(bool)
 JS_ReportPendingException(JSContext *cx);
 
+namespace JS {
+
 /*
- * Save the current exception state.  This takes a snapshot of cx's current
- * exception state without making any change to that state.
+ * Save and later restore the current exception state of a given JSContext.
+ * This is useful for implementing behavior in C++ that's like try/catch
+ * or try/finally in JS.
  *
- * The returned state pointer MUST be passed later to JS_RestoreExceptionState
- * (to restore that saved state, overriding any more recent state) or else to
- * JS_DropExceptionState (to free the state struct in case it is not correct
- * or desirable to restore it).  Both Restore and Drop free the state struct,
- * so callers must stop using the pointer returned from Save after calling the
- * Release or Drop API.
+ * Typical usage:
+ *
+ *     bool ok = JS_EvaluateScript(cx, ...);
+ *     AutoSaveExceptionState savedExc(cx);
+ *     ... cleanup that might re-enter JS ...
+ *     return ok;
  */
+class JS_PUBLIC_API(AutoSaveExceptionState)
+{
+  private:
+    JSContext *context;
+    bool wasThrowing;
+    RootedValue exceptionValue;
+
+  public:
+    /*
+     * Take a snapshot of cx's current exception state. Then clear any current
+     * pending exception in cx.
+     */
+    explicit AutoSaveExceptionState(JSContext *cx);
+
+    /*
+     * If neither drop() nor restore() was called, restore the exception
+     * state only if no exception is currently pending on cx.
+     */
+    ~AutoSaveExceptionState();
+
+    /*
+     * Discard any stored exception state.
+     * If this is called, the destructor is a no-op.
+     */
+    void drop() {
+        wasThrowing = false;
+        exceptionValue.setUndefined();
+    }
+
+    /*
+     * Replace cx's exception state with the stored exception state. Then
+     * discard the stored exception state. If this is called, the
+     * destructor is a no-op.
+     */
+    void restore();
+};
+
+} /* namespace JS */
+
+/* Deprecated API. Use AutoSaveExceptionState instead. */
 extern JS_PUBLIC_API(JSExceptionState *)
 JS_SaveExceptionState(JSContext *cx);
 
@@ -4641,10 +4578,10 @@ JS_ScheduleGC(JSContext *cx, uint32_t count);
 #endif
 
 extern JS_PUBLIC_API(void)
-JS_SetParallelParsingEnabled(JSContext *cx, bool enabled);
+JS_SetParallelParsingEnabled(JSRuntime *rt, bool enabled);
 
 extern JS_PUBLIC_API(void)
-JS_SetParallelIonCompilationEnabled(JSContext *cx, bool enabled);
+JS_SetParallelIonCompilationEnabled(JSRuntime *rt, bool enabled);
 
 #define JIT_COMPILER_OPTIONS(Register)                             \
   Register(BASELINE_USECOUNT_TRIGGER, "baseline.usecount.trigger") \
@@ -4663,9 +4600,9 @@ typedef enum JSJitCompilerOption {
 } JSJitCompilerOption;
 
 extern JS_PUBLIC_API(void)
-JS_SetGlobalJitCompilerOption(JSContext *cx, JSJitCompilerOption opt, uint32_t value);
+JS_SetGlobalJitCompilerOption(JSRuntime *rt, JSJitCompilerOption opt, uint32_t value);
 extern JS_PUBLIC_API(int)
-JS_GetGlobalJitCompilerOption(JSContext *cx, JSJitCompilerOption opt);
+JS_GetGlobalJitCompilerOption(JSRuntime *rt, JSJitCompilerOption opt);
 
 /*
  * Convert a uint32_t index into a jsid.
@@ -4687,24 +4624,48 @@ JS_CharsToId(JSContext* cx, JS::TwoByteChars chars, JS::MutableHandleId);
 extern JS_PUBLIC_API(bool)
 JS_IsIdentifier(JSContext *cx, JS::HandleString str, bool *isIdentifier);
 
+namespace JS {
+
 /*
- * Return the current script and line number of the most currently running
+ * AutoFilename encapsulates a pointer to a C-string and keeps the C-string
+ * alive for as long as the associated AutoFilename object is alive.
+ */
+class MOZ_STACK_CLASS JS_PUBLIC_API(AutoFilename)
+{
+    void *scriptSource_;
+
+    AutoFilename(const AutoFilename &) MOZ_DELETE;
+    void operator=(const AutoFilename &) MOZ_DELETE;
+
+  public:
+    AutoFilename() : scriptSource_(nullptr) {}
+    ~AutoFilename() { reset(nullptr); }
+
+    const char *get() const;
+
+    void reset(void *newScriptSource);
+};
+
+/*
+ * Return the current filename and line number of the most currently running
  * frame. Returns true if a scripted frame was found, false otherwise.
  *
  * If a the embedding has hidden the scripted caller for the topmost activation
  * record, this will also return false.
  */
 extern JS_PUBLIC_API(bool)
-JS_DescribeScriptedCaller(JSContext *cx, JS::MutableHandleScript script, unsigned *lineno);
+DescribeScriptedCaller(JSContext *cx, AutoFilename *filename = nullptr,
+                       unsigned *lineno = nullptr);
 
-namespace JS {
+extern JS_PUBLIC_API(JSObject *)
+GetScriptedCallerGlobal(JSContext *cx);
 
 /*
  * Informs the JS engine that the scripted caller should be hidden. This can be
  * used by the embedding to maintain an override of the scripted caller in its
  * calculations, by hiding the scripted caller in the JS engine and pushing data
- * onto a separate stack, which it inspects when JS_DescribeScriptedCaller
- * returns null.
+ * onto a separate stack, which it inspects when DescribeScriptedCaller returns
+ * null.
  *
  * We maintain a counter on each activation record. Add() increments the counter
  * of the topmost activation, and Remove() decrements it. The count may never
@@ -4782,9 +4743,16 @@ typedef void
  * outparams. If the callback returns 'true', the JS engine guarantees a call
  * to CloseAsmJSCacheEntryForWriteOp passing the same base address, size and
  * handle.
+ *
+ * If 'installed' is true, then the cache entry is associated with a permanently
+ * installed JS file (e.g., in a packaged webapp). This information allows the
+ * embedding to store the cache entry in a installed location associated with
+ * the principal of 'global' where it will not be evicted until the associated
+ * installed JS file is removed.
  */
 typedef bool
-(* OpenAsmJSCacheEntryForWriteOp)(HandleObject global, const jschar *begin, const jschar *end,
+(* OpenAsmJSCacheEntryForWriteOp)(HandleObject global, bool installed,
+                                  const jschar *begin, const jschar *end,
                                   size_t size, uint8_t **memory, intptr_t *handle);
 typedef void
 (* CloseAsmJSCacheEntryForWriteOp)(HandleObject global, size_t size, uint8_t *memory,

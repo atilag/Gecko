@@ -456,8 +456,8 @@ def environment(xrePath, env=None, crashreporter=True, debugger=False, dmdPath=N
     env['MOZ_CRASHREPORTER_DISABLE'] = '1'
 
   # Set WebRTC logging in case it is not set yet
-  env.setdefault('NSPR_LOG_MODULES', 'signaling:5,mtransport:3')
-  env.setdefault('R_LOG_LEVEL', '5')
+  env.setdefault('NSPR_LOG_MODULES', 'signaling:5,mtransport:5,datachannel:5')
+  env.setdefault('R_LOG_LEVEL', '6')
   env.setdefault('R_LOG_DESTINATION', 'stderr')
   env.setdefault('R_LOG_VERBOSE', '1')
 
@@ -479,7 +479,7 @@ def environment(xrePath, env=None, crashreporter=True, debugger=False, dmdPath=N
       message = "INFO | runtests.py | ASan running in %s configuration"
       if totalMemory <= 1024 * 1024 * 4:
         message = message % 'low-memory'
-        env["ASAN_OPTIONS"] = "quarantine_size=50331648"
+        env["ASAN_OPTIONS"] = "quarantine_size=50331648:malloc_context_size=5"
       else:
         message = message % 'default memory'
     except OSError,err:

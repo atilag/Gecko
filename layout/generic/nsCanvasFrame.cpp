@@ -301,7 +301,8 @@ public:
     MOZ_COUNT_DTOR(nsDisplayCanvasFocus);
   }
 
-  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap)
+  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
+                           bool* aSnap) MOZ_OVERRIDE
   {
     *aSnap = false;
     // This is an overestimate, but that's not a problem.
@@ -310,7 +311,7 @@ public:
   }
 
   virtual void Paint(nsDisplayListBuilder* aBuilder,
-                     nsRenderingContext* aCtx)
+                     nsRenderingContext* aCtx) MOZ_OVERRIDE
   {
     nsCanvasFrame* frame = static_cast<nsCanvasFrame*>(mFrame);
     frame->PaintFocus(*aCtx, ToReferenceFrame());
@@ -491,7 +492,7 @@ nsCanvasFrame::Reflow(nsPresContext*           aPresContext,
   // don't need to be reflowed. The normal child is always comes before
   // the fixed-pos placeholders, because we insert it at the start
   // of the child list, above.
-  nsHTMLReflowMetrics kidDesiredSize(aReflowState.GetWritingMode());
+  nsHTMLReflowMetrics kidDesiredSize(aReflowState);
   if (mFrames.IsEmpty()) {
     // We have no child frame, so return an empty size
     aDesiredSize.Width() = aDesiredSize.Height() = 0;

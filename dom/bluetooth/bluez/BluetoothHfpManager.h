@@ -79,8 +79,6 @@ class BluetoothHfpManager : public BluetoothSocketObserver
                           , public BatteryObserver
 {
 public:
-  NS_DECL_ISUPPORTS
-  NS_DECL_NSIOBSERVER
   BT_DECL_HFP_MGR_BASE
   virtual void GetName(nsACString& aName)
   {
@@ -155,7 +153,6 @@ private:
 
   bool Init();
   void Notify(const hal::BatteryInformation& aBatteryInfo);
-  void Reset();
 #ifdef MOZ_B2G_RIL
   void ResetCallArray();
   uint32_t FindFirstCall(uint16_t aState);

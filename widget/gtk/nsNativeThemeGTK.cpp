@@ -13,7 +13,7 @@
 #include "nsIPresShell.h"
 #include "nsIContent.h"
 #include "nsViewManager.h"
-#include "nsINameSpaceManager.h"
+#include "nsNameSpaceManager.h"
 #include "nsGfxCIID.h"
 #include "nsTransform2D.h"
 #include "nsMenuFrame.h"
@@ -752,7 +752,8 @@ nsNativeThemeGTK::DrawWidgetBackground(nsRenderingContext* aContext,
                                        nsIFrame* aFrame,
                                        uint8_t aWidgetType,
                                        const nsRect& aRect,
-                                       const nsRect& aDirtyRect)
+                                       const nsRect& aDirtyRect,
+                                       nsIntRegion* aRegionToClear)
 {
   GtkWidgetState state;
   GtkThemeWidgetType gtkWidgetType;

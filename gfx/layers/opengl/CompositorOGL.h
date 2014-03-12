@@ -24,13 +24,16 @@
 #include "nsAutoPtr.h"                  // for nsRefPtr, nsAutoPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsDebug.h"                    // for NS_ASSERTION, NS_WARNING
+#include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 #include "nsSize.h"                     // for nsIntSize
 #include "nsTArray.h"                   // for nsAutoTArray, nsTArray, etc
 #include "nsThreadUtils.h"              // for nsRunnable
-#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
 #include "nsXULAppAPI.h"                // for XRE_GetProcessType
 #include "nscore.h"                     // for NS_IMETHOD
 #include "VBOArena.h"                   // for gl::VBOArena
+#ifdef MOZ_WIDGET_GONK
+#include <ui/GraphicBuffer.h>
+#endif
 
 class gfx3DMatrix;
 class nsIWidget;
@@ -158,6 +161,10 @@ public:
   virtual bool Resume() MOZ_OVERRIDE;
 
   virtual nsIWidget* GetWidget() const MOZ_OVERRIDE { return mWidget; }
+
+#ifdef MOZ_WIDGET_GONK
+  virtual CompositorBackendSpecificData* GetCompositorBackendSpecificData() MOZ_OVERRIDE;
+#endif
 
   GLContext* gl() const { return mGLContext; }
   gfx::SurfaceFormat GetFBOFormat() const {
@@ -307,14 +314,37 @@ private:
   // Textures used for direct texturing of buffers like gralloc.
   // The index of the texture in this array must correspond to the texture unit.
   nsTArray<GLuint> mTextures;
-  static bool sDrawFPS;
 
   /**
    * Height of the OpenGL context's primary framebuffer in pixels. Used by
    * FlipY for the y-flipping calculation.
    */
   GLint mHeight;
+
+#ifdef MOZ_WIDGET_GONK
+  RefPtr<CompositorBackendSpecificData> mCompositorBackendSpecificData;
+#endif
 };
+
+#ifdef MOZ_WIDGET_GONK
+class CompositorOGLGonkBackendSpecificData : public CompositorBackendSpecificData
+{
+public:
+  CompositorOGLGonkBackendSpecificData(CompositorOGL* aCompositor);
+  virtual ~CompositorOGLGonkBackendSpecificData();
+
+  GLuint GetTexture();
+  void EndFrame();
+
+private:
+  gl::GLContext* gl() const;
+
+  RefPtr<CompositorOGL> mCompositor;
+
+  nsTArray<GLuint> mCreatedTextures;
+  nsTArray<GLuint> mUnusedTextures;
+};
+#endif
 
 }
 }

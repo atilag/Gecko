@@ -1,3 +1,4 @@
+
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -12,6 +13,7 @@
 #include "nsContentUtils.h"
 #include "nsGenericHTMLElement.h"
 #include "nsGkAtoms.h"
+#include "nsDOMTokenList.h"
 #include "nsIDocument.h"
 #include "nsIDOMEvent.h"
 #include "nsIDOMStyleSheet.h"
@@ -45,12 +47,14 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLLinkElement,
                                                   nsGenericHTMLElement)
   tmp->nsStyleLinkElement::Traverse(cb);
   tmp->Link::Traverse(cb);
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRelList)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLLinkElement,
                                                 nsGenericHTMLElement)
   tmp->nsStyleLinkElement::Unlink();
   tmp->Link::Unlink();
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mRelList)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_ADDREF_INHERITED(HTMLLinkElement, Element)
@@ -255,7 +259,7 @@ HTMLLinkElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
     bool dropSheet = false;
     if (aName == nsGkAtoms::rel && GetSheet()) {
       uint32_t linkTypes = nsStyleLinkElement::ParseLinkTypes(aValue);
-      dropSheet = !(linkTypes & STYLESHEET);          
+      dropSheet = !(linkTypes & nsStyleLinkElement::eSTYLESHEET);
     }
     
     UpdateStyleSheetInternal(nullptr, nullptr,
@@ -324,6 +328,15 @@ HTMLLinkElement::GetLinkTarget(nsAString& aTarget)
   }
 }
 
+nsDOMTokenList* 
+HTMLLinkElement::RelList()
+{
+  if (!mRelList) {
+    mRelList = new nsDOMTokenList(this, nsGkAtoms::rel);
+  }
+  return mRelList;
+}
+
 already_AddRefed<nsIURI>
 HTMLLinkElement::GetHrefURI() const
 {
@@ -360,7 +373,7 @@ HTMLLinkElement::GetStyleSheetInfo(nsAString& aTitle,
   GetAttr(kNameSpaceID_None, nsGkAtoms::rel, rel);
   uint32_t linkTypes = nsStyleLinkElement::ParseLinkTypes(rel);
   // Is it a stylesheet link?
-  if (!(linkTypes & STYLESHEET)) {
+  if (!(linkTypes & nsStyleLinkElement::eSTYLESHEET)) {
     return;
   }
 
@@ -370,7 +383,7 @@ HTMLLinkElement::GetStyleSheetInfo(nsAString& aTitle,
   aTitle.Assign(title);
 
   // If alternate, does it have title?
-  if (linkTypes & ALTERNATE) {
+  if (linkTypes & nsStyleLinkElement::eALTERNATE) {
     if (aTitle.IsEmpty()) { // alternates must have title
       return;
     } else {

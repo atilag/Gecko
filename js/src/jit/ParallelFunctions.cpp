@@ -181,10 +181,10 @@ jit::CheckOverRecursedPar(ForkJoinContext *cx)
     JS_ASSERT(ForkJoinContext::current() == cx);
     int stackDummy_;
 
-    // When an interrupt is triggered, the main thread stack limit is
+    // When an interrupt is requested, the main thread stack limit is
     // overwritten with a sentinel value that brings us here.
     // Therefore, we must check whether this is really a stack overrun
-    // and, if not, check whether an interrupt is needed.
+    // and, if not, check whether an interrupt was requested.
     //
     // When not on the main thread, we don't overwrite the stack
     // limit, but we do still call into this routine if the interrupt
@@ -201,7 +201,7 @@ jit::CheckOverRecursedPar(ForkJoinContext *cx)
     if (cx->isMainThread())
         realStackLimit = GetNativeStackLimit(cx);
     else
-        realStackLimit = cx->perThreadData->ionStackLimit;
+        realStackLimit = cx->perThreadData->jitStackLimit;
 
     if (!JS_CHECK_STACK_SIZE(realStackLimit, &stackDummy_)) {
         cx->bailoutRecord->setCause(ParallelBailoutOverRecursed);
@@ -541,7 +541,7 @@ jit::BitRshPar(ForkJoinContext *cx, HandleValue lhs, HandleValue rhs, int32_t *o
 
 bool
 jit::UrshValuesPar(ForkJoinContext *cx, HandleValue lhs, HandleValue rhs,
-                   Value *out)
+                   MutableHandleValue out)
 {
     uint32_t left;
     int32_t right;
@@ -550,7 +550,7 @@ jit::UrshValuesPar(ForkJoinContext *cx, HandleValue lhs, HandleValue rhs,
     if (!NonObjectToUint32(cx, lhs, &left) || !NonObjectToInt32(cx, rhs, &right))
         return false;
     left >>= right & 31;
-    out->setNumber(uint32_t(left));
+    out.setNumber(uint32_t(left));
     return true;
 }
 

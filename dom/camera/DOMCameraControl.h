@@ -37,7 +37,7 @@ class StartRecordingHelper;
 class nsDOMCameraControl MOZ_FINAL : public DOMMediaStream
 {
 public:
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(nsDOMCameraControl, DOMMediaStream)
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsDOMCameraControl, DOMMediaStream)
   NS_DECL_ISUPPORTS_INHERITED
 
   nsDOMCameraControl(uint32_t aCameraId,
@@ -45,7 +45,6 @@ public:
                      dom::GetCameraCallback* aOnSuccess,
                      dom::CameraErrorCallback* aOnError,
                      nsPIDOMWindow* aWindow);
-  nsRefPtr<ICameraControl> GetNativeCameraControl();
 
   void Shutdown();
 
@@ -80,6 +79,8 @@ public:
   double GetExposureCompensation(ErrorResult& aRv);
   int32_t SensorAngle();
   already_AddRefed<dom::CameraCapabilities> Capabilities();
+  void GetIsoMode(nsString& aMode, ErrorResult& aRv);
+  void SetIsoMode(const nsAString& aMode, ErrorResult& aRv);
 
   // Unsolicited event handlers.
   already_AddRefed<dom::CameraShutterCallback> GetOnShutter();

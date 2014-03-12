@@ -125,9 +125,16 @@ class SPSProfiler
     bool                 slowAssertions;
     uint32_t             enabled_;
     PRLock               *lock_;
+    void                (*eventMarker_)(const char *);
 
     const char *allocProfileString(JSScript *script, JSFunction *function);
     void push(const char *string, void *sp, JSScript *script, jsbytecode *pc);
+    void pushNoCopy(const char *string, void *sp,
+                    JSScript *script, jsbytecode *pc) {
+        push(string, reinterpret_cast<void*>(
+            reinterpret_cast<uintptr_t>(sp) | ProfileEntry::NoCopyBit),
+            script, pc);
+    }
     void pop();
 
   public:
@@ -185,8 +192,11 @@ class SPSProfiler
     jsbytecode *ipToPC(JSScript *script, size_t ip) { return nullptr; }
 
     void setProfilingStack(ProfileEntry *stack, uint32_t *size, uint32_t max);
+    void setEventMarker(void (*fn)(const char *));
     const char *profileString(JSScript *script, JSFunction *maybeFun);
     void onScriptFinalized(JSScript *script);
+
+    void markEvent(const char *event);
 
     /* meant to be used for testing, not recommended to call in normal code */
     size_t stringsCount();

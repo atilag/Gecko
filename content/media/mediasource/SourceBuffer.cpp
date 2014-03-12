@@ -26,9 +26,9 @@ class JSObject;
 
 #ifdef PR_LOGGING
 extern PRLogModuleInfo* gMediaSourceLog;
-#define LOG(type, msg) PR_LOG(gMediaSourceLog, type, msg)
+#define MSE_DEBUG(...) PR_LOG(gMediaSourceLog, PR_LOG_DEBUG, (__VA_ARGS__))
 #else
-#define LOG(type, msg)
+#define MSE_DEBUG(...)
 #endif
 
 namespace mozilla {
@@ -94,6 +94,23 @@ layers::ImageContainer*
 SubBufferDecoder::GetImageContainer()
 {
   return mParentDecoder->GetImageContainer();
+}
+
+int64_t
+SubBufferDecoder::ConvertToByteOffset(double aTime)
+{
+  // Uses a conversion based on (aTime/duration) * length.  For the
+  // purposes of eviction this should be adequate since we have the
+  // byte threshold as well to ensure data actually gets evicted and
+  // we ensure we don't evict before the current playable point.
+  double duration = mParentDecoder->GetMediaSourceDuration();
+  if (duration <= 0.0 || IsNaN(duration)) {
+    return -1;
+  }
+  int64_t length = GetResource()->GetLength();
+  MOZ_ASSERT(length > 0);
+  int64_t offset = (aTime / duration) * length;
+  return offset;
 }
 
 namespace dom {
@@ -200,7 +217,7 @@ SourceBuffer::Abort(ErrorResult& aRv)
   }
   // TODO: Run reset parser algorithm.
   mAppendWindowStart = 0;
-  mAppendWindowEnd = PositiveInfinity();
+  mAppendWindowEnd = PositiveInfinity<double>();
 }
 
 void
@@ -239,7 +256,7 @@ SourceBuffer::SourceBuffer(MediaSource* aMediaSource, const nsACString& aType)
   : nsDOMEventTargetHelper(aMediaSource->GetParentObject())
   , mMediaSource(aMediaSource)
   , mAppendWindowStart(0)
-  , mAppendWindowEnd(PositiveInfinity())
+  , mAppendWindowEnd(PositiveInfinity<double>())
   , mTimestampOffset(0)
   , mAppendMode(SourceBufferAppendMode::Segments)
   , mUpdating(false)
@@ -272,14 +289,14 @@ SourceBuffer::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 void
 SourceBuffer::DispatchSimpleEvent(const char* aName)
 {
-  LOG(PR_LOG_DEBUG, ("%p Dispatching event %s to SourceBuffer", this, aName));
+  MSE_DEBUG("%p Dispatching event %s to SourceBuffer", this, aName);
   DispatchTrustedEvent(NS_ConvertUTF8toUTF16(aName));
 }
 
 void
 SourceBuffer::QueueAsyncSimpleEvent(const char* aName)
 {
-  LOG(PR_LOG_DEBUG, ("%p Queuing event %s to SourceBuffer", this, aName));
+  MSE_DEBUG("%p Queuing event %s to SourceBuffer", this, aName);
   nsCOMPtr<nsIRunnable> event = new AsyncEventRunner<SourceBuffer>(this, aName);
   NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
 }
@@ -322,7 +339,7 @@ SourceBuffer::AppendData(const uint8_t* aData, uint32_t aLength, ErrorResult& aR
   }
   // TODO: Run coded frame eviction algorithm.
   // TODO: Test buffer full flag.
-  LOG(PR_LOG_DEBUG, ("%p Append(ArrayBuffer=%u)", this, aLength));
+  MSE_DEBUG("%p Append(ArrayBuffer=%u)", this, aLength);
   StartUpdating();
   // XXX: For future reference: NDA call must run on the main thread.
   mDecoder->NotifyDataArrived(reinterpret_cast<const char*>(aData),
@@ -330,7 +347,56 @@ SourceBuffer::AppendData(const uint8_t* aData, uint32_t aLength, ErrorResult& aR
                               mDecoder->GetResource()->GetLength());
   // TODO: Run buffer append algorithm asynchronously (would call StopUpdating()).
   mDecoder->GetResource()->AppendData(aData, aLength);
+
+  // Eviction uses a byte threshold. If the buffer is greater than the
+  // number of bytes then data is evicted. The time range for this
+  // eviction is reported back to the media source. It will then
+  // evict data before that range across all SourceBuffer's it knows
+  // about.
+  const int evict_threshold = 1000000;
+  bool evicted = mDecoder->GetResource()->EvictData(evict_threshold);
+  if (evicted) {
+    double start = 0.0;
+    double end = 0.0;
+    GetBufferedStartEndTime(&start, &end);
+
+    // We notify that we've evicted from the time range 0 through to
+    // the current start point.
+    mMediaSource->NotifyEvicted(0.0, start);
+  }
   StopUpdating();
+
+  // Schedule the state machine thread to ensure playback starts
+  // if required when data is appended.
+  mMediaSource->GetDecoder()->ScheduleStateMachineThread();
+}
+
+void
+SourceBuffer::GetBufferedStartEndTime(double* aStart, double* aEnd)
+{
+  nsRefPtr<TimeRanges> ranges = new TimeRanges();
+  mDecoder->GetBuffered(ranges);
+  ranges->Normalize();
+  int length = ranges->Length();
+  ErrorResult rv;
+
+  if (aStart) {
+    *aStart = length > 0 ? ranges->Start(0, rv) : 0.0;
+  }
+
+  if (aEnd) {
+    *aEnd = length > 0 ? ranges->End(length - 1, rv) : 0.0;
+  }
+}
+
+void
+SourceBuffer::Evict(double aStart, double aEnd)
+{
+  // Need to map time to byte offset then evict
+  int64_t end = mDecoder->ConvertToByteOffset(aEnd);
+  if (end > 0) {
+    mDecoder->GetResource()->EvictBefore(end);
+  }
 }
 
 NS_IMPL_CYCLE_COLLECTION_INHERITED_1(SourceBuffer, nsDOMEventTargetHelper, mMediaSource)

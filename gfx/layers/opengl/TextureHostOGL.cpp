@@ -176,6 +176,7 @@ void CompositableDataGonkOGL::SetCompositor(Compositor* aCompositor)
 
 void CompositableDataGonkOGL::ClearData()
 {
+  CompositableBackendSpecificData::ClearData();
   DeleteTextureIfPresent();
 }
 
@@ -199,6 +200,41 @@ CompositableDataGonkOGL::DeleteTextureIfPresent()
     mTexture = 0;
   }
 }
+
+#if MOZ_WIDGET_GONK && ANDROID_VERSION >= 17
+bool
+TextureHostOGL::SetReleaseFence(const android::sp<android::Fence>& aReleaseFence)
+{
+  if (!aReleaseFence.get() || !aReleaseFence->isValid()) {
+    return false;
+  }
+
+  if (!mReleaseFence.get()) {
+    mReleaseFence = aReleaseFence;
+  } else {
+    android::sp<android::Fence> mergedFence = android::Fence::merge(
+                  android::String8::format("TextureHostOGL"),
+                  mReleaseFence, aReleaseFence);
+    if (!mergedFence.get()) {
+      // synchronization is broken, the best we can do is hope fences
+      // signal in order so the new fence will act like a union.
+      // This error handling is same as android::ConsumerBase does.
+      mReleaseFence = aReleaseFence;
+      return false;
+    }
+    mReleaseFence = mergedFence;
+  }
+  return true;
+}
+
+android::sp<android::Fence>
+TextureHostOGL::GetAndResetReleaseFence()
+{
+  android::sp<android::Fence> fence = mReleaseFence;
+  mReleaseFence = android::Fence::NO_FENCE;
+  return fence;
+}
+#endif
 
 bool
 TextureImageTextureSourceOGL::Update(gfx::DataSourceSurface* aSurface,
@@ -467,9 +503,8 @@ StreamTextureSourceOGL::RetrieveTextureFromStream()
   switch (sharedSurf->Type()) {
     case SharedSurfaceType::GLTextureShare: {
       SharedSurface_GLTexture* glTexSurf = SharedSurface_GLTexture::Cast(sharedSurf);
-      glTexSurf->SetConsumerGL(gl());
-      mTextureHandle = glTexSurf->Texture();
-      mTextureTarget = glTexSurf->TextureTarget();
+      mTextureHandle = glTexSurf->ConsTexture(gl());
+      mTextureTarget = glTexSurf->ConsTextureTarget();
       MOZ_ASSERT(mTextureHandle);
       mFormat = sharedSurf->HasAlpha() ? SurfaceFormat::R8G8B8A8
                                        : SurfaceFormat::R8G8B8X8;
@@ -479,22 +514,17 @@ StreamTextureSourceOGL::RetrieveTextureFromStream()
       SharedSurface_EGLImage* eglImageSurf =
           SharedSurface_EGLImage::Cast(sharedSurf);
 
-      mTextureHandle = eglImageSurf->AcquireConsumerTexture(gl());
-      mTextureTarget = eglImageSurf->TextureTarget();
-      if (!mTextureHandle) {
-        toUpload = eglImageSurf->GetPixels();
-        MOZ_ASSERT(toUpload);
-      } else {
-        mFormat = sharedSurf->HasAlpha() ? SurfaceFormat::R8G8B8A8
-                                         : SurfaceFormat::R8G8B8X8;
-      }
+      eglImageSurf->AcquireConsumerTexture(gl(), &mTextureHandle, &mTextureTarget);
+      MOZ_ASSERT(mTextureHandle);
+      mFormat = sharedSurf->HasAlpha() ? SurfaceFormat::R8G8B8A8
+                                       : SurfaceFormat::R8G8B8X8;
       break;
     }
 #ifdef XP_MACOSX
     case SharedSurfaceType::IOSurface: {
       SharedSurface_IOSurface* glTexSurf = SharedSurface_IOSurface::Cast(sharedSurf);
-      mTextureHandle = glTexSurf->Texture();
-      mTextureTarget = glTexSurf->TextureTarget();
+      mTextureHandle = glTexSurf->ConsTexture(gl());
+      mTextureTarget = glTexSurf->ConsTextureTarget();
       MOZ_ASSERT(mTextureHandle);
       mFormat = sharedSurf->HasAlpha() ? SurfaceFormat::R8G8B8A8
                                        : SurfaceFormat::R8G8B8X8;
@@ -1155,7 +1185,8 @@ GrallocDeprecatedTextureHostOGL::GetRenderState()
 
     return LayerRenderState(mGraphicBuffer.get(),
                             bufferSize,
-                            flags);
+                            flags,
+                            nullptr);
   }
 
   return LayerRenderState();

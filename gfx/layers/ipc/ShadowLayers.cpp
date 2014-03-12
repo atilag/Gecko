@@ -49,7 +49,7 @@ class Shmem;
 
 namespace layers {
 
-class BasicTiledLayerBuffer;
+class ClientTiledLayerBuffer;
 
 typedef nsTArray<SurfaceDescriptor> BufferArray;
 typedef std::vector<Edit> EditVector;
@@ -177,7 +177,6 @@ void
 CompositableForwarder::IdentifyTextureHost(const TextureFactoryIdentifier& aIdentifier)
 {
   mTextureFactoryIdentifier = aIdentifier;
-  mMultiProcess = aIdentifier.mParentProcessId != XRE_GetProcessType();
 }
 
 ShadowLayerForwarder::ShadowLayerForwarder()
@@ -276,8 +275,8 @@ ShadowLayerForwarder::InsertAfter(ShadowableLayer* aContainer,
                                 nullptr, Shadow(aChild),
                                 nullptr, Shadow(aAfter)));
   else
-    mTxn->AddEdit(OpAppendChild(nullptr, Shadow(aContainer),
-                                nullptr, Shadow(aChild)));
+    mTxn->AddEdit(OpPrependChild(nullptr, Shadow(aContainer),
+                                 nullptr, Shadow(aChild)));
 }
 void
 ShadowLayerForwarder::RemoveChild(ShadowableLayer* aContainer,
@@ -327,11 +326,11 @@ ShadowLayerForwarder::CheckSurfaceDescriptor(const SurfaceDescriptor* aDescripto
 #endif
 
 void
-ShadowLayerForwarder::PaintedTiledLayerBuffer(CompositableClient* aCompositable,
-                                              const SurfaceDescriptorTiles& aTileLayerDescriptor)
+ShadowLayerForwarder::UseTiledLayerBuffer(CompositableClient* aCompositable,
+                                          const SurfaceDescriptorTiles& aTileLayerDescriptor)
 {
-  mTxn->AddNoSwapPaint(OpPaintTiledLayerBuffer(nullptr, aCompositable->GetIPDLActor(),
-                                               aTileLayerDescriptor));
+  mTxn->AddNoSwapPaint(OpUseTiledLayerBuffer(nullptr, aCompositable->GetIPDLActor(),
+                                             aTileLayerDescriptor));
 }
 
 void
@@ -621,6 +620,12 @@ bool
 ShadowLayerForwarder::IPCOpen() const
 {
   return mShadowManager->IPCOpen();
+}
+
+bool
+ShadowLayerForwarder::IsSameProcess() const
+{
+  return mShadowManager->OtherProcess() == kInvalidProcessHandle;
 }
 
 /*static*/ already_AddRefed<gfxASurface>

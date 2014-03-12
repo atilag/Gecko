@@ -31,6 +31,7 @@ class nsXULElement;
 namespace mozilla {
 namespace gfx {
 class SourceSurface;
+class SurfaceStream;
 }
 
 namespace dom {
@@ -185,6 +186,9 @@ public:
                   mozilla::ErrorResult& error);
   TextMetrics*
     MeasureText(const nsAString& rawText, mozilla::ErrorResult& error);
+
+  void AddHitRegion(const HitRegionOptions& options, mozilla::ErrorResult& error);
+  void RemoveHitRegion(const nsAString& id);
 
   void DrawImage(const HTMLImageOrCanvasOrVideoElement& image,
                  double dx, double dy, mozilla::ErrorResult& error)
@@ -593,7 +597,6 @@ protected:
     return CurrentState().font;
   }
 
-#if USE_SKIA_GPU
   static std::vector<CanvasRenderingContext2D*>& DemotableContexts();
   static void DemoteOldestContextIfNecessary();
 
@@ -602,7 +605,6 @@ protected:
 
   // Do not use GL
   bool mForceSoftware;
-#endif
 
   // Member vars
   int32_t mWidth, mHeight;
@@ -628,6 +630,8 @@ protected:
   // accessing it. In the event of an error it will be equal to
   // sErrorTarget.
   mozilla::RefPtr<mozilla::gfx::DrawTarget> mTarget;
+
+  RefPtr<gfx::SurfaceStream> mStream;
 
   /**
     * Flag to avoid duplicate calls to InvalidateFrame. Set to true whenever
@@ -680,6 +684,29 @@ protected:
     */
   uint32_t mInvalidateCount;
   static const uint32_t kCanvasMaxInvalidateCount = 100;
+
+  /**
+    * State information for hit regions
+    */
+
+  struct RegionInfo : public nsStringHashKey
+  {
+    RegionInfo(const nsAString& aKey) :
+      nsStringHashKey(&aKey)
+    {
+    }
+    RegionInfo(const nsAString *aKey) :
+      nsStringHashKey(aKey)
+    {
+    }
+
+    nsRefPtr<Element> mElement;
+  };
+
+#ifdef ACCESSIBILITY
+  static PLDHashOperator RemoveHitRegionProperty(RegionInfo* aEntry, void* aData);
+#endif
+  nsTHashtable<RegionInfo> mHitRegionsOptions;
 
   /**
     * Returns true if a shadow should be drawn along with a

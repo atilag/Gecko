@@ -354,9 +354,9 @@ ExportFunction(JSContext *cx, unsigned argc, jsval *vp)
 static bool
 GetFilenameAndLineNumber(JSContext *cx, nsACString &filename, unsigned &lineno)
 {
-    JS::RootedScript script(cx);
-    if (JS_DescribeScriptedCaller(cx, &script, &lineno)) {
-        if (const char *cfilename = JS_GetScriptFilename(cx, script)) {
+    JS::AutoFilename scriptFilename;
+    if (JS::DescribeScriptedCaller(cx, &scriptFilename, &lineno)) {
+        if (const char *cfilename = scriptFilename.get()) {
             filename.Assign(nsDependentCString(cfilename));
             return true;
         }
@@ -510,6 +510,7 @@ EvalInWindow(JSContext *cx, const nsAString &source, HandleObject scope, Mutable
         lineNo = 0;
     }
 
+    RootedObject cxGlobal(cx, JS::CurrentGlobalOrNull(cx));
     {
         // CompileOptions must be created from the context
         // we will execute this script in.
@@ -548,8 +549,9 @@ EvalInWindow(JSContext *cx, const nsAString &source, HandleObject scope, Mutable
             rval.set(UndefinedValue());
 
             // Then clone the exception.
-            if (CloneNonReflectors(cx, &exn))
-                JS_SetPendingException(cx, exn);
+            JSAutoCompartment ac(wndCx, cxGlobal);
+            if (CloneNonReflectors(wndCx, &exn))
+                js::SetPendingExceptionCrossContext(cx, exn);
 
             return false;
         }
@@ -1680,8 +1682,7 @@ xpc::EvalInSandbox(JSContext *cx, HandleObject sandboxArg, const nsAString& sour
         JSAutoCompartment ac(sandcx, sandbox);
 
         JS::CompileOptions options(sandcx);
-        options.setPrincipals(nsJSPrincipals::get(prin))
-               .setFileAndLine(filenameBuf.get(), lineNo);
+        options.setFileAndLine(filenameBuf.get(), lineNo);
         if (jsVersion != JSVERSION_DEFAULT)
                options.setVersion(jsVersion);
         JS::RootedObject rootedSandbox(sandcx, sandbox);

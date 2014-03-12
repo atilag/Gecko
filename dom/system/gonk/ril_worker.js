@@ -487,15 +487,25 @@ RilObject.prototype = {
         this.enterICCPUK2(options);
         break;
       case GECKO_CARDLOCK_NCK:
-      case GECKO_CARDLOCK_CCK: // Fall through.
-      case GECKO_CARDLOCK_SPCK: {
+      case GECKO_CARDLOCK_NCK1:
+      case GECKO_CARDLOCK_NCK2:
+      case GECKO_CARDLOCK_HNCK:
+      case GECKO_CARDLOCK_CCK:
+      case GECKO_CARDLOCK_SPCK:
+      case GECKO_CARDLOCK_RCCK: // Fall through.
+      case GECKO_CARDLOCK_RSPCK: {
         let type = GECKO_PERSO_LOCK_TO_CARD_PERSO_LOCK[options.lockType];
         this.enterDepersonalization(type, options.pin, options);
         break;
       }
       case GECKO_CARDLOCK_NCK_PUK:
-      case GECKO_CARDLOCK_CCK_PUK: // Fall through.
-      case GECKO_CARDLOCK_SPCK_PUK: {
+      case GECKO_CARDLOCK_NCK1_PUK:
+      case GECKO_CARDLOCK_NCK2_PUK:
+      case GECKO_CARDLOCK_HNCK_PUK:
+      case GECKO_CARDLOCK_CCK_PUK:
+      case GECKO_CARDLOCK_SPCK_PUK:
+      case GECKO_CARDLOCK_RCCK_PUK: // Fall through.
+      case GECKO_CARDLOCK_RSPCK_PUK: {
         let type = GECKO_PERSO_LOCK_TO_CARD_PERSO_LOCK[options.lockType];
         this.enterDepersonalization(type, options.puk, options);
         break;
@@ -1456,14 +1466,19 @@ RilObject.prototype = {
       this.exitEmergencyCbMode();
     }
 
-    options.request = REQUEST_DIAL;
-    this.sendDialRequest(options);
+    if (this._isCdma && Object.keys(this.currentCalls).length == 1) {
+      // Make a Cdma 3way call.
+      options.featureStr = options.number;
+      this.sendCdmaFlashCommand(options);
+    } else {
+      options.request = REQUEST_DIAL;
+      this.sendDialRequest(options);
+    }
   },
 
   dialEmergencyNumber: function(options, onerror) {
     options.request = RILQUIRKS_REQUEST_USE_DIAL_EMERGENCY_CALL ?
                       REQUEST_DIAL_EMERGENCY_CALL : REQUEST_DIAL;
-
     if (this.radioState == GECKO_RADIOSTATE_OFF) {
       if (DEBUG) {
         this.context.debug("Automatically enable radio for an emergency call.");
@@ -1478,7 +1493,13 @@ RilObject.prototype = {
       return;
     }
 
-    this.sendDialRequest(options);
+    if (this._isCdma && Object.keys(this.currentCalls).length == 1) {
+      // Make a Cdma 3way call.
+      options.featureStr = options.number;
+      this.sendCdmaFlashCommand(options);
+    } else {
+      this.sendDialRequest(options);
+    }
   },
 
   sendDialRequest: function(options) {
@@ -1490,6 +1511,15 @@ RilObject.prototype = {
     // TODO Why do we need this extra 0? It was put it in to make this
     // match the format of the binary message.
     Buf.writeInt32(0);
+    Buf.sendParcel();
+  },
+
+  sendCdmaFlashCommand: function(options) {
+    let Buf = this.context.Buf;
+    options.isCdma = true;
+    options.request = REQUEST_CDMA_FLASH;
+    Buf.newParcel(options.request, options);
+    Buf.writeString(options.featureStr);
     Buf.sendParcel();
   },
 
@@ -1608,22 +1638,37 @@ RilObject.prototype = {
 
   holdCall: function(options) {
     let call = this.currentCalls[options.callIndex];
-    if (call && call.state == CALL_STATE_ACTIVE) {
-      let Buf = this.context.Buf;
-      if (this._isCdma) {
-        Buf.newParcel(REQUEST_CDMA_FLASH);
-        Buf.writeString("");
-        Buf.sendParcel();
-      } else {
-        Buf.simpleRequest(REQUEST_SWITCH_HOLDING_AND_ACTIVE);
-      }
+    if (!call) {
+      options.errorMsg = GECKO_ERROR_GENERIC_FAILURE;
+      options.success = false;
+      this.sendChromeMessage(options);
+      return;
     }
-  },
+
+    let Buf = this.context.Buf;
+    if (this._isCdma) {
+      options.featureStr = "";
+      this.sendCdmaFlashCommand(options);
+    } else if (call.state == CALL_STATE_ACTIVE) {
+      Buf.simpleRequest(REQUEST_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE, options);
+    }
+ },
 
   resumeCall: function(options) {
     let call = this.currentCalls[options.callIndex];
-    if (call && call.state == CALL_STATE_HOLDING) {
-      this.context.Buf.simpleRequest(REQUEST_SWITCH_HOLDING_AND_ACTIVE);
+    if (!call) {
+      options.errorMsg = GECKO_ERROR_GENERIC_FAILURE;
+      options.success = false;
+      this.sendChromeMessage(options);
+      return;
+    }
+
+    let Buf = this.context.Buf;
+    if (this._isCdma) {
+      options.featureStr = "";
+      this.sendCdmaFlashCommand(options);
+    } else if (call.state == CALL_STATE_HOLDING) {
+      Buf.simpleRequest(REQUEST_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE, options);
     }
   },
 
@@ -1631,24 +1676,52 @@ RilObject.prototype = {
   _hasConferenceRequest: false,
 
   conferenceCall: function(options) {
-    this._hasConferenceRequest = true;
-    this.context.Buf.simpleRequest(REQUEST_CONFERENCE, options);
+    let Buf = this.context.Buf;
+    if (this._isCdma) {
+      options.featureStr = "";
+      this.sendCdmaFlashCommand(options);
+    } else {
+      this._hasConferenceRequest = true;
+      Buf.simpleRequest(REQUEST_CONFERENCE, options);
+    }
   },
 
   separateCall: function(options) {
+    let call = this.currentCalls[options.callIndex];
+    if (!call) {
+      options.errorName = "removeError";
+      options.errorMsg = GECKO_ERROR_GENERIC_FAILURE;
+      options.success = false;
+      this.sendChromeMessage(options);
+      return;
+    }
+
     let Buf = this.context.Buf;
-    Buf.newParcel(REQUEST_SEPARATE_CONNECTION, options);
-    Buf.writeInt32(1);
-    Buf.writeInt32(options.callIndex);
-    Buf.sendParcel();
-  },
+    if (this._isCdma) {
+      options.featureStr = "";
+      this.sendCdmaFlashCommand(options);
+    } else {
+      Buf.newParcel(REQUEST_SEPARATE_CONNECTION, options);
+      Buf.writeInt32(1);
+      Buf.writeInt32(options.callIndex);
+      Buf.sendParcel();
+    }
+ },
 
   holdConference: function() {
-    this.context.Buf.simpleRequest(REQUEST_SWITCH_HOLDING_AND_ACTIVE);
+    if (this._isCdma) {
+      return;
+    }
+
+    this.context.Buf.simpleRequest(REQUEST_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE);
   },
 
   resumeConference: function() {
-    this.context.Buf.simpleRequest(REQUEST_SWITCH_HOLDING_AND_ACTIVE);
+    if (this._isCdma) {
+      return;
+    }
+
+    this.context.Buf.simpleRequest(REQUEST_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE);
   },
 
   /**
@@ -3889,8 +3962,9 @@ RilObject.prototype = {
       }
       currentDataCall.gw = updatedDataCall.gw;
       if (updatedDataCall.dns) {
-        currentDataCall.dns[0] = updatedDataCall.dns[0];
-        currentDataCall.dns[1] = updatedDataCall.dns[1];
+        currentDataCall.dns = updatedDataCall.dns.slice();
+      } else {
+        currentDataCall.dns = [];
       }
       currentDataCall.rilMessageType = "datacallstatechange";
       this.sendChromeMessage(currentDataCall);
@@ -5282,31 +5356,27 @@ RilObject.prototype[REQUEST_HANGUP_FOREGROUND_RESUME_BACKGROUND] = function REQU
   this.getCurrentCalls();
 };
 RilObject.prototype[REQUEST_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE] = function REQUEST_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE(length, options) {
-  if (options.rilRequestError) {
-    return;
-  }
-
-  this.getCurrentCalls();
-};
-RilObject.prototype[REQUEST_SWITCH_HOLDING_AND_ACTIVE] = function REQUEST_SWITCH_HOLDING_AND_ACTIVE(length, options) {
-  if (options.rilRequestError) {
-    return;
-  }
-
-  // XXX Normally we should get a UNSOLICITED_RESPONSE_CALL_STATE_CHANGED parcel
-  // notifying us of call state changes, but sometimes we don't (have no idea why).
-  // this.getCurrentCalls() helps update the call state actively.
-  this.getCurrentCalls();
-};
-RilObject.prototype[REQUEST_CONFERENCE] = function REQUEST_CONFERENCE(length, options) {
-  if (options.rilRequestError) {
-    this._hasConferenceRequest = false;
-    options = {rilMessageType: "conferenceError",
-               errorName: "addError",
-               errorMsg: RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError]};
+  options.success = (options.rilRequestError === 0);
+  if (!options.success) {
+    options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
     this.sendChromeMessage(options);
     return;
   }
+
+  this.sendChromeMessage(options);
+  this.getCurrentCalls();
+};
+RilObject.prototype[REQUEST_CONFERENCE] = function REQUEST_CONFERENCE(length, options) {
+  options.success = (options.rilRequestError === 0);
+  if (!options.success) {
+    this._hasConferenceRequest = false;
+    options.errorName = "addError";
+    options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
+    this.sendChromeMessage(options);
+    return;
+  }
+
+  this.sendChromeMessage(options);
 };
 RilObject.prototype[REQUEST_UDUB] = null;
 RilObject.prototype[REQUEST_LAST_CALL_FAIL_CAUSE] = function REQUEST_LAST_CALL_FAIL_CAUSE(length, options) {
@@ -5893,13 +5963,15 @@ RilObject.prototype[REQUEST_BASEBAND_VERSION] = function REQUEST_BASEBAND_VERSIO
   if (DEBUG) this.context.debug("Baseband version: " + this.basebandVersion);
 };
 RilObject.prototype[REQUEST_SEPARATE_CONNECTION] = function REQUEST_SEPARATE_CONNECTION(length, options) {
-  if (options.rilRequestError) {
-    options = {rilMessageType: "conferenceError",
-               errorName: "removeError",
-               errorMsg: RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError]};
+  options.success = (options.rilRequestError === 0);
+  if (!options.success) {
+    options.errorName = "removeError";
+    options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
     this.sendChromeMessage(options);
     return;
   }
+
+  this.sendChromeMessage(options);
 };
 RilObject.prototype[REQUEST_SET_MUTE] = null;
 RilObject.prototype[REQUEST_GET_MUTE] = null;
@@ -6115,7 +6187,19 @@ RilObject.prototype[REQUEST_CDMA_QUERY_PREFERRED_VOICE_PRIVACY_MODE] = function 
   options.enabled = enabled[0] ? true : false;
   this.sendChromeMessage(options);
 };
-RilObject.prototype[REQUEST_CDMA_FLASH] = null;
+RilObject.prototype[REQUEST_CDMA_FLASH] = function REQUEST_CDMA_FLASH(length, options) {
+  options.success = (options.rilRequestError === 0);
+  if (!options.success) {
+    if (options.rilMessageType === "conferenceCall") {
+      options.errorName = "addError";
+    } else if (options.rilMessageType === "separateCall") {
+      options.errorName = "removeError";
+    }
+    options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
+  }
+
+  this.sendChromeMessage(options);
+};
 RilObject.prototype[REQUEST_CDMA_BURST_DTMF] = null;
 RilObject.prototype[REQUEST_CDMA_VALIDATE_AND_WRITE_AKEY] = null;
 RilObject.prototype[REQUEST_CDMA_SEND_SMS] = function REQUEST_CDMA_SEND_SMS(length, options) {
@@ -6673,12 +6757,25 @@ GsmPDUHelperObject.prototype = {
   },
 
   /**
-   * Convert a semi-octet (number) to a GSM BCD char.
+   * Convert a semi-octet (number) to a GSM BCD char, or return empty string
+   * if invalid semiOctet and supressException is set to true.
+   *
+   * @param semiOctet
+   *        Nibble to be converted to.
+   * @param [optional] supressException
+   *        Supress exception if invalid semiOctet and supressException is set
+   *        to true.
+   *
+   * @return GSM BCD char, or empty string.
    */
   bcdChars: "0123456789*#,;",
-  semiOctetToBcdChar: function(semiOctet) {
+  semiOctetToBcdChar: function(semiOctet, supressException) {
     if (semiOctet >= 14) {
-      throw new RangeError();
+      if (supressException) {
+        return "";
+      } else {
+        throw new RangeError();
+      }
     }
 
     return this.bcdChars.charAt(semiOctet);
@@ -6718,10 +6815,13 @@ GsmPDUHelperObject.prototype = {
    *
    * @param pairs
    *        Number of nibble *pairs* to read.
+   * @param [optional] supressException
+   *        Supress exception if invalid semiOctet and supressException is set
+   *        to true.
    *
    * @return The BCD string.
    */
-  readSwappedNibbleBcdString: function(pairs) {
+  readSwappedNibbleBcdString: function(pairs, supressException) {
     let str = "";
     for (let i = 0; i < pairs; i++) {
       let nibbleH = this.readHexNibble();
@@ -6730,9 +6830,9 @@ GsmPDUHelperObject.prototype = {
         break;
       }
 
-      str += this.semiOctetToBcdChar(nibbleL);
+      str += this.semiOctetToBcdChar(nibbleL, supressException);
       if (nibbleH != 0x0F) {
-        str += this.semiOctetToBcdChar(nibbleH);
+        str += this.semiOctetToBcdChar(nibbleH, supressException);
       }
     }
 
@@ -11807,7 +11907,9 @@ ICCIOHelperObject.prototype = {
       }
       this.context.debug(errorMsg);
     }
-    onerror(requestError);
+    if (options.onerror) {
+      options.onerror(requestError);
+    }
   },
 };
 ICCIOHelperObject.prototype[ICC_COMMAND_SEEK] = null;
@@ -11860,7 +11962,13 @@ ICCRecordHelperObject.prototype = {
       let strLen = Buf.readInt32();
       let octetLen = strLen / 2;
       RIL.iccInfo.iccid =
-        this.context.GsmPDUHelper.readSwappedNibbleBcdString(octetLen);
+        this.context.GsmPDUHelper.readSwappedNibbleBcdString(octetLen, true);
+      // Consumes the remaining buffer if any.
+      let unReadBuffer = this.context.Buf.getReadAvailable() -
+                         this.context.Buf.PDU_HEX_OCTET_SIZE;
+      if (unReadBuffer > 0) {
+        this.context.Buf.seekIncoming(unReadBuffer);
+      }
       Buf.readStringDelimiter(strLen);
 
       if (DEBUG) this.context.debug("ICCID: " + RIL.iccInfo.iccid);
@@ -12195,7 +12303,7 @@ ICCRecordHelperObject.prototype = {
       callback: onsuccess,
       onerror: onerror
     });
- },
+  },
 
   /**
    * Cache EF_ANR record size.

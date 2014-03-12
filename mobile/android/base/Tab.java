@@ -5,34 +5,28 @@
 
 package org.mozilla.gecko;
 
-import org.mozilla.gecko.SiteIdentity.SecurityMode;
-import org.mozilla.gecko.db.BrowserContract.Bookmarks;
-import org.mozilla.gecko.db.BrowserDB;
-import org.mozilla.gecko.favicons.Favicons;
-import org.mozilla.gecko.favicons.LoadFaviconTask;
-import org.mozilla.gecko.favicons.OnFaviconLoadedListener;
-import org.mozilla.gecko.gfx.Layer;
-import org.mozilla.gecko.util.ThreadUtils;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.mozilla.gecko.db.BrowserContract.Bookmarks;
+import org.mozilla.gecko.db.BrowserDB;
+import org.mozilla.gecko.gfx.Layer;
+import org.mozilla.gecko.util.ThreadUtils;
 
 import android.content.ContentResolver;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.BitmapDrawable;
-import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.View;
-
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class Tab {
     private static final String LOGTAG = "GeckoTab";
@@ -73,12 +67,18 @@ public class Tab {
     private Context mAppContext;
     private ErrorType mErrorType = ErrorType.NONE;
     private static final int MAX_HISTORY_LIST_SIZE = 50;
-    private int mLoadProgress;
+    private volatile int mLoadProgress;
 
     public static final int STATE_DELAYED = 0;
     public static final int STATE_LOADING = 1;
     public static final int STATE_SUCCESS = 2;
     public static final int STATE_ERROR = 3;
+
+    public static final int LOAD_PROGRESS_INIT = 10;
+    public static final int LOAD_PROGRESS_START = 20;
+    public static final int LOAD_PROGRESS_LOCATION_CHANGE = 60;
+    public static final int LOAD_PROGRESS_LOADED = 80;
+    public static final int LOAD_PROGRESS_STOP = 100;
 
     private static final int DEFAULT_BACKGROUND_COLOR = Color.WHITE;
 
@@ -118,6 +118,7 @@ public class Tab {
         mPluginViews = new ArrayList<View>();
         mPluginLayers = new HashMap<Object, Layer>();
         mState = shouldShowProgress(url) ? STATE_SUCCESS : STATE_LOADING;
+        mLoadProgress = LOAD_PROGRESS_INIT;
 
         // At startup, the background is set to a color specified by LayerView
         // when the LayerView is created. Shortly after, this background color
@@ -634,6 +635,7 @@ public class Tab {
         setHasTouchListeners(false);
         setBackgroundColor(DEFAULT_BACKGROUND_COLOR);
         setErrorType(ErrorType.NONE);
+        setLoadProgressIfLoading(LOAD_PROGRESS_LOCATION_CHANGE);
 
         Tabs.getInstance().notifyListeners(this, Tabs.TabEvents.LOCATION_CHANGE, oldUrl);
     }
@@ -645,6 +647,7 @@ public class Tab {
     }
 
     void handleDocumentStart(boolean showProgress, String url) {
+        setLoadProgress(LOAD_PROGRESS_START);
         setState(showProgress ? STATE_LOADING : STATE_SUCCESS);
         updateIdentityData(null);
         setReaderEnabled(false);
@@ -655,6 +658,7 @@ public class Tab {
 
         final String oldURL = getURL();
         final Tab tab = this;
+        tab.setLoadProgress(LOAD_PROGRESS_STOP);
         ThreadUtils.getBackgroundHandler().postDelayed(new Runnable() {
             @Override
             public void run() {
@@ -665,7 +669,11 @@ public class Tab {
                 ThumbnailHelper.getInstance().getAndProcessThumbnailFor(tab);
             }
         }, 500);
-     }
+    }
+
+    void handleContentLoaded() {
+        setLoadProgressIfLoading(LOAD_PROGRESS_LOADED);
+    }
 
     protected void saveThumbnailToDB() {
         try {
@@ -766,6 +774,22 @@ public class Tab {
      */
     void setLoadProgress(int progressPercentage) {
         mLoadProgress = progressPercentage;
+    }
+
+    /**
+     * Sets the tab load progress to the given percentage only if the tab is
+     * currently loading.
+     *
+     * about:neterror can trigger a STOP before other page load events (bug
+     * 976426), so any post-START events should make sure the page is loading
+     * before updating progress.
+     *
+     * @param progressPercentage Percentage to set progress to (0-100)
+     */
+    void setLoadProgressIfLoading(int progressPercentage) {
+        if (getState() == STATE_LOADING) {
+            setLoadProgress(progressPercentage);
+        }
     }
 
     /**

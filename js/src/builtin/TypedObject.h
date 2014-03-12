@@ -489,11 +489,6 @@ class TypedObject : public ArrayBufferViewObject
                                   uint32_t index, MutableHandleObject objp,
                                   MutableHandleShape propp);
 
-    static bool obj_lookupSpecial(JSContext *cx, HandleObject obj,
-                                  HandleSpecialId sid,
-                                  MutableHandleObject objp,
-                                  MutableHandleShape propp);
-
     static bool obj_defineGeneric(JSContext *cx, HandleObject obj, HandleId id, HandleValue v,
                                   PropertyOp getter, StrictPropertyOp setter, unsigned attrs);
 
@@ -502,9 +497,6 @@ class TypedObject : public ArrayBufferViewObject
                                    PropertyOp getter, StrictPropertyOp setter, unsigned attrs);
 
     static bool obj_defineElement(JSContext *cx, HandleObject obj, uint32_t index, HandleValue v,
-                                  PropertyOp getter, StrictPropertyOp setter, unsigned attrs);
-
-    static bool obj_defineSpecial(JSContext *cx, HandleObject obj, HandleSpecialId sid, HandleValue v,
                                   PropertyOp getter, StrictPropertyOp setter, unsigned attrs);
 
     static bool obj_getGeneric(JSContext *cx, HandleObject obj, HandleObject receiver,
@@ -519,17 +511,12 @@ class TypedObject : public ArrayBufferViewObject
     static bool obj_getUnsizedArrayElement(JSContext *cx, HandleObject obj, HandleObject receiver,
                                          uint32_t index, MutableHandleValue vp);
 
-    static bool obj_getSpecial(JSContext *cx, HandleObject obj, HandleObject receiver,
-                               HandleSpecialId sid, MutableHandleValue vp);
-
     static bool obj_setGeneric(JSContext *cx, HandleObject obj, HandleId id,
                                MutableHandleValue vp, bool strict);
     static bool obj_setProperty(JSContext *cx, HandleObject obj, HandlePropertyName name,
                                 MutableHandleValue vp, bool strict);
     static bool obj_setElement(JSContext *cx, HandleObject obj, uint32_t index,
                                MutableHandleValue vp, bool strict);
-    static bool obj_setSpecial(JSContext *cx, HandleObject obj,
-                               HandleSpecialId sid, MutableHandleValue vp, bool strict);
 
     static bool obj_getGenericAttributes(JSContext *cx, HandleObject obj,
                                          HandleId id, unsigned *attrsp);
@@ -539,8 +526,6 @@ class TypedObject : public ArrayBufferViewObject
     static bool obj_deleteProperty(JSContext *cx, HandleObject obj, HandlePropertyName name,
                                    bool *succeeded);
     static bool obj_deleteElement(JSContext *cx, HandleObject obj, uint32_t index,
-                                  bool *succeeded);
-    static bool obj_deleteSpecial(JSContext *cx, HandleObject obj, HandleSpecialId sid,
                                   bool *succeeded);
 
     static bool obj_enumerate(JSContext *cx, HandleObject obj, JSIterateOp enum_op,
@@ -695,6 +680,15 @@ bool NewDerivedTypedObject(JSContext *cx, unsigned argc, Value *vp);
  */
 bool AttachTypedObject(ThreadSafeContext *cx, unsigned argc, Value *vp);
 extern const JSJitInfo AttachTypedObjectJitInfo;
+
+/*
+ * Usage: SetTypedObjectOffset(typedObj, offset)
+ *
+ * Changes the offset for `typedObj` within its buffer to `offset`.
+ * `typedObj` must already be attached.
+ */
+bool SetTypedObjectOffset(ThreadSafeContext *cx, unsigned argc, Value *vp);
+extern const JSJitInfo SetTypedObjectOffsetJitInfo;
 
 /*
  * Usage: ObjectIsTypeDescr(obj)
@@ -871,6 +865,29 @@ IsTypedObjectClass(const Class *class_)
            class_ == &OpaqueTypedObject::class_;
 }
 
+inline bool
+IsSimpleTypeDescrClass(const Class* clasp)
+{
+    return clasp == &ScalarTypeDescr::class_ ||
+           clasp == &ReferenceTypeDescr::class_;
+}
+
+inline bool
+IsSizedTypeDescrClass(const Class* clasp)
+{
+    return IsSimpleTypeDescrClass(clasp) ||
+           clasp == &StructTypeDescr::class_ ||
+           clasp == &SizedArrayTypeDescr::class_ ||
+           clasp == &X4TypeDescr::class_;
+}
+
+inline bool
+IsTypeDescrClass(const Class* clasp)
+{
+    return IsSizedTypeDescrClass(clasp) ||
+           clasp == &UnsizedArrayTypeDescr::class_;
+}
+
 } // namespace js
 
 JSObject *
@@ -880,26 +897,21 @@ template <>
 inline bool
 JSObject::is<js::SimpleTypeDescr>() const
 {
-    return is<js::ScalarTypeDescr>() ||
-           is<js::ReferenceTypeDescr>();
+    return IsSimpleTypeDescrClass(getClass());
 }
 
 template <>
 inline bool
 JSObject::is<js::SizedTypeDescr>() const
 {
-    return is<js::SimpleTypeDescr>() ||
-           is<js::StructTypeDescr>() ||
-           is<js::SizedArrayTypeDescr>() ||
-           is<js::X4TypeDescr>();
+    return IsSizedTypeDescrClass(getClass());
 }
 
 template <>
 inline bool
 JSObject::is<js::TypeDescr>() const
 {
-    return is<js::SizedTypeDescr>() ||
-           is<js::UnsizedArrayTypeDescr>();
+    return IsTypeDescrClass(getClass());
 }
 
 template <>
@@ -910,4 +922,3 @@ JSObject::is<js::TypedObject>() const
 }
 
 #endif /* builtin_TypedObject_h */
-

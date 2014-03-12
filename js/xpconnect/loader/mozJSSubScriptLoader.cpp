@@ -139,8 +139,7 @@ mozJSSubScriptLoader::ReadScript(nsIURI *uri, JSContext *cx, JSObject *targetObj
     JSErrorReporter er = JS_SetErrorReporter(cx, xpc::SystemErrorReporter);
 
     JS::CompileOptions options(cx);
-    options.setPrincipals(nsJSPrincipals::get(principal))
-           .setFileAndLine(uriStr, 1);
+    options.setFileAndLine(uriStr, 1);
     if (!charset.IsVoid()) {
         nsString script;
         rv = nsScriptLoader::ConvertToUTF16(nullptr, reinterpret_cast<const uint8_t*>(buf.get()), len,
@@ -269,10 +268,9 @@ mozJSSubScriptLoader::DoLoadSubScriptWithOptions(const nsAString &url,
     nsAutoCString uriStr;
     nsAutoCString scheme;
 
-    RootedScript script(cx);
-
     // Figure out who's calling us
-    if (!JS_DescribeScriptedCaller(cx, &script, nullptr)) {
+    JS::AutoFilename filename;
+    if (!JS::DescribeScriptedCaller(cx, &filename)) {
         // No scripted frame means we don't know who's calling, bail.
         return NS_ERROR_FAILURE;
     }
@@ -313,7 +311,7 @@ mozJSSubScriptLoader::DoLoadSubScriptWithOptions(const nsAString &url,
 
         // For file URIs prepend the filename with the filename of the
         // calling script, and " -> ". See bug 418356.
-        nsAutoCString tmp(JS_GetScriptFilename(cx, script));
+        nsAutoCString tmp(filename.get());
         tmp.AppendLiteral(" -> ");
         tmp.Append(uriStr);
 
@@ -327,7 +325,7 @@ mozJSSubScriptLoader::DoLoadSubScriptWithOptions(const nsAString &url,
     PathifyURI(uri, cachePath);
 
     RootedFunction function(cx);
-    script = nullptr;
+    RootedScript script(cx);
     if (cache && !options.ignoreCache)
         rv = ReadCachedScript(cache, cachePath, cx, mSystemPrincipal, &script);
     if (!script) {
@@ -349,7 +347,8 @@ mozJSSubScriptLoader::DoLoadSubScriptWithOptions(const nsAString &url,
 
     bool ok = false;
     if (function) {
-        ok = JS_CallFunction(cx, targetObj, function, JS::EmptyValueArray, retval);
+        ok = JS_CallFunction(cx, targetObj, function, JS::HandleValueArray::empty(),
+                             retval);
     } else {
         ok = JS_ExecuteScriptVersion(cx, targetObj, script, retval.address(), version);
     }

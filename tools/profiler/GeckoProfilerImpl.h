@@ -80,6 +80,24 @@ void profiler_stop()
 }
 
 static inline
+bool profiler_is_paused()
+{
+  return mozilla_sampler_is_paused();
+}
+
+static inline
+void profiler_pause()
+{
+  mozilla_sampler_pause();
+}
+
+static inline
+void profiler_resume()
+{
+  mozilla_sampler_resume();
+}
+
+static inline
 ProfilerBacktrace* profiler_get_backtrace()
 {
   return mozilla_sampler_get_backtrace();
@@ -332,7 +350,7 @@ public:
       mHandle = mozilla_sampler_call_enter(mDest, this, true, line);
       va_end(args);
     } else {
-      mHandle = mozilla_sampler_call_enter(aDefault, nullptr, false, line);
+      mHandle = mozilla_sampler_call_enter(aDefault, this, false, line);
     }
   }
   ~SamplerStackFramePrintfRAII() {

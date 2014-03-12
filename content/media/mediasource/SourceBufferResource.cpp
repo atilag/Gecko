@@ -10,15 +10,15 @@
 #include <algorithm>
 
 #include "nsISeekableStream.h"
-#include "nsTraceRefcnt.h"
+#include "nsISupportsImpl.h"
 #include "prenv.h"
 #include "prlog.h"
 
 #ifdef PR_LOGGING
 extern PRLogModuleInfo* gMediaSourceLog;
-#define LOG(type, msg) PR_LOG(gMediaSourceLog, type, msg)
+#define MSE_DEBUG(...) PR_LOG(gMediaSourceLog, PR_LOG_DEBUG, (__VA_ARGS__))
 #else
-#define LOG(type, msg)
+#define MSE_DEBUG(...)
 #endif
 
 namespace mozilla {
@@ -33,7 +33,7 @@ nsresult
 SourceBufferResource::Close()
 {
   ReentrantMonitorAutoEnter mon(mMonitor);
-  LOG(PR_LOG_DEBUG, ("%p SBR::Close", this));
+  MSE_DEBUG("%p SBR::Close", this);
   //MOZ_ASSERT(!mClosed);
   mClosed = true;
   mon.NotifyAll();
@@ -46,26 +46,28 @@ SourceBufferResource::Read(char* aBuffer, uint32_t aCount, uint32_t* aBytes)
   ReentrantMonitorAutoEnter mon(mMonitor);
   bool blockingRead = !!aBytes;
 
-  while (blockingRead && !mEnded && mOffset + aCount > GetLength()) {
-    LOG(PR_LOG_DEBUG, ("%p SBR::Read waiting for data", this));
+  while (blockingRead &&
+         !mEnded &&
+         mOffset + aCount > static_cast<uint64_t>(GetLength())) {
+    MSE_DEBUG("%p SBR::Read waiting for data", this);
     mon.Wait();
   }
 
   uint32_t available = GetLength() - mOffset;
   uint32_t count = std::min(aCount, available);
   if (!PR_GetEnv("MOZ_QUIET")) {
-    LOG(PR_LOG_DEBUG, ("%p SBR::Read aCount=%u length=%u offset=%u "
-                       "available=%u count=%u, blocking=%d bufComplete=%d",
-                       this, aCount, GetLength(), mOffset, available, count,
-                       blockingRead, mEnded));
+    MSE_DEBUG("%p SBR::Read aCount=%u length=%u offset=%u "
+              "available=%u count=%u, blocking=%d bufComplete=%d",
+              this, aCount, GetLength(), mOffset, available, count,
+              blockingRead, mEnded);
   }
   if (available == 0) {
-    LOG(PR_LOG_DEBUG, ("%p SBR::Read EOF", this));
+    MSE_DEBUG("%p SBR::Read EOF", this);
     *aBytes = 0;
     return NS_OK;
   }
 
-  memcpy(aBuffer, &mInputBuffer[mOffset], count);
+  mInputBuffer.CopyData(mOffset, count, aBuffer);
   *aBytes = count;
   mOffset += count;
   return NS_OK;
@@ -124,11 +126,26 @@ SourceBufferResource::ReadFromCache(char* aBuffer, int64_t aOffset, uint32_t aCo
   return Read(aBuffer, aCount, nullptr);
 }
 
+bool
+SourceBufferResource::EvictData(uint32_t aThreshold)
+{
+  return mInputBuffer.Evict(mOffset, aThreshold);
+}
+
+void
+SourceBufferResource::EvictBefore(uint64_t aOffset)
+{
+  // If aOffset is past the current playback offset we don't evict.
+  if (aOffset < mOffset) {
+    mInputBuffer.Evict(aOffset, 0);
+  }
+}
+
 void
 SourceBufferResource::AppendData(const uint8_t* aData, uint32_t aLength)
 {
   ReentrantMonitorAutoEnter mon(mMonitor);
-  mInputBuffer.AppendElements(aData, aLength);
+  mInputBuffer.PushBack(new ResourceItem(aData, aLength));
   mon.NotifyAll();
 }
 
@@ -143,7 +160,7 @@ SourceBufferResource::Ended()
 SourceBufferResource::~SourceBufferResource()
 {
   MOZ_COUNT_DTOR(SourceBufferResource);
-  LOG(PR_LOG_DEBUG, ("%p SBR::~SBR", this));
+  MSE_DEBUG("%p SBR::~SBR", this);
 }
 
 SourceBufferResource::SourceBufferResource(nsIPrincipal* aPrincipal,
@@ -156,7 +173,7 @@ SourceBufferResource::SourceBufferResource(nsIPrincipal* aPrincipal,
   , mEnded(false)
 {
   MOZ_COUNT_CTOR(SourceBufferResource);
-  LOG(PR_LOG_DEBUG, ("%p SBR::SBR()", this));
+  MSE_DEBUG("%p SBR::SBR()", this);
 }
 
 } // namespace mozilla

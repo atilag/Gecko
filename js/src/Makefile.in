@@ -360,10 +360,6 @@ $(CURDIR)/javascript-trace.h: $(srcdir)/devtools/javascript-trace.d
 $(addsuffix .$(OBJ_SUFFIX),Probes jsinterp jsobj): $(CURDIR)/javascript-trace.h
 endif
 
-ifdef HAVE_LINUX_PERF_EVENT_H
-pm_linux.$(OBJ_SUFFIX): CXXFLAGS += $(LINUX_HEADERS_INCLUDES)
-endif
-
 # Prepare self-hosted JS code for embedding
 export:: selfhosting
 selfhosting:: selfhosted.out.h
@@ -377,6 +373,7 @@ selfhosting_srcs := \
   $(srcdir)/builtin/Iterator.js \
   $(srcdir)/builtin/Map.js \
   $(srcdir)/builtin/Number.js \
+  $(srcdir)/builtin/Parallel.js \
   $(srcdir)/builtin/String.js \
   $(srcdir)/builtin/Set.js \
   $(srcdir)/builtin/TypedObject.js \

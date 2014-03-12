@@ -70,8 +70,8 @@ PerThreadData::PerThreadData(JSRuntime *runtime)
   : PerThreadDataFriendFields(),
     runtime_(runtime),
     ionTop(nullptr),
-    ionJSContext(nullptr),
-    ionStackLimit(0),
+    jitJSContext(nullptr),
+    jitStackLimit(0),
     activation_(nullptr),
     asmJSActivationStack_(nullptr),
 #ifdef JS_ARM_SIMULATOR
@@ -122,16 +122,16 @@ JSRuntime::JSRuntime(JSRuntime *parentRuntime, JSUseHelperThreads useHelperThrea
     interruptPar(false),
 #endif
     handlingSignal(false),
-    operationCallback(nullptr),
+    interruptCallback(nullptr),
 #ifdef JS_THREADSAFE
-    operationCallbackLock(nullptr),
-    operationCallbackOwner(nullptr),
+    interruptLock(nullptr),
+    interruptLockOwner(nullptr),
     exclusiveAccessLock(nullptr),
     exclusiveAccessOwner(nullptr),
     mainThreadHasExclusiveAccess(false),
     numExclusiveThreads(0),
 #else
-    operationCallbackLockTaken(false),
+    interruptLockTaken(false),
 #endif
     systemZone(nullptr),
     numCompartments(0),
@@ -160,6 +160,9 @@ JSRuntime::JSRuntime(JSRuntime *parentRuntime, JSUseHelperThreads useHelperThrea
 # ifdef DEBUG
     checkRequestDepth(0),
 # endif
+#endif
+#ifdef DEBUG
+    activeContext(nullptr),
 #endif
     gcInitialized(false),
     gcSystemAvailableChunkListHead(nullptr),
@@ -245,8 +248,8 @@ JSRuntime::JSRuntime(JSRuntime *parentRuntime, JSUseHelperThreads useHelperThrea
 #endif
     scriptAndCountsVector(nullptr),
     NaNValue(DoubleNaNValue()),
-    negativeInfinityValue(DoubleValue(NegativeInfinity())),
-    positiveInfinityValue(DoubleValue(PositiveInfinity())),
+    negativeInfinityValue(DoubleValue(NegativeInfinity<double>())),
+    positiveInfinityValue(DoubleValue(PositiveInfinity<double>())),
     emptyString(nullptr),
     debugMode(false),
     spsProfiler(thisFromCtor()),
@@ -344,8 +347,8 @@ JSRuntime::init(uint32_t maxbytes)
 #ifdef JS_THREADSAFE
     ownerThread_ = PR_GetCurrentThread();
 
-    operationCallbackLock = PR_NewLock();
-    if (!operationCallbackLock)
+    interruptLock = PR_NewLock();
+    if (!interruptLock)
         return false;
 
     gcLock = PR_NewLock();
@@ -484,9 +487,9 @@ JSRuntime::~JSRuntime()
     JS_ASSERT(!numExclusiveThreads);
     mainThreadHasExclusiveAccess = true;
 
-    JS_ASSERT(!operationCallbackOwner);
-    if (operationCallbackLock)
-        PR_DestroyLock(operationCallbackLock);
+    JS_ASSERT(!interruptLockOwner);
+    if (interruptLock)
+        PR_DestroyLock(interruptLock);
 #endif
 
     /*
@@ -566,13 +569,13 @@ NewObjectCache::clearNurseryObjects(JSRuntime *rt)
 }
 
 void
-JSRuntime::resetIonStackLimit()
+JSRuntime::resetJitStackLimit()
 {
-    AutoLockForOperationCallback lock(this);
-    mainThread.setIonStackLimit(mainThread.nativeStackLimit[js::StackForUntrustedScript]);
+    AutoLockForInterrupt lock(this);
+    mainThread.setJitStackLimit(mainThread.nativeStackLimit[js::StackForUntrustedScript]);
 
 #ifdef JS_ARM_SIMULATOR
-    mainThread.setIonStackLimit(js::jit::Simulator::StackLimit());
+    mainThread.setJitStackLimit(js::jit::Simulator::StackLimit());
 #endif
  }
 
@@ -615,7 +618,7 @@ JSRuntime::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf, JS::Runtim
         execAlloc_->addSizeOfCode(&rtSizes->code);
 #ifdef JS_ION
     {
-        AutoLockForOperationCallback lock(this);
+        AutoLockForInterrupt lock(this);
         if (jitRuntime()) {
             if (JSC::ExecutableAllocator *ionAlloc = jitRuntime()->ionAlloc(this))
                 ionAlloc->addSizeOfCode(&rtSizes->code);
@@ -639,23 +642,23 @@ SignalBasedTriggersDisabled()
 }
 
 void
-JSRuntime::triggerOperationCallback(OperationCallbackTrigger trigger)
+JSRuntime::requestInterrupt(InterruptMode mode)
 {
-    AutoLockForOperationCallback lock(this);
+    AutoLockForInterrupt lock(this);
 
     /*
      * Invalidate ionTop to trigger its over-recursion check. Note this must be
-     * set before interrupt, to avoid racing with js_InvokeOperationCallback,
-     * into a weird state where interrupt is stuck at 0 but ionStackLimit is
+     * set before interrupt, to avoid racing with js::InvokeInterruptCallback,
+     * into a weird state where interrupt is stuck at 0 but jitStackLimit is
      * MAXADDR.
      */
-    mainThread.setIonStackLimit(-1);
+    mainThread.setJitStackLimit(-1);
 
     interrupt = true;
 
 #ifdef JS_ION
 #ifdef JS_THREADSAFE
-    TriggerOperationCallbackForForkJoin(this, trigger);
+    RequestInterruptForForkJoin(this, mode);
 #endif
 
     /*
@@ -663,8 +666,8 @@ JSRuntime::triggerOperationCallback(OperationCallbackTrigger trigger)
      * handlers to halt running code.
      */
     if (!SignalBasedTriggersDisabled()) {
-        TriggerOperationCallbackForAsmJSCode(this);
-        jit::TriggerOperationCallbackForIonCode(this, trigger);
+        RequestInterruptForAsmJSCode(this);
+        jit::RequestInterruptForIonCode(this, mode);
     }
 #endif
 }
@@ -870,7 +873,7 @@ JSRuntime::clearUsedByExclusiveThread(Zone *zone)
 bool
 js::CurrentThreadCanAccessRuntime(JSRuntime *rt)
 {
-    return rt->ownerThread_ == PR_GetCurrentThread() || InExclusiveParallelSection();
+    return rt->ownerThread_ == PR_GetCurrentThread() && !InParallelSection();
 }
 
 bool
@@ -920,8 +923,8 @@ JSRuntime::assertCanLock(RuntimeLock which)
         JS_ASSERT(exclusiveAccessOwner != PR_GetCurrentThread());
       case WorkerThreadStateLock:
         JS_ASSERT(!WorkerThreadState().isLocked());
-      case OperationCallbackLock:
-        JS_ASSERT(!currentThreadOwnsOperationCallbackLock());
+      case InterruptLock:
+        JS_ASSERT(!currentThreadOwnsInterruptLock());
       case GCLock:
         JS_ASSERT(gcLockOwner != PR_GetCurrentThread());
         break;

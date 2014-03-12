@@ -1732,7 +1732,7 @@ var gCSSProperties = {
 		type: CSS_TYPE_LONGHAND,
 		initial_values: [ "none" ],
 		other_values: [ "1000px", "500.2px" ],
-		invalid_values: [ "pants", "200", "0", "-100px", "-27.2em" ]
+		invalid_values: [ "pants", "200", "0", "-100px", "-27.2em", "0px" ]
 	},
 	"backface-visibility": {
 		domProp: "backfaceVisibility",
@@ -4790,6 +4790,253 @@ if (SpecialPowers.getBoolPref("layout.css.filters.enabled")) {
 	};
 }
 
+if (SpecialPowers.getBoolPref("layout.css.grid.enabled")) {
+	gCSSProperties["display"].other_values.push("grid", "inline-grid");
+	gCSSProperties["grid-auto-flow"] = {
+		domProp: "gridAutoFlow",
+		inherited: false,
+		type: CSS_TYPE_LONGHAND,
+		initial_values: [ "none" ],
+		other_values: [
+			"column",
+			"row",
+			"column dense",
+			"row dense",
+			"dense column",
+			"dense row",
+		],
+		invalid_values: [
+			"",
+			"auto",
+			"10px",
+			"dense",
+			"none row",
+			"none dense",
+			"column row",
+			"dense row dense",
+		]
+	};
+
+	gCSSProperties["grid-auto-columns"] = {
+		domProp: "gridAutoColumns",
+		inherited: false,
+		type: CSS_TYPE_LONGHAND,
+		initial_values: [ "auto" ],
+		other_values: [
+			"40px",
+			"2em",
+			"2.5fr",
+			"12%",
+			"min-content",
+			"max-content",
+			"calc(20px + 10%)",
+			"minmax(20px, max-content)",
+			"m\\69nmax(20px, 4Fr)",
+			"MinMax(min-content, calc(20px + 10%))",
+		],
+		invalid_values: [
+			"",
+			"normal",
+			"40ms",
+			"-40px",
+			"-12%",
+			"-2em",
+			"-2.5fr",
+			"minmax()",
+			"minmax(20px)",
+			"mİnmax(20px, 100px)",
+			"minmax(20px, 100px, 200px)",
+			"maxmin(100px, 20px)",
+			"minmax(min-content, auto)",
+			"minmax(min-content, minmax(30px, max-content))",
+		]
+	};
+	gCSSProperties["grid-auto-rows"] = {
+		domProp: "gridAutoRows",
+		inherited: false,
+		type: CSS_TYPE_LONGHAND,
+		initial_values: gCSSProperties["grid-auto-columns"].initial_values,
+		other_values: gCSSProperties["grid-auto-columns"].other_values,
+		invalid_values: gCSSProperties["grid-auto-columns"].invalid_values
+	};
+
+	gCSSProperties["grid-template-columns"] = {
+		domProp: "gridTemplateColumns",
+		inherited: false,
+		type: CSS_TYPE_LONGHAND,
+		initial_values: [ "none" ],
+		other_values: [
+			"auto",
+			"40px",
+			"2.5fr",
+			"(normal) 40px () auto ( ) 12%",
+			"(foo) 40px min-content ( bar ) calc(20px + 10%) max-content",
+			"40px min-content calc(20px + 10%) max-content",
+			"m\\69nmax(20px, 4Fr)",
+			"40px MinMax(min-content, calc(20px + 10%)) max-content",
+			"40px 2em",
+			"() 40px (-foo) 2em (bar baz This\ is\ one\ ident)",
+			// TODO bug 978478: "(a) repeat(3, (b) 20px (c) 40px (d)) (e)",
+
+			// See https://bugzilla.mozilla.org/show_bug.cgi?id=981300
+			"(none auto subgrid min-content max-content foo) 40px",
+		],
+		invalid_values: [
+			"",
+			"normal",
+			"40ms",
+			"-40px",
+			"-12%",
+			"-2fr",
+			"(foo)",
+			"(inherit) 40px",
+			"(initial) 40px",
+			"(unset) 40px",
+			"(default) 40px",
+			"(6%) 40px",
+			"(5th) 40px",
+			"(foo() bar) 40px",
+			"(foo)) 40px",
+			"(foo] 40px",
+			"[foo] 40px",
+			"(foo) (bar) 40px",
+			"40px (foo) (bar)",
+			"minmax()",
+			"minmax(20px)",
+			"mİnmax(20px, 100px)",
+			"minmax(20px, 100px, 200px)",
+			"maxmin(100px, 20px)",
+			"minmax(min-content, auto)",
+			"minmax(min-content, minmax(30px, max-content))",
+		]
+	};
+	gCSSProperties["grid-template-rows"] = {
+		domProp: "gridTemplateRows",
+		inherited: false,
+		type: CSS_TYPE_LONGHAND,
+		initial_values: gCSSProperties["grid-template-columns"].initial_values,
+		other_values: gCSSProperties["grid-template-columns"].other_values,
+		invalid_values: gCSSProperties["grid-template-columns"].invalid_values
+	};
+	gCSSProperties["grid-template-areas"] = {
+		domProp: "gridTemplateAreas",
+		inherited: false,
+		type: CSS_TYPE_LONGHAND,
+		initial_values: [ "none" ],
+		other_values: [
+			"''",
+			"'' ''",
+			"'1a-é_ .' \"b .\"",
+			"' Z\t\\aZ' 'Z Z'",
+			" '. . a b'  '..a b' ",
+		],
+		invalid_values: [
+			"'a b' 'a/b'",
+			"'a . a'",
+			"'. a a' 'a a a'",
+			"'a a .' 'a a a'",
+			"'a a' 'a .'",
+			"'a a'\n'..'\n'a a'",
+		]
+	};
+
+	var gridLineOtherValues = [
+		"foo",
+		"2",
+		"2 foo",
+		"foo 2",
+		"-3",
+		"-3 bar",
+		"bar -3",
+		"span 2",
+		"2 span",
+		"span foo",
+		"foo span",
+		"span 2 foo",
+		"span foo 2",
+		"2 foo span",
+		"foo 2 span",
+	];
+	var gridLineInvalidValues = [
+		"",
+		"4th",
+		"span",
+		"inherit 2",
+		"2 inherit",
+		"20px",
+		"2 3",
+		"2.5",
+		"2.0",
+		"0",
+		"0 foo",
+		"span 0",
+		"2 foo 3",
+		"foo 2 foo",
+		"2 span foo",
+		"foo span 2",
+		"span -3",
+		"span -3 bar",
+		"span 2 span",
+		"span foo span",
+		"span 2 foo span",
+	];
+
+	gCSSProperties["grid-column-start"] = {
+		domProp: "gridColumnStart",
+		inherited: false,
+		type: CSS_TYPE_LONGHAND,
+		initial_values: [ "auto" ],
+		other_values: gridLineOtherValues,
+		invalid_values: gridLineInvalidValues
+	};
+	gCSSProperties["grid-column-end"] = {
+		domProp: "gridColumnEnd",
+		inherited: false,
+		type: CSS_TYPE_LONGHAND,
+		initial_values: [ "auto" ],
+		other_values: gridLineOtherValues,
+		invalid_values: gridLineInvalidValues
+	};
+	gCSSProperties["grid-row-start"] = {
+		domProp: "gridRowStart",
+		inherited: false,
+		type: CSS_TYPE_LONGHAND,
+		initial_values: [ "auto" ],
+		other_values: gridLineOtherValues,
+		invalid_values: gridLineInvalidValues
+	};
+	gCSSProperties["grid-row-end"] = {
+		domProp: "gridRowEnd",
+		inherited: false,
+		type: CSS_TYPE_LONGHAND,
+		initial_values: [ "auto" ],
+		other_values: gridLineOtherValues,
+		invalid_values: gridLineInvalidValues
+	};
+
+	var gridAutoPositionOtherValues = [];
+	gridLineOtherValues.concat([ "auto" ]).forEach(function(val) {
+		gridAutoPositionOtherValues.push(" foo / " + val);
+		gridAutoPositionOtherValues.push(val + "/2");
+	});
+	var gridAutoPositionInvalidValues = [
+		"foo, bar",
+		"foo / bar / baz",
+	];
+	gridLineInvalidValues.forEach(function(val) {
+		gridAutoPositionInvalidValues.push("span 3 / " + val);
+		gridAutoPositionInvalidValues.push(val + " / foo");
+	});
+	gCSSProperties["grid-auto-position"] = {
+		domProp: "gridAutoPosition",
+		inherited: false,
+		type: CSS_TYPE_LONGHAND,
+		initial_values: [ "1 / 1" ],
+		other_values: gridAutoPositionOtherValues,
+		invalid_values: gridAutoPositionInvalidValues
+	};
+}
+
 if (SpecialPowers.getBoolPref("layout.css.image-orientation.enabled")) {
 	gCSSProperties["image-orientation"] = {
 		domProp: "imageOrientation",
@@ -4900,7 +5147,7 @@ if (SpecialPowers.getBoolPref("layout.css.background-blend-mode.enabled")) {
 		initial_values: [ "normal" ],
 		other_values: [ "multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn",
 			"hard-light", "soft-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity" ],
-		invalid_values: []
+		invalid_values: ["none", "10px", "multiply multiply"]
 	};
 }
 
@@ -4912,6 +5159,17 @@ if (SpecialPowers.getBoolPref("layout.css.will-change.enabled")) {
 		initial_values: [ "auto" ],
 		other_values: [ "scroll-position", "contents", "transform", "opacity", "scroll-position, transform", "transform, opacity", "contents, transform", "property-that-doesnt-exist-yet" ],
 		invalid_values: [ "none", "all", "default", "auto, scroll-position", "scroll-position, auto", "transform scroll-position", ",", "trailing," ]
+	};
+}
+
+if (SpecialPowers.getBoolPref("layout.css.overflow-clip-box.enabled")) {
+	gCSSProperties["overflow-clip-box"] = {
+		domProp: "overflowClipBox",
+		inherited: false,
+		type: CSS_TYPE_LONGHAND,
+		initial_values: [ "padding-box" ],
+		other_values: [ "content-box" ],
+		invalid_values: [ "none", "auto", "border-box", "0" ]
 	};
 }
 

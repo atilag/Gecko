@@ -35,6 +35,41 @@ add_task(function() {
   yield hiddenPromise;
 });
 
+// Right-click on an empty bit of extra toolbar should
+// show a context menu with moving options disabled,
+// and a toggle option for the extra toolbar
+add_task(function() {
+  let contextMenu = document.getElementById("toolbar-context-menu");
+  let shownPromise = contextMenuShown(contextMenu);
+  let toolbar = createToolbarWithPlacements("880164_empty_toolbar", []);
+  toolbar.setAttribute("context", "toolbar-context-menu");
+  toolbar.setAttribute("toolbarname", "Fancy Toolbar for Context Menu");
+  EventUtils.synthesizeMouseAtCenter(toolbar, {type: "contextmenu", button: 2 });
+  yield shownPromise;
+
+  let expectedEntries = [
+    [".customize-context-moveToPanel", false],
+    [".customize-context-removeFromToolbar", false],
+    ["---"]
+  ];
+  if (!isOSX) {
+    expectedEntries.push(["#toggle_toolbar-menubar", true]);
+  }
+  expectedEntries.push(
+    ["#toggle_PersonalToolbar", true],
+    ["#toggle_880164_empty_toolbar", true],
+    ["---"],
+    [".viewCustomizeToolbar", true]
+  );
+  checkContextMenu(contextMenu, expectedEntries);
+
+  let hiddenPromise = contextMenuHidden(contextMenu);
+  contextMenu.hidePopup();
+  yield hiddenPromise;
+  removeCustomToolbars();
+});
+
+
 // Right-click on the urlbar-container should
 // show a context menu with disabled options to move it.
 add_task(function() {
@@ -223,7 +258,7 @@ add_task(function() {
   contextMenu.hidePopup();
   yield hiddenContextPromise;
   yield endCustomizing(this.otherWin);
-  this.otherWin.close();
+  yield promiseWindowClosed(this.otherWin);
   this.otherWin = null;
 });
 
@@ -305,3 +340,32 @@ add_task(function() {
   yield hiddenPromise;
 });
 
+
+// Bug 982027 - moving icon around removes custom context menu.
+add_task(function() {
+  let widgetId = "custom-context-menu-toolbarbutton";
+  let expectedContext = "myfancycontext";
+  let widget = createDummyXULButton(widgetId, "Test ctxt menu");
+  widget.setAttribute("context", expectedContext);
+  CustomizableUI.addWidgetToArea(widgetId, CustomizableUI.AREA_NAVBAR);
+  is(widget.getAttribute("context"), expectedContext, "Should have context menu when added to the toolbar.");
+
+  yield startCustomizing();
+  is(widget.getAttribute("context"), "", "Should not have own context menu in the toolbar now that we're customizing.");
+  is(widget.getAttribute("wrapped-context"), expectedContext, "Should keep own context menu wrapped when in toolbar.");
+
+  let panel = PanelUI.contents;
+  simulateItemDrag(widget, panel);
+  is(widget.getAttribute("context"), "", "Should not have own context menu when in the panel.");
+  is(widget.getAttribute("wrapped-context"), expectedContext, "Should keep own context menu wrapped now that we're in the panel.");
+
+  simulateItemDrag(widget, document.getElementById("nav-bar").customizationTarget);
+  is(widget.getAttribute("context"), "", "Should not have own context menu when back in toolbar because we're still customizing.");
+  is(widget.getAttribute("wrapped-context"), expectedContext, "Should keep own context menu wrapped now that we're back in the toolbar.");
+
+  yield endCustomizing();
+  is(widget.getAttribute("context"), expectedContext, "Should have context menu again now that we're out of customize mode.");
+  CustomizableUI.removeWidgetFromArea(widgetId);
+  widget.remove();
+  ok(CustomizableUI.inDefaultState, "Should be in default state after removing button.");
+});

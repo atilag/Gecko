@@ -8,7 +8,6 @@
 
 %define glassActiveBorderColor rgb(37, 44, 51)
 %define glassInactiveBorderColor rgb(102, 102, 102)
-%define nestedButtons #zoom-out-button, #zoom-in-button, #cut-button, #copy-button, #paste-button
 
 %include downloads/indicator-aero.css
 
@@ -22,7 +21,8 @@
   }
 }
 
-@media (-moz-windows-default-theme) {
+@media (-moz-windows-default-theme) and (-moz-os-version: windows-vista),
+       (-moz-windows-default-theme) and (-moz-os-version: windows-win7) {
   #navigator-toolbox > toolbar:not(:-moz-lwtheme),
   #browser-bottombox:not(:-moz-lwtheme),
   .browserContainer > findbar {
@@ -169,8 +169,6 @@
      because of the border radius on the toolbar below the tab bar. */
   #main-window[sizemode=normal] #nav-bar {
     border-top: 1px solid @toolbarShadowColor@;
-    border-top-left-radius: 2.5px;
-    border-top-right-radius: 2.5px;
     background-clip: padding-box;
   }
 
@@ -197,7 +195,18 @@
 
   #main-menubar:not(:-moz-lwtheme):not(:-moz-window-inactive) {
     background-color: rgba(255,255,255,.5);
-    border-radius: 4px;
+  }
+
+  @media (-moz-os-version: windows-vista),
+         (-moz-os-version: windows-win7) {
+    #main-window[sizemode=normal] #nav-bar {
+      border-top-left-radius: 2.5px;
+      border-top-right-radius: 2.5px;
+    }
+
+    #main-menubar:not(:-moz-lwtheme):not(:-moz-window-inactive) {
+      border-radius: 4px;
+    }
   }
 
   #ctrlTab-panel {
@@ -223,19 +232,13 @@
     background-color: #556;
   }
 
-  /* Use inverted icons for glassed toolbars */
-  #TabsToolbar > toolbarpaletteitem > #bookmarks-menu-button > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon:not(:-moz-lwtheme),
-  #TabsToolbar > #bookmarks-menu-button > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon:not(:-moz-lwtheme),
+  /* Use inverted icons for non-fogged glassed toolbars */
   #toolbar-menubar > toolbarpaletteitem > #bookmarks-menu-button > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon:not(:-moz-lwtheme),
   #toolbar-menubar > #bookmarks-menu-button > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon:not(:-moz-lwtheme),
   #toolbar-menubar > toolbarpaletteitem > toolbaritem > :-moz-any(@nestedButtons@):not(:-moz-lwtheme),
   #toolbar-menubar > toolbaritem > :-moz-any(@nestedButtons@):not(:-moz-lwtheme),
-  #TabsToolbar > toolbarpaletteitem > toolbaritem > :-moz-any(@nestedButtons@):not(:-moz-lwtheme),
-  #TabsToolbar > toolbaritem > :-moz-any(@nestedButtons@):not(:-moz-lwtheme),
   #toolbar-menubar > toolbarpaletteitem > :-moz-any(@primaryToolbarButtons@):not(:-moz-lwtheme),
-  #toolbar-menubar > :-moz-any(@primaryToolbarButtons@):not(:-moz-lwtheme),
-  #TabsToolbar > toolbarpaletteitem > :-moz-any(@primaryToolbarButtons@):not(:-moz-lwtheme),
-  #TabsToolbar > :-moz-any(@primaryToolbarButtons@):not(:-moz-lwtheme) {
+  #toolbar-menubar > :-moz-any(@primaryToolbarButtons@):not(:-moz-lwtheme) {
     list-style-image: url("chrome://browser/skin/Toolbar-inverted.png");
   }
 
@@ -246,7 +249,13 @@
     position: relative;
   }
 
-  #TabsToolbar:not(:-moz-lwtheme)::before {
+  #TabsToolbar:not(:-moz-lwtheme)::after {
+    /* Because we use placeholders for window controls etc. in the tabstrip,
+     * and position those with ordinal attributes, and because our layout code
+     * expects :before/:after nodes to come first/last in the frame list,
+     * we have to reorder this element to come last, hence the
+     * ordinal group value (see bug 853415). */
+    -moz-box-ordinal-group: 1001;
     box-shadow: 0 0 30px 30px rgba(174,189,204,0.85);
     content: "";
     display: -moz-box;
@@ -306,6 +315,36 @@
 
   #print-preview-toolbar:not(:-moz-lwtheme) {
     -moz-appearance: -moz-win-browsertabbar-toolbox;
+  }
+}
+
+/* Win8 and beyond. */
+@media not all and (-moz-os-version: windows-vista) {
+  @media not all and (-moz-os-version: windows-win7) {
+    #urlbar:not(:-moz-lwtheme),
+    .searchbar-textbox:not(:-moz-lwtheme) {
+      background-color: hsla(0,0%,100%,.9);
+      border: 1px solid transparent;
+      border-color: hsla(210,54%,20%,.25) hsla(210,54%,20%,.27) hsla(210,54%,20%,.3);
+      box-shadow: 0 1px 0 hsla(0,0%,0%,.01) inset,
+                  0 1px 0 hsla(0,0%,100%,.1);
+      transition-property: border-color, background-color;
+      transition-duration: 200ms;
+    }
+
+    #urlbar:not(:-moz-lwtheme)[focused],
+    .searchbar-textbox:not(:-moz-lwtheme)[focused] {
+      background-color: hsla(0,0%,100%,1);
+      border-color: #4595e5;
+    }
+
+    /* Introducing an additional hover state for the Bookmark button */
+    #nav-bar .toolbarbutton-1[buttonover] > .toolbarbutton-menubutton-button:hover > .toolbarbutton-icon {
+      background-color: hsla(210,4%,10%,.08);
+      -moz-border-end: 1px solid;
+      -moz-padding-end: 5px;
+      border-color: hsla(210,4%,10%,.1);
+    }
   }
 }
 

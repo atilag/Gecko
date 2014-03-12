@@ -352,6 +352,7 @@ class NewObjectCache
      * nullptr if returning the object could possibly trigger GC (does not
      * indicate failure).
      */
+    template <AllowGC allowGC>
     inline JSObject *newObjectFromHit(JSContext *cx, EntryIndex entry, js::gc::InitialHeap heap);
 
     /* Fill an entry after a cache miss. */
@@ -483,7 +484,7 @@ AtomStateOffsetToName(const JSAtomState &atomState, size_t offset)
 enum RuntimeLock {
     ExclusiveAccessLock,
     WorkerThreadStateLock,
-    OperationCallbackLock,
+    InterruptLock,
     GCLock
 };
 
@@ -533,18 +534,29 @@ class PerThreadData : public PerThreadDataFriendFields
      * aligned to an Ion exit frame.
      */
     uint8_t             *ionTop;
-    JSContext           *ionJSContext;
-    uintptr_t            ionStackLimit;
 
-    inline void setIonStackLimit(uintptr_t limit);
+    /*
+     * The current JSContext when entering JIT code. This field may only be used
+     * from JIT code and C++ directly called by JIT code (otherwise it may refer
+     * to the wrong JSContext).
+     */
+    JSContext           *jitJSContext;
+
+    /*
+     * The stack limit checked by JIT code. This stack limit may be temporarily
+     * set to null to force JIT code to exit (e.g., for the operation callback).
+     */
+    uintptr_t            jitStackLimit;
+
+    inline void setJitStackLimit(uintptr_t limit);
 
     /*
      * asm.js maintains a stack of AsmJSModule activations (see AsmJS.h). This
-     * stack is used by JSRuntime::triggerOperationCallback to stop long-
-     * running asm.js without requiring dynamic polling operations in the
-     * generated code. Since triggerOperationCallback may run on a separate
-     * thread than the JSRuntime's owner thread all reads/writes must be
-     * synchronized (by rt->operationCallbackLock).
+     * stack is used by JSRuntime::requestInterrupt to stop long-running asm.js
+     * without requiring dynamic polling operations in the generated
+     * code. Since requestInterrupt may run on a separate thread than the
+     * JSRuntime's owner thread all reads/writes must be synchronized (by
+     * rt->interruptLock).
      */
   private:
     friend class js::Activation;
@@ -561,7 +573,7 @@ class PerThreadData : public PerThreadDataFriendFields
      */
     js::Activation *activation_;
 
-    /* See AsmJSActivation comment. Protected by rt->operationCallbackLock. */
+    /* See AsmJSActivation comment. Protected by rt->interruptLock. */
     js::AsmJSActivation *asmJSActivationStack_;
 
 #ifdef JS_ARM_SIMULATOR
@@ -678,7 +690,7 @@ struct JSRuntime : public JS::shadow::Runtime,
     JSRuntime *parentRuntime;
 
     /*
-     * If true, we've been asked to call the operation callback as soon as
+     * If true, we've been asked to call the interrupt callback as soon as
      * possible.
      */
     mozilla::Atomic<bool, mozilla::Relaxed> interrupt;
@@ -695,8 +707,7 @@ struct JSRuntime : public JS::shadow::Runtime,
     /* Set when handling a signal for a thread associated with this runtime. */
     bool handlingSignal;
 
-    /* Branch callback */
-    JSOperationCallback operationCallback;
+    JSInterruptCallback interruptCallback;
 
 #ifdef DEBUG
     void assertCanLock(js::RuntimeLock which);
@@ -706,48 +717,48 @@ struct JSRuntime : public JS::shadow::Runtime,
 
   private:
     /*
-     * Lock taken when triggering the operation callback from another thread.
+     * Lock taken when triggering an interrupt from another thread.
      * Protects all data that is touched in this process.
      */
 #ifdef JS_THREADSAFE
-    PRLock *operationCallbackLock;
-    PRThread *operationCallbackOwner;
+    PRLock *interruptLock;
+    PRThread *interruptLockOwner;
 #else
-    bool operationCallbackLockTaken;
+    bool interruptLockTaken;
 #endif // JS_THREADSAFE
   public:
 
-    class AutoLockForOperationCallback {
+    class AutoLockForInterrupt {
         JSRuntime *rt;
       public:
-        AutoLockForOperationCallback(JSRuntime *rt MOZ_GUARD_OBJECT_NOTIFIER_PARAM) : rt(rt) {
+        AutoLockForInterrupt(JSRuntime *rt MOZ_GUARD_OBJECT_NOTIFIER_PARAM) : rt(rt) {
             MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-            rt->assertCanLock(js::OperationCallbackLock);
+            rt->assertCanLock(js::InterruptLock);
 #ifdef JS_THREADSAFE
-            PR_Lock(rt->operationCallbackLock);
-            rt->operationCallbackOwner = PR_GetCurrentThread();
+            PR_Lock(rt->interruptLock);
+            rt->interruptLockOwner = PR_GetCurrentThread();
 #else
-            rt->operationCallbackLockTaken = true;
+            rt->interruptLockTaken = true;
 #endif // JS_THREADSAFE
         }
-        ~AutoLockForOperationCallback() {
-            JS_ASSERT(rt->currentThreadOwnsOperationCallbackLock());
+        ~AutoLockForInterrupt() {
+            JS_ASSERT(rt->currentThreadOwnsInterruptLock());
 #ifdef JS_THREADSAFE
-            rt->operationCallbackOwner = nullptr;
-            PR_Unlock(rt->operationCallbackLock);
+            rt->interruptLockOwner = nullptr;
+            PR_Unlock(rt->interruptLock);
 #else
-            rt->operationCallbackLockTaken = false;
+            rt->interruptLockTaken = false;
 #endif // JS_THREADSAFE
         }
 
         MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
     };
 
-    bool currentThreadOwnsOperationCallbackLock() {
+    bool currentThreadOwnsInterruptLock() {
 #if defined(JS_THREADSAFE)
-        return operationCallbackOwner == PR_GetCurrentThread();
+        return interruptLockOwner == PR_GetCurrentThread();
 #else
-        return operationCallbackLockTaken;
+        return interruptLockTaken;
 #endif
     }
 
@@ -841,6 +852,10 @@ struct JSRuntime : public JS::shadow::Runtime,
     WTF::BumpPointerAllocator *bumpAlloc_;
     js::jit::JitRuntime *jitRuntime_;
 
+    /*
+     * Self-hosting state cloned on demand into other compartments. Shared with the parent
+     * runtime if there is one.
+     */
     JSObject *selfHostingGlobal_;
 
     /* Space for interpreter frames. */
@@ -884,15 +899,14 @@ struct JSRuntime : public JS::shadow::Runtime,
     bool initSelfHosting(JSContext *cx);
     void finishSelfHosting();
     void markSelfHostingGlobal(JSTracer *trc);
-    bool isSelfHostingGlobal(js::HandleObject global) {
+    bool isSelfHostingGlobal(JSObject *global) {
         return global == selfHostingGlobal_;
     }
+    bool isSelfHostingCompartment(JSCompartment *comp);
     bool cloneSelfHostedFunctionScript(JSContext *cx, js::Handle<js::PropertyName*> name,
                                        js::Handle<JSFunction*> targetFun);
     bool cloneSelfHostedValue(JSContext *cx, js::Handle<js::PropertyName*> name,
                               js::MutableHandleValue vp);
-    bool maybeWrappedSelfHostedFunction(JSContext *cx, js::HandleId name,
-                                        js::MutableHandleValue funVal);
 
     //-------------------------------------------------------------------------
     // Locale information
@@ -949,6 +963,16 @@ struct JSRuntime : public JS::shadow::Runtime,
 # ifdef DEBUG
     unsigned            checkRequestDepth;
 # endif
+#endif
+
+#ifdef DEBUG
+    /*
+     * To help embedders enforce their invariants, we allow them to specify in
+     * advance which JSContext should be passed to JSAPI calls. If this is set
+     * to a non-null value, the assertSameCompartment machinery does double-
+     * duty (in debug builds) to verify that it matches the cx being used.
+     */
+    JSContext          *activeContext;
 #endif
 
     /* Garbage collector state, used by jsgc.c. */
@@ -1562,9 +1586,9 @@ struct JSRuntime : public JS::shadow::Runtime,
 
     bool                jitSupportsFloatingPoint;
 
-    // Used to reset stack limit after a signaled interrupt (i.e. ionStackLimit_ = -1)
+    // Used to reset stack limit after a signaled interrupt (i.e. jitStackLimit_ = -1)
     // has been noticed by Ion/Baseline.
-    void resetIonStackLimit();
+    void resetJitStackLimit();
 
     // Cache for jit::GetPcScript().
     js::jit::PcScriptCache *ionPcScriptCache;
@@ -1665,20 +1689,21 @@ struct JSRuntime : public JS::shadow::Runtime,
     JS_FRIEND_API(void *) onOutOfMemory(void *p, size_t nbytes);
     JS_FRIEND_API(void *) onOutOfMemory(void *p, size_t nbytes, JSContext *cx);
 
-    // Ways in which the operation callback on the runtime can be triggered,
+    // Ways in which the interrupt callback on the runtime can be triggered,
     // varying based on which thread is triggering the callback.
-    enum OperationCallbackTrigger {
-        TriggerCallbackMainThread,
-        TriggerCallbackAnyThread,
-        TriggerCallbackAnyThreadDontStopIon,
-        TriggerCallbackAnyThreadForkJoin
+    enum InterruptMode {
+        RequestInterruptMainThread,
+        RequestInterruptAnyThread,
+        RequestInterruptAnyThreadDontStopIon,
+        RequestInterruptAnyThreadForkJoin
     };
 
-    void triggerOperationCallback(OperationCallbackTrigger trigger);
+    void requestInterrupt(InterruptMode mode);
 
     void addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf, JS::RuntimeSizes *runtime);
 
   private:
+    JS::RuntimeOptions options_;
 
     JSUseHelperThreads useHelperThreads_;
 
@@ -1726,6 +1751,13 @@ struct JSRuntime : public JS::shadow::Runtime,
         return isWorkerRuntime_;
     }
 
+    const JS::RuntimeOptions &options() const {
+        return options_;
+    }
+    JS::RuntimeOptions &options() {
+        return options_;
+    }
+
 #ifdef DEBUG
   public:
     js::AutoEnterPolicy *enteredPolicy;
@@ -1765,6 +1797,19 @@ struct JSRuntime : public JS::shadow::Runtime,
 };
 
 namespace js {
+
+// When entering JIT code, the calling JSContext* is stored into the thread's
+// PerThreadData. This function retrieves the JSContext with the pre-condition
+// that the caller is JIT code or C++ called directly from JIT code. This
+// function should not be called from arbitrary locations since the JSContext
+// may be the wrong one.
+static inline JSContext *
+GetJSContextFromJitCode()
+{
+    JSContext *cx = TlsPerThreadData.get()->jitJSContext;
+    JS_ASSERT(cx);
+    return cx;
+}
 
 /*
  * Flags accompany script version data so that a) dynamically created scripts
@@ -1898,10 +1943,10 @@ class MOZ_STACK_CLASS AutoKeepAtoms
 };
 
 inline void
-PerThreadData::setIonStackLimit(uintptr_t limit)
+PerThreadData::setJitStackLimit(uintptr_t limit)
 {
-    JS_ASSERT(runtime_->currentThreadOwnsOperationCallbackLock());
-    ionStackLimit = limit;
+    JS_ASSERT(runtime_->currentThreadOwnsInterruptLock());
+    jitStackLimit = limit;
 }
 
 inline JSRuntime *

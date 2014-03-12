@@ -35,6 +35,20 @@ class MacroAssemblerARM : public Assembler
     // baseline IC stubs rely on lr holding the return address.
     Register secondScratchReg_;
 
+    // higher level tag testing code
+    Operand ToPayload(Operand base) {
+        return Operand(Register::FromCode(base.base()), base.disp());
+    }
+    Address ToPayload(Address base) {
+        return ToPayload(Operand(base)).toAddress();
+    }
+    Operand ToType(Operand base) {
+        return Operand(Register::FromCode(base.base()), base.disp() + sizeof(void *));
+    }
+    Address ToType(Address base) {
+        return ToType(Operand(base)).toAddress();
+    }
+
   public:
     MacroAssemblerARM()
       : secondScratchReg_(lr)
@@ -1441,6 +1455,7 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     void floor(FloatRegister input, Register output, Label *handleNotAnInt);
     void floorf(FloatRegister input, Register output, Label *handleNotAnInt);
     void round(FloatRegister input, Register output, Label *handleNotAnInt, FloatRegister tmp);
+    void roundf(FloatRegister input, Register output, Label *handleNotAnInt, FloatRegister tmp);
 
     void clampCheck(Register r, Label *handleNotAnInt) {
         // check explicitly for r == INT_MIN || r == INT_MAX

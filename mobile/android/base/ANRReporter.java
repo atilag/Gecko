@@ -5,19 +5,6 @@
 
 package org.mozilla.gecko;
 
-import org.mozilla.gecko.util.ThreadUtils;
-
-import org.json.JSONObject;
-
-import android.content.BroadcastReceiver;
-import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
-import android.os.Handler;
-import android.os.Looper;
-import android.util.Base64;
-import android.util.Log;
-
 import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.File;
@@ -28,9 +15,19 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.Reader;
-import java.io.StringReader;
 import java.util.UUID;
 import java.util.regex.Pattern;
+
+import org.json.JSONObject;
+import org.mozilla.gecko.util.ThreadUtils;
+
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.Log;
 
 public final class ANRReporter extends BroadcastReceiver
 {
@@ -167,6 +164,8 @@ public final class ANRReporter extends BroadcastReceiver
             }
         } catch (IOException e) {
             Log.w(LOGTAG, e);
+        } catch (ClassCastException e) {
+            Log.w(LOGTAG, e); // Bug 975436
         }
         // Check most common location one last time just in case
         File tracesFile = new File("/data/anr/traces.txt");

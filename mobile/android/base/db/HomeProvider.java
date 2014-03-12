@@ -4,34 +4,28 @@
 
 package org.mozilla.gecko.db;
 
-import org.mozilla.gecko.R;
-import org.mozilla.gecko.db.BrowserContract.HomeItems;
-import org.mozilla.gecko.db.PerProfileDatabases.DatabaseHelperFactory;
-import org.mozilla.gecko.sqlite.SQLiteBridge;
+import java.io.IOException;
+import java.io.InputStream;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.mozilla.gecko.R;
+import org.mozilla.gecko.db.BrowserContract.HomeItems;
+import org.mozilla.gecko.sqlite.SQLiteBridge;
 
 import android.content.ContentValues;
-import android.content.Context;
 import android.content.UriMatcher;
 import android.database.Cursor;
 import android.database.MatrixCursor;
-import android.database.MatrixCursor.RowBuilder;
 import android.net.Uri;
-import android.os.Build;
-import android.text.TextUtils;
 import android.util.Log;
-
-import java.io.InputStream;
-import java.io.IOException;
 
 public class HomeProvider extends SQLiteBridgeContentProvider {
     private static final String LOGTAG = "GeckoHomeProvider";
 
     // This should be kept in sync with the db version in mobile/android/modules/HomeProvider.jsm
-    private static int DB_VERSION = 1;
+    private static int DB_VERSION = 2;
     private static String DB_FILENAME = "home.sqlite";
 
     private static final String TABLE_ITEMS = "items";

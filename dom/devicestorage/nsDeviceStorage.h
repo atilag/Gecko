@@ -54,6 +54,8 @@ enum DeviceStorageRequestType {
     DEVICE_STORAGE_REQUEST_AVAILABLE,
     DEVICE_STORAGE_REQUEST_STATUS,
     DEVICE_STORAGE_REQUEST_FORMAT,
+    DEVICE_STORAGE_REQUEST_MOUNT,
+    DEVICE_STORAGE_REQUEST_UNMOUNT,
     DEVICE_STORAGE_REQUEST_CREATEFD
 };
 
@@ -204,7 +206,8 @@ public:
   bool mOkToCallContinue;
   PRTime mSince;
 
-  virtual bool Recv__delete__(const bool& allow) MOZ_OVERRIDE;
+  virtual bool Recv__delete__(const bool& allow,
+                              const InfallibleTArray<PermissionChoice>& choices) MOZ_OVERRIDE;
   virtual void IPDLRelease() MOZ_OVERRIDE;
 
   void GetStorageType(nsAString & aType);

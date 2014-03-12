@@ -124,12 +124,12 @@
 //   parallelization and just invoke |func()| N times in a row (once
 //   for each worker) but with |warmup| set to false.
 //
-// Operation callback:
+// Interrupts:
 //
-// During parallel execution, |cx.check()| must be periodically
-// invoked to check for the operation callback. This is automatically
-// done by the Ion-generated code. If the operation callback is
-// necessary, |cx.check()| abort the parallel execution.
+// During parallel execution, |cx.check()| must be periodically invoked to
+// check for interrupts. This is automatically done by the Ion-generated
+// code. If an interrupt has been requested |cx.check()| aborts parallel
+// execution.
 //
 // Transitive compilation:
 //
@@ -312,9 +312,6 @@ struct ForkJoinShared;
 class ForkJoinContext : public ThreadSafeContext
 {
   public:
-    // The worker that is doing the work.
-    const uint32_t workerId;
-
     // Bailout record used to record the reason this thread stopped executing
     ParallelBailoutRecord *const bailoutRecord;
 
@@ -343,17 +340,16 @@ class ForkJoinContext : public ThreadSafeContext
     uint8_t *targetRegionStart;
     uint8_t *targetRegionEnd;
 
-    ForkJoinContext(PerThreadData *perThreadData, uint32_t workerId,
+    ForkJoinContext(PerThreadData *perThreadData, ThreadPoolWorker *worker,
                     Allocator *allocator, ForkJoinShared *shared,
                     ParallelBailoutRecord *bailoutRecord);
 
+    // Get the worker id. The main thread by convention has the id of the max
+    // worker thread id + 1.
+    uint32_t workerId() const { return worker_->id(); }
+
     // Get a slice of work for the worker associated with the context.
-    bool getSlice(uint16_t *sliceId) {
-        ThreadPool &pool = runtime()->threadPool;
-        return (isMainThread()
-                ? pool.getSliceForMainThread(sliceId)
-                : pool.getSliceForWorker(workerId, sliceId));
-    }
+    bool getSlice(uint16_t *sliceId) { return worker_->getSlice(this, sliceId); }
 
     // True if this is the main thread, false if it is one of the parallel workers.
     bool isMainThread() const;
@@ -388,7 +384,7 @@ class ForkJoinContext : public ThreadSafeContext
     // also rendesvous to perform GC or do other similar things.
     //
     // This function is guaranteed to have no effect if both
-    // runtime()->interrupt is zero.  Ion-generated code takes
+    // runtime()->interruptPar is zero.  Ion-generated code takes
     // advantage of this by inlining the checks on those flags before
     // actually calling this function.  If this function ends up
     // getting called a lot from outside ion code, we can refactor
@@ -410,13 +406,20 @@ class ForkJoinContext : public ThreadSafeContext
     // Initializes the thread-local state.
     static bool initialize();
 
+    // Used in inlining GetForkJoinSlice.
+    static size_t offsetOfWorker() {
+        return offsetof(ForkJoinContext, worker_);
+    }
+
   private:
     friend class AutoSetForkJoinContext;
 
     // Initialized by initialize()
     static mozilla::ThreadLocal<ForkJoinContext*> tlsForkJoinContext;
 
-    ForkJoinShared *const shared;
+    ForkJoinShared *const shared_;
+
+    ThreadPoolWorker *worker_;
 
     bool acquiredJSContext_;
 
@@ -465,8 +468,7 @@ bool InExclusiveParallelSection();
 
 bool ParallelTestsShouldPass(JSContext *cx);
 
-void TriggerOperationCallbackForForkJoin(JSRuntime *rt,
-                                         JSRuntime::OperationCallbackTrigger trigger);
+void RequestInterruptForForkJoin(JSRuntime *rt, JSRuntime::InterruptMode mode);
 
 bool intrinsic_SetForkJoinTargetRegion(JSContext *cx, unsigned argc, Value *vp);
 extern const JSJitInfo intrinsic_SetForkJoinTargetRegionInfo;

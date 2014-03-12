@@ -220,13 +220,6 @@ using namespace mozilla;
 // logs from MOZ_CC_LOG_ALL and MOZ_CC_LOG_SHUTDOWN, or other uses
 // of nsICycleCollectorListener)
 
-MOZ_NEVER_INLINE void
-CC_AbortIfNull(void *ptr)
-{
-    if (!ptr)
-        MOZ_CRASH();
-}
-
 // Various parameters of this collector can be tuned using environment
 // variables.
 
@@ -738,10 +731,8 @@ public:
     void Init()
     {
         MOZ_ASSERT(IsEmpty(), "Failed to call GCGraph::Clear");
-        if (!PL_DHashTableInit(&mPtrToNodeMap, &PtrNodeOps, nullptr,
-                               sizeof(PtrToNodeEntry), 32768)) {
-            MOZ_CRASH();
-        }
+        PL_DHashTableInit(&mPtrToNodeMap, &PtrNodeOps, nullptr,
+                          sizeof(PtrToNodeEntry), 32768);
     }
 
     void Clear()
@@ -1234,7 +1225,9 @@ private:
 
     void CheckedPush(nsDeque &aQueue, PtrInfo *pi)
     {
-        CC_AbortIfNull(pi);
+        if (!pi) {
+            MOZ_CRASH();
+        }
         if (!aQueue.Push(pi, fallible_t())) {
             mVisitor.Failed();
         }
@@ -1320,7 +1313,6 @@ GraphWalker<Visitor>::DoWalk(nsDeque &aQueue)
     // built the graph, for hopefully-better locality.
     while (aQueue.GetSize() > 0) {
         PtrInfo *pi = static_cast<PtrInfo*>(aQueue.PopFront());
-        CC_AbortIfNull(pi);
 
         if (pi->mParticipant && mVisitor.ShouldVisitNode(pi)) {
             mVisitor.VisitNode(pi);
@@ -2263,6 +2255,7 @@ public:
     {
         MOZ_ASSERT(mValues.IsEmpty());
         MOZ_ASSERT(mObjects.IsEmpty());
+        MOZ_ASSERT(mTenuredObjects.IsEmpty());
     }
 
     void Destroy()
@@ -2270,6 +2263,7 @@ public:
         mReferenceToThis = nullptr;
         mValues.Clear();
         mObjects.Clear();
+        mTenuredObjects.Clear();
         mozilla::DropJSObjects(this);
         NS_RELEASE_THIS();
     }
@@ -2280,6 +2274,7 @@ public:
     JSPurpleBuffer*& mReferenceToThis;
     SegmentedArray<JS::Heap<JS::Value>> mValues;
     SegmentedArray<JS::Heap<JSObject*>> mObjects;
+    SegmentedArray<JS::TenuredHeap<JSObject*>> mTenuredObjects;
 };
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(JSPurpleBuffer)
@@ -2307,6 +2302,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(JSPurpleBuffer)
     NS_TRACE_SEGMENTED_ARRAY(mValues)
     NS_TRACE_SEGMENTED_ARRAY(mObjects)
+    NS_TRACE_SEGMENTED_ARRAY(mTenuredObjects)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(JSPurpleBuffer, AddRef)
@@ -2389,6 +2385,14 @@ public:
     {
         if (*aObject && xpc_GCThingIsGrayCCThing(*aObject)) {
             mCollector->GetJSPurpleBuffer()->mObjects.AppendElement(*aObject);
+        }
+    }
+
+    virtual void Trace(JS::TenuredHeap<JSObject*>* aObject, const char* aName,
+                       void* aClosure) const
+    {
+        if (*aObject && xpc_GCThingIsGrayCCThing(*aObject)) {
+            mCollector->GetJSPurpleBuffer()->mTenuredObjects.AppendElement(*aObject);
         }
     }
 
@@ -2538,7 +2542,10 @@ nsCycleCollector::MarkRoots(SliceBudget &aBudget)
 
     while (!aBudget.isOverBudget() && !mCurrNode->IsDone()) {
         PtrInfo *pi = mCurrNode->GetNext();
-        CC_AbortIfNull(pi);
+        if (!pi) {
+            MOZ_CRASH();
+        }
+
         // We need to call the builder's Traverse() method on deleted nodes, to
         // set their firstChild() that may be read by a prior non-deleted
         // neighbor.
@@ -3191,7 +3198,6 @@ nsCycleCollector::Collect(ccType aCCType,
     if (mActivelyCollecting || mFreeingSnowWhite) {
         return false;
     }
-    AutoRestore<bool> ar(mActivelyCollecting);
     mActivelyCollecting = true;
 
     bool startedIdle = (mIncrementalPhase == IdlePhase);
@@ -3231,6 +3237,10 @@ nsCycleCollector::Collect(ccType aCCType,
             break;
         }
     } while (!aBudget.checkOverBudget() && !finished);
+
+    // Clear mActivelyCollecting here to ensure that a recursive call to
+    // Collect() does something.
+    mActivelyCollecting = false;
 
     if (aCCType != SliceCC && !startedIdle) {
         // We were in the middle of an incremental CC (using its own listener).

@@ -16,8 +16,8 @@
 #include "mozilla/layers/ContentClient.h"  // for ContentClientBasic
 #include "mozilla/mozalloc.h"           // for operator delete
 #include "nsDebug.h"                    // for NS_ASSERTION
+#include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 #include "nsRegion.h"                   // for nsIntRegion
-#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
 class gfxContext;
 
 namespace mozilla {
@@ -53,7 +53,6 @@ public:
     NS_ASSERTION(BasicManager()->InConstruction(),
                  "Can only set properties in construction phase");
     mInvalidRegion.Or(mInvalidRegion, aRegion);
-    mInvalidRegion.SimplifyOutward(10);
     mValidRegion.Sub(mValidRegion, mInvalidRegion);
   }
 

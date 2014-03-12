@@ -547,12 +547,6 @@ TRY_AGAIN_POWER_OF_TWO:
     return surface;
 }
 
-bool
-GLContextEGL::ResizeOffscreen(const gfx::IntSize& aNewSize)
-{
-    return ResizeScreenBuffer(aNewSize);
-}
-
 static const EGLint kEGLConfigAttribsOffscreenPBuffer[] = {
     LOCAL_EGL_SURFACE_TYPE,    LOCAL_EGL_PBUFFER_BIT,
     LOCAL_EGL_RENDERABLE_TYPE, LOCAL_EGL_OPENGL_ES2_BIT,
@@ -658,6 +652,11 @@ CreateConfig(EGLConfig* aConfig)
         // Android doesn't always support 16 bit so also try 24 bit
         if (depth == 16) {
             return CreateConfig(aConfig, 24);
+        }
+        // Bug 970096
+        // Some devices that have 24 bit screens only support 16 bit OpenGL?
+        if (depth == 24) {
+            return CreateConfig(aConfig, 16);
         }
 #endif
         return false;

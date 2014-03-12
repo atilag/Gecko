@@ -450,8 +450,11 @@ Debugger::fromChildJSObject(JSObject *obj)
 }
 
 bool
-Debugger::getScriptFrame(JSContext *cx, AbstractFramePtr frame, MutableHandleValue vp)
+Debugger::getScriptFrameWithIter(JSContext *cx, AbstractFramePtr frame,
+                                 const ScriptFrameIter *maybeIter, MutableHandleValue vp)
 {
+    MOZ_ASSERT_IF(maybeIter, maybeIter->abstractFramePtr() == frame);
+
     FrameMap::AddPtr p = frames.lookupForAdd(frame);
     if (!p) {
         /* Create and populate the Debugger.Frame object. */
@@ -461,7 +464,17 @@ Debugger::getScriptFrame(JSContext *cx, AbstractFramePtr frame, MutableHandleVal
         if (!frameobj)
             return false;
 
-        frameobj->setPrivate(frame.raw());
+        // Eagerly copy ScriptFrameIter data if we've already walked the
+        // stack.
+        if (maybeIter) {
+            AbstractFramePtr data = maybeIter->copyDataAsAbstractFramePtr();
+            if (!data)
+                return false;
+            frameobj->setPrivate(data.raw());
+        } else {
+            frameobj->setPrivate(frame.raw());
+        }
+
         frameobj->setReservedSlot(JSSLOT_DEBUGFRAME_OWNER, ObjectValue(*object));
 
         if (!frames.add(p, frame, frameobj)) {
@@ -2746,9 +2759,16 @@ Debugger::findAllGlobals(JSContext *cx, unsigned argc, Value *vp)
         return false;
 
     for (CompartmentsIter c(cx->runtime(), SkipAtoms); !c.done(); c.next()) {
+        if (c->options().invisibleToDebugger())
+            continue;
+
         c->zone()->scheduledForDestruction = false;
 
         GlobalObject *global = c->maybeGlobal();
+
+        if (cx->runtime()->isSelfHostingGlobal(global))
+            continue;
+
         if (global) {
             /*
              * We pulled |global| out of nowhere, so it's possible that it was
@@ -3370,7 +3390,7 @@ DebuggerScript_getAllOffsets(JSContext *cx, unsigned argc, Value *vp)
             RootedId id(cx, INT_TO_JSID(lineno));
 
             bool found;
-            if (!JSObject::hasProperty(cx, result, id, &found))
+            if (!js::HasOwnProperty(cx, result, id, &found))
                 return false;
             if (found && !JSObject::getGeneric(cx, result, result, id, &offsetsv))
                 return false;
@@ -3921,12 +3941,32 @@ DebuggerSource_getElementProperty(JSContext *cx, unsigned argc, Value *vp)
 }
 
 static bool
+DebuggerSource_getIntroductionScript(JSContext *cx, unsigned argc, Value *vp)
+{
+    THIS_DEBUGSOURCE_REFERENT(cx, argc, vp, "(get introductionScript)", args, obj, sourceObject);
+
+    RootedScript script(cx, sourceObject->introductionScript());
+    if (script) {
+        RootedObject scriptDO(cx, Debugger::fromChildJSObject(obj)->wrapScript(cx, script));
+        if (!scriptDO)
+            return false;
+        args.rval().setObject(*scriptDO);
+    } else {
+        args.rval().setUndefined();
+    }
+    return true;
+}
+
+static bool
 DebuggerSource_getIntroductionOffset(JSContext *cx, unsigned argc, Value *vp)
 {
     THIS_DEBUGSOURCE_REFERENT(cx, argc, vp, "(get introductionOffset)", args, obj, sourceObject);
 
+    // Regardless of what's recorded in the ScriptSourceObject and
+    // ScriptSource, only hand out the introduction offset if we also have
+    // the script within which it applies.
     ScriptSource *ss = sourceObject->source();
-    if (ss->hasIntroductionOffset())
+    if (ss->hasIntroductionOffset() && sourceObject->introductionScript())
         args.rval().setInt32(ss->introductionOffset());
     else
         args.rval().setUndefined();
@@ -3936,7 +3976,7 @@ DebuggerSource_getIntroductionOffset(JSContext *cx, unsigned argc, Value *vp)
 static bool
 DebuggerSource_getIntroductionType(JSContext *cx, unsigned argc, Value *vp)
 {
-    THIS_DEBUGSOURCE_REFERENT(cx, argc, vp, "(get introductionOffset)", args, obj, sourceObject);
+    THIS_DEBUGSOURCE_REFERENT(cx, argc, vp, "(get introductionType)", args, obj, sourceObject);
 
     ScriptSource *ss = sourceObject->source();
     if (ss->hasIntroductionType()) {
@@ -3955,6 +3995,7 @@ static const JSPropertySpec DebuggerSource_properties[] = {
     JS_PSG("url", DebuggerSource_getUrl, 0),
     JS_PSG("element", DebuggerSource_getElement, 0),
     JS_PSG("displayURL", DebuggerSource_getDisplayURL, 0),
+    JS_PSG("introductionScript", DebuggerSource_getIntroductionScript, 0),
     JS_PSG("introductionOffset", DebuggerSource_getIntroductionOffset, 0),
     JS_PSG("introductionType", DebuggerSource_getIntroductionType, 0),
     JS_PSG("elementAttributeName", DebuggerSource_getElementProperty, 0),
@@ -4109,6 +4150,7 @@ DebuggerFrame_getEnvironment(JSContext *cx, unsigned argc, Value *vp)
     Rooted<Env*> env(cx);
     {
         AutoCompartment ac(cx, iter.abstractFramePtr().scopeChain());
+        iter.updatePcQuadratic();
         env = GetDebugScopeForFrame(cx, iter.abstractFramePtr(), iter.pc());
         if (!env)
             return false;
@@ -4447,12 +4489,12 @@ js::EvaluateInEnv(JSContext *cx, Handle<Env*> env, HandleValue thisv, AbstractFr
      * static level will suffice.
      */
     CompileOptions options(cx);
-    options.setPrincipals(env->compartment()->principals)
-           .setCompileAndGo(true)
+    options.setCompileAndGo(true)
            .setForEval(true)
            .setNoScriptRval(false)
            .setFileAndLine(filename, lineno)
-           .setCanLazilyParse(false);
+           .setCanLazilyParse(false)
+           .setIntroductionType("debugger eval");
     RootedScript callerScript(cx, frame ? frame.script() : nullptr);
     RootedScript script(cx, frontend::CompileScript(cx, &cx->tempLifoAlloc(), env, callerScript,
                                                     options, chars.get(), length,
@@ -4606,6 +4648,7 @@ DebuggerFrame_eval(JSContext *cx, unsigned argc, Value *vp)
     THIS_FRAME_ITER(cx, argc, vp, "eval", args, thisobj, _, iter);
     REQUIRE_ARGC("Debugger.Frame.prototype.eval", 1);
     Debugger *dbg = Debugger::fromChildJSObject(thisobj);
+    iter.updatePcQuadratic();
     return DebuggerGenericEval(cx, "Debugger.Frame.prototype.eval",
                                args[0], EvalWithDefaultBindings, JS::UndefinedHandleValue,
                                args.get(1), args.rval(), dbg, js::NullPtr(), &iter);
@@ -4617,6 +4660,7 @@ DebuggerFrame_evalWithBindings(JSContext *cx, unsigned argc, Value *vp)
     THIS_FRAME_ITER(cx, argc, vp, "evalWithBindings", args, thisobj, _, iter);
     REQUIRE_ARGC("Debugger.Frame.prototype.evalWithBindings", 2);
     Debugger *dbg = Debugger::fromChildJSObject(thisobj);
+    iter.updatePcQuadratic();
     return DebuggerGenericEval(cx, "Debugger.Frame.prototype.evalWithBindings",
                                args[0], EvalHasExtraBindings, args[1], args.get(2),
                                args.rval(), dbg, js::NullPtr(), &iter);

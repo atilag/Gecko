@@ -455,7 +455,7 @@ bool
 BaselineCompiler::emitStackCheck(bool earlyCheck)
 {
     Label skipCall;
-    uintptr_t *limitAddr = &cx->runtime()->mainThread.ionStackLimit;
+    uintptr_t *limitAddr = &cx->runtime()->mainThread.jitStackLimit;
     uint32_t slotsSize = script->nslots() * sizeof(Value);
     uint32_t tolerance = earlyCheck ? slotsSize : 0;
 
@@ -612,7 +612,7 @@ BaselineCompiler::emitInterruptCheck()
 }
 
 bool
-BaselineCompiler::emitUseCountIncrement()
+BaselineCompiler::emitUseCountIncrement(bool allowOsr)
 {
     // Emit no use count increments or bailouts if Ion is not
     // enabled, or if the script will never be Ion-compileable
@@ -632,6 +632,12 @@ BaselineCompiler::emitUseCountIncrement()
     // If this is a loop inside a catch or finally block, increment the use
     // count but don't attempt OSR (Ion only compiles the try block).
     if (analysis_.info(pc).loopEntryInCatchOrFinally) {
+        JS_ASSERT(JSOp(*pc) == JSOP_LOOPENTRY);
+        return true;
+    }
+
+    // OSR not possible at this loop entry.
+    if (!allowOsr) {
         JS_ASSERT(JSOp(*pc) == JSOP_LOOPENTRY);
         return true;
     }
@@ -854,10 +860,16 @@ BaselineCompiler::emit_JSOP_POPN()
 }
 
 bool
-BaselineCompiler::emit_JSOP_POPNV()
+BaselineCompiler::emit_JSOP_DUPAT()
 {
-    frame.popRegsAndSync(1);
-    frame.popn(GET_UINT16(pc));
+    frame.syncStack(0);
+
+    // DUPAT takes a value on the stack and re-pushes it on top.  It's like
+    // GETLOCAL but it addresses from the top of the stack instead of from the
+    // stack frame.
+
+    int depth = -(GET_UINT24(pc) + 1);
+    masm.loadValue(frame.addressOfStackValue(frame.peek(depth)), R0);
     frame.push(R0);
     return true;
 }
@@ -1058,7 +1070,7 @@ bool
 BaselineCompiler::emit_JSOP_LOOPENTRY()
 {
     frame.syncStack(0);
-    return emitUseCountIncrement();
+    return emitUseCountIncrement(LoopEntryCanIonOsr(pc));
 }
 
 bool
@@ -2290,17 +2302,7 @@ BaselineCompiler::emit_JSOP_INITELEM_SETTER()
 bool
 BaselineCompiler::emit_JSOP_GETLOCAL()
 {
-    uint32_t local = GET_LOCALNO(pc);
-
-    if (local >= frame.nlocals()) {
-        // Destructuring assignments may use GETLOCAL to access stack values.
-        frame.syncStack(0);
-        masm.loadValue(Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfLocal(local)), R0);
-        frame.push(R0);
-        return true;
-    }
-
-    frame.pushLocal(local);
+    frame.pushLocal(GET_LOCALNO(pc));
     return true;
 }
 

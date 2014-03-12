@@ -38,6 +38,7 @@ public:
 
 protected:
   nsresult Init(int32_t aWidth, int32_t aHeight,
+                int32_t aDisplayWidth, int32_t aDisplayHeight,
                 TrackRate aTrackRate) MOZ_FINAL MOZ_OVERRIDE;
 
 private:
@@ -72,6 +73,9 @@ private:
 
   // Muted frame, we only create it once.
   nsTArray<uint8_t> mMuteFrame;
+
+  // I420 frame, convert the 4:4:4, 4:2:2 to I420.
+  nsTArray<uint8_t> mI420Frame;
 
   /**
    * A local segment queue which takes the raw data out from mRawSegment in the

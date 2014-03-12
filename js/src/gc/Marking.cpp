@@ -366,9 +366,21 @@ IsAboutToBeFinalized(T **thingp)
     return !(*thingp)->isMarked();
 }
 
+template <typename T>
+T *
+UpdateIfRelocated(JSRuntime *rt, T **thingp)
+{
+    JS_ASSERT(thingp);
+#ifdef JSGC_GENERATIONAL
+    if (*thingp && rt->isHeapMinorCollecting() && rt->gcNursery.isInside(*thingp))
+        rt->gcNursery.getForwardedPointer(thingp);
+#endif
+    return *thingp;
+}
+
 #define DeclMarkerImpl(base, type)                                                                \
 void                                                                                              \
-Mark##base(JSTracer *trc, BarrieredPtr<type> *thing, const char *name)                         \
+Mark##base(JSTracer *trc, BarrieredPtr<type> *thing, const char *name)                            \
 {                                                                                                 \
     Mark<type>(trc, thing, name);                                                                 \
 }                                                                                                 \
@@ -409,7 +421,7 @@ Is##base##Marked(type **thingp)                                                 
 }                                                                                                 \
                                                                                                   \
 bool                                                                                              \
-Is##base##Marked(BarrieredPtr<type> *thingp)                                                   \
+Is##base##Marked(BarrieredPtr<type> *thingp)                                                      \
 {                                                                                                 \
     return IsMarked<type>(thingp->unsafeGet());                                                   \
 }                                                                                                 \
@@ -421,10 +433,23 @@ Is##base##AboutToBeFinalized(type **thingp)                                     
 }                                                                                                 \
                                                                                                   \
 bool                                                                                              \
-Is##base##AboutToBeFinalized(BarrieredPtr<type> *thingp)                                       \
+Is##base##AboutToBeFinalized(BarrieredPtr<type> *thingp)                                          \
 {                                                                                                 \
     return IsAboutToBeFinalized<type>(thingp->unsafeGet());                                       \
+}                                                                                                 \
+                                                                                                  \
+type *                                                                                            \
+Update##base##IfRelocated(JSRuntime *rt, BarrieredPtr<type> *thingp)                              \
+{                                                                                                 \
+    return UpdateIfRelocated<type>(rt, thingp->unsafeGet());                                      \
+}                                                                                                 \
+                                                                                                  \
+type *                                                                                            \
+Update##base##IfRelocated(JSRuntime *rt, type **thingp)                                           \
+{                                                                                                 \
+    return UpdateIfRelocated<type>(rt, thingp);                                                   \
 }
+
 
 DeclMarkerImpl(BaseShape, BaseShape)
 DeclMarkerImpl(BaseShape, UnownedBaseShape)
@@ -432,6 +457,7 @@ DeclMarkerImpl(JitCode, jit::JitCode)
 DeclMarkerImpl(Object, ArgumentsObject)
 DeclMarkerImpl(Object, ArrayBufferObject)
 DeclMarkerImpl(Object, ArrayBufferViewObject)
+DeclMarkerImpl(Object, SharedArrayBufferObject)
 DeclMarkerImpl(Object, DebugScopeObject)
 DeclMarkerImpl(Object, GlobalObject)
 DeclMarkerImpl(Object, JSObject)

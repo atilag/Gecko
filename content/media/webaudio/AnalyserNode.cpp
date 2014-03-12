@@ -57,10 +57,10 @@ public:
     MOZ_ASSERT(NS_IsMainThread());
   }
 
-  virtual void ProduceAudioBlock(AudioNodeStream* aStream,
-                                 const AudioChunk& aInput,
-                                 AudioChunk* aOutput,
-                                 bool* aFinished) MOZ_OVERRIDE
+  virtual void ProcessBlock(AudioNodeStream* aStream,
+                            const AudioChunk& aInput,
+                            AudioChunk* aOutput,
+                            bool* aFinished) MOZ_OVERRIDE
   {
     *aOutput = aInput;
 
@@ -177,6 +177,17 @@ AnalyserNode::GetByteFrequencyData(const Uint8Array& aArray)
     const double scaled = std::max(0.0, std::min(double(UCHAR_MAX),
                                                  UCHAR_MAX * (decibels - mMinDecibels) * rangeScaleFactor));
     buffer[i] = static_cast<unsigned char>(scaled);
+  }
+}
+
+void
+AnalyserNode::GetFloatTimeDomainData(const Float32Array& aArray)
+{
+  float* buffer = aArray.Data();
+  uint32_t length = std::min(aArray.Length(), mBuffer.Length());
+
+  for (uint32_t i = 0; i < length; ++i) {
+    buffer[i] = mBuffer[(i + mWriteIndex) % mBuffer.Length()];;
   }
 }
 

@@ -19,9 +19,16 @@
 #include "mozilla/gfx/2D.h"             // for DrawTarget
 #include "mozilla/mozalloc.h"           // for operator delete, etc
 #include "nsAutoPtr.h"                  // for nsRefPtr
-#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
+#include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 
 namespace mozilla {
+
+namespace gfx {
+class SurfaceStream;
+class SharedSurface;
+class SurfaceFactory;
+}
+
 namespace layers {
 
 class CanvasClientWebGL;
@@ -54,11 +61,12 @@ protected:
   nsRefPtr<mozilla::gl::GLContext> mGLContext;
   mozilla::RefPtr<mozilla::gfx::DrawTarget> mDrawTarget;
 
+  RefPtr<gfx::SurfaceStream> mStream;
+
   uint32_t mCanvasFramebuffer;
 
   bool mIsGLAlphaPremult;
   bool mNeedsYFlip;
-  bool mForceReadback;
 
   RefPtr<gfx::DataSourceSurface> mCachedTempSurface;
   nsRefPtr<gfxImageSurface> mDeprecatedCachedTempSurface;

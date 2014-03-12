@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 include protocol PAsmJSCacheEntry;
+include protocol PBackground;
 include protocol PBlob;
 include protocol PBluetooth;
 include protocol PBrowser;
@@ -92,6 +93,18 @@ struct DeviceStorageFormatParams
   nsString storageName;
 };
 
+struct DeviceStorageMountParams
+{
+  nsString type;
+  nsString storageName;
+};
+
+struct DeviceStorageUnmountParams
+{
+  nsString type;
+  nsString storageName;
+};
+
 struct DeviceStorageAddParams
 {
   nsString type;
@@ -142,6 +155,8 @@ union DeviceStorageParams
   DeviceStorageAvailableParams;
   DeviceStorageStatusParams;
   DeviceStorageFormatParams;
+  DeviceStorageMountParams;
+  DeviceStorageUnmountParams;
 };
 
 struct FMRadioRequestEnableParams
@@ -199,6 +214,7 @@ intr protocol PContent
 {
     parent opens PCompositor;
     parent opens PImageBridge;
+    child opens PBackground;
 
     manages PAsmJSCacheEntry;
     manages PBlob;
@@ -257,7 +273,7 @@ child:
      */
     async SetProcessPrivileges(ChildPrivileges privs);
 
-    PMemoryReportRequest(uint32_t generation);
+    PMemoryReportRequest(uint32_t generation, bool minimizeMemoryUsage, nsString DMDDumpIdent);
 
     /**
      * Notify the AudioChannelService in the child processes.
@@ -267,19 +283,10 @@ child:
     async SpeakerManagerNotify();
 
     /**
-     * Do a memory info dump to a file in our temp directory.
-     *
-     * For documentation on the args, see
-     * MemoryInfoDumper::dumpMemoryInfoToTempDir.
-     */
-    async DumpMemoryInfoToTempDir(nsString identifier,
-                                  bool minimizeMemoryUsage,
-                                  bool dumpChildProcesses);
-    /**
      * Dump this process's GC and CC logs.
      *
-     * For documentation on the args, see
-     * MemoryInfoDumper::dumpGCAndCCLogsToFile.
+     * For documentation on the args, see dumpGCAndCCLogsToFile in
+     * nsIMemoryInfoDumper.idl
      */
     async DumpGCAndCCLogsToFile(nsString identifier,
                                 bool dumpAllTraces,
@@ -332,7 +339,6 @@ child:
 
     NotifyProcessPriorityChanged(ProcessPriority priority);
     MinimizeMemoryUsage();
-    CancelMinimizeMemoryUsage();
 
     /**
      * Used to manage nsIStyleSheetService across processes.

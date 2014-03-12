@@ -7,6 +7,7 @@
 #define GFX_IMAGESURFACE_H
 
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/RefPtr.h"
 #include "gfxASurface.h"
 #include "nsAutoPtr.h"
 #include "nsSize.h"
@@ -17,6 +18,7 @@ class gfxSubimageSurface;
 
 namespace mozilla {
 namespace gfx {
+class DataSourceSurface;
 class SourceSurface;
 }
 }
@@ -107,6 +109,12 @@ public:
      * Assumes that the format of this surface is compatible with aSurface
      */
     bool CopyTo (mozilla::gfx::SourceSurface *aSurface);
+
+    /**
+     * Copy to a Moz2D DataSourceSurface.
+     * Marked as virtual so that browsercomps can access this method.
+     */
+    virtual mozilla::TemporaryRef<mozilla::gfx::DataSourceSurface> CopyToB8G8R8A8DataSourceSurface();
 
     /* return new Subimage with pointing to original image starting from aRect.pos
      * and size of aRect.size. New subimage keeping current image reference

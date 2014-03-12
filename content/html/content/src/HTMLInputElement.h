@@ -256,7 +256,7 @@ public:
   bool     HasPatternMismatch() const;
   bool     IsRangeOverflow() const;
   bool     IsRangeUnderflow() const;
-  bool     HasStepMismatch() const;
+  bool     HasStepMismatch(bool aUseZeroIfValueNaN = false) const;
   bool     HasBadInput() const;
   void     UpdateTooLongValidityState();
   void     UpdateValueMissingValidityState();
@@ -611,7 +611,7 @@ public:
   double ValueAsNumber() const
   {
     return DoesValueAsNumberApply() ? GetValueAsDecimal().toDouble()
-                                    : UnspecifiedNaN();
+                                    : UnspecifiedNaN<double>();
   }
 
   void SetValueAsNumber(double aValue, ErrorResult& aRv);

@@ -995,7 +995,7 @@ nsFlexContainerFrame::
     childRSForMeasuringHeight.mFlags.mVResize = true;
   }
 
-  nsHTMLReflowMetrics childDesiredSize(childRSForMeasuringHeight.GetWritingMode());
+  nsHTMLReflowMetrics childDesiredSize(childRSForMeasuringHeight);
   nsReflowStatus childReflowStatus;
   const uint32_t flags = NS_FRAME_NO_MOVE_FRAME;
   nsresult rv = ReflowChild(aFlexItem.Frame(), aPresContext,
@@ -1053,8 +1053,10 @@ FlexItem::FlexItem(nsIFrame* aChildFrame,
     mAlignSelf(aChildFrame->StylePosition()->mAlignSelf)
 {
   MOZ_ASSERT(mFrame, "expecting a non-null child frame");
-  MOZ_ASSERT(!mFrame->IsAbsolutelyPositioned(),
-             "abspos child frames should not be treated as flex items");
+  MOZ_ASSERT(mFrame->GetType() != nsGkAtoms::placeholderFrame,
+             "placeholder frames should not be treated as flex items");
+  MOZ_ASSERT(!(mFrame->GetStateBits() & NS_FRAME_OUT_OF_FLOW),
+             "out-of-flow frames should not be treated as flex items");
 
   SetFlexBaseSizeAndMainSize(aFlexBaseSize);
 
@@ -1126,8 +1128,10 @@ FlexItem::FlexItem(nsIFrame* aChildFrame, nscoord aCrossSize)
   MOZ_ASSERT(NS_STYLE_VISIBILITY_COLLAPSE ==
              mFrame->StyleVisibility()->mVisible,
              "Should only make struts for children with 'visibility:collapse'");
-  MOZ_ASSERT(!mFrame->IsAbsolutelyPositioned(),
-             "abspos child frames should not be treated as flex items");
+  MOZ_ASSERT(mFrame->GetType() != nsGkAtoms::placeholderFrame,
+             "placeholder frames should not be treated as flex items");
+  MOZ_ASSERT(!(mFrame->GetStateBits() & NS_FRAME_OUT_OF_FLOW),
+             "out-of-flow frames should not be treated as flex items");
 }
 
 nscoord
@@ -1142,7 +1146,7 @@ FlexItem::GetBaselineOffsetFromOuterCrossStart(
   MOZ_ASSERT(!IsAxisHorizontal(aCrossAxis),
              "Only expecting to be doing baseline computations when the "
              "cross axis is vertical");
- 
+
   nscoord marginTopToBaseline = mAscent + mMargin.top;
 
   if (aCrossAxis == eAxis_TB) {
@@ -1453,7 +1457,8 @@ nsFlexContainerFrame::SanityCheckAnonymousFlexItems() const
                "but it isn't");
     if (child->StyleContext()->GetPseudo() ==
         nsCSSAnonBoxes::anonymousFlexItem) {
-      MOZ_ASSERT(!prevChildWasAnonFlexItem || mChildrenHaveBeenReordered,
+      MOZ_ASSERT(!prevChildWasAnonFlexItem ||
+                 HasAnyStateBits(NS_STATE_FLEX_CHILDREN_REORDERED),
                  "two anon flex items in a row (shouldn't happen, unless our "
                  "children have been reordered with the 'order' property)");
 
@@ -1958,7 +1963,7 @@ CrossAxisPositionTracker::
         for (uint32_t i = 0; i < aLines.Length(); i++) {
           FlexLine& line = aLines[i];
           // Our share is the amount of space remaining, divided by the number
-          // of lines remainig. 
+          // of lines remainig.
           nscoord shareOfExtraSpace =
             mPackingSpaceRemaining / (aLines.Length() - i);
           nscoord newSize = line.GetLineCrossSize() + shareOfExtraSpace;
@@ -2004,7 +2009,7 @@ SingleLineCrossAxisPositionTracker::
 void
 FlexLine::ComputeCrossSizeAndBaseline(const FlexboxAxisTracker& aAxisTracker)
 {
-  nscoord crossStartToFurthestBaseline= nscoord_MIN;
+  nscoord crossStartToFurthestBaseline = nscoord_MIN;
   nscoord crossEndToFurthestBaseline = nscoord_MIN;
   nscoord largestOuterCrossSize = 0;
   for (uint32_t i = 0; i < mItems.Length(); ++i) {
@@ -2483,7 +2488,7 @@ nsFlexContainerFrame::ComputeCrossSize(const nsHTMLReflowState& aReflowState,
                                        bool* aIsDefinite,
                                        nsReflowStatus& aStatus)
 {
-  MOZ_ASSERT(aIsDefinite, "outparam pointer must be non-null"); 
+  MOZ_ASSERT(aIsDefinite, "outparam pointer must be non-null");
 
   if (IsAxisHorizontal(aAxisTracker.GetCrossAxis())) {
     // Cross axis is horizontal: our cross size is our computed width
@@ -2609,7 +2614,7 @@ nsFlexContainerFrame::SizeItemInCrossAxis(
     // whether any of its ancestors are being resized).
     aChildReflowState.mFlags.mVResize = true;
   }
-  nsHTMLReflowMetrics childDesiredSize(aChildReflowState.GetWritingMode());
+  nsHTMLReflowMetrics childDesiredSize(aChildReflowState);
   nsReflowStatus childReflowStatus;
   const uint32_t flags = NS_FRAME_NO_MOVE_FRAME;
   nsresult rv = ReflowChild(aItem.Frame(), aPresContext,
@@ -2736,9 +2741,11 @@ nsFlexContainerFrame::Reflow(nsPresContext*           aPresContext,
   // operations need to use a fancier LEQ function that also takes DOM order
   // into account, so that we can honor the spec's requirement that frames w/
   // equal "order" values are laid out in DOM order.
-  if (!mChildrenHaveBeenReordered) {
-    mChildrenHaveBeenReordered =
-      SortChildrenIfNeeded<IsOrderLEQ>();
+
+  if (!HasAnyStateBits(NS_STATE_FLEX_CHILDREN_REORDERED)) {
+    if (SortChildrenIfNeeded<IsOrderLEQ>()) {
+      AddStateBits(NS_STATE_FLEX_CHILDREN_REORDERED);
+    }
   } else {
     SortChildrenIfNeeded<IsOrderLEQWithDOMFallback>();
   }
@@ -2983,7 +2990,7 @@ nsFlexContainerFrame::DoFlexLayout(nsPresContext*           aPresContext,
       // after this point, because some of its methods (e.g. SetComputedWidth)
       // internally call InitResizeFlags and stomp on mVResize & mHResize.
 
-      nsHTMLReflowMetrics childDesiredSize(childReflowState.GetWritingMode());
+      nsHTMLReflowMetrics childDesiredSize(childReflowState);
       nsReflowStatus childReflowStatus;
       nsresult rv = ReflowChild(curItem.Frame(), aPresContext,
                                 childDesiredSize, childReflowState,

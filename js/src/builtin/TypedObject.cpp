@@ -894,8 +894,12 @@ StructMetaTypeDescr::layout(JSContext *cx,
     // fieldTypes : { string: Type, ... }
     RootedObject fieldOffsets(cx);
     fieldOffsets = NewObjectWithProto<JSObject>(cx, nullptr, nullptr, TenuredObject);
+    if (!fieldOffsets)
+        return false;
     RootedObject fieldTypes(cx);
     fieldTypes = NewObjectWithProto<JSObject>(cx, nullptr, nullptr, TenuredObject);
+    if (!fieldTypes)
+        return false;
     for (size_t i = 0; i < typeRepr->fieldCount(); i++) {
         const StructField &field = typeRepr->field(i);
         RootedId fieldId(cx, NameToId(field.propertyName));
@@ -1426,6 +1430,8 @@ TypedObject::attach(ArrayBufferObject &buffer, int32_t offset)
 void
 TypedObject::attach(TypedObject &typedObj, int32_t offset)
 {
+    JS_ASSERT(typedObj.typedMem() != NULL);
+
     attach(typedObj.owner(), typedObj.offset() + offset);
 }
 
@@ -1453,8 +1459,9 @@ TypedObjLengthFromType(TypeDescr &descr)
 
 /*static*/ TypedObject *
 TypedObject::createDerived(JSContext *cx, HandleSizedTypeDescr type,
-                          HandleTypedObject typedObj, size_t offset)
+                           HandleTypedObject typedObj, size_t offset)
 {
+    JS_ASSERT(typedObj->typedMem() != NULL);
     JS_ASSERT(offset <= typedObj->size());
     JS_ASSERT(offset + type->size() <= typedObj->size());
 
@@ -1687,15 +1694,6 @@ ReportPropertyError(JSContext *cx,
 }
 
 bool
-TypedObject::obj_lookupSpecial(JSContext *cx, HandleObject obj,
-                              HandleSpecialId sid, MutableHandleObject objp,
-                              MutableHandleShape propp)
-{
-    RootedId id(cx, SPECIALID_TO_JSID(sid));
-    return obj_lookupGeneric(cx, obj, id, objp, propp);
-}
-
-bool
 TypedObject::obj_defineGeneric(JSContext *cx, HandleObject obj, HandleId id, HandleValue v,
                               PropertyOp getter, StrictPropertyOp setter, unsigned attrs)
 {
@@ -1721,14 +1719,6 @@ TypedObject::obj_defineElement(JSContext *cx, HandleObject obj, uint32_t index, 
     if (!delegate)
         return false;
     return baseops::DefineElement(cx, delegate, index, v, getter, setter, attrs);
-}
-
-bool
-TypedObject::obj_defineSpecial(JSContext *cx, HandleObject obj, HandleSpecialId sid, HandleValue v,
-                              PropertyOp getter, StrictPropertyOp setter, unsigned attrs)
-{
-    Rooted<jsid> id(cx, SPECIALID_TO_JSID(sid));
-    return obj_defineGeneric(cx, obj, id, v, getter, setter, attrs);
 }
 
 bool
@@ -1853,15 +1843,6 @@ TypedObject::obj_getArrayElement(JSContext *cx,
 }
 
 bool
-TypedObject::obj_getSpecial(JSContext *cx, HandleObject obj,
-                            HandleObject receiver, HandleSpecialId sid,
-                            MutableHandleValue vp)
-{
-    RootedId id(cx, SPECIALID_TO_JSID(sid));
-    return obj_getGeneric(cx, obj, receiver, id, vp);
-}
-
-bool
 TypedObject::obj_setGeneric(JSContext *cx, HandleObject obj, HandleId id,
                            MutableHandleValue vp, bool strict)
 {
@@ -1960,15 +1941,6 @@ TypedObject::obj_setArrayElement(JSContext *cx,
     elementType = &descr->as<T>().elementType();
     size_t offset = elementType->size() * index;
     return ConvertAndCopyTo(cx, elementType, typedObj, offset, vp);
-}
-
-bool
-TypedObject::obj_setSpecial(JSContext *cx, HandleObject obj,
-                             HandleSpecialId sid, MutableHandleValue vp,
-                             bool strict)
-{
-    RootedId id(cx, SPECIALID_TO_JSID(sid));
-    return obj_setGeneric(cx, obj, id, vp, strict);
 }
 
 bool
@@ -2091,19 +2063,6 @@ TypedObject::obj_deleteElement(JSContext *cx, HandleObject obj, uint32_t index,
     }
 
     return JSObject::deleteElement(cx, proto, index, succeeded);
-}
-
-bool
-TypedObject::obj_deleteSpecial(JSContext *cx, HandleObject obj,
-                               HandleSpecialId sid, bool *succeeded)
-{
-    RootedObject proto(cx, obj->getProto());
-    if (!proto) {
-        *succeeded = false;
-        return true;
-    }
-
-    return JSObject::deleteSpecial(cx, proto, sid, succeeded);
 }
 
 bool
@@ -2235,24 +2194,19 @@ const Class TransparentTypedObject::class_ = {
         TypedObject::obj_lookupGeneric,
         TypedObject::obj_lookupProperty,
         TypedObject::obj_lookupElement,
-        TypedObject::obj_lookupSpecial,
         TypedObject::obj_defineGeneric,
         TypedObject::obj_defineProperty,
         TypedObject::obj_defineElement,
-        TypedObject::obj_defineSpecial,
         TypedObject::obj_getGeneric,
         TypedObject::obj_getProperty,
         TypedObject::obj_getElement,
-        TypedObject::obj_getSpecial,
         TypedObject::obj_setGeneric,
         TypedObject::obj_setProperty,
         TypedObject::obj_setElement,
-        TypedObject::obj_setSpecial,
         TypedObject::obj_getGenericAttributes,
         TypedObject::obj_setGenericAttributes,
         TypedObject::obj_deleteProperty,
         TypedObject::obj_deleteElement,
-        TypedObject::obj_deleteSpecial,
         nullptr, nullptr, // watch/unwatch
         nullptr,   /* slice */
         TypedObject::obj_enumerate,
@@ -2427,6 +2381,11 @@ TypedObject::constructUnsized(JSContext *cx, unsigned int argc, Value *vp)
     // Length constructor.
     if (args[0].isInt32()) {
         int32_t length = args[0].toInt32();
+        if (length < 0) {
+            JS_ReportErrorNumber(cx, js_GetErrorMessage,
+                                 nullptr, JSMSG_TYPEDOBJECT_BAD_ARGS);
+            return nullptr;
+        }
         Rooted<TypedObject*> obj(cx, createZeroed(cx, callee, length));
         if (!obj)
             return false;
@@ -2563,24 +2522,19 @@ const Class OpaqueTypedObject::class_ = {
         TypedObject::obj_lookupGeneric,
         TypedObject::obj_lookupProperty,
         TypedObject::obj_lookupElement,
-        TypedObject::obj_lookupSpecial,
         TypedObject::obj_defineGeneric,
         TypedObject::obj_defineProperty,
         TypedObject::obj_defineElement,
-        TypedObject::obj_defineSpecial,
         TypedObject::obj_getGeneric,
         TypedObject::obj_getProperty,
         TypedObject::obj_getElement,
-        TypedObject::obj_getSpecial,
         TypedObject::obj_setGeneric,
         TypedObject::obj_setProperty,
         TypedObject::obj_setElement,
-        TypedObject::obj_setSpecial,
         TypedObject::obj_getGenericAttributes,
         TypedObject::obj_setGenericAttributes,
         TypedObject::obj_deleteProperty,
         TypedObject::obj_deleteElement,
-        TypedObject::obj_deleteSpecial,
         nullptr, nullptr, // watch/unwatch
         nullptr, // slice
         TypedObject::obj_enumerate,
@@ -2659,6 +2613,28 @@ js::AttachTypedObject(ThreadSafeContext *, unsigned argc, Value *vp)
 JS_JITINFO_NATIVE_PARALLEL_THREADSAFE(js::AttachTypedObjectJitInfo,
                                       AttachTypedObjectJitInfo,
                                       js::AttachTypedObject);
+
+bool
+js::SetTypedObjectOffset(ThreadSafeContext *, unsigned argc, Value *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    JS_ASSERT(argc == 2);
+    JS_ASSERT(args[0].isObject() && args[0].toObject().is<TypedObject>());
+    JS_ASSERT(args[1].isInt32());
+
+    TypedObject &typedObj = args[0].toObject().as<TypedObject>();
+    int32_t offset = args[1].toInt32();
+
+    JS_ASSERT(typedObj.typedMem() != nullptr); // must be attached already
+
+    typedObj.setPrivate(typedObj.owner().dataPointer() + offset);
+    typedObj.setReservedSlot(JS_TYPEDOBJ_SLOT_BYTEOFFSET, Int32Value(offset));
+    return true;
+}
+
+JS_JITINFO_NATIVE_PARALLEL_THREADSAFE(js::SetTypedObjectOffsetJitInfo,
+                                      SetTypedObjectJitInfo,
+                                      js::SetTypedObjectOffset);
 
 bool
 js::ObjectIsTypeDescr(ThreadSafeContext *, unsigned argc, Value *vp)

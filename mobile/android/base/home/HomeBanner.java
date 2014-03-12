@@ -5,22 +5,21 @@
 
 package org.mozilla.gecko.home;
 
-import org.mozilla.gecko.animation.PropertyAnimator;
-import org.mozilla.gecko.animation.PropertyAnimator.Property;
-import org.mozilla.gecko.animation.PropertyAnimator.PropertyAnimationListener;
-import org.mozilla.gecko.animation.ViewHelper;
+import org.json.JSONException;
+import org.json.JSONObject;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.R;
+import org.mozilla.gecko.animation.PropertyAnimator;
+import org.mozilla.gecko.animation.PropertyAnimator.Property;
+import org.mozilla.gecko.animation.ViewHelper;
 import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.util.GeckoEventListener;
 import org.mozilla.gecko.util.ThreadUtils;
 
-import org.json.JSONException;
-import org.json.JSONObject;
-
 import android.content.Context;
 import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.text.Html;
 import android.text.Spanned;
 import android.text.TextUtils;
@@ -44,8 +43,8 @@ public class HomeBanner extends LinearLayout
     // Used to detect for upwards scroll to push banner all the way up
     private boolean mSnapBannerToTop;
 
-    // Tracks if the banner has been enabled by HomePager to avoid race conditions.
-    private boolean mEnabled = false;
+    // Tracks whether or not the banner should be shown.
+    private boolean mActive = false;
 
     // The user is currently swiping between HomePager pages
     private boolean mScrollingPages = false;
@@ -53,6 +52,16 @@ public class HomeBanner extends LinearLayout
     // Tracks whether the user swiped the banner down, preventing us from autoshowing when the user
     // switches back to the default page.
     private boolean mUserSwipedDown = false;
+
+    private final TextView mTextView;
+    private final ImageView mIconView;
+
+    // Listener that gets called when the banner is dismissed from the close button.
+    private OnDismissListener mOnDismissListener;
+
+    public interface OnDismissListener {
+        public void onDismiss();
+    }
 
     public HomeBanner(Context context) {
         this(context, null);
@@ -62,6 +71,9 @@ public class HomeBanner extends LinearLayout
         super(context, attrs);
 
         LayoutInflater.from(context).inflate(R.layout.home_banner, this);
+
+        mTextView = (TextView) findViewById(R.id.text);
+        mIconView = (ImageView) findViewById(R.id.icon);
     }
 
     @Override
@@ -79,21 +91,29 @@ public class HomeBanner extends LinearLayout
             @Override
             public void onClick(View view) {
                 HomeBanner.this.setVisibility(View.GONE);
+
                 // Send the current message id back to JS.
                 GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("HomeBanner:Dismiss", (String) getTag()));
+
+                if (mOnDismissListener != null) {
+                    mOnDismissListener.onDismiss();
+                }
             }
         });
 
         setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                // Hide the banner. This does not remove the message from the rotation, so it may appear
+                // again if the JS onclick handler doesn't choose to remove it.
+                HomeBanner.this.setVisibility(View.GONE);
+
                 // Send the current message id back to JS.
                 GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("HomeBanner:Click", (String) getTag()));
             }
         });
 
         GeckoAppShell.getEventDispatcher().registerEventListener("HomeBanner:Data", this);
-        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("HomeBanner:Get", null));
     }
 
     @Override
@@ -101,73 +121,91 @@ public class HomeBanner extends LinearLayout
         super.onDetachedFromWindow();
 
         GeckoAppShell.getEventDispatcher().unregisterEventListener("HomeBanner:Data", this);
-     }
+    }
 
-     public void setScrollingPages(boolean scrollingPages) {
-         mScrollingPages = scrollingPages;
-     }
+    @Override
+    public void setVisibility(int visibility) {
+        // On pre-Honeycomb devices, setting the visibility to GONE won't actually
+        // hide the view unless we clear animations first.
+        if (Build.VERSION.SDK_INT < 11 && visibility == View.GONE) {
+            clearAnimation();
+        }
+
+        super.setVisibility(visibility);
+    }
+
+    public void setScrollingPages(boolean scrollingPages) {
+        mScrollingPages = scrollingPages;
+    }
+
+    public void setOnDismissListener(OnDismissListener listener) {
+        mOnDismissListener = listener;
+    }
+
+    /**
+     * Sends a message to gecko to request a new banner message. UI is updated in handleMessage.
+     */
+    public void update() {
+        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("HomeBanner:Get", null));
+    }
 
     @Override
     public void handleMessage(String event, JSONObject message) {
-        try {
-            // Store the current message id to pass back to JS in the view's OnClickListener.
-            setTag(message.getString("id"));
-
-            // Display styled text from an HTML string.
-            final Spanned text = Html.fromHtml(message.getString("text"));
-            final TextView textView = (TextView) findViewById(R.id.text);
-
-            // Update the banner message on the UI thread.
-            ThreadUtils.postToUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    textView.setText(text);
-                    setVisibility(VISIBLE);
-                    animateUp();
-                }
-            });
-        } catch (JSONException e) {
-            Log.e(LOGTAG, "Exception handling " + event + " message", e);
-            return;
-        }
-
+        final String id = message.optString("id");
+        final String text = message.optString("text");
         final String iconURI = message.optString("iconURI");
-        final ImageView iconView = (ImageView) findViewById(R.id.icon);
 
-        if (TextUtils.isEmpty(iconURI)) {
-            // Hide the image view if we don't have an icon to show.
-            iconView.setVisibility(View.GONE);
-            return;
-        }
-
-        BitmapUtils.getDrawable(getContext(), iconURI, new BitmapUtils.BitmapLoader() {
+        // Update the banner message on the UI thread.
+        ThreadUtils.postToUiThread(new Runnable() {
             @Override
-            public void onBitmapFound(final Drawable d) {
-                // Bail if getDrawable doesn't find anything.
-                if (d == null) {
-                    iconView.setVisibility(View.GONE);
+            public void run() {
+                // Hide the banner if the message doesn't have valid id and text.
+                if (TextUtils.isEmpty(id) || TextUtils.isEmpty(text)) {
+                    setVisibility(View.GONE);
                     return;
                 }
 
-                // Update the banner icon on the UI thread.
-                ThreadUtils.postToUiThread(new Runnable() {
+                // Store the current message id to pass back to JS in the view's OnClickListener.
+                setTag(id);
+                mTextView.setText(Html.fromHtml(text));
+
+                BitmapUtils.getDrawable(getContext(), iconURI, new BitmapUtils.BitmapLoader() {
                     @Override
-                    public void run() {
-                        iconView.setImageDrawable(d);
+                    public void onBitmapFound(final Drawable d) {
+                        // Hide the image view if we don't have an icon to show.
+                        if (d == null) {
+                            mIconView.setVisibility(View.GONE);
+                        } else {
+                            mIconView.setImageDrawable(d);
+                        }
                     }
                 });
+
+                setVisibility(View.VISIBLE);
+                GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("HomeBanner:Shown", id));
+
+                // Animate the banner if it is currently active.
+                if (mActive) {
+                    animateUp();
+                }
             }
         });
     }
 
-    public void setEnabled(boolean enabled) {
+    public void setActive(boolean active) {
         // No need to animate if not changing
-        if (mEnabled == enabled) {
+        if (mActive == active) {
             return;
         }
 
-        mEnabled = enabled;
-        if (enabled) {
+        mActive = active;
+
+        // Don't animate if the banner isn't visible.
+        if (getVisibility() != View.VISIBLE) {
+            return;
+        }
+
+        if (active) {
             animateUp();
         } else {
             animateDown();
@@ -175,15 +213,9 @@ public class HomeBanner extends LinearLayout
     }
 
     private void animateUp() {
-        // Check to make sure that message has been received and the banner has been enabled.
-        // Necessary to avoid race conditions between show() and handleMessage() calls.
-        TextView textView = (TextView) findViewById(R.id.text);
-        if (!mEnabled || TextUtils.isEmpty(textView.getText()) || mUserSwipedDown) {
-            return;
-        }
-
-        // No need to animate if already translated.
-        if (ViewHelper.getTranslationY(this) == 0) {
+        // Don't try to animate if the banner is already translated, or if the user swiped
+        // the banner down previously to hide it.
+        if (ViewHelper.getTranslationY(this) == 0 || mUserSwipedDown) {
             return;
         }
 
@@ -193,7 +225,7 @@ public class HomeBanner extends LinearLayout
     }
 
     private void animateDown() {
-        // No need to animate if already translated or gone.
+        // Don't try to animate if the banner is already translated.
         if (ViewHelper.getTranslationY(this) == getHeight()) {
             return;
         }
@@ -204,7 +236,7 @@ public class HomeBanner extends LinearLayout
     }
 
     public void handleHomeTouch(MotionEvent event) {
-        if (!mEnabled || getVisibility() == GONE || mScrollingPages) {
+        if (!mActive || getVisibility() == GONE || mScrollingPages) {
             return;
         }
 

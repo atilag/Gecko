@@ -328,13 +328,21 @@ class LNewSlots : public LCallInstructionHelper<1, 0, 3>
     }
 };
 
-class LNewArray : public LInstructionHelper<1, 0, 0>
+class LNewArray : public LInstructionHelper<1, 0, 1>
 {
   public:
     LIR_HEADER(NewArray)
 
+    LNewArray(const LDefinition &temp) {
+        setTemp(0, temp);
+    }
+
     const char *extraName() const {
         return mir()->shouldUseVM() ? "VMCall" : nullptr;
+    }
+
+    const LDefinition *temp() {
+        return getTemp(0);
     }
 
     MNewArray *mir() const {
@@ -342,13 +350,21 @@ class LNewArray : public LInstructionHelper<1, 0, 0>
     }
 };
 
-class LNewObject : public LInstructionHelper<1, 0, 0>
+class LNewObject : public LInstructionHelper<1, 0, 1>
 {
   public:
     LIR_HEADER(NewObject)
 
+    LNewObject(const LDefinition &temp) {
+        setTemp(0, temp);
+    }
+
     const char *extraName() const {
         return mir()->shouldUseVM() ? "VMCall" : nullptr;
+    }
+
+    const LDefinition *temp() {
+        return getTemp(0);
     }
 
     MNewObject *mir() const {
@@ -430,10 +446,18 @@ class LNewDenseArrayPar : public LCallInstructionHelper<1, 2, 3>
 //   (1) An inline allocation of the call object is attempted.
 //   (2) Otherwise, a callVM create a new object.
 //
-class LNewDeclEnvObject : public LInstructionHelper<1, 0, 0>
+class LNewDeclEnvObject : public LInstructionHelper<1, 0, 1>
 {
   public:
     LIR_HEADER(NewDeclEnvObject);
+
+    LNewDeclEnvObject(const LDefinition &temp) {
+        setTemp(0, temp);
+    }
+
+    const LDefinition *temp() {
+        return getTemp(0);
+    }
 
     MNewDeclEnvObject *mir() const {
         return mir_->toNewDeclEnvObject();
@@ -449,13 +473,18 @@ class LNewDeclEnvObject : public LInstructionHelper<1, 0, 0>
 //       call object.
 //   (2) Otherwise, an inline allocation of the call object is attempted.
 //
-class LNewCallObject : public LInstructionHelper<1, 1, 0>
+class LNewCallObject : public LInstructionHelper<1, 1, 1>
 {
   public:
     LIR_HEADER(NewCallObject)
 
-    LNewCallObject(const LAllocation &slots) {
+    LNewCallObject(const LAllocation &slots, const LDefinition &temp) {
         setOperand(0, slots);
+        setTemp(0, temp);
+    }
+
+    const LDefinition *temp() {
+        return getTemp(0);
     }
 
     const LAllocation *slots() {
@@ -883,16 +912,21 @@ class LCreateThisWithProto : public LCallInstructionHelper<1, 2, 0>
 
 // Allocate an object for |new| on the caller-side.
 // Always performs object initialization with a fast path.
-class LCreateThisWithTemplate : public LInstructionHelper<1, 0, 0>
+class LCreateThisWithTemplate : public LInstructionHelper<1, 0, 1>
 {
   public:
     LIR_HEADER(CreateThisWithTemplate)
 
-    LCreateThisWithTemplate()
-    { }
+    LCreateThisWithTemplate(const LDefinition &temp) {
+        setTemp(0, temp);
+    }
 
     MCreateThisWithTemplate *mir() const {
         return mir_->toCreateThisWithTemplate();
+    }
+
+    const LDefinition *temp() {
+        return getTemp(0);
     }
 };
 
@@ -3396,16 +3430,20 @@ class LLambdaForSingleton : public LCallInstructionHelper<1, 1, 0>
     }
 };
 
-class LLambda : public LInstructionHelper<1, 1, 0>
+class LLambda : public LInstructionHelper<1, 1, 1>
 {
   public:
     LIR_HEADER(Lambda)
 
-    LLambda(const LAllocation &scopeChain) {
+    LLambda(const LAllocation &scopeChain, const LDefinition &temp) {
         setOperand(0, scopeChain);
+        setTemp(0, temp);
     }
     const LAllocation *scopeChain() {
         return getOperand(0);
+    }
+    const LDefinition *temp() {
+        return getTemp(0);
     }
     const MLambda *mir() const {
         return mir_->toLambda();
@@ -4738,13 +4776,32 @@ class LFloorF : public LInstructionHelper<1, 1, 0>
     }
 };
 
-// Round a number. Implements Math.round().
+// Round a double precision number. Implements Math.round().
 class LRound : public LInstructionHelper<1, 1, 1>
 {
   public:
     LIR_HEADER(Round)
 
     LRound(const LAllocation &num, const LDefinition &temp) {
+        setOperand(0, num);
+        setTemp(0, temp);
+    }
+
+    const LDefinition *temp() {
+        return getTemp(0);
+    }
+    MRound *mir() const {
+        return mir_->toRound();
+    }
+};
+
+// Round a single precision number. Implements Math.round().
+class LRoundF : public LInstructionHelper<1, 1, 1>
+{
+  public:
+    LIR_HEADER(RoundF)
+
+    LRoundF(const LAllocation &num, const LDefinition &temp) {
         setOperand(0, num);
         setTemp(0, temp);
     }
@@ -4782,6 +4839,38 @@ class LForkJoinContext : public LCallInstructionHelper<1, 0, 1>
 
     const LDefinition *getTempReg() {
         return getTemp(0);
+    }
+};
+
+class LForkJoinGetSlice : public LInstructionHelper<1, 1, 4>
+{
+  public:
+    LIR_HEADER(ForkJoinGetSlice);
+
+    LForkJoinGetSlice(const LAllocation &cx,
+                      const LDefinition &temp1, const LDefinition &temp2,
+                      const LDefinition &temp3, const LDefinition &temp4) {
+        setOperand(0, cx);
+        setTemp(0, temp1);
+        setTemp(1, temp2);
+        setTemp(2, temp3);
+        setTemp(3, temp4);
+    }
+
+    const LAllocation *forkJoinContext() {
+        return getOperand(0);
+    }
+    const LDefinition *temp1() {
+        return getTemp(0);
+    }
+    const LDefinition *temp2() {
+        return getTemp(1);
+    }
+    const LDefinition *temp3() {
+        return getTemp(2);
+    }
+    const LDefinition *temp4() {
+        return getTemp(3);
     }
 };
 
@@ -5386,24 +5475,6 @@ class LPostWriteBarrierV : public LInstructionHelper<0, 1 + BOX_PIECES, 1>
     }
 };
 
-// Generational write barrier used when writing to multiple slots in an object.
-class LPostWriteBarrierAllSlots : public LInstructionHelper<0, 1, 0>
-{
-  public:
-    LIR_HEADER(PostWriteBarrierAllSlots)
-
-    LPostWriteBarrierAllSlots(const LAllocation &obj) {
-        setOperand(0, obj);
-    }
-
-    const MPostWriteBarrier *mir() const {
-        return mir_->toPostWriteBarrier();
-    }
-    const LAllocation *object() {
-        return getOperand(0);
-    }
-};
-
 // Guard against an object's identity.
 class LGuardObjectIdentity : public LInstructionHelper<0, 1, 0>
 {
@@ -5640,6 +5711,22 @@ class LHaveSameClass : public LInstructionHelper<1, 2, 1>
     }
     MHaveSameClass *mir() const {
         return mir_->toHaveSameClass();
+    }
+};
+
+class LHasClass : public LInstructionHelper<1, 1, 0>
+{
+  public:
+    LIR_HEADER(HasClass);
+    LHasClass(const LAllocation &lhs) {
+        setOperand(0, lhs);
+    }
+
+    const LAllocation *lhs() {
+        return getOperand(0);
+    }
+    MHasClass *mir() const {
+        return mir_->toHasClass();
     }
 };
 

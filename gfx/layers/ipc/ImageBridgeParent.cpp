@@ -58,6 +58,12 @@ ImageBridgeParent::~ImageBridgeParent()
   }
 }
 
+LayersBackend
+ImageBridgeParent::GetCompositorBackendType() const
+{
+  return Compositor::GetBackend();
+}
+
 void
 ImageBridgeParent::ActorDestroy(ActorDestroyReason aWhy)
 {
@@ -75,9 +81,14 @@ ImageBridgeParent::RecvUpdate(const EditArray& aEdits, EditReplyArray* aReply)
     return true;
   }
 
+  // Clear fence handles used in previsou transaction.
+  ClearPrevFenceHandles();
+
   EditReplyVector replyv;
   for (EditArray::index_type i = 0; i < aEdits.Length(); ++i) {
-    ReceiveCompositableUpdate(aEdits[i], replyv);
+    if (!ReceiveCompositableUpdate(aEdits[i], replyv)) {
+      return false;
+    }
   }
 
   aReply->SetCapacity(replyv.size());
@@ -230,6 +241,11 @@ ImageBridgeParent::CloneToplevel(const InfallibleTArray<ProtocolFdMapping>& aFds
     }
   }
   return nullptr;
+}
+
+bool ImageBridgeParent::IsSameProcess() const
+{
+  return OtherProcess() == ipc::kInvalidProcessHandle;
 }
 
 } // layers

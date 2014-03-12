@@ -148,9 +148,9 @@ class JitRuntime
 
     // Executable allocator used for allocating the main code in an IonScript.
     // All accesses on this allocator must be protected by the runtime's
-    // operation callback lock, as the executable memory may be protected()
-    // when triggering a callback to force a fault in the Ion code and avoid
-    // the neeed for explicit interrupt checks.
+    // interrupt lock, as the executable memory may be protected() when
+    // requesting an interrupt to force a fault in the Ion code and avoid the
+    // need for explicit interrupt checks.
     JSC::ExecutableAllocator *ionAlloc_;
 
     // Shared post-exception-handler tail
@@ -189,6 +189,9 @@ class JitRuntime
     // Thunk used by the debugger for breakpoint and step mode.
     JitCode *debugTrapHandler_;
 
+    // Stub used to inline the ForkJoinGetSlice intrinsic.
+    JitCode *forkJoinGetSliceStub_;
+
     // Map VMFunction addresses to the JitCode of the wrapper.
     typedef WeakCache<const VMFunction *, JitCode *> VMWrapperMap;
     VMWrapperMap *functionWrappers_;
@@ -219,6 +222,7 @@ class JitRuntime
     JitCode *generateInvalidator(JSContext *cx);
     JitCode *generatePreBarrier(JSContext *cx, MIRType type);
     JitCode *generateDebugTrapHandler(JSContext *cx);
+    JitCode *generateForkJoinGetSliceStub(JSContext *cx);
     JitCode *generateVMWrapper(JSContext *cx, const VMFunction &f);
 
     JSC::ExecutableAllocator *createIonAlloc(JSContext *cx);
@@ -242,12 +246,12 @@ class JitRuntime
     }
 
     JSC::ExecutableAllocator *getIonAlloc(JSContext *cx) {
-        JS_ASSERT(cx->runtime()->currentThreadOwnsOperationCallbackLock());
+        JS_ASSERT(cx->runtime()->currentThreadOwnsInterruptLock());
         return ionAlloc_ ? ionAlloc_ : createIonAlloc(cx);
     }
 
     JSC::ExecutableAllocator *ionAlloc(JSRuntime *rt) {
-        JS_ASSERT(rt->currentThreadOwnsOperationCallbackLock());
+        JS_ASSERT(rt->currentThreadOwnsInterruptLock());
         return ionAlloc_;
     }
 
@@ -320,6 +324,11 @@ class JitRuntime
 
     JitCode *shapePreBarrier() const {
         return shapePreBarrier_;
+    }
+
+    bool ensureForkJoinGetSliceStubExists(JSContext *cx);
+    JitCode *forkJoinGetSliceStub() const {
+        return forkJoinGetSliceStub_;
     }
 };
 

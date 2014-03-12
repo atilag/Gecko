@@ -270,16 +270,25 @@ class CGDOMProxyJSClass(CGThing):
     def declare(self):
         return ""
     def define(self):
+        flags = ["JSCLASS_IS_DOMJSCLASS"]
+        # We don't use an IDL annotation for JSCLASS_EMULATES_UNDEFINED because
+        # we don't want people ever adding that to any interface other than
+        # HTMLAllCollection.  So just hardcode it here.
+        if self.descriptor.interface.identifier.name == "HTMLAllCollection":
+            flags.append("JSCLASS_EMULATES_UNDEFINED")
+        callHook = LEGACYCALLER_HOOK_NAME if self.descriptor.operations["LegacyCaller"] else 'nullptr'
         return """
 static const DOMJSClass Class = {
   PROXY_CLASS_DEF("%s",
                   0, /* extra slots */
-                  JSCLASS_IS_DOMJSCLASS,
-                  nullptr, /* call */
+                  %s,
+                  %s, /* call */
                   nullptr  /* construct */),
 %s
 };
 """ % (self.descriptor.interface.identifier.name,
+       " | ".join(flags),
+       callHook,
        CGIndenter(CGGeneric(DOMClass(self.descriptor))).define())
 
 def PrototypeIDAndDepth(descriptor):
@@ -299,7 +308,8 @@ def UseHolderForUnforgeable(descriptor):
             descriptor.proxy and
             any(m for m in descriptor.interface.members if m.isAttr() and m.isUnforgeable()))
 
-def CallOnUnforgeableHolder(descriptor, code, isXrayCheck=None):
+def CallOnUnforgeableHolder(descriptor, code, isXrayCheck=None,
+                            useSharedRoot=False):
     """
     Generate the code to execute the code in "code" on an unforgeable holder if
     needed. code should be a string containing the code to execute. If it
@@ -309,6 +319,10 @@ def CallOnUnforgeableHolder(descriptor, code, isXrayCheck=None):
     If isXrayCheck is not None it should be a string that contains a statement
     returning whether proxy is an Xray. If isXrayCheck is None the generated
     code won't try to unwrap Xrays.
+
+    If useSharedRoot is true, we will use an existing
+    JS::Rooted<JSObject*> sharedRoot for storing our unforgeable holder instead
+    of declaring a new Rooted.
     """
     code = string.Template(code).substitute({ "holder": "unforgeableHolder" })
     if not isXrayCheck is None:
@@ -327,11 +341,16 @@ def CallOnUnforgeableHolder(descriptor, code, isXrayCheck=None):
 {
   JSObject* global = js::GetGlobalForObjectCrossCompartment(proxy);"""
 
+    if useSharedRoot:
+        holderDecl = "JS::Rooted<JSObject*>& unforgeableHolder(sharedRoot)"
+    else:
+        holderDecl = "JS::Rooted<JSObject*> unforgeableHolder(cx)"
     return (pre + """
-  JS::Rooted<JSObject*> unforgeableHolder(cx, GetUnforgeableHolder(global, prototypes::id::%s));
+  %s;
+  unforgeableHolder = GetUnforgeableHolder(global, prototypes::id::%s);
 """ + CGIndenter(CGGeneric(code)).define() + """
 }
-""") % descriptor.name
+""") % (holderDecl, descriptor.name)
 
 class CGPrototypeJSClass(CGThing):
     def __init__(self, descriptor, properties):
@@ -1164,19 +1183,48 @@ class CGClassConstructor(CGAbstractStaticMethod):
 
     def generate_code(self):
         preamble = """
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  JS::Rooted<JSObject*> obj(cx, &args.callee());
+JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+JS::Rooted<JSObject*> obj(cx, &args.callee());
 """
+        # [ChromeOnly] interfaces may only be constructed by chrome.
         if isChromeOnly(self._ctor):
-            preamble += """  if (!nsContentUtils::ThreadsafeIsCallerChrome()) {
-    return ThrowingConstructor(cx, argc, vp);
-  }
-"""
+            preamble += (
+                "if (!nsContentUtils::ThreadsafeIsCallerChrome()) {\n"
+                "  return ThrowingConstructor(cx, argc, vp);\n"
+                "}\n\n")
+
+        # Additionally, we want to throw if a caller does a bareword invocation
+        # of a constructor without |new|. We don't enforce this for chrome in
+        # realease builds to avoid the addon compat fallout of making that
+        # change. See bug 916644.
+        #
+        # Figure out the name of our constructor for error reporting purposes.
+        # For unnamed webidl constructors, identifier.name is "constructor" but
+        # the name JS sees is the interface name; for named constructors
+        # identifier.name is the actual name.
+        name = self._ctor.identifier.name
+        if name != "constructor":
+            ctorName = name
+        else:
+            ctorName = self.descriptor.interface.identifier.name
+        preamble += (
+            "bool mayInvoke = args.isConstructing();\n"
+            "#ifdef RELEASE_BUILD\n"
+            "mayInvoke = mayInvoke || nsContentUtils::ThreadsafeIsCallerChrome();\n"
+            "#endif // RELEASE_BUILD\n"
+            "if (!mayInvoke) {\n"
+            "  // XXXbz wish I could get the name from the callee instead of\n"
+            "  // Adding more relocations\n"
+            '  return ThrowConstructorWithoutNew(cx, "%s");\n'
+            "}" % ctorName)
+
         name = self._ctor.identifier.name
         nativeName = MakeNativeName(self.descriptor.binaryNames.get(name, name))
         callGenerator = CGMethodCall(nativeName, True, self.descriptor,
-                                     self._ctor, isConstructor=True)
-        return preamble + callGenerator.define();
+                                     self._ctor, isConstructor=True,
+                                     constructorName=ctorName)
+        return CGList([CGIndenter(CGGeneric(preamble)), callGenerator],
+                      "\n").define()
 
 # Encapsulate the constructor in a helper method to share genConstructorBody with CGJSImplMethod.
 class CGConstructNavigatorObjectHelper(CGAbstractStaticMethod):
@@ -2620,12 +2668,13 @@ numericSuffixes = {
 def numericValue(t, v):
     if (t == IDLType.Tags.unrestricted_double or
         t == IDLType.Tags.unrestricted_float):
+        typeName = builtinNames[t]
         if v == float("inf"):
-            return "mozilla::PositiveInfinity()"
+            return "mozilla::PositiveInfinity<%s>()" % typeName
         if v == float("-inf"):
-            return "mozilla::NegativeInfinity()"
+            return "mozilla::NegativeInfinity<%s>()" % typeName
         if math.isnan(v):
-            return "mozilla::UnspecifiedNaN()"
+            return "mozilla::UnspecifiedNaN<%s>()" % typeName
     return "%s%s" % (v, numericSuffixes[t])
 
 class CastableObjectUnwrapper():
@@ -3094,31 +3143,35 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
             arrayRef = "${declName}"
 
         # NOTE: Keep this in sync with variadic conversions as needed
-        templateBody = ("""JS::Rooted<JSObject*> seq(cx, &${val}.toObject());\n
-if (!IsArrayLike(cx, seq)) {
+        templateBody = ("""JS::ForOfIterator iter(cx);
+if (!iter.init(${val}, JS::ForOfIterator::AllowNonIterable)) {
 %s
 }
-uint32_t length;
-// JS_GetArrayLength actually works on all objects
-if (!JS_GetArrayLength(cx, seq, &length)) {
+if (!iter.valueIsIterable()) {
 %s
 }
 %s &arr = %s;
-if (!arr.SetCapacity(length)) {
-  JS_ReportOutOfMemory(cx);
-%s
-}
-for (uint32_t i = 0; i < length; ++i) {
-  JS::Rooted<JS::Value> temp(cx);
-  if (!JS_GetElement(cx, seq, i, &temp)) {
+JS::Rooted<JS::Value> temp(cx);
+while (true) {
+  bool done;
+  if (!iter.next(&temp, &done)) {
 %s
   }
-  %s& slot = *arr.AppendElement();
-""" % (CGIndenter(CGGeneric(notSequence)).define(),
-       exceptionCodeIndented.define(),
+  if (done) {
+    break;
+  }
+  %s* slotPtr = arr.AppendElement();
+  if (!slotPtr) {
+    JS_ReportOutOfMemory(cx);
+%s
+  }
+  %s& slot = *slotPtr;
+""" % (exceptionCodeIndented.define(),
+       CGIndenter(CGGeneric(notSequence)).define(),
        sequenceType,
        arrayRef,
-       exceptionCodeIndented.define(),
+       CGIndenter(exceptionCodeIndented).define(),
+       elementInfo.declType.define(),
        CGIndenter(exceptionCodeIndented).define(),
        elementInfo.declType.define()))
 
@@ -3185,12 +3238,7 @@ for (uint32_t i = 0; i < length; ++i) {
 
         arrayObjectMemberTypes = filter(lambda t: t.isArray() or t.isSequence(), memberTypes)
         if len(arrayObjectMemberTypes) > 0:
-            assert len(arrayObjectMemberTypes) == 1
-            memberType = arrayObjectMemberTypes[0]
-            name = memberType.name
-            arrayObject = CGGeneric("done = (failed = !%s.TrySetTo%s(cx, ${val}, ${mutableVal}, tryNext)) || !tryNext;" % (unionArgumentObj, name))
-            arrayObject = CGIfWrapper(arrayObject, "IsArrayLike(cx, argObj)")
-            names.append(name)
+            raise TypeError("Bug 767924: We don't support sequences in unions yet")
         else:
             arrayObject = None
 
@@ -4778,21 +4826,9 @@ def getRetvalDeclarationForType(returnType, descriptorProvider,
         name = returnType.unroll().identifier.name
         return CGGeneric("nsRefPtr<%s>" % name), False, None, None
     if returnType.isAny():
-        result = CGGeneric("JS::Value")
-        if isMember:
-            resultArgs = None
-        else:
-            result = CGTemplatedType("JS::Rooted", result)
-            resultArgs = "cx"
-        return result, False, None, resultArgs
+        return CGGeneric("JS::Value"), False, None, None
     if returnType.isObject() or returnType.isSpiderMonkeyInterface():
-        result = CGGeneric("JSObject*")
-        if isMember:
-            resultArgs = None
-        else:
-            result = CGTemplatedType("JS::Rooted", result)
-            resultArgs = "cx"
-        return result, False, None, resultArgs
+        return CGGeneric("JSObject*"), False, None, None
     if returnType.isSequence():
         nullable = returnType.nullable()
         if nullable:
@@ -5406,10 +5442,14 @@ class CGMethodCall(CGThing):
     signatures and generation of a call to that signature.
     """
     def __init__(self, nativeMethodName, static, descriptor, method,
-                 isConstructor=False):
+                 isConstructor=False, constructorName=None):
         CGThing.__init__(self)
 
-        methodName = "%s.%s" % (descriptor.interface.identifier.name, method.identifier.name)
+        if isConstructor:
+            assert constructorName is not None
+            methodName = constructorName
+        else:
+            methodName = "%s.%s" % (descriptor.interface.identifier.name, method.identifier.name)
         argDesc = "argument %d of " + methodName
 
         def requiredArgCount(signature):
@@ -5453,26 +5493,32 @@ class CGMethodCall(CGThing):
         allowedArgCounts = method.allowedArgCounts
 
         argCountCases = []
-        for argCount in allowedArgCounts:
+        for (argCountIdx, argCount) in enumerate(allowedArgCounts):
             possibleSignatures = method.signaturesForArgCount(argCount)
+
+            # Try to optimize away cases when the next argCount in the list
+            # will have the same code as us; if it does, we can fall through to
+            # that case.
+            if argCountIdx+1 < len(allowedArgCounts):
+                nextPossibleSignatures = \
+                    method.signaturesForArgCount(allowedArgCounts[argCountIdx+1])
+            else:
+                nextPossibleSignatures = None
+            if possibleSignatures == nextPossibleSignatures:
+                # Same set of signatures means we better have the same
+                # distinguishing index.  So we can in fact just fall through to
+                # the next case here.
+                assert (len(possibleSignatures) == 1 or
+                        (method.distinguishingIndexForArgCount(argCount) ==
+                         method.distinguishingIndexForArgCount(allowedArgCounts[argCountIdx+1])))
+                argCountCases.append(CGCase(str(argCount), None, True))
+                continue
+
             if len(possibleSignatures) == 1:
                 # easy case!
                 signature = possibleSignatures[0]
-
-                # (possibly) important optimization: if signature[1] has >
-                # argCount arguments and signature[1][argCount] is optional and
-                # there is only one signature for argCount+1, then the
-                # signature for argCount+1 is just ourselves and we can fall
-                # through.
-                if (len(signature[1]) > argCount and
-                    signature[1][argCount].optional and
-                    (argCount+1) in allowedArgCounts and
-                    len(method.signaturesForArgCount(argCount+1)) == 1):
-                    argCountCases.append(
-                        CGCase(str(argCount), None, True))
-                else:
-                    argCountCases.append(
-                        CGCase(str(argCount), getPerSignatureCall(signature)))
+                argCountCases.append(
+                    CGCase(str(argCount), getPerSignatureCall(signature)))
                 continue
 
             distinguishingIndex = method.distinguishingIndexForArgCount(argCount)
@@ -8543,6 +8589,7 @@ class CGDOMJSProxyHandler_get(ClassMethod):
         ClassMethod.__init__(self, "get", "bool", args)
         self.descriptor = descriptor
     def getBody(self):
+        getUnforgeableOrExpando = "JS::Rooted<JSObject*> sharedRoot(cx);\n"
         if UseHolderForUnforgeable(self.descriptor):
             hasUnforgeable = (
                 "bool hasUnforgeable;\n"
@@ -8552,21 +8599,23 @@ class CGDOMJSProxyHandler_get(ClassMethod):
                  "if (hasUnforgeable) {\n"
                  "  return JS_ForwardGetPropertyTo(cx, ${holder}, id, proxy, vp);\n"
                  "}")
-            getUnforgeableOrExpando = CallOnUnforgeableHolder(self.descriptor,
-                                                              hasUnforgeable)
-        else:
-            getUnforgeableOrExpando = ""
-        getUnforgeableOrExpando += """JS::Rooted<JSObject*> expando(cx, DOMProxyHandler::GetExpandoObject(proxy));
-if (expando) {
-  bool hasProp;
-  if (!JS_HasPropertyById(cx, expando, id, &hasProp)) {
-    return false;
-  }
+            getUnforgeableOrExpando += CallOnUnforgeableHolder(self.descriptor,
+                                                               hasUnforgeable,
+                                                               useSharedRoot=True)
+        getUnforgeableOrExpando += """{ // Scope for expando
+  JS::Rooted<JSObject*>& expando(sharedRoot);
+  expando = DOMProxyHandler::GetExpandoObject(proxy);
+  if (expando) {
+    bool hasProp;
+    if (!JS_HasPropertyById(cx, expando, id, &hasProp)) {
+      return false;
+    }
 
-  if (hasProp) {
-    // Forward the get to the expando object, but our receiver is whatever our
-    // receiver is.
-    return JS_ForwardGetPropertyTo(cx, expando, id, receiver, vp);
+    if (hasProp) {
+      // Forward the get to the expando object, but our receiver is whatever our
+      // receiver is.
+      return JS_ForwardGetPropertyTo(cx, expando, id, receiver, vp);
+    }
   }
 }"""
 
@@ -11344,7 +11393,7 @@ class CallbackMethod(CallbackMember):
         if self.argCount > 0:
             replacements["args"] = "JS::HandleValueArray::subarray(argv, 0, argc)"
         else:
-            replacements["args"] = "JS::EmptyValueArray"
+            replacements["args"] = "JS::HandleValueArray::empty()"
         return string.Template("${declCallable}${declThis}"
                 "if (${callGuard}!JS::Call(cx, ${thisVal}, callable,\n"
                 "              ${args}, &rval)) {\n"
@@ -11767,7 +11816,7 @@ struct PrototypeTraits;
 
         curr = CGWrapper(curr, post='\n')
 
-        headers.update(["nsDebug.h", "mozilla/dom/UnionTypes.h", "XPCWrapper.h"])
+        headers.update(["nsDebug.h", "mozilla/dom/UnionTypes.h"])
         curr = CGHeaders([], [], [], [], headers, [], 'UnionConversions', curr)
 
         # Add include guards.
@@ -11992,9 +12041,17 @@ class CGEventClass(CGBindingImplClass):
               "parentType": self.parentType
             })
 
-        CGClass.__init__(self, descriptor.nativeType.split('::')[-1],
+        className = descriptor.nativeType.split('::')[-1]
+        asConcreteTypeMethod = ClassMethod("As%s" % className,
+                                           "%s*" % className,
+                                           [],
+                                           virtual=True,
+                                           body="return this;",
+                                           breakAfterReturnDecl=" ")
+
+        CGClass.__init__(self, className,
                          bases=[ClassBase(self.parentType)],
-                         methods=self.methodDecls,
+                         methods=[asConcreteTypeMethod]+self.methodDecls,
                          members=members,
                          extradeclarations=baseDeclarations)
 
@@ -12050,7 +12107,7 @@ class CGEventClass(CGBindingImplClass):
             dropJS += "  mozilla::DropJSObjects(this);\n"
         # Just override CGClass and do our own thing
         nativeType = self.descriptor.nativeType.split('::')[-1]
-        ctorParams = ("aOwner, nullptr, nullptr" if self.parentType == "nsDOMEvent"
+        ctorParams = ("aOwner, nullptr, nullptr" if self.parentType == "Event"
                  else "aOwner")
         classImpl = """
 NS_IMPL_CYCLE_COLLECTION_CLASS(${nativeType})

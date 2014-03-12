@@ -13,20 +13,20 @@
 #undef CreateEvent
 
 #include "nsISupports.h"
-#include "nsDOMEvent.h"
+#include "mozilla/dom/Event.h"
 #include "nsEventListenerManager.h"
 #include "nsIDOMEventListener.h"
 #include "nsGkAtoms.h"
 #include "nsPIDOMWindow.h"
 #include "nsIJSEventListener.h"
 #include "nsIScriptGlobalObject.h"
-#include "nsINameSpaceManager.h"
+#include "nsNameSpaceManager.h"
 #include "nsIContent.h"
 #include "mozilla/MemoryReporting.h"
 #include "nsCOMPtr.h"
 #include "nsError.h"
 #include "nsIDocument.h"
-#include "mozilla/MutationEvent.h"
+#include "mozilla/InternalMutationEvent.h"
 #include "nsIXPConnect.h"
 #include "nsDOMCID.h"
 #include "nsContentUtils.h"
@@ -137,7 +137,7 @@ nsEventListenerManager::RemoveAllListeners()
 void
 nsEventListenerManager::Shutdown()
 {
-  nsDOMEvent::Shutdown();
+  Event::Shutdown();
 }
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(nsEventListenerManager, AddRef)
@@ -809,7 +809,8 @@ nsEventListenerManager::CompileEventHandlerInternal(nsListenerStruct *aListenerS
 
   JS::Rooted<JSObject*> scope(cx, listener->GetEventScope());
 
-  nsIAtom* attrName = aListenerStruct->mTypeAtom;
+  nsCOMPtr<nsIAtom> typeAtom = aListenerStruct->mTypeAtom;
+  nsIAtom* attrName = typeAtom;
 
   if (aListenerStruct->mHandlerIsString) {
     // OK, we didn't find an existing compiled event handler.  Flag us
@@ -850,6 +851,7 @@ nsEventListenerManager::CompileEventHandlerInternal(nsListenerStruct *aListenerS
       body = &handlerBody;
       aElement = element;
     }
+    aListenerStruct = nullptr;
 
     uint32_t lineNo = 0;
     nsAutoCString url (NS_LITERAL_CSTRING("-moz-evil:lying-event-listener"));
@@ -864,12 +866,13 @@ nsEventListenerManager::CompileEventHandlerInternal(nsListenerStruct *aListenerS
     uint32_t argCount;
     const char **argNames;
     nsContentUtils::GetEventArgNames(aElement->GetNameSpaceID(),
-                                     aListenerStruct->mTypeAtom,
+                                     typeAtom,
                                      &argCount, &argNames);
 
     JSAutoCompartment ac(cx, context->GetWindowProxy());
     JS::CompileOptions options(cx);
-    options.setFileAndLine(url.get(), lineNo)
+    options.setIntroductionType("eventHandler")
+           .setFileAndLine(url.get(), lineNo)
            .setVersion(SCRIPTVERSION_DEFAULT);
 
     JS::Rooted<JS::Value> targetVal(cx);
@@ -893,11 +896,13 @@ nsEventListenerManager::CompileEventHandlerInternal(nsListenerStruct *aListenerS
 
     JS::Rooted<JSObject*> handlerFun(cx);
     result = nsJSUtils::CompileFunction(cx, JS::NullPtr(), options,
-                                        nsAtomCString(aListenerStruct->mTypeAtom),
+                                        nsAtomCString(typeAtom),
                                         argCount, argNames, *body, handlerFun.address());
     NS_ENSURE_SUCCESS(result, result);
     handler = handlerFun;
     NS_ENSURE_TRUE(handler, NS_ERROR_FAILURE);
+  } else {
+    aListenerStruct = nullptr;
   }
 
   if (handler) {
@@ -905,7 +910,6 @@ nsEventListenerManager::CompileEventHandlerInternal(nsListenerStruct *aListenerS
     // Bind it
     JS::Rooted<JSObject*> boundHandler(cx);
     context->BindCompiledEventHandler(mTarget, scope, handler, &boundHandler);
-    aListenerStruct = nullptr;
     // Note - We pass null for aIncumbentGlobal below. We could also pass the
     // compilation global, but since the handler is guaranteed to be scripted,
     // there's no need to use an override, since the JS engine will always give
@@ -987,7 +991,7 @@ nsEventListenerManager::HandleEventInternal(nsPresContext* aPresContext,
   nsAutoTObserverArray<nsListenerStruct, 2>::EndLimitedIterator iter(mListeners);
   Maybe<nsAutoPopupStatePusher> popupStatePusher;
   if (mIsMainThreadELM) {
-    popupStatePusher.construct(nsDOMEvent::GetEventPopupControlState(aEvent));
+    popupStatePusher.construct(Event::GetEventPopupControlState(aEvent));
   }
 
   bool hasListener = false;

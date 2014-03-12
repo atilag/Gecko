@@ -52,6 +52,9 @@ BlockSizeFor(GLenum format, GLint* blockWidth, GLint* blockHeight)
         if (blockHeight)
             *blockHeight = 4;
         break;
+
+    case LOCAL_GL_ETC1_RGB8_OES:
+        // 4x4 blocks, but no 4-multiple requirement.
     default:
         break;
     }
@@ -105,6 +108,7 @@ NameFrom(GLenum glenum)
         XX(DEPTH_COMPONENT32);
         XX(DEPTH_STENCIL);
         XX(DEPTH24_STENCIL8);
+        XX(ETC1_RGB8_OES);
         XX(FLOAT);
         XX(HALF_FLOAT);
         XX(LUMINANCE);
@@ -174,6 +178,7 @@ IsAllowedFromSource(GLenum format, WebGLTexImageFunc func)
     case LOCAL_GL_ATC_RGB:
     case LOCAL_GL_ATC_RGBA_EXPLICIT_ALPHA:
     case LOCAL_GL_ATC_RGBA_INTERPOLATED_ALPHA:
+    case LOCAL_GL_ETC1_RGB8_OES:
         return func == WebGLTexImageFunc::CompTexImage;
     }
 
@@ -324,6 +329,11 @@ WebGLContext::BaseTexFormat(GLenum internalFormat) const
         {
             return LOCAL_GL_RGBA;
         }
+    }
+
+    if (IsExtensionEnabled(WEBGL_compressed_texture_etc1)) {
+        if (internalFormat == LOCAL_GL_ETC1_RGB8_OES)
+            return LOCAL_GL_RGB;
     }
 
     if (IsExtensionEnabled(WEBGL_compressed_texture_pvrtc)) {
@@ -621,6 +631,15 @@ WebGLContext::ValidateTexImageFormat(GLenum format, WebGLTexImageFunc func)
         return validFormat;
     }
 
+    // WEBGL_compressed_texture_etc1
+    if (format == LOCAL_GL_ETC1_RGB8_OES) {
+        bool validFormat = IsExtensionEnabled(WEBGL_compressed_texture_etc1);
+        if (!validFormat)
+            ErrorInvalidEnum("%s: invalid format %s: need WEBGL_compressed_texture_etc1 enabled",
+                             InfoFrom(func), NameFrom(format));
+        return validFormat;
+    }
+
 
     if (format == LOCAL_GL_COMPRESSED_RGB_PVRTC_2BPPV1 ||
         format == LOCAL_GL_COMPRESSED_RGB_PVRTC_4BPPV1 ||
@@ -776,26 +795,54 @@ WebGLContext::ValidateCompTexImageSize(GLenum target, GLint level, GLenum format
 
         /* The size must be a multiple of blockWidth and blockHeight,
          * or must be using offset+size that exactly hits the edge.
-         * Important for small mipmap levels. (s3tc extension appears
-         * to have changed and old code that checks 1x1, 2x2 doesn't
-         * appear necessary anymore)
+         * Important for small mipmap levels.
          */
-        if ((width % blockWidth != 0) &&
-            (xoffset + width != (GLint) levelWidth))
-        {
-            ErrorInvalidOperation("%s: width must be multiple of %d or "
-                                  "xoffset + width must be %d",
-                                  InfoFrom(func), blockWidth, levelWidth);
-            return false;
+        /* https://www.khronos.org/registry/webgl/extensions/WEBGL_compressed_texture_s3tc/
+         * "When level equals zero width and height must be a multiple of 4. When
+         *  level is greater than 0 width and height must be 0, 1, 2 or a multiple of 4.
+         *  If they are not an INVALID_OPERATION error is generated."
+         */
+        if (level == 0) {
+            if (width % blockWidth != 0) {
+                ErrorInvalidOperation("%s: width of level 0 must be multple of %d",
+                                      InfoFrom(func), blockWidth);
+                return false;
+            }
+
+            if (height % blockHeight != 0) {
+                ErrorInvalidOperation("%s: height of level 0 must be multipel of %d",
+                                      InfoFrom(func), blockHeight);
+                return false;
+            }
+        }
+        else if (level > 0) {
+            if (width % blockWidth != 0 && width > 2) {
+                ErrorInvalidOperation("%s: width of level %d must be multiple"
+                                      " of %d or 0, 1, 2",
+                                      InfoFrom(func), level, blockWidth);
+                return false;
+            }
+
+            if (height % blockHeight != 0 && height > 2) {
+                ErrorInvalidOperation("%s: height of level %d must be multiple"
+                                      " of %d or 0, 1, 2",
+                                      InfoFrom(func), level, blockHeight);
+                return false;
+            }
         }
 
-        if ((height % blockHeight != 0) &&
-            (yoffset + height != (GLint) levelHeight))
-        {
-            ErrorInvalidOperation("%s: height must be multiple of %d or "
-                                  "yoffset + height must be %d",
-                                  InfoFrom(func), blockHeight, levelHeight);
-            return false;
+        if (IsSubFunc(func)) {
+            if ((xoffset % blockWidth) != 0) {
+                ErrorInvalidOperation("%s: xoffset must be multiple of %d",
+                                      InfoFrom(func), blockWidth);
+                return false;
+            }
+
+            if (yoffset % blockHeight != 0) {
+                ErrorInvalidOperation("%s: yoffset must be multiple of %d",
+                                      InfoFrom(func), blockHeight);
+                return false;
+            }
         }
     }
 
@@ -834,6 +881,7 @@ WebGLContext::ValidateCompTexImageDataSize(GLint level, GLenum format,
         case LOCAL_GL_COMPRESSED_RGB_S3TC_DXT1_EXT:
         case LOCAL_GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
         case LOCAL_GL_ATC_RGB:
+        case LOCAL_GL_ETC1_RGB8_OES:
         {
             required_byteLength = ((CheckedUint32(width) + 3) / 4) * ((CheckedUint32(height) + 3) / 4) * 8;
             break;
@@ -1087,6 +1135,7 @@ WebGLContext::GetBitsPerTexel(GLenum format, GLenum type)
     case LOCAL_GL_ATC_RGB:
     case LOCAL_GL_COMPRESSED_RGB_PVRTC_4BPPV1:
     case LOCAL_GL_COMPRESSED_RGBA_PVRTC_4BPPV1:
+    case LOCAL_GL_ETC1_RGB8_OES:
         return 4;
 
     case LOCAL_GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
@@ -1153,10 +1202,27 @@ WebGLContext::ValidateTexImageFormatAndType(GLenum format, GLenum type, WebGLTex
         validCombo = (type == LOCAL_GL_UNSIGNED_INT_24_8);
         break;
 
+    case LOCAL_GL_ATC_RGB:
+    case LOCAL_GL_ATC_RGBA_EXPLICIT_ALPHA:
+    case LOCAL_GL_ATC_RGBA_INTERPOLATED_ALPHA:
+    case LOCAL_GL_ETC1_RGB8_OES:
+    case LOCAL_GL_COMPRESSED_RGB_PVRTC_2BPPV1:
+    case LOCAL_GL_COMPRESSED_RGB_PVRTC_4BPPV1:
+    case LOCAL_GL_COMPRESSED_RGBA_PVRTC_2BPPV1:
+    case LOCAL_GL_COMPRESSED_RGBA_PVRTC_4BPPV1:
+    case LOCAL_GL_COMPRESSED_RGB_S3TC_DXT1_EXT:
+    case LOCAL_GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
+    case LOCAL_GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
+    case LOCAL_GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
+        validCombo = (type == LOCAL_GL_UNSIGNED_BYTE);
+        break;
+
     default:
         // Only valid formats should be passed to the switch stmt.
-        MOZ_ASSERT("Invalid format");
-        return false;
+        MOZ_ASSERT(false, "Unexpected format and type combo. How'd this happen?");
+        validCombo = false;
+        // Fall through to return an InvalidOperations. This will alert us to the
+        // unexpected case that needs fixing in builds without asserts.
     }
 
     if (!validCombo)
@@ -1542,7 +1608,9 @@ WebGLContext::InitAndValidateGL()
     }
 
     mActiveTexture = 0;
+    mEmitContextLostErrorOnce = true;
     mWebGLError = LOCAL_GL_NO_ERROR;
+    mUnderlyingGLError = LOCAL_GL_NO_ERROR;
 
     mBound2DTextures.Clear();
     mBoundCubeMapTextures.Clear();

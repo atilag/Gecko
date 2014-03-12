@@ -88,10 +88,10 @@ Window implements WindowEventHandlers;
 interface WindowTimers {
   [Throws] long setTimeout(Function handler, optional long timeout = 0, any... arguments);
   [Throws] long setTimeout(DOMString handler, optional long timeout = 0, any... unused);
-  [Throws] void clearTimeout(long handle);
+  [Throws] void clearTimeout(optional long handle = 0);
   [Throws] long setInterval(Function handler, optional long timeout, any... arguments);
   [Throws] long setInterval(DOMString handler, optional long timeout, any... unused);
-  [Throws] void clearInterval(long handle);
+  [Throws] void clearInterval(optional long handle = 0);
 };
 Window implements WindowTimers;
 
@@ -341,6 +341,13 @@ partial interface Window {
 Window implements TouchEventHandlers;
 
 Window implements OnErrorEventHandlerForWindow;
+
+// ConsoleAPI
+partial interface Window {
+  [Replaceable, GetterThrows]
+  readonly attribute Console console;
+};
+
 
 [ChromeOnly] interface ChromeWindow {
   [Func="nsGlobalWindow::IsChromeWindow"]

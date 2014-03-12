@@ -73,6 +73,8 @@
 #include "nsXULTooltipListener.h"
 
 #include "inDOMView.h"
+
+#include "nsMenuBarListener.h"
 #endif
 
 #include "nsHTMLEditor.h"
@@ -120,7 +122,7 @@ using namespace mozilla::system;
 #include "nsCookieService.h"
 #include "nsApplicationCacheService.h"
 #include "mozilla/dom/time/DateCacheCleaner.h"
-#include "nsIMEStateManager.h"
+#include "mozilla/IMEStateManager.h"
 #include "nsDocument.h"
 #include "mozilla/dom/HTMLVideoElement.h"
 
@@ -281,6 +283,10 @@ nsLayoutStatics::Initialize()
 
   HTMLVideoElement::Init();
 
+#ifdef MOZ_XUL
+  nsMenuBarListener::InitializeStatics();
+#endif
+
   CacheObserver::Init();
 
   return NS_OK;
@@ -301,7 +307,7 @@ nsLayoutStatics::Shutdown()
   txMozillaXSLTProcessor::Shutdown();
   Attr::Shutdown();
   nsEventListenerManager::Shutdown();
-  nsIMEStateManager::Shutdown();
+  IMEStateManager::Shutdown();
   nsComputedDOMStyle::Shutdown();
   nsCSSParser::Shutdown();
   nsCSSRuleProcessor::Shutdown();
@@ -341,7 +347,6 @@ nsLayoutStatics::Shutdown()
   nsAttrValue::Shutdown();
   nsContentUtils::Shutdown();
   nsLayoutStylesheetCache::Shutdown();
-  NS_NameSpaceManagerShutdown();
 
   ShutdownJSEnvironment();
   nsGlobalWindow::ShutDown();

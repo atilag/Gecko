@@ -70,7 +70,7 @@ static nsresult MacErrorMapper(OSErr inErr);
 #endif
 
 #include "nsNativeCharsetUtils.h"
-#include "nsTraceRefcntImpl.h"
+#include "nsTraceRefcnt.h"
 #include "nsHashKeys.h"
 
 using namespace mozilla;
@@ -382,7 +382,7 @@ nsLocalFile::OpenNSPRFileDesc(int32_t flags, int32_t mode, PRFileDesc **_retval)
         PR_Delete(mPath.get());
     }
 
-#if defined(LINUX) && !defined(ANDROID)
+#if defined(HAVE_POSIX_FADVISE)
     if (flags & OS_READAHEAD) {
         posix_fadvise(PR_FileDesc2NativeHandle(*_retval), 0, 0,
                       POSIX_FADV_SEQUENTIAL);
@@ -1737,13 +1737,13 @@ nsLocalFile::Load(PRLibrary **_retval)
         return NS_ERROR_INVALID_ARG;
 
 #ifdef NS_BUILD_REFCNT_LOGGING
-    nsTraceRefcntImpl::SetActivityIsLegal(false);
+    nsTraceRefcnt::SetActivityIsLegal(false);
 #endif
 
     *_retval = PR_LoadLibrary(mPath.get());
 
 #ifdef NS_BUILD_REFCNT_LOGGING
-    nsTraceRefcntImpl::SetActivityIsLegal(true);
+    nsTraceRefcnt::SetActivityIsLegal(true);
 #endif
 
     if (!*_retval)

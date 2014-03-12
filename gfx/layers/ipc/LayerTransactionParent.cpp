@@ -32,15 +32,16 @@
 #include "mozilla/mozalloc.h"           // for operator delete, etc
 #include "nsCoord.h"                    // for NSAppUnitsToFloatPixels
 #include "nsDebug.h"                    // for NS_RUNTIMEABORT
+#include "nsDeviceContext.h"            // for AppUnitsPerCSSPixel
 #include "nsISupportsImpl.h"            // for Layer::Release, etc
 #include "nsLayoutUtils.h"              // for nsLayoutUtils
 #include "nsMathUtils.h"                // for NS_round
 #include "nsPoint.h"                    // for nsPoint
 #include "nsTArray.h"                   // for nsTArray, nsTArray_Impl, etc
-#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
 #include "GeckoProfiler.h"
 #include "mozilla/layers/TextureHost.h"
 #include "mozilla/layers/AsyncCompositionManager.h"
+#include "AsyncPanZoomController.h"
 
 typedef std::vector<mozilla::layers::EditReply> EditReplyVector;
 
@@ -97,12 +98,12 @@ ShadowAfter(const OpInsertAfter& op)
 }
 
 static ShadowLayerParent*
-ShadowContainer(const OpAppendChild& op)
+ShadowContainer(const OpPrependChild& op)
 {
   return cast(op.containerParent());
 }
 static ShadowLayerParent*
-ShadowChild(const OpAppendChild& op)
+ShadowChild(const OpPrependChild& op)
 {
   return cast(op.childLayerParent());
 }
@@ -175,6 +176,12 @@ LayerTransactionParent::Destroy()
   }
 }
 
+LayersBackend
+LayerTransactionParent::GetCompositorBackendType() const
+{
+  return mLayerManager->GetBackendType();
+}
+
 /* virtual */
 bool
 LayerTransactionParent::RecvUpdateNoSwap(const InfallibleTArray<Edit>& cset,
@@ -204,10 +211,18 @@ LayerTransactionParent::RecvUpdate(const InfallibleTArray<Edit>& cset,
     return true;
   }
 
+  if (mLayerManager && mLayerManager->GetCompositor() &&
+      !targetConfig.naturalBounds().IsEmpty()) {
+    mLayerManager->GetCompositor()->SetScreenRotation(targetConfig.rotation());
+  }
+
+  // Clear fence handles used in previsou transaction.
+  ClearPrevFenceHandles();
+
   EditReplyVector replyv;
 
   {
-    AutoResolveRefLayers resolve(mShadowLayersManager->GetCompositionManager());
+    AutoResolveRefLayers resolve(mShadowLayersManager->GetCompositionManager(this));
     layer_manager()->BeginTransaction();
   }
 
@@ -394,7 +409,11 @@ LayerTransactionParent::RecvUpdate(const InfallibleTArray<Edit>& cset,
       MOZ_LAYERS_LOG(("[ParentSide] SetRoot"));
 
       Layer* newRoot = AsLayerComposite(edit.get_OpSetRoot())->AsLayer();
+      if (!newRoot) {
+        return false;
+      }
       if (newRoot->GetParent()) {
+        // newRoot is not a root!
         return false;
       }
       mRoot = newRoot;
@@ -416,10 +435,10 @@ LayerTransactionParent::RecvUpdate(const InfallibleTArray<Edit>& cset,
       }
       break;
     }
-    case Edit::TOpAppendChild: {
-      MOZ_LAYERS_LOG(("[ParentSide] AppendChild"));
+    case Edit::TOpPrependChild: {
+      MOZ_LAYERS_LOG(("[ParentSide] PrependChild"));
 
-      const OpAppendChild& oac = edit.get_OpAppendChild();
+      const OpPrependChild& oac = edit.get_OpPrependChild();
       Layer* child = ShadowChild(oac)->AsLayer();
       if (!child) {
         return false;
@@ -481,8 +500,10 @@ LayerTransactionParent::RecvUpdate(const InfallibleTArray<Edit>& cset,
       break;
     }
     case Edit::TCompositableOperation: {
-      ReceiveCompositableUpdate(edit.get_CompositableOperation(),
-                                replyv);
+      if (!ReceiveCompositableUpdate(edit.get_CompositableOperation(),
+                                replyv)) {
+        return false;
+      }
       break;
     }
     case Edit::TOpAttachCompositable: {
@@ -510,7 +531,7 @@ LayerTransactionParent::RecvUpdate(const InfallibleTArray<Edit>& cset,
   }
 
   {
-    AutoResolveRefLayers resolve(mShadowLayersManager->GetCompositionManager());
+    AutoResolveRefLayers resolve(mShadowLayersManager->GetCompositionManager(this));
     layer_manager()->EndTransaction(nullptr, nullptr, LayerManager::END_NO_IMMEDIATE_REDRAW);
   }
 
@@ -556,25 +577,40 @@ LayerTransactionParent::RecvGetOpacity(PLayerParent* aParent,
 }
 
 bool
-LayerTransactionParent::RecvGetTransform(PLayerParent* aParent,
-                                         gfx3DMatrix* aTransform)
+LayerTransactionParent::RecvGetAnimationTransform(PLayerParent* aParent,
+                                                  MaybeTransform* aTransform)
 {
   if (mDestroyed || !layer_manager() || layer_manager()->IsDestroyed()) {
     return false;
   }
 
-  // The following code recovers the untranslated transform
-  // from the shadow transform by undoing the translations in
-  // AsyncCompositionManager::SampleValue.
   Layer* layer = cast(aParent)->AsLayer();
   if (!layer) {
     return false;
   }
-  gfx::To3DMatrix(layer->AsLayerComposite()->GetShadowTransform(), *aTransform);
+
+  // This method is specific to transforms applied by animation.
+  // This is because this method uses the information stored with an animation
+  // such as the origin of the reference frame corresponding to the layer, to
+  // recover the untranslated transform from the shadow transform. For
+  // transforms that are not set by animation we don't have this information
+  // available.
+  if (!layer->AsLayerComposite()->GetShadowTransformSetByAnimation()) {
+    *aTransform = mozilla::void_t();
+    return true;
+  }
+
+  // The following code recovers the untranslated transform
+  // from the shadow transform by undoing the translations in
+  // AsyncCompositionManager::SampleValue.
+
+  gfx3DMatrix transform;
+  gfx::To3DMatrix(layer->AsLayerComposite()->GetShadowTransform(), transform);
   if (ContainerLayer* c = layer->AsContainerLayer()) {
-    aTransform->ScalePost(1.0f/c->GetInheritedXScale(),
-                          1.0f/c->GetInheritedYScale(),
-                          1.0f);
+    // Undo the scale transform applied by AsyncCompositionManager::SampleValue
+    transform.ScalePost(1.0f/c->GetInheritedXScale(),
+                        1.0f/c->GetInheritedYScale(),
+                        1.0f);
   }
   float scale = 1;
   gfxPoint3D scaledOrigin;
@@ -587,13 +623,52 @@ LayerTransactionParent::RecvGetTransform(PLayerParent* aParent,
         gfxPoint3D(NS_round(NSAppUnitsToFloatPixels(data.origin().x, scale)),
                    NS_round(NSAppUnitsToFloatPixels(data.origin().y, scale)),
                    0.0f);
-      transformOrigin = data.transformOrigin();
+      double cssPerDev =
+        double(nsDeviceContext::AppUnitsPerCSSPixel()) / double(scale);
+      transformOrigin = data.transformOrigin() * cssPerDev;
       break;
     }
   }
 
-  aTransform->Translate(-scaledOrigin);
-  *aTransform = nsLayoutUtils::ChangeMatrixBasis(-scaledOrigin - transformOrigin, *aTransform);
+  // Undo the translation to the origin of the reference frame applied by
+  // AsyncCompositionManager::SampleValue
+  transform.Translate(-scaledOrigin);
+
+  // Undo the rebasing applied by
+  // nsDisplayTransform::GetResultingTransformMatrixInternal
+  transform = nsLayoutUtils::ChangeMatrixBasis(-scaledOrigin - transformOrigin,
+                                               transform);
+
+  // Convert to CSS pixels (this undoes the operations performed by
+  // nsStyleTransformMatrix::ProcessTranslatePart which is called from
+  // nsDisplayTransform::GetResultingTransformMatrix)
+  double devPerCss =
+    double(scale) / double(nsDeviceContext::AppUnitsPerCSSPixel());
+  transform._41 *= devPerCss;
+  transform._42 *= devPerCss;
+  transform._43 *= devPerCss;
+
+  *aTransform = transform;
+  return true;
+}
+
+bool
+LayerTransactionParent::RecvSetAsyncScrollOffset(PLayerParent* aLayer,
+                                                 const int32_t& aX, const int32_t& aY)
+{
+  if (mDestroyed || !layer_manager() || layer_manager()->IsDestroyed()) {
+    return false;
+  }
+
+  ContainerLayer* layer = cast(aLayer)->AsLayer()->AsContainerLayer();
+  if (!layer) {
+    return true;
+  }
+  AsyncPanZoomController* controller = layer->GetAsyncPanZoomController();
+  if (!controller) {
+    return true;
+  }
+  controller->SetTestAsyncScrollOffset(CSSPoint(aX, aY));
   return true;
 }
 
@@ -641,6 +716,14 @@ LayerTransactionParent::RecvClearCachedResources()
   }
   return true;
 }
+
+bool
+LayerTransactionParent::RecvForceComposite()
+{
+  mShadowLayersManager->ForceComposite(this);
+  return true;
+}
+
 
 PGrallocBufferParent*
 LayerTransactionParent::AllocPGrallocBufferParent(const IntSize& aSize,
@@ -705,6 +788,11 @@ bool
 LayerTransactionParent::DeallocPTextureParent(PTextureParent* actor)
 {
   return TextureHost::DestroyIPDLActor(actor);
+}
+
+bool LayerTransactionParent::IsSameProcess() const
+{
+  return OtherProcess() == ipc::kInvalidProcessHandle;
 }
 
 } // namespace layers

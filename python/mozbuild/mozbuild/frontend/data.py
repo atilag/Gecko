@@ -185,10 +185,11 @@ class Defines(SandboxDerived):
     def get_defines(self):
         for define, value in self.defines.iteritems():
             if value is True:
-                defstr = define
+                yield('-D%s' % define)
+            elif value is False:
+                yield('-U%s' % define)
             else:
-                defstr = '%s=%s' % (define, shell_quote(value))
-            yield('-D%s' % defstr)
+                yield('-D%s=%s' % (define, shell_quote(value)))
 
 class Exports(SandboxDerived):
     """Sandbox container object for EXPORTS, which is a HierarchicalStringList.
@@ -422,6 +423,9 @@ class TestManifest(SandboxDerived):
         # The relative path of the parsed manifest within the srcdir.
         'manifest_relpath',
 
+        # The relative path of the parsed manifest within the objdir.
+        'manifest_obj_relpath',
+
         # If this manifest is a duplicate of another one, this is the
         # manifestparser.TestManifest of the other one.
         'dupe_manifest',
@@ -437,6 +441,7 @@ class TestManifest(SandboxDerived):
         self.flavor = flavor
         self.install_prefix = install_prefix
         self.manifest_relpath = relpath
+        self.manifest_obj_relpath = relpath
         self.dupe_manifest = dupe_manifest
         self.installs = {}
         self.pattern_installs = []
@@ -467,6 +472,21 @@ class GeneratedInclude(SandboxDerived):
         SandboxDerived.__init__(self, sandbox)
 
         self.path = path
+
+
+class PerSourceFlag(SandboxDerived):
+    """Describes compiler flags specified for individual source files."""
+
+    __slots__ = (
+        'file_name',
+        'flags',
+    )
+
+    def __init__(self, sandbox, file_name, flags):
+        SandboxDerived.__init__(self, sandbox)
+
+        self.file_name = file_name
+        self.flags = flags
 
 
 class JARManifest(SandboxDerived):
@@ -596,6 +616,7 @@ class AndroidEclipseProjectData(object):
         'included_projects',
         'referenced_projects',
         '_classpathentries',
+        'filtered_resources',
     )
 
     def __init__(self, name):
@@ -610,6 +631,7 @@ class AndroidEclipseProjectData(object):
         self.included_projects = []
         self.referenced_projects = []
         self._classpathentries = []
+        self.filtered_resources = []
 
     def add_classpathentry(self, path, srcdir, dstdir, exclude_patterns=[], ignore_warnings=False):
         cpe = ClassPathEntry()

@@ -26,7 +26,6 @@ class nsIDOMNode;
 class nsIDocumentEncoder;
 class nsIEditRules;
 class nsIOutputStream;
-class nsIPrivateTextRangeList;
 class nsISelection;
 class nsISelectionController;
 class nsITransferable;
@@ -135,7 +134,7 @@ public:
                         int32_t aDestOffset,
                         bool aDoDeleteSelection);
 
-  virtual nsresult InsertFromDataTransfer(nsIDOMDataTransfer *aDataTransfer,
+  virtual nsresult InsertFromDataTransfer(mozilla::dom::DataTransfer *aDataTransfer,
                                           int32_t aIndex,
                                           nsIDOMDocument *aSourceDoc,
                                           nsIDOMNode *aDestinationNode,

@@ -52,24 +52,23 @@ let HomeBanner = (function () {
   // Holds the messages that will rotate through the banner.
   let _messages = {};
 
-  // A queue used to keep track of which message to show next.
-  let _queue = [];
-
 
   let _handleGet = function() {
-    // Get the message from the front of the queue, then add it back
-    // to the end of the queue to show it again later.
-    let id = _queue.shift();
-    _queue.push(id);
+    // Choose a message at random.
+    let keys = Object.keys(_messages);
+    let randomId = keys[Math.floor(Math.random() * keys.length)];
+    let message = _messages[randomId];
 
-    let message = _messages[id];
     sendMessageToJava({
       type: "HomeBanner:Data",
       id: message.id,
       text: message.text,
       iconURI: message.iconURI
     });
+  };
 
+  let _handleShown = function(id) {
+    let message = _messages[id];
     if (message.onshown)
       message.onshown();
   };
@@ -93,13 +92,17 @@ let HomeBanner = (function () {
           _handleGet();
           break;
 
+        case "HomeBanner:Shown":
+          _handleShown(data);
+          break;
+
         case "HomeBanner:Click":
           _handleClick(data);
           break;
 
         case "HomeBanner:Dismiss":
           _handleDismiss(data);
-          break; 
+          break;
       }
     },
 
@@ -112,13 +115,11 @@ let HomeBanner = (function () {
       let message = new BannerMessage(options);
       _messages[message.id] = message;
 
-      // Add the new message to the end of the queue.
-      _queue.push(message.id);
-
       // If this is the first message we're adding, add
       // observers to listen for requests from the Java UI.
       if (Object.keys(_messages).length == 1) {
         Services.obs.addObserver(this, "HomeBanner:Get", false);
+        Services.obs.addObserver(this, "HomeBanner:Shown", false);
         Services.obs.addObserver(this, "HomeBanner:Click", false);
         Services.obs.addObserver(this, "HomeBanner:Dismiss", false);
 
@@ -136,15 +137,16 @@ let HomeBanner = (function () {
      * @param id The id of the message to remove.
      */
     remove: function(id) {
-      delete _messages[id];
+      if (!(id in _messages)) {
+        throw "Home.banner: Can't remove message that doesn't exist: id = " + id;
+      }
 
-      // Remove the message from the queue.
-      let index = _queue.indexOf(id);
-      _queue.splice(index, 1);
+      delete _messages[id];
 
       // If there are no more messages, remove the observers.
       if (Object.keys(_messages).length == 0) {
         Services.obs.removeObserver(this, "HomeBanner:Get");
+        Services.obs.removeObserver(this, "HomeBanner:Shown");
         Services.obs.removeObserver(this, "HomeBanner:Click");
         Services.obs.removeObserver(this, "HomeBanner:Dismiss");
       }
@@ -152,12 +154,9 @@ let HomeBanner = (function () {
   });
 })();
 
-function Panel(options) {
-  if ("id" in options)
-    this.id = options.id;
-
-  if ("title" in options)
-    this.title = options.title;
+function Panel(id, options) {
+  this.id = id;
+  this.title = options.title;
 
   if ("layout" in options)
     this.layout = options.layout;
@@ -166,30 +165,101 @@ function Panel(options) {
     this.views = options.views;
 }
 
-let HomePanels = (function () {
-  // Holds the currrent set of registered panels.
-  let _panels = {};
+// We need this function to have access to the HomePanels
+// private members without leaking it outside Home.jsm.
+let handlePanelsGet;
 
-  let _panelToJSON = function(panel) {
-    return {
-      id: panel.id,
-      title: panel.title,
-      layout: panel.layout,
-      views: panel.views
-    };
+let HomePanels = (function () {
+  // Holds the current set of registered panels that can be
+  // installed, updated, uninstalled, or unregistered. It maps
+  // panel ids with the functions that dynamically generate
+  // their respective panel options. This is used to retrieve
+  // the current list of available panels in the system.
+  // See HomePanels:Get handler.
+  let _registeredPanels = {};
+
+  // Valid layouts for a panel.
+  let Layout = Object.freeze({
+    FRAME: "frame"
+  });
+
+  // Valid types of views for a dataset.
+  let View = Object.freeze({
+    LIST: "list",
+    GRID: "grid"
+  });
+
+  // Valid item types for a panel view.
+  let Item = Object.freeze({
+    ARTICLE: "article",
+    IMAGE: "image"
+  });
+
+  // Valid item handlers for a panel view.
+  let ItemHandler = Object.freeze({
+    BROWSER: "browser",
+    INTENT: "intent"
+  });
+
+  let _generatePanel = function(id) {
+    let panel = new Panel(id, _registeredPanels[id]());
+
+    if (!panel.id || !panel.title) {
+      throw "Home.panels: Can't create a home panel without an id and title!";
+    }
+
+    if (!panel.layout) {
+      // Use FRAME layout by default
+      panel.layout = Layout.FRAME;
+    } else if (!_valueExists(Layout, panel.layout)) {
+      throw "Home.panels: Invalid layout for panel: panel.id = " + panel.id + ", panel.layout =" + panel.layout;
+    }
+
+    for (let view of panel.views) {
+      if (!_valueExists(View, view.type)) {
+        throw "Home.panels: Invalid view type: panel.id = " + panel.id + ", view.type = " + view.type;
+      }
+
+      if (!view.itemType) {
+        if (view.type == View.LIST) {
+          // Use ARTICLE item type by default in LIST views
+          view.itemType = Item.ARTICLE;
+        } else if (view.type == View.GRID) {
+          // Use IMAGE item type by default in GRID views
+          view.itemType = Item.IMAGE;
+        }
+      } else if (!_valueExists(Item, view.itemType)) {
+        throw "Home.panels: Invalid item type: panel.id = " + panel.id + ", view.itemType = " + view.itemType;
+      }
+
+      if (!view.itemHandler) {
+        // Use BROWSER item handler by default
+        view.itemHandler = ItemHandler.BROWSER;
+      } else if (!_valueExists(ItemHandler, view.itemHandler)) {
+        throw "Home.panels: Invalid item handler: panel.id = " + panel.id + ", view.itemHandler = " + view.itemHandler;
+      }
+
+      if (!view.dataset) {
+        throw "Home.panels: No dataset provided for view: panel.id = " + panel.id + ", view.type = " + view.type;
+      }
+    }
+
+    return panel;
   };
 
-  let _handleGet = function(data) {
+  handlePanelsGet = function(data) {
     let requestId = data.requestId;
     let ids = data.ids || null;
 
     let panels = [];
-    for (let id in _panels) {
-      let panel = _panels[id];
-
+    for (let id in _registeredPanels) {
       // Null ids means we want to fetch all available panels
-      if (ids == null || ids.indexOf(panel.id) >= 0) {
-        panels.push(_panelToJSON(panel));
+      if (ids == null || ids.indexOf(id) >= 0) {
+        try {
+          panels.push(_generatePanel(id));
+        } catch(e) {
+          Cu.reportError("Home.panels: Invalid options, panel.id = " + id + ": " + e);
+        }
       }
     }
 
@@ -211,87 +281,34 @@ let HomePanels = (function () {
   };
 
   let _assertPanelExists = function(id) {
-    if (!(id in _panels)) {
+    if (!(id in _registeredPanels)) {
       throw "Home.panels: Panel doesn't exist: id = " + id;
     }
   };
 
   return Object.freeze({
-    // Valid layouts for a panel.
-    Layout: Object.freeze({
-      FRAME: "frame"
-    }),
+    Layout: Layout,
+    View: View,
+    Item: Item,
+    ItemHandler: ItemHandler,
 
-    // Valid types of views for a dataset.
-    View: Object.freeze({
-      LIST: "list",
-      GRID: "grid"
-    }),
-
-    // Valid item types for a panel view.
-    Item: Object.freeze({
-      ARTICLE: "article",
-      IMAGE: "image"
-    }),
-
-    // Valid item handlers for a panel view.
-    ItemHandler: Object.freeze({
-      BROWSER: "browser",
-      INTENT: "intent"
-    }),
-
-    register: function(options) {
-      let panel = new Panel(options);
-
+    register: function(id, optionsCallback) {
       // Bail if the panel already exists
-      if (panel.id in _panels) {
-        throw "Home.panels: Panel already exists: id = " + panel.id;
+      if (id in _registeredPanels) {
+        throw "Home.panels: Panel already exists: id = " + id;
       }
 
-      if (!panel.id || !panel.title) {
-        throw "Home.panels: Can't create a home panel without an id and title!";
+      if (!optionsCallback || typeof optionsCallback !== "function") {
+        throw "Home.panels: Panel callback must be a function: id = " + id;
       }
 
-      if (!_valueExists(this.Layout, panel.layout)) {
-        throw "Home.panels: Invalid layout for panel: panel.id = " + panel.id + ", panel.layout =" + panel.layout;
-      }
-
-      for (let view of panel.views) {
-        if (!_valueExists(this.View, view.type)) {
-          throw "Home.panels: Invalid view type: panel.id = " + panel.id + ", view.type = " + view.type;
-        }
-
-        if (!view.itemType) {
-          if (view.type == this.View.LIST) {
-            // Use ARTICLE item type by default in LIST views
-            view.itemType = this.Item.ARTICLE;
-          } else if (view.type == this.View.GRID) {
-            // Use IMAGE item type by default in GRID views
-            view.itemType = this.Item.IMAGE;
-          }
-        } else if (!_valueExists(this.Item, view.itemType)) {
-          throw "Home.panels: Invalid item type: panel.id = " + panel.id + ", view.itemType = " + view.itemType;
-        }
-
-        if (!view.itemHandler) {
-          // Use BROWSER item handler by default
-          view.itemHandler = this.ItemHandler.BROWSER;
-        } else if (!_valueExists(this.ItemHandler, view.itemHandler)) {
-          throw "Home.panels: Invalid item handler: panel.id = " + panel.id + ", view.itemHandler = " + view.itemHandler;
-        }
-
-        if (!view.dataset) {
-          throw "Home.panels: No dataset provided for view: panel.id = " + panel.id + ", view.type = " + view.type;
-        }
-      }
-
-      _panels[panel.id] = panel;
+      _registeredPanels[id] = optionsCallback;
     },
 
     unregister: function(id) {
       _assertPanelExists(id);
 
-      delete _panels[id];
+      delete _registeredPanels[id];
     },
 
     install: function(id) {
@@ -299,7 +316,7 @@ let HomePanels = (function () {
 
       sendMessageToJava({
         type: "HomePanels:Install",
-        panel: _panelToJSON(_panels[id])
+        panel: _generatePanel(id)
       });
     },
 
@@ -317,7 +334,7 @@ let HomePanels = (function () {
 
       sendMessageToJava({
         type: "HomePanels:Update",
-        panel: _panelToJSON(_panels[id])
+        panel: _generatePanel(id)
       });
     }
   });
@@ -332,7 +349,7 @@ this.Home = Object.freeze({
   observe: function(subject, topic, data) {
     switch(topic) {
       case "HomePanels:Get":
-        HomePanels._handleGet(JSON.parse(data));
+        handlePanelsGet(JSON.parse(data));
         break;
     }
   }

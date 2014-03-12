@@ -28,8 +28,9 @@ struct StmtInfoPC : public StmtInfoBase {
     StmtInfoPC      *downScope;     /* next enclosing lexical scope */
 
     uint32_t        blockid;        /* for simplified dominance computation */
+    uint32_t        innerBlockScopeDepth; /* maximum depth of nested block scopes, in slots */
 
-    StmtInfoPC(ExclusiveContext *cx) : StmtInfoBase(cx) {}
+    StmtInfoPC(ExclusiveContext *cx) : StmtInfoBase(cx), innerBlockScopeDepth(0) {}
 };
 
 typedef HashSet<JSAtom *> FuncStmtSet;
@@ -118,6 +119,7 @@ struct ParseContext : public GenericParseContext
     bool isLegacyGenerator() const { return generatorKind() == LegacyGenerator; }
     bool isStarGenerator() const { return generatorKind() == StarGenerator; }
 
+    uint32_t        blockScopeDepth; /* maximum depth of nested block scopes, in slots */
     Node            blockNode;      /* parse node for a block with let declarations
                                        (block with its own lexical scope)  */
   private:
@@ -133,11 +135,6 @@ struct ParseContext : public GenericParseContext
     uint32_t numArgs() const {
         JS_ASSERT(sc->isFunctionBox());
         return args_.length();
-    }
-
-    uint32_t numVars() const {
-        JS_ASSERT(sc->isFunctionBox());
-        return vars_.length();
     }
 
     /*
@@ -243,7 +240,7 @@ struct ParseContext : public GenericParseContext
     ParseContext(Parser<ParseHandler> *prs, GenericParseContext *parent,
                  Node maybeFunction, SharedContext *sc,
                  Directives *newDirectives,
-                 unsigned staticLevel, uint32_t bodyid)
+                 unsigned staticLevel, uint32_t bodyid, uint32_t blockScopeDepth)
       : GenericParseContext(parent, sc),
         bodyid(0),           // initialized in init()
         blockidGen(bodyid),  // used to set |bodyid| and subsequently incremented in init()
@@ -253,6 +250,7 @@ struct ParseContext : public GenericParseContext
         maybeFunction(maybeFunction),
         staticLevel(staticLevel),
         lastYieldOffset(NoYieldOffset),
+        blockScopeDepth(blockScopeDepth),
         blockNode(ParseHandler::null()),
         decls_(prs->context, prs->alloc),
         args_(prs->context),
@@ -305,9 +303,6 @@ template <typename ParseHandler>
 struct BindData;
 
 class CompExprTransplanter;
-
-template <typename ParseHandler>
-class GenexpGuard;
 
 enum LetContext { LetExpresion, LetStatement };
 enum VarContext { HoistVars, DontHoistVars };
@@ -528,7 +523,8 @@ class Parser : private AutoGCRooter, public StrictModeGetter
     Node unaryExpr();
     Node memberExpr(TokenKind tt, bool allowCallSyntax);
     Node primaryExpr(TokenKind tt);
-    Node parenExpr(bool *genexp = nullptr);
+    Node parenExprOrGeneratorComprehension();
+    Node exprInParens();
 
     /*
      * Additional JS parsers.
@@ -545,11 +541,23 @@ class Parser : private AutoGCRooter, public StrictModeGetter
     Node unaryOpExpr(ParseNodeKind kind, JSOp op, uint32_t begin);
 
     Node condition();
-    Node comprehensionTail(Node kid, unsigned blockid, bool isGenexp,
-                           ParseContext<ParseHandler> *outerpc,
-                           ParseNodeKind kind = PNK_SEMI, JSOp op = JSOP_NOP);
-    bool arrayInitializerComprehensionTail(Node pn);
-    Node generatorExpr(Node kid);
+
+    Node generatorComprehensionLambda(GeneratorKind comprehensionKind, unsigned begin,
+                                      Node innerStmt);
+
+    Node legacyComprehensionTail(Node kid, unsigned blockid, GeneratorKind comprehensionKind,
+                                 ParseContext<ParseHandler> *outerpc,
+                                 unsigned innerBlockScopeDepth);
+    Node legacyArrayComprehension(Node array);
+    Node legacyGeneratorExpr(Node kid);
+
+    Node comprehensionTail(GeneratorKind comprehensionKind);
+    Node comprehensionIf(GeneratorKind comprehensionKind);
+    Node comprehensionFor(GeneratorKind comprehensionKind);
+    Node comprehension(GeneratorKind comprehensionKind);
+    Node arrayComprehension(uint32_t begin);
+    Node generatorComprehension(uint32_t begin);
+
     bool argumentList(Node listNode, bool *isSpread);
     Node letBlock(LetContext letContext);
     Node destructuringExpr(BindData<ParseHandler> *data, TokenKind tt);
@@ -645,8 +653,7 @@ class Parser : private AutoGCRooter, public StrictModeGetter
     uint32_t offsetOfCurrentAsmJSModule() const { return tokenStream.currentToken().pos.end; }
   private:
 
-    friend class CompExprTransplanter;
-    friend class GenexpGuard<ParseHandler>;
+    friend class LegacyCompExprTransplanter;
     friend struct BindData<ParseHandler>;
 };
 

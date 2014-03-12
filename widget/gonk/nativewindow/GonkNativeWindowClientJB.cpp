@@ -246,7 +246,6 @@ int GonkNativeWindowClient::cancelBuffer(android_native_buffer_t* buffer,
 
 int GonkNativeWindowClient::getSlotFromBufferLocked(
         android_native_buffer_t* buffer) const {
-    bool dumpedState = false;
     for (int i = 0; i < NUM_BUFFER_SLOTS; i++) {
         if (mSlots[i].buffer != NULL &&
                 mSlots[i].buffer->handle == buffer->handle) {
@@ -286,6 +285,7 @@ int GonkNativeWindowClient::queueBuffer(android_native_buffer_t* buffer, int fen
 
     sp<Fence> fence(fenceFd >= 0 ? new Fence(fenceFd) : Fence::NO_FENCE);
     IGraphicBufferProducer::QueueBufferOutput output;
+
     IGraphicBufferProducer::QueueBufferInput input(timestamp, crop, mScalingMode,
             mTransform, fence);
     status_t err = mBufferProducer->queueBuffer(i, input, &output);
@@ -496,8 +496,10 @@ int GonkNativeWindowClient::dispatchUnlockAndPost(va_list args) {
 
 int GonkNativeWindowClient::connect(int api) {
     ALOGV("GonkNativeWindowClient::connect");
+
     Mutex::Autolock lock(mMutex);
     IGraphicBufferProducer::QueueBufferOutput output;
+
     int err = mBufferProducer->connect(api, &output);
     if (err == NO_ERROR) {
         uint32_t numPendingBuffers = 0;

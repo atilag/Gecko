@@ -8,7 +8,7 @@
 #include "nsIContent.h"
 #include "nsPresContext.h"
 #include "nsGkAtoms.h"
-#include "nsINameSpaceManager.h"
+#include "nsNameSpaceManager.h"
 #include "nsIDocument.h"
 #include "nsIPresShell.h"
 #include "nsNodeInfoManager.h"
@@ -179,7 +179,7 @@ nsMeterFrame::ReflowBarFrame(nsIFrame*                aBarFrame,
   xoffset += reflowState.ComputedPhysicalMargin().left;
   yoffset += reflowState.ComputedPhysicalMargin().top;
 
-  nsHTMLReflowMetrics barDesiredSize(reflowState.GetWritingMode());
+  nsHTMLReflowMetrics barDesiredSize(reflowState);
   ReflowChild(aBarFrame, aPresContext, barDesiredSize, reflowState, xoffset,
               yoffset, 0, aStatus);
   FinishReflowChild(aBarFrame, aPresContext, barDesiredSize, &reflowState,

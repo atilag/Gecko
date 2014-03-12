@@ -16,13 +16,21 @@ let devtools = Cu.import("resource://gre/modules/devtools/Loader.jsm", {}).devto
 
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
                                   "resource://gre/modules/Services.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "ConsoleAPIStorage",
-                                  "resource://gre/modules/ConsoleAPIStorage.jsm");
+XPCOMUtils.defineLazyGetter(this, "NetworkMonitor", () => {
+  return devtools.require("devtools/toolkit/webconsole/network-monitor")
+         .NetworkMonitor;
+});
+XPCOMUtils.defineLazyGetter(this, "NetworkMonitorChild", () => {
+  return devtools.require("devtools/toolkit/webconsole/network-monitor")
+         .NetworkMonitorChild;
+});
+XPCOMUtils.defineLazyGetter(this, "ConsoleProgressListener", () => {
+  return devtools.require("devtools/toolkit/webconsole/network-monitor")
+         .ConsoleProgressListener;
+});
 
 for (let name of ["WebConsoleUtils", "ConsoleServiceListener",
-                  "ConsoleAPIListener", "ConsoleProgressListener",
-                  "JSTermHelpers", "JSPropertyProvider", "NetworkMonitor",
+                  "ConsoleAPIListener", "JSTermHelpers", "JSPropertyProvider",
                   "ConsoleReflowListener"]) {
   Object.defineProperty(this, name, {
     get: function(prop) {
@@ -59,15 +67,19 @@ function WebConsoleActor(aConnection, aParentActor)
 
   this.dbg = new Debugger();
 
-  this._protoChains = new Map();
   this._netEvents = new Map();
   this._gripDepth = 0;
 
+  this._onWillNavigate = this._onWillNavigate.bind(this);
   this._onObserverNotification = this._onObserverNotification.bind(this);
   if (this.parentActor.isRootActor) {
     Services.obs.addObserver(this._onObserverNotification,
                              "last-pb-context-exited", false);
   }
+
+  this.traits = {
+    customNetworkRequest: !this._parentIsContentActor,
+  };
 }
 
 WebConsoleActor.l10n = new WebConsoleUtils.l10n("chrome://global/locale/console.properties");
@@ -113,20 +125,27 @@ WebConsoleActor.prototype =
   _netEvents: null,
 
   /**
-   * A cache of prototype chains for objects that have received a
-   * prototypeAndProperties request.
-   *
-   * @private
-   * @type Map
-   * @see dbg-script-actors.js, ThreadActor._protoChains
-   */
-  _protoChains: null,
-
-  /**
    * The debugger server connection instance.
    * @type object
    */
   conn: null,
+
+  /**
+   * List of supported features by the console actor.
+   * @type object
+   */
+  traits: null,
+
+  /**
+   * Boolean getter that tells if the parent actor is a ContentActor.
+   *
+   * @private
+   * @type boolean
+   */
+  get _parentIsContentActor() {
+    return "ContentActor" in DebuggerServer &&
+            this.parentActor instanceof DebuggerServer.ContentActor;
+  },
 
   /**
    * The window we work with.
@@ -209,6 +228,31 @@ WebConsoleActor.prototype =
    */
   _lastChromeWindow: null,
 
+  // The evalWindow is used at the scope for JS evaluation.
+  _evalWindow: null,
+  get evalWindow() {
+    return this._evalWindow || this.window;
+  },
+
+  set evalWindow(aWindow) {
+    this._evalWindow = aWindow;
+
+    if (!this._progressListenerActive && this.parentActor._progressListener) {
+      this.parentActor._progressListener.once("will-navigate", this._onWillNavigate);
+      this._progressListenerActive = true;
+    }
+  },
+
+  /**
+   * Flag used to track if we are listening for events from the progress
+   * listener of the tab actor. We use the progress listener to clear
+   * this.evalWindow on page navigation.
+   *
+   * @private
+   * @type boolean
+   */
+  _progressListenerActive: false,
+
   /**
    * The ConsoleServiceListener instance.
    * @type object
@@ -242,13 +286,6 @@ WebConsoleActor.prototype =
    */
   _jstermHelpersCache: null,
 
-  /**
-   * Getter for the NetworkMonitor.saveRequestAndResponseBodies preference.
-   * @type boolean
-   */
-  get saveRequestAndResponseBodies()
-    this._prefs["NetworkMonitor.saveRequestAndResponseBodies"] || null,
-
   actorPrefix: "console",
 
   grip: function WCA_grip()
@@ -256,7 +293,15 @@ WebConsoleActor.prototype =
     return { actor: this.actorID };
   },
 
-  hasNativeConsoleAPI: BrowserTabActor.prototype.hasNativeConsoleAPI,
+  hasNativeConsoleAPI: function WCA_hasNativeConsoleAPI(aWindow) {
+    let isNative = false;
+    try {
+      let console = aWindow.wrappedJSObject.console;
+      isNative = console instanceof aWindow.Console;
+    }
+    catch (ex) { }
+    return isNative;
+  },
 
   _createValueGrip: ThreadActor.prototype.createValueGrip,
   _stringIsLong: ThreadActor.prototype._stringIsLong,
@@ -295,8 +340,9 @@ WebConsoleActor.prototype =
     }
     this._actorPool = null;
 
+    this._jstermHelpersCache = null;
+    this._evalWindow = null;
     this._netEvents.clear();
-    this._protoChains.clear();
     this.dbg.enabled = false;
     this.dbg = null;
     this.conn = null;
@@ -456,6 +502,14 @@ WebConsoleActor.prototype =
   {
     let startedListeners = [];
     let window = !this.parentActor.isRootActor ? this.window : null;
+    let appId = null;
+    let messageManager = null;
+
+    if (this._parentIsContentActor) {
+      // Filter network requests by appId on Firefox OS devices.
+      appId = this.parentActor.docShell.appId;
+      messageManager = this.parentActor._chromeGlobal;
+    }
 
     while (aRequest.listeners.length > 0) {
       let listener = aRequest.listeners.shift();
@@ -478,8 +532,13 @@ WebConsoleActor.prototype =
           break;
         case "NetworkActivity":
           if (!this.networkMonitor) {
-            this.networkMonitor =
-              new NetworkMonitor(window, this);
+            if (appId && messageManager) {
+              this.networkMonitor =
+                new NetworkMonitorChild(appId, messageManager, this);
+            }
+            else {
+              this.networkMonitor = new NetworkMonitor({ window: window }, this);
+            }
             this.networkMonitor.init();
           }
           startedListeners.push(listener);
@@ -505,6 +564,7 @@ WebConsoleActor.prototype =
     return {
       startedListeners: startedListeners,
       nativeConsoleAPI: this.hasNativeConsoleAPI(this.window),
+      traits: this.traits,
     };
   },
 
@@ -725,7 +785,7 @@ WebConsoleActor.prototype =
     }
     // This is the general case (non-paused debugger)
     else {
-      dbgObject = this.dbg.makeGlobalObjectReference(this.window);
+      dbgObject = this.dbg.makeGlobalObjectReference(this.evalWindow);
     }
 
     let result = JSPropertyProvider(dbgObject, environment, aRequest.text,
@@ -762,7 +822,10 @@ WebConsoleActor.prototype =
     // TODO: Bug 717611 - Web Console clear button does not clear cached errors
     let windowId = !this.parentActor.isRootActor ?
                    WebConsoleUtils.getInnerWindowId(this.window) : null;
+    let ConsoleAPIStorage = Cc["@mozilla.org/consoleAPI-storage;1"]
+                              .getService(Ci.nsIConsoleAPIStorage);
     ConsoleAPIStorage.clearEvents(windowId);
+
     if (this.parentActor.isRootActor) {
       Services.console.logStringMessage(null); // for the Error Console
       Services.console.reset();
@@ -797,6 +860,11 @@ WebConsoleActor.prototype =
   {
     for (let key in aRequest.preferences) {
       this._prefs[key] = aRequest.preferences[key];
+
+      if (key == "NetworkMonitor.saveRequestAndResponseBodies" &&
+          this.networkMonitor) {
+        this.networkMonitor.saveRequestAndResponseBodies = this._prefs[key];
+      }
     }
     return { updated: Object.keys(aRequest.preferences) };
   },
@@ -822,12 +890,13 @@ WebConsoleActor.prototype =
   _getJSTermHelpers: function WCA__getJSTermHelpers(aDebuggerGlobal)
   {
     let helpers = {
-      window: this.window,
+      window: this.evalWindow,
       chromeWindow: this.chromeWindow.bind(this),
       makeDebuggeeValue: aDebuggerGlobal.makeDebuggeeValue.bind(aDebuggerGlobal),
       createValueGrip: this.createValueGrip.bind(this),
       sandbox: Object.create(null),
       helperResult: null,
+      consoleActor: this,
     };
     JSTermHelpers(helpers);
 
@@ -924,12 +993,12 @@ WebConsoleActor.prototype =
     // as ordinary objects, not as references to be followed, so mixing
     // debuggers causes strange behaviors.)
     let dbg = frame ? frameActor.threadActor.dbg : this.dbg;
-    let dbgWindow = dbg.makeGlobalObjectReference(this.window);
+    let dbgWindow = dbg.makeGlobalObjectReference(this.evalWindow);
 
     // If we have an object to bind to |_self|, create a Debugger.Object
     // referring to that object, belonging to dbg.
     let bindSelf = null;
-    let dbgWindow = dbg.makeGlobalObjectReference(this.window);
+    let dbgWindow = dbg.makeGlobalObjectReference(this.evalWindow);
     if (aOptions.bindObjectActor) {
       let objActor = this.getActorByID(aOptions.bindObjectActor);
       if (objActor) {
@@ -1106,6 +1175,8 @@ WebConsoleActor.prototype =
    *
    * @param object aEvent
    *        The initial network request event information.
+   * @param nsIHttpChannel aChannel
+   *        The network request nsIHttpChannel object.
    * @return object
    *         A new NetworkEventActor is returned. This is used for tracking the
    *         network request and response.
@@ -1130,8 +1201,10 @@ WebConsoleActor.prototype =
    * Get the NetworkEventActor for a nsIChannel, if it exists,
    * otherwise create a new one.
    *
-   * @param object aChannel
+   * @param nsIHttpChannel aChannel
    *        The channel for the network event.
+   * @return object
+   *         The NetworkEventActor for the given channel.
    */
   getNetworkEventActor: function WCA_getNetworkEventActor(aChannel) {
     let actor = this._netEvents.get(aChannel);
@@ -1289,7 +1362,17 @@ WebConsoleActor.prototype =
         });
         break;
     }
-  }
+  },
+
+  /**
+   * The "will-navigate" progress listener. This is used to clear the current
+   * eval scope.
+   */
+  _onWillNavigate: function WCA__onWillNavigate()
+  {
+    this._evalWindow = null;
+    this._progressListenerActive = false;
+  },
 };
 
 WebConsoleActor.prototype.requestTypes =

@@ -14,6 +14,7 @@
 #include "Role.h"
 #include "States.h"
 #include "TextAttrs.h"
+#include "TextRange.h"
 #include "TreeWalker.h"
 
 #include "nsCaret.h"
@@ -1504,6 +1505,33 @@ HyperTextAccessible::ScrollSubstringToPoint(int32_t aStartOffset,
   }
 }
 
+void
+HyperTextAccessible::EnclosingRange(a11y::TextRange& aRange) const
+{
+}
+
+void
+HyperTextAccessible::SelectionRanges(nsTArray<a11y::TextRange>* aRanges) const
+{
+}
+
+void
+HyperTextAccessible::VisibleRanges(nsTArray<a11y::TextRange>* aRanges) const
+{
+}
+
+void
+HyperTextAccessible::RangeByChild(Accessible* aChild,
+                                  a11y::TextRange& aRange) const
+{
+}
+
+void
+HyperTextAccessible::RangeAtPoint(int32_t aX, int32_t aY,
+                                  a11y::TextRange& aRange) const
+{
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Accessible public
 
@@ -1791,7 +1819,6 @@ HyperTextAccessible::GetSpellTextAttribute(nsINode* aNode,
     return NS_OK;
 
   int32_t startHTOffset = 0, endHTOffset = 0;
-  nsresult rv = NS_OK;
   for (int32_t idx = 0; idx < rangeCount; idx++) {
     nsRange* range = domSel->GetRangeAt(idx);
     if (range->Collapsed())

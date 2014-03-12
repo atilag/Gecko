@@ -25,6 +25,10 @@
 #include "jit/IonCode.h"
 #include "vm/Shape.h"
 
+namespace JS {
+struct ScriptSourceInfo;
+}
+
 namespace js {
 
 namespace jit {
@@ -127,19 +131,10 @@ struct BlockScopeArray {
     uint32_t        length;     // Count of indexed try notes.
 };
 
-/*
- * A "binding" is a formal, 'var' or 'const' declaration. A function's lexical
- * scope is composed of these three kinds of bindings.
- */
-
-enum BindingKind { ARGUMENT, VARIABLE, CONSTANT };
-
 class Binding
 {
-    /*
-     * One JSScript stores one Binding per formal/variable so we use a
-     * packed-word representation.
-     */
+    // One JSScript stores one Binding per formal/variable so we use a
+    // packed-word representation.
     uintptr_t bits_;
 
     static const uintptr_t KIND_MASK = 0x3;
@@ -147,9 +142,13 @@ class Binding
     static const uintptr_t NAME_MASK = ~(KIND_MASK | ALIASED_BIT);
 
   public:
+    // A "binding" is a formal, 'var', or 'const' declaration. A function's
+    // lexical scope is composed of these three kinds of bindings.
+    enum Kind { ARGUMENT, VARIABLE, CONSTANT };
+
     explicit Binding() : bits_(0) {}
 
-    Binding(PropertyName *name, BindingKind kind, bool aliased) {
+    Binding(PropertyName *name, Kind kind, bool aliased) {
         JS_STATIC_ASSERT(CONSTANT <= KIND_MASK);
         JS_ASSERT((uintptr_t(name) & ~NAME_MASK) == 0);
         JS_ASSERT((uintptr_t(kind) & ~KIND_MASK) == 0);
@@ -160,8 +159,8 @@ class Binding
         return (PropertyName *)(bits_ & NAME_MASK);
     }
 
-    BindingKind kind() const {
-        return BindingKind(bits_ & KIND_MASK);
+    Kind kind() const {
+        return Kind(bits_ & KIND_MASK);
     }
 
     bool aliased() const {
@@ -188,6 +187,7 @@ class Bindings
     HeapPtr<Shape> callObjShape_;
     uintptr_t bindingArrayAndFlag_;
     uint16_t numArgs_;
+    uint16_t numBlockScoped_;
     uint32_t numVars_;
 
     /*
@@ -220,7 +220,21 @@ class Bindings
      */
     static bool initWithTemporaryStorage(ExclusiveContext *cx, InternalBindingsHandle self,
                                          unsigned numArgs, uint32_t numVars,
-                                         Binding *bindingArray);
+                                         Binding *bindingArray, unsigned numBlockScoped);
+
+    // CompileScript parses and compiles one statement at a time, but the result
+    // is one Script object.  There will be no vars or bindings, because those
+    // go on the global, but there may be block-scoped locals, and the number of
+    // block-scoped locals may increase as we parse more expressions.  This
+    // helper updates the number of block scoped variables in a script as it is
+    // being parsed.
+    void updateNumBlockScoped(unsigned numBlockScoped) {
+        JS_ASSERT(!callObjShape_);
+        JS_ASSERT(numVars_ == 0);
+        JS_ASSERT(numBlockScoped < LOCALNO_LIMIT);
+        JS_ASSERT(numBlockScoped >= numBlockScoped_);
+        numBlockScoped_ = numBlockScoped;
+    }
 
     uint8_t *switchToScriptStorage(Binding *newStorage);
 
@@ -233,6 +247,10 @@ class Bindings
 
     unsigned numArgs() const { return numArgs_; }
     uint32_t numVars() const { return numVars_; }
+    unsigned numBlockScoped() const { return numBlockScoped_; }
+    uint32_t numLocals() const { return numVars() + numBlockScoped(); }
+
+    // Return the size of the bindingArray.
     uint32_t count() const { return numArgs() + numVars(); }
 
     /* Return the initial shape of call objects created for this scope. */
@@ -423,14 +441,14 @@ class ScriptSource
     bool hasIntroductionOffset_:1;
 
   public:
-    explicit ScriptSource(JSPrincipals *originPrincipals)
+    explicit ScriptSource()
       : refs(0),
         length_(0),
         compressedLength_(0),
         filename_(nullptr),
         displayURL_(nullptr),
         sourceMapURL_(nullptr),
-        originPrincipals_(originPrincipals),
+        originPrincipals_(nullptr),
         introductionOffset_(0),
         introducerFilename_(nullptr),
         introductionType_(nullptr),
@@ -440,8 +458,6 @@ class ScriptSource
         hasIntroductionOffset_(false)
     {
         data.source = nullptr;
-        if (originPrincipals_)
-            JS_HoldPrincipals(originPrincipals_);
     }
     void incref() { refs++; }
     void decref() {
@@ -449,6 +465,7 @@ class ScriptSource
         if (--refs == 0)
             destroy();
     }
+    bool initFromOptions(ExclusiveContext *cx, const ReadOnlyCompileOptions &options);
     bool setSourceCopy(ExclusiveContext *cx,
                        const jschar *src,
                        uint32_t length,
@@ -469,16 +486,14 @@ class ScriptSource
     }
     const jschar *chars(JSContext *cx, const SourceDataCache::AutoSuppressPurge &asp);
     JSFlatString *substring(JSContext *cx, uint32_t start, uint32_t stop);
-    size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
+    void addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
+                                JS::ScriptSourceInfo *info) const;
 
     // XDR handling
     template <XDRMode mode>
     bool performXDR(XDRState<mode> *xdr);
 
     bool setFilename(ExclusiveContext *cx, const char *filename);
-    bool setIntroducedFilename(ExclusiveContext *cx,
-                               const char *callerFilename, unsigned callerLineno,
-                               const char *introductionType, const char *introducerFilename);
     const char *introducerFilename() const {
         return introducerFilename_;
     }
@@ -547,6 +562,7 @@ class ScriptSourceObject : public JSObject
   public:
     static const Class class_;
 
+    static void trace(JSTracer *trc, JSObject *obj);
     static void finalize(FreeOp *fop, JSObject *obj);
     static ScriptSourceObject *create(ExclusiveContext *cx, ScriptSource *source,
                                       const ReadOnlyCompileOptions &options);
@@ -561,11 +577,18 @@ class ScriptSourceObject : public JSObject
     void initElement(HandleObject element);
     const Value &elementAttributeName() const;
 
+    JSScript *introductionScript() const {
+        void *untyped = getReservedSlot(INTRODUCTION_SCRIPT_SLOT).toPrivate();
+        return static_cast<JSScript *>(untyped);
+    }
+    void initIntroductionScript(JSScript *script);
+
   private:
     static const uint32_t SOURCE_SLOT = 0;
     static const uint32_t ELEMENT_SLOT = 1;
     static const uint32_t ELEMENT_PROPERTY_SLOT = 2;
-    static const uint32_t RESERVED_SLOTS = 3;
+    static const uint32_t INTRODUCTION_SCRIPT_SLOT = 3;
+    static const uint32_t RESERVED_SLOTS = 4;
 };
 
 enum GeneratorKind { NotGenerator, LegacyGenerator, StarGenerator };
@@ -923,7 +946,14 @@ class JSScript : public js::gc::BarrieredCell<JSScript>
 
     void setColumn(size_t column) { column_ = column; }
 
+    // The fixed part of a stack frame is comprised of vars (in function code)
+    // and block-scoped locals (in all kinds of code).
     size_t nfixed() const {
+        return function_ ? bindings.numLocals() : bindings.numBlockScoped();
+    }
+
+    // Number of fixed slots reserved for vars.  Only nonzero for function code.
+    size_t nfixedvars() const {
         return function_ ? bindings.numVars() : 0;
     }
 
@@ -1522,7 +1552,7 @@ namespace js {
  * Iterator over a script's bindings (formals and variables).
  * The order of iteration is:
  *  - first, formal arguments, from index 0 to numArgs
- *  - next, variables, from index 0 to numVars
+ *  - next, variables, from index 0 to numLocals
  */
 class BindingIter
 {
@@ -1562,7 +1592,7 @@ FillBindingVector(HandleScript fromScript, BindingVector *vec);
 /*
  * Iterator over the aliased formal bindings in ascending index order. This can
  * be veiwed as a filtering of BindingIter with predicate
- *   bi->aliased() && bi->kind() == ARGUMENT
+ *   bi->aliased() && bi->kind() == Binding::ARGUMENT
  */
 class AliasedFormalIter
 {
@@ -1938,10 +1968,10 @@ enum LineOption {
 };
 
 extern void
-CurrentScriptFileLineOrigin(JSContext *cx, JSScript **script,
-                            const char **file, unsigned *linenop,
-                            uint32_t *pcOffset, JSPrincipals **origin,
-                            LineOption opt = NOT_CALLED_FROM_JSOP_EVAL);
+DescribeScriptedCallerForCompilation(JSContext *cx, JSScript **maybeScript,
+                                     const char **file, unsigned *linenop,
+                                     uint32_t *pcOffset, JSPrincipals **origin,
+                                     LineOption opt = NOT_CALLED_FROM_JSOP_EVAL);
 
 bool
 CloneFunctionScript(JSContext *cx, HandleFunction original, HandleFunction clone,

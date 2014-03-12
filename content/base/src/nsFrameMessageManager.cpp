@@ -23,6 +23,7 @@
 #include "nsIXULRuntime.h"
 #include "nsIScriptError.h"
 #include "nsIConsoleService.h"
+#include "nsIMemoryReporter.h"
 #include "nsIProtocolHandler.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIJSRuntimeService.h"
@@ -33,7 +34,7 @@
 #include "mozilla/dom/StructuredCloneUtils.h"
 #include "JavaScriptChild.h"
 #include "JavaScriptParent.h"
-#include "nsDOMLists.h"
+#include "mozilla/dom/DOMStringList.h"
 #include "nsPrintfCString.h"
 #include <algorithm>
 
@@ -703,12 +704,12 @@ nsFrameMessageManager::BroadcastAsyncMessage(const nsAString& aMessageName,
 NS_IMETHODIMP
 nsFrameMessageManager::GetChildCount(uint32_t* aChildCount)
 {
-  *aChildCount = static_cast<uint32_t>(mChildManagers.Count()); 
+  *aChildCount = static_cast<uint32_t>(mChildManagers.Count());
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsFrameMessageManager::GetChildAt(uint32_t aIndex, 
+nsFrameMessageManager::GetChildAt(uint32_t aIndex,
                                   nsIMessageListenerManager** aMM)
 {
   *aMM = nullptr;
@@ -1429,7 +1430,8 @@ nsFrameScriptExecutor::LoadFrameScriptInternal(const nsAString& aURL,
       }
       JS::Rooted<JS::Value> rval(cx);
       JS::Rooted<JS::Value> methodVal(cx, JS::ObjectValue(*method));
-      ok = JS_CallFunctionValue(cx, global, methodVal, JS::EmptyValueArray, &rval);
+      ok = JS_CallFunctionValue(cx, global, methodVal,
+                                JS::HandleValueArray::empty(), &rval);
     } else if (script) {
       ok = JS_ExecuteScript(cx, global, script, nullptr);
     }
@@ -1492,8 +1494,7 @@ nsFrameScriptExecutor::TryCacheLoadAndCompileScript(const nsAString& aURL,
     if (global) {
       JSAutoCompartment ac(cx, global);
       JS::CompileOptions options(cx);
-      options.setFileAndLine(url.get(), 1)
-             .setPrincipals(nsJSPrincipals::get(mPrincipal));
+      options.setFileAndLine(url.get(), 1);
       JS::Rooted<JSScript*> script(cx);
       JS::Rooted<JSObject*> funobj(cx);
       if (aRunInGlobalScope) {
@@ -1743,11 +1744,11 @@ public:
       return false;
     }
     if (aIsSync) {
-      return cc->SendSyncMessage(nsString(aMessage), data, cpows, aPrincipal,
-                                 aJSONRetVal);
+      return cc->SendSyncMessage(PromiseFlatString(aMessage), data, cpows,
+                                 aPrincipal, aJSONRetVal);
     }
-    return cc->CallRpcMessage(nsString(aMessage), data, cpows, aPrincipal,
-                              aJSONRetVal);
+    return cc->CallRpcMessage(PromiseFlatString(aMessage), data, cpows,
+                              aPrincipal, aJSONRetVal);
   }
 
   virtual bool DoSendAsyncMessage(JSContext* aCx,
@@ -1769,7 +1770,8 @@ public:
     if (!cc->GetCPOWManager()->Wrap(aCx, aCpows, &cpows)) {
       return false;
     }
-    return cc->SendAsyncMessage(nsString(aMessage), data, cpows, aPrincipal);
+    return cc->SendAsyncMessage(PromiseFlatString(aMessage), data, cpows,
+                                aPrincipal);
   }
 
 };

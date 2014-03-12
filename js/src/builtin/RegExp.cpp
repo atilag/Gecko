@@ -502,7 +502,7 @@ js_InitRegExpClass(JSContext *cx, HandleObject obj)
     if (!JS_DefineProperties(cx, ctor, regexp_static_props))
         return nullptr;
 
-    if (!DefineConstructorAndPrototype(cx, global, JSProto_RegExp, ctor, proto))
+    if (!GlobalObject::initBuiltinConstructor(cx, global, JSProto_RegExp, ctor, proto))
         return nullptr;
 
     return proto;
@@ -636,10 +636,9 @@ js::regexp_exec(JSContext *cx, unsigned argc, Value *vp)
 
 /* Separate interface for use by IonMonkey. */
 bool
-js::regexp_exec_raw(JSContext *cx, HandleObject regexp, HandleString input, Value *vp)
+js::regexp_exec_raw(JSContext *cx, HandleObject regexp, HandleString input, MutableHandleValue output)
 {
-    MutableHandleValue vpHandle = MutableHandleValue::fromMarkedLocation(vp);
-    return regexp_exec_impl(cx, regexp, input, UpdateRegExpStatics, vpHandle);
+    return regexp_exec_impl(cx, regexp, input, UpdateRegExpStatics, output);
 }
 
 bool

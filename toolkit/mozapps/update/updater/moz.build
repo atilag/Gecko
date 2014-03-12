@@ -20,6 +20,7 @@ if CONFIG['OS_ARCH'] == 'WINNT':
         'progressui_win.cpp',
         'win_dirent.cpp',
     ]
+    RCINCLUDE = 'updater.rc'
     DEFINES['UNICODE'] = True
     DEFINES['_UNICODE'] = True
     USE_STATIC_LIBS = True
@@ -37,22 +38,22 @@ if CONFIG['MOZ_ENABLE_GTK']:
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     have_progressui = 1
+    SOURCES += [
+        'launchchild_osx.mm',
+        'progressui_osx.mm',
+    ]
+    LDFLAGS += ['-framework Cocoa']
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
     have_progressui = 1
     SOURCES += [
         'automounter_gonk.cpp',
         'progressui_gonk.cpp',
     ]
+    DISABLE_STL_WRAPPING = True
 
 if have_progressui == 0:
     SOURCES += [
         'progressui_null.cpp',
-    ]
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
-    SOURCES += [
-        'launchchild_osx.mm',
-        'progressui_osx.mm',
     ]
 
 DEFINES['NS_NO_XPCOM'] = True
@@ -64,9 +65,16 @@ LOCAL_INCLUDES += [
     '/xpcom/glue',
 ]
 
-
 DELAYLOAD_DLLS += [
     'crypt32.dll',
     'userenv.dll',
     'wsock32.dll',
 ]
+
+if CONFIG['_MSC_VER']:
+    WIN32_EXE_LDFLAGS += ['-ENTRY:wmainCRTStartup']
+
+if CONFIG['MOZ_UPDATE_CHANNEL'] in ('beta', 'release', 'esr'):
+    DEFINES['MAR_SIGNING_RELEASE_BETA'] = '1'
+elif CONFIG['MOZ_UPDATE_CHANNEL'] in ('nightly', 'aurora', 'nightly-elm', 'nightly-profiling', 'nightly-oak'):
+    DEFINES['MAR_SIGNING_AURORA_NIGHTLY'] = '1'

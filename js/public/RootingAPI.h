@@ -324,7 +324,7 @@ class TenuredHeap : public js::HeapBase<T>
                       "TenuredHeap<T> must be binary compatible with T.");
     }
     explicit TenuredHeap(T p) : bits(0) { setPtr(p); }
-    explicit TenuredHeap(const TenuredHeap<T> &p) : bits(0) { setPtr(p.ptr); }
+    explicit TenuredHeap(const TenuredHeap<T> &p) : bits(0) { setPtr(p.getPtr()); }
 
     bool operator==(const TenuredHeap<T> &other) { return bits == other.bits; }
     bool operator!=(const TenuredHeap<T> &other) { return bits != other.bits; }
@@ -1080,7 +1080,7 @@ class FakeMutableHandle : public js::MutableHandleBase<T>
 
 /*
  * Types for a variable that either should or shouldn't be rooted, depending on
- * the template parameter Rooted. Used for implementing functions that can
+ * the template parameter allowGC. Used for implementing functions that can
  * operate on either rooted or unrooted data.
  *
  * The toHandle() and toMutableHandle() functions are for calling functions

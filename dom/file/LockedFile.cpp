@@ -7,6 +7,7 @@
 #include "LockedFile.h"
 
 #include "nsIAppShell.h"
+#include "nsIDOMEvent.h"
 #include "nsIDOMFile.h"
 #include "nsIFileStorage.h"
 #include "nsISeekableStream.h"
@@ -15,7 +16,6 @@
 #include "nsEventDispatcher.h"
 #include "nsNetUtil.h"
 #include "nsDOMClassInfoID.h"
-#include "nsDOMEvent.h"
 #include "nsJSUtils.h"
 #include "nsStringStream.h"
 #include "nsWidgetsCID.h"
@@ -458,9 +458,9 @@ LockedFile::IsOpen() const
 }
 
 NS_IMETHODIMP
-LockedFile::GetFileHandle(nsIDOMFileHandle** aFileHandle)
+LockedFile::GetFileHandle(nsISupports** aFileHandle)
 {
-  nsCOMPtr<nsIDOMFileHandle> result(mFileHandle);
+  nsCOMPtr<nsISupports> result(mFileHandle);
   result.forget(aFileHandle);
   return NS_OK;
 }

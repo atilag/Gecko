@@ -14,6 +14,13 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/RefCountType.h"
 #include "mozilla/TypeTraits.h"
+#if defined(MOZILLA_INTERNAL_API)
+#include "nsXPCOM.h"
+#endif
+
+#if defined(MOZILLA_INTERNAL_API) && (defined(DEBUG) || defined(FORCE_BUILD_REFCNT_LOGGING))
+#define MOZ_REFCOUNTED_LEAK_CHECKING
+#endif
 
 namespace mozilla {
 
@@ -50,7 +57,29 @@ template<typename T> OutParamRef<T> byRef(RefPtr<T>&);
  */
 namespace detail {
 #ifdef DEBUG
-static const MozRefCountType DEAD = 0xffffdead;
+const MozRefCountType DEAD = 0xffffdead;
+#endif
+
+// When building code that gets compiled into Gecko, try to use the
+// trace-refcount leak logging facilities.
+#ifdef MOZ_REFCOUNTED_LEAK_CHECKING
+class RefCountLogger
+{
+  public:
+    static void logAddRef(const void* aPointer, MozRefCountType aRefCount,
+                          const char* aTypeName, uint32_t aInstanceSize)
+    {
+      MOZ_ASSERT(aRefCount != DEAD);
+      NS_LogAddRef(const_cast<void*>(aPointer), aRefCount, aTypeName, aInstanceSize);
+    }
+
+    static void logRelease(const void* aPointer, MozRefCountType aRefCount,
+                           const char* aTypeName)
+    {
+      MOZ_ASSERT(aRefCount != DEAD);
+      NS_LogRelease(const_cast<void*>(aPointer), aRefCount, aTypeName);
+    }
+};
 #endif
 
 // This is used WeakPtr.h as well as this file.
@@ -74,12 +103,23 @@ class RefCounted
   public:
     // Compatibility with nsRefPtr.
     void AddRef() const {
+      MOZ_ASSERT(int32_t(refCnt) >= 0);
       ++refCnt;
+#ifdef MOZ_REFCOUNTED_LEAK_CHECKING
+      detail::RefCountLogger::logAddRef(static_cast<const T*>(this), refCnt,
+                                        static_cast<const T*>(this)->typeName(),
+                                        static_cast<const T*>(this)->typeSize());
+#endif
     }
 
     void Release() const {
-      MOZ_ASSERT(refCnt > 0);
-      if (0 == --refCnt) {
+      MOZ_ASSERT(int32_t(refCnt) > 0);
+      --refCnt;
+#ifdef MOZ_REFCOUNTED_LEAK_CHECKING
+      detail::RefCountLogger::logRelease(static_cast<const T*>(this), refCnt,
+                                         static_cast<const T*>(this)->typeName());
+#endif
+      if (0 == refCnt) {
 #ifdef DEBUG
         refCnt = detail::DEAD;
 #endif
@@ -100,8 +140,18 @@ class RefCounted
     mutable typename Conditional<Atomicity == AtomicRefCount, Atomic<MozRefCountType>, MozRefCountType>::Type refCnt;
 };
 
+#ifdef MOZ_REFCOUNTED_LEAK_CHECKING
 #define MOZ_DECLARE_REFCOUNTED_TYPENAME(T) \
-  const char* typeName() const { return #T; }
+  const char* typeName() const { return #T; } \
+  size_t typeSize() const { return sizeof(*this); }
+
+#define MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(T) \
+  virtual const char* typeName() const { return #T; } \
+  virtual size_t typeSize() const { return sizeof(*this); }
+#else
+#define MOZ_DECLARE_REFCOUNTED_TYPENAME(T)
+#define MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(T)
+#endif
 
 }
 

@@ -7,7 +7,6 @@
 
 #include "mozilla/gfx/2D.h"
 #include "mozilla/layers/GrallocTextureClient.h"
-#include "mozilla/layers/CompositableClient.h"
 #include "mozilla/layers/CompositableForwarder.h"
 #include "mozilla/layers/ISurfaceAllocator.h"
 #include "mozilla/layers/ShadowLayerUtilsGralloc.h"
@@ -95,28 +94,16 @@ GrallocTextureClientOGL::GrallocTextureClientOGL(GrallocBufferActor* aActor,
                                                  gfx::IntSize aSize,
                                                  TextureFlags aFlags)
 : BufferTextureClient(nullptr, gfx::SurfaceFormat::UNKNOWN, aFlags)
-, mAllocator(nullptr)
 , mMappedBuffer(nullptr)
 {
   InitWith(aActor, aSize);
   MOZ_COUNT_CTOR(GrallocTextureClientOGL);
 }
 
-GrallocTextureClientOGL::GrallocTextureClientOGL(CompositableClient* aCompositable,
-                                                 gfx::SurfaceFormat aFormat,
-                                                 TextureFlags aFlags)
-: BufferTextureClient(aCompositable, aFormat, aFlags)
-, mAllocator(nullptr)
-, mMappedBuffer(nullptr)
-{
-  MOZ_COUNT_CTOR(GrallocTextureClientOGL);
-}
-
 GrallocTextureClientOGL::GrallocTextureClientOGL(ISurfaceAllocator* aAllocator,
                                                  gfx::SurfaceFormat aFormat,
                                                  TextureFlags aFlags)
-: BufferTextureClient(nullptr, aFormat, aFlags)
-, mAllocator(aAllocator)
+: BufferTextureClient(aAllocator, aFormat, aFlags)
 , mMappedBuffer(nullptr)
 {
   MOZ_COUNT_CTOR(GrallocTextureClientOGL);
@@ -196,6 +183,16 @@ GrallocTextureClientOGL::UpdateSurface(gfxASurface* aSurface)
   return true;
 }
 
+void
+GrallocTextureClientOGL::SetReleaseFenceHandle(FenceHandle aReleaseFenceHandle)
+{
+  if (mBufferLocked) {
+    mBufferLocked->SetReleaseFenceHandle(aReleaseFenceHandle);
+  } else {
+    mReleaseFenceHandle = aReleaseFenceHandle;
+  }
+}
+
 bool
 GrallocTextureClientOGL::Lock(OpenMode aMode)
 {
@@ -207,6 +204,20 @@ GrallocTextureClientOGL::Lock(OpenMode aMode)
   if (mMappedBuffer) {
     return true;
   }
+
+#if MOZ_WIDGET_GONK && ANDROID_VERSION >= 17
+  if (mReleaseFenceHandle.IsValid()) {
+    android::sp<Fence> fence = mReleaseFenceHandle.mFence;
+#if ANDROID_VERSION == 17
+    fence->waitForever(1000, "GrallocTextureClientOGL::Lock");
+    // 1000 is what Android uses. It is warning timeout ms.
+#else
+    fence->waitForever("GrallocTextureClientOGL::Lock");
+#endif
+    mReleaseFenceHandle = FenceHandle();
+  }
+#endif
+
   uint32_t usage = 0;
   if (aMode & OPEN_READ) {
     usage |= GRALLOC_USAGE_SW_READ_OFTEN;
@@ -431,15 +442,6 @@ GrallocTextureClientOGL::GetBufferSize() const
   // see Bug 908196
   MOZ_CRASH("This method should never be called.");
   return 0;
-}
-
-ISurfaceAllocator*
-GrallocTextureClientOGL::GetAllocator()
-{
-  MOZ_ASSERT(mCompositable || mAllocator);
-  return mCompositable ?
-         mCompositable->GetForwarder() :
-         mAllocator;
 }
 
 } // namesapace layers

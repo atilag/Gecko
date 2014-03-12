@@ -69,6 +69,7 @@ input {
   text-indent: 0;
   -moz-user-select: text;
   text-shadow: none;
+  overflow-clip-box: content-box;
 }
 
 input > .anonymous-div,
@@ -115,6 +116,7 @@ textarea {
   -moz-user-select: text;
   text-shadow: none;
   word-wrap: break-word;
+  overflow-clip-box: content-box;
 }
 
 textarea > scrollbar {
@@ -137,6 +139,7 @@ textarea::-moz-placeholder {
   ime-mode: inherit;
   resize: inherit;
   -moz-control-character-visibility: visible;
+  overflow-clip-box: inherit;
 }
 
 textarea > .anonymous-div.wrap,
@@ -415,6 +418,7 @@ input[type="file"] {
   display: inline-block;
   white-space: nowrap;
   overflow: hidden;
+  overflow-clip-box: padding-box;
   color: inherit;
 
   /* Revert rules which apply on all inputs. */
@@ -570,6 +574,7 @@ input[type="submit"] {
   white-space: pre;
   text-align: center;
   text-shadow: none;
+  overflow-clip-box: padding-box;
 }
 
 input[type="color"]:-moz-system-metric(color-picker-available) {
@@ -894,12 +899,9 @@ input[type=range]::-moz-range-thumb {
   -moz-user-select: none ! important;
 }
 
-input[type="number"] {
-  -moz-appearance: number-input;
-  /* Has to revert some properties applied by the generic input rule. */
-  -moz-binding: none;
-  width: 149px; /* to match type=text */
-}
+/* As a temporary workaround until bug 677302 the rule for input[type=number]
+ * has moved to number-control.css
+ */
 
 input[type=number]::-moz-number-wrapper {
   /* Prevent styling that would change the type of frame we construct. */

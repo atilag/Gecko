@@ -9,7 +9,7 @@ const promise = require("sdk/core/promise");
 const IOService = Cc["@mozilla.org/network/io-service;1"]
   .getService(Ci.nsIIOService);
 const {Spectrum} = require("devtools/shared/widgets/Spectrum");
-const EventEmitter = require("devtools/shared/event-emitter");
+const EventEmitter = require("devtools/toolkit/event-emitter");
 const {colorUtils} = require("devtools/css-color");
 const Heritage = require("sdk/core/heritage");
 const {CSSTransformPreviewer} = require("devtools/shared/widgets/CSSTransformPreviewer");
@@ -741,6 +741,40 @@ Tooltip.prototype = {
           def.resolve();
         }
       });
+    } else {
+      def.reject();
+    }
+
+    return def.promise;
+  },
+
+  /**
+   * Set the content of the tooltip to display a font family preview.
+   * This is based on Lea Verou's Dablet. See https://github.com/LeaVerou/dabblet
+   * for more info.
+   *
+   * @param {String} font
+   *        The font family value.
+   */
+  setFontFamilyContent: function(font) {
+    let def = promise.defer();
+
+    if (font) {
+      // Main container
+      let vbox = this.doc.createElement("vbox");
+      vbox.setAttribute("flex", "1");
+
+      // Display the font family previewer
+      let previewer = this.doc.createElement("description");
+      previewer.setAttribute("flex", "1");
+      previewer.style.fontFamily = font;
+      previewer.classList.add("devtools-tooltip-font-previewer-text");
+      previewer.textContent = "(ABCabc123&@%)";
+      vbox.appendChild(previewer);
+
+      this.content = vbox;
+
+      def.resolve();
     } else {
       def.reject();
     }

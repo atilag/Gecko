@@ -16,8 +16,8 @@
 #include "mozilla/mozalloc.h"           // for operator delete
 #include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsDebug.h"                    // for NS_ASSERTION
+#include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 #include "nsRegion.h"                   // for nsIntRegion
-#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
 
 namespace mozilla {
 namespace layers {
@@ -33,17 +33,12 @@ public:
   ClientCanvasLayer(ClientLayerManager* aLayerManager) :
     CopyableCanvasLayer(aLayerManager,
                         static_cast<ClientLayer*>(MOZ_THIS_IN_INITIALIZER_LIST()))
+    , mTextureSurface(nullptr)
+    , mFactory(nullptr)
   {
     MOZ_COUNT_CTOR(ClientCanvasLayer);
   }
-  virtual ~ClientCanvasLayer()
-  {
-    MOZ_COUNT_DTOR(ClientCanvasLayer);
-    if (mCanvasClient) {
-      mCanvasClient->OnDetach();
-      mCanvasClient = nullptr;
-    }
-  }
+  virtual ~ClientCanvasLayer();
 
   virtual void SetVisibleRegion(const nsIntRegion& aRegion)
   {
@@ -55,6 +50,13 @@ public:
   virtual void Initialize(const Data& aData);
 
   virtual void RenderLayer();
+
+  virtual void ClearCachedResources()
+  {
+    if (mCanvasClient) {
+      mCanvasClient->Clear();
+    }
+  }
 
   virtual void FillSpecificAttributes(SpecificLayerAttributes& aAttrs)
   {
@@ -89,6 +91,9 @@ protected:
   }
 
   RefPtr<CanvasClient> mCanvasClient;
+
+  gfx::SharedSurface* mTextureSurface;
+  gfx::SurfaceFactory* mFactory;
 
   friend class DeprecatedCanvasClient2D;
   friend class CanvasClient2D;

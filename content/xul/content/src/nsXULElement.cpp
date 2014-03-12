@@ -38,7 +38,7 @@
 #include "nsFocusManager.h"
 #include "nsHTMLStyleSheet.h"
 #include "nsIJSRuntimeService.h"
-#include "nsINameSpaceManager.h"
+#include "nsNameSpaceManager.h"
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
 #include "nsIPresShell.h"
@@ -58,7 +58,7 @@
 #include "nsIXULTemplateBuilder.h"
 #include "nsLayoutCID.h"
 #include "nsContentCID.h"
-#include "nsDOMEvent.h"
+#include "mozilla/dom/Event.h"
 #include "nsRDFCID.h"
 #include "nsStyleConsts.h"
 #include "nsXPIDLString.h"
@@ -73,8 +73,8 @@
 #include "nsIListBoxObject.h"
 #include "nsContentUtils.h"
 #include "nsContentList.h"
+#include "mozilla/InternalMutationEvent.h"
 #include "mozilla/MouseEvents.h"
-#include "mozilla/MutationEvent.h"
 #include "nsAsyncDOMEvent.h"
 #include "nsIDOMMutationEvent.h"
 #include "nsPIDOMWindow.h"
@@ -1185,7 +1185,7 @@ nsXULElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
                 // handling.
                 nsCOMPtr<nsIDOMEvent> domEvent = aVisitor.mDOMEvent;
                 while (domEvent) {
-                    nsDOMEvent* event = domEvent->InternalDOMEvent();
+                    Event* event = domEvent->InternalDOMEvent();
                     NS_ENSURE_STATE(!SameCOMIdentity(event->GetOriginalTarget(),
                                                      commandContent));
                     nsCOMPtr<nsIDOMXULCommandEvent> commandEvent =
@@ -2643,8 +2643,7 @@ nsXULPrototypeScript::Compile(const char16_t* aText,
     // Ok, compile it to create a prototype script object!
     NS_ENSURE_TRUE(JSVersion(mLangVersion) != JSVERSION_UNKNOWN, NS_OK);
     JS::CompileOptions options(cx);
-    options.setPrincipals(nsJSPrincipals::get(aDocument->NodePrincipal()))
-           .setFileAndLine(urlspec.get(), aLineNo)
+    options.setFileAndLine(urlspec.get(), aLineNo)
            .setVersion(JSVersion(mLangVersion));
     // If the script was inline, tell the JS parser to save source for
     // Function.prototype.toSource(). If it's out of line, we retrieve the

@@ -70,6 +70,18 @@ class HTMLVideoElement;
 namespace layers {
 class Layer;
 }
+}
+
+namespace mozilla {
+
+struct DisplayPortPropertyData {
+  DisplayPortPropertyData(const nsRect& aRect, uint32_t aPriority)
+    : mRect(aRect)
+    , mPriority(aPriority)
+  {}
+  nsRect mRect;
+  uint32_t mPriority;
+};
 
 template <class AnimationsOrTransitions>
 extern AnimationsOrTransitions* HasAnimationOrTransition(nsIContent* aContent,
@@ -1515,6 +1527,31 @@ public:
    * popup frame or the root prescontext's root frame.
    */
   static nsIFrame* GetDisplayRootFrame(nsIFrame* aFrame);
+
+  /**
+   * Get the reference frame that would be used when constructing a
+   * display item for this frame.  (Note, however, that
+   * nsDisplayTransform use the reference frame appropriate for their
+   * GetTransformRootFrame(), rather than using their own frame as a
+   * reference frame.)
+   *
+   * This duplicates some of the logic of GetDisplayRootFrame above and
+   * of nsDisplayListBuilder::FindReferenceFrameFor.
+   *
+   * If you have an nsDisplayListBuilder, you should get the reference
+   * frame from it instead of calling this.
+   */
+  static nsIFrame* GetReferenceFrame(nsIFrame* aFrame);
+
+  /**
+   * Get the parent of this frame, except if that parent is part of a
+   * preserve-3d hierarchy, get the parent of the root of the
+   * preserve-3d hierarchy.
+   *
+   * (This is used as the starting point for reference frame computation
+   * for nsDisplayTransform display items.)
+   */
+  static nsIFrame* GetTransformRootFrame(nsIFrame* aFrame);
 
   /**
    * Get textrun construction flags determined by a given style; in particular

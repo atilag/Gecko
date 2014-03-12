@@ -98,27 +98,20 @@ AppTrustDomain::FindPotentialIssuers(const SECItem* encodedIssuerName,
 
   results = CERT_CreateSubjectCertList(nullptr, CERT_GetDefaultCertDB(),
                                        encodedIssuerName, time, true);
-  if (!results) {
-    // NSS sometimes returns this unhelpful error code upon failing to find any
-    // candidate certificates.
-    if (PR_GetError() == SEC_ERROR_BAD_DATABASE) {
-      PR_SetError(SEC_ERROR_UNKNOWN_ISSUER, 0);
-    }
-    return SECFailure;
-  }
-
   return SECSuccess;
 }
 
 SECStatus
 AppTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
+                             SECOidTag policy,
                              const CERTCertificate* candidateCert,
                      /*out*/ TrustLevel* trustLevel)
 {
+  MOZ_ASSERT(policy == SEC_OID_X509_ANY_POLICY);
   MOZ_ASSERT(candidateCert);
   MOZ_ASSERT(trustLevel);
   MOZ_ASSERT(mTrustedRoot);
-  if (!candidateCert || !trustLevel) {
+  if (!candidateCert || !trustLevel || policy != SEC_OID_X509_ANY_POLICY) {
     PR_SetError(SEC_ERROR_INVALID_ARGS, 0);
     return SECFailure;
   }

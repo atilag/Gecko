@@ -1438,7 +1438,7 @@ StackBaseShape::hash(const StackBaseShape *base)
 StackBaseShape::match(UnownedBaseShape *key, const StackBaseShape *lookup)
 {
     return key->flags == lookup->flags
-        && key->clasp == lookup->clasp
+        && key->clasp_ == lookup->clasp
         && key->parent == lookup->parent
         && key->metadata == lookup->metadata
         && key->rawGetter == lookup->rawGetter
@@ -1659,6 +1659,9 @@ class InitialShapeSetRef : public BufferableRef
 void
 JSCompartment::checkInitialShapesTableAfterMovingGC()
 {
+    if (!initialShapes.initialized())
+        return;
+
     /*
      * Assert that the postbarriers have worked and that nothing is left in
      * initialShapes that points into the nursery, and that the hash table

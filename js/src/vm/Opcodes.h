@@ -100,8 +100,8 @@
     /* spreadcall variant of JSOP_EVAL */ \
     macro(JSOP_SPREADEVAL,43, "spreadeval", NULL,         1,  3,  1, JOF_BYTE|JOF_INVOKE|JOF_TYPESET) \
     \
-    /* Pop N values, preserving top value. */ \
-    macro(JSOP_POPNV,     44, "popnv",      NULL,         3, -1,  1,  JOF_UINT16) \
+    /* Dup the Nth value from the top. */ \
+    macro(JSOP_DUPAT,     44, "dupat",      NULL,         4,  0,  1,  JOF_UINT24) \
     \
     macro(JSOP_UNUSED45,  45, "unused45",   NULL,         1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED46,  46, "unused46",   NULL,         1,  0,  0,  JOF_BYTE) \
@@ -477,9 +477,12 @@
     macro(JSOP_IMPLICITTHIS,  226, "implicitthis", "",    5,  0,  1,  JOF_ATOM) \
     \
     /*
-     * This opcode is the target of the entry jump for some loop. The uint8 argument
-     * is the loop depth. This value starts at 1 and is just a hint: deeply
-     * nested loops all have the same value.
+     * This opcode is the target of the entry jump for some loop. The uint8
+     * argument is a bitfield. The lower 7 bits of the argument indicate the
+     * loop depth. This value starts at 1 and is just a hint: deeply nested
+     * loops all have the same value.  The upper bit is set if Ion should be
+     * able to OSR at this point, which is true unless there is non-loop state
+     * on the stack.
      */ \
     macro(JSOP_LOOPENTRY,     227, "loopentry",    NULL,  2,  0,  0,  JOF_UINT8)
 

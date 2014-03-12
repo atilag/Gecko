@@ -17,7 +17,7 @@
 #include "gfxColor.h"
 #include "gfxContext.h"
 #include "gfxUtils.h"
-#include "gfxPlatform.h"
+#include "gfxPrefs.h"
 #include "nsIWidget.h"
 
 #include "GLContext.h"
@@ -421,7 +421,7 @@ public:
 
 class DebugGLTextureData : public DebugGLData {
 public:
-    DebugGLTextureData(GLContext* cx, void* layerRef, GLuint target, GLenum name, gfxImageSurface* img)
+    DebugGLTextureData(GLContext* cx, void* layerRef, GLuint target, GLenum name, DataSourceSurface* img)
         : DebugGLData(DebugGLData::TextureData, cx),
           mLayerRef(layerRef),
           mTarget(target),
@@ -431,7 +431,7 @@ public:
 
     void *GetLayerRef() const { return mLayerRef; }
     GLuint GetName() const { return mName; }
-    gfxImageSurface* GetImage() const { return mImage; }
+    DataSourceSurface* GetImage() const { return mImage; }
     GLenum GetTextureTarget() const { return mTarget; }
 
     virtual bool Write() {
@@ -449,13 +449,13 @@ public:
         packet.dataFormat = LOCAL_GL_RGBA;
 
         if (mImage) {
-            packet.width = mImage->Width();
-            packet.height = mImage->Height();
+            packet.width = mImage->GetSize().width;
+            packet.height = mImage->GetSize().height;
             packet.stride = mImage->Stride();
-            packet.dataSize = mImage->GetDataSize();
+            packet.dataSize = mImage->GetSize().height * mImage->Stride();
 
-            dataptr = (char*) mImage->Data();
-            datasize = mImage->GetDataSize();
+            dataptr = (char*) mImage->GetData();
+            datasize = packet.dataSize;
 
             compresseddata = std::auto_ptr<char>((char*) moz_malloc(LZ4::maxCompressedSize(datasize)));
             if (compresseddata.get()) {
@@ -497,7 +497,7 @@ protected:
     void* mLayerRef;
     GLenum mTarget;
     GLuint mName;
-    nsRefPtr<gfxImageSurface> mImage;
+    RefPtr<DataSourceSurface> mImage;
 };
 
 class DebugGLColorData : public DebugGLData {
@@ -637,7 +637,7 @@ NS_IMPL_ISUPPORTS1(DebugDataSender, nsIRunnable);
 void
 LayerScope::CreateServerSocket()
 {
-    if (!Preferences::GetBool("gfx.layerscope.enabled", false)) {
+    if (!gfxPrefs::LayerScopeEnabled()) {
         return;
     }
 
@@ -722,9 +722,9 @@ SendTextureSource(GLContext* aGLContext,
 
     // By sending 0 to ReadTextureImage rely upon aSource->BindTexture binding
     // texture correctly. textureId is used for tracking in DebugGLTextureData.
-    nsRefPtr<gfxImageSurface> img =
+    RefPtr<DataSourceSurface> img =
         aGLContext->ReadTexImageHelper()->ReadTexImage(0, textureTarget,
-                                                       gfxIntSize(size.width, size.height),
+                                                       size,
                                                        shaderConfig, aFlipY);
 
     gLayerScopeWebSocketManager->AppendDebugData(
@@ -814,7 +814,7 @@ LayerScopeWebSocketManager::LayerScopeWebSocketManager()
     NS_NewThread(getter_AddRefs(mDebugSenderThread));
 
     mServerSocket = do_CreateInstance(NS_SERVERSOCKET_CONTRACTID);
-    int port = Preferences::GetInt("gfx.layerscope.port", 23456);
+    int port = gfxPrefs::LayerScopePort();
     mServerSocket->Init(port, false, -1);
     mServerSocket->AsyncListen(new DebugListener);
 }

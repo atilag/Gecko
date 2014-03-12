@@ -35,6 +35,7 @@
 #include "nsIScriptTimeoutHandler.h"
 #include "nsIController.h"
 #include "nsScriptNameSpaceManager.h"
+#include "nsWindowMemoryReporter.h"
 
 // Helper Classes
 #include "nsJSUtils.h"
@@ -59,6 +60,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/Debug.h"
 #include "mozilla/MouseEvents.h"
+#include "AudioChannelService.h"
 
 // Interfaces Needed
 #include "nsIFrame.h"
@@ -207,6 +209,7 @@
 #include "TimeChangeObserver.h"
 #include "mozilla/dom/AudioContext.h"
 #include "mozilla/dom/BrowserElementDictionariesBinding.h"
+#include "mozilla/dom/Console.h"
 #include "mozilla/dom/FunctionBinding.h"
 #include "mozilla/dom/WindowBinding.h"
 #include "nsITabChild.h"
@@ -562,6 +565,7 @@ nsPIDOMWindow::nsPIDOMWindow(nsPIDOMWindow *aOuterWindow)
   mMayHavePointerEnterLeaveEventListener(false),
   mIsModalContentWindow(false),
   mIsActive(false), mIsBackground(false),
+  mAudioMuted(false), mAudioVolume(1.0),
   mInnerWindow(nullptr), mOuterWindow(aOuterWindow),
   // Make sure no actual window ends up with mWindowID == 0
   mWindowID(++gNextWindowID), mHasNotifiedGlobalCreated(false),
@@ -1439,6 +1443,8 @@ nsGlobalWindow::CleanUp()
   mApplicationCache = nullptr;
   mIndexedDB = nullptr;
 
+  mConsole = nullptr;
+
   mPerformance = nullptr;
 
 #ifdef MOZ_WEBSPEECH
@@ -1568,8 +1574,11 @@ nsGlobalWindow::FreeInnerObjects()
     mDocBaseURI = mDoc->GetDocBaseURI();
 
     while (mDoc->EventHandlingSuppressed()) {
-      mDoc->UnsuppressEventHandlingAndFireEvents(false);
+      mDoc->UnsuppressEventHandlingAndFireEvents(nsIDocument::eEvents, false);
     }
+
+    // Note: we don't have to worry about eAnimationsOnly suppressions because
+    // they won't leak.
   }
 
   // Remove our reference to the document and the document principal.
@@ -1750,6 +1759,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindow)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mStatusbar)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mScrollbars)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCrypto)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mConsole)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindow)
@@ -1807,6 +1817,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindow)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mStatusbar)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mScrollbars)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mCrypto)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mConsole)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 #ifdef DEBUG
@@ -2328,6 +2339,10 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
 
   nsCxPusher cxPusher;
   cxPusher.Push(cx);
+
+  // Check if we're near the stack limit before we get anywhere near the
+  // transplanting code.
+  JS_CHECK_RECURSION(cx, return NS_ERROR_FAILURE);
 
   nsCOMPtr<WindowStateHolder> wsh = do_QueryInterface(aState);
   NS_ASSERTION(!aState || wsh, "What kind of weird state are you giving me here?");
@@ -3566,6 +3581,100 @@ nsPIDOMWindow::CreatePerformanceObjectIfNeeded()
   }
   if (timing) {
     mPerformance = new nsPerformance(this, timing, timedChannel);
+  }
+}
+
+bool
+nsPIDOMWindow::GetAudioMuted() const
+{
+  if (!IsInnerWindow()) {
+    return mInnerWindow->GetAudioMuted();
+  }
+
+  return mAudioMuted;
+}
+
+void
+nsPIDOMWindow::SetAudioMuted(bool aMuted)
+{
+  if (!IsInnerWindow()) {
+    mInnerWindow->SetAudioMuted(aMuted);
+    return;
+  }
+
+  if (mAudioMuted == aMuted) {
+    return;
+  }
+
+  mAudioMuted = aMuted;
+  RefreshMediaElements();
+}
+
+float
+nsPIDOMWindow::GetAudioVolume() const
+{
+  if (!IsInnerWindow()) {
+    return mInnerWindow->GetAudioVolume();
+  }
+
+  return mAudioVolume;
+}
+
+nsresult
+nsPIDOMWindow::SetAudioVolume(float aVolume)
+{
+  if (!IsInnerWindow()) {
+    return mInnerWindow->SetAudioVolume(aVolume);
+  }
+
+  if (aVolume < 0.0) {
+    return NS_ERROR_DOM_INDEX_SIZE_ERR;
+  }
+
+  if (mAudioVolume == aVolume) {
+    return NS_OK;
+  }
+
+  mAudioVolume = aVolume;
+  RefreshMediaElements();
+  return NS_OK;
+}
+
+float
+nsPIDOMWindow::GetAudioGlobalVolume()
+{
+  float globalVolume = 1.0;
+  nsCOMPtr<nsPIDOMWindow> window = this;
+
+  do {
+    if (window->GetAudioMuted()) {
+      return 0;
+    }
+
+    globalVolume *= window->GetAudioVolume();
+
+    nsCOMPtr<nsIDOMWindow> win;
+    window->GetParent(getter_AddRefs(win));
+    if (window == win) {
+      break;
+    }
+
+    window = do_QueryInterface(win);
+
+    // If there is not parent, or we are the toplevel or the volume is
+    // already 0.0, we don't continue.
+  } while (window && window != this && globalVolume);
+
+  return globalVolume;
+}
+
+void
+nsPIDOMWindow::RefreshMediaElements()
+{
+  nsRefPtr<AudioChannelService> service =
+    AudioChannelService::GetAudioChannelService();
+  if (service) {
+    service->RefreshAgentsVolume(this);
   }
 }
 
@@ -5564,7 +5673,7 @@ bool
 nsGlobalWindow::DispatchResizeEvent(const nsIntSize& aSize)
 {
   ErrorResult res;
-  nsRefPtr<nsDOMEvent> domEvent =
+  nsRefPtr<Event> domEvent =
     mDoc->CreateEvent(NS_LITERAL_STRING("CustomEvent"), res);
   if (res.Failed()) {
     return false;
@@ -7521,8 +7630,6 @@ class PostMessageEvent : public nsRunnable
                      bool aTrustedCaller)
     : mSource(aSource),
       mCallerOrigin(aCallerOrigin),
-      mMessage(nullptr),
-      mMessageLen(0),
       mTargetWindow(aTargetWindow),
       mProvidedPrincipal(aProvidedPrincipal),
       mTrustedCaller(aTrustedCaller)
@@ -7532,14 +7639,12 @@ class PostMessageEvent : public nsRunnable
     
     ~PostMessageEvent()
     {
-      NS_ASSERTION(!mMessage, "Message should have been deserialized!");
       MOZ_COUNT_DTOR(PostMessageEvent);
     }
 
-    void SetJSData(JSAutoStructuredCloneBuffer& aBuffer)
+    JSAutoStructuredCloneBuffer& Buffer()
     {
-      NS_ASSERTION(!mMessage && mMessageLen == 0, "Don't call twice!");
-      aBuffer.steal(&mMessage, &mMessageLen);
+      return mBuffer;
     }
 
     bool StoreISupports(nsISupports* aSupports)
@@ -7549,10 +7654,9 @@ class PostMessageEvent : public nsRunnable
     }
 
   private:
+    JSAutoStructuredCloneBuffer mBuffer;
     nsRefPtr<nsGlobalWindow> mSource;
     nsString mCallerOrigin;
-    uint64_t* mMessage;
-    size_t mMessageLen;
     nsRefPtr<nsGlobalWindow> mTargetWindow;
     nsCOMPtr<nsIPrincipal> mProvidedPrincipal;
     bool mTrustedCaller;
@@ -7700,12 +7804,6 @@ PostMessageEvent::Run()
   // If we bailed before this point we're going to leak mMessage, but
   // that's probably better than crashing.
 
-  // Ensure that the buffer is freed even if we fail to post the message
-  JSAutoStructuredCloneBuffer buffer;
-  buffer.adopt(mMessage, mMessageLen);
-  mMessage = nullptr;
-  mMessageLen = 0;
-
   nsRefPtr<nsGlobalWindow> targetWindow;
   if (mTargetWindow->IsClosedOrClosing() ||
       !(targetWindow = mTargetWindow->GetCurrentInnerWindowInternal()) ||
@@ -7748,7 +7846,7 @@ PostMessageEvent::Run()
     scInfo.event = this;
     scInfo.window = targetWindow;
 
-    if (!buffer.read(cx, &messageData, &kPostMessageCallbacks, &scInfo)) {
+    if (!mBuffer.read(cx, &messageData, &kPostMessageCallbacks, &scInfo)) {
       return NS_ERROR_DOM_DATA_CLONE_ERR;
     }
   }
@@ -7929,7 +8027,6 @@ nsGlobalWindow::PostMessageMoz(JSContext* aCx, JS::Handle<JS::Value> aMessage,
 
   // We *must* clone the data here, or the JS::Value could be modified
   // by script
-  JSAutoStructuredCloneBuffer buffer;
   StructuredCloneInfo scInfo;
   scInfo.event = event;
   scInfo.window = this;
@@ -7938,13 +8035,11 @@ nsGlobalWindow::PostMessageMoz(JSContext* aCx, JS::Handle<JS::Value> aMessage,
   JS::Rooted<JS::Value> message(aCx, aMessage);
   JS::Rooted<JS::Value> transfer(aCx, aTransfer);
   if (NS_FAILED(callerPrin->Subsumes(principal, &scInfo.subsumes)) ||
-      !buffer.write(aCx, message, transfer, &kPostMessageCallbacks,
-                    &scInfo)) {
+      !event->Buffer().write(aCx, message, transfer, &kPostMessageCallbacks,
+                             &scInfo)) {
     aError.Throw(NS_ERROR_DOM_DATA_CLONE_ERR);
     return;
   }
-
-  event->SetJSData(buffer);
 
   aError = NS_DispatchToCurrentThread(event);
 }
@@ -8282,7 +8377,7 @@ nsGlobalWindow::EnterModalState()
 
     mSuspendedDoc = topDoc;
     if (mSuspendedDoc) {
-      mSuspendedDoc->SuppressEventHandling();
+      mSuspendedDoc->SuppressEventHandling(nsIDocument::eAnimationsOnly);
     }
   }
   topWin->mModalStateDepth++;
@@ -8379,7 +8474,8 @@ nsGlobalWindow::LeaveModalState()
 
     if (mSuspendedDoc) {
       nsCOMPtr<nsIDocument> currentDoc = topWin->GetExtantDoc();
-      mSuspendedDoc->UnsuppressEventHandlingAndFireEvents(currentDoc == mSuspendedDoc);
+      mSuspendedDoc->UnsuppressEventHandlingAndFireEvents(nsIDocument::eAnimationsOnly,
+                                                          currentDoc == mSuspendedDoc);
       mSuspendedDoc = nullptr;
     }
   }
@@ -10536,9 +10632,9 @@ nsGlobalWindow::ShowSlowScriptDialog()
   NS_ENSURE_TRUE(prompt, KillSlowScript);
 
   // Check if we should offer the option to debug
-  JS::Rooted<JSScript*> script(cx);
+  JS::AutoFilename filename;
   unsigned lineno;
-  bool hasFrame = JS_DescribeScriptedCaller(cx, &script, &lineno);
+  bool hasFrame = JS::DescribeScriptedCaller(cx, &filename, &lineno);
 
   bool debugPossible = hasFrame && js::CanCallContextDebugHandler(cx);
 #ifdef MOZ_JSDEBUGGER
@@ -10623,23 +10719,20 @@ nsGlobalWindow::ShowSlowScriptDialog()
   }
 
   // Append file and line number information, if available
-  if (script) {
-    const char *filename = JS_GetScriptFilename(cx, script);
-    if (filename) {
-      nsXPIDLString scriptLocation;
-      NS_ConvertUTF8toUTF16 filenameUTF16(filename);
-      const char16_t *formatParams[] = { filenameUTF16.get() };
-      rv = nsContentUtils::FormatLocalizedString(nsContentUtils::eDOM_PROPERTIES,
-                                                 "KillScriptLocation",
-                                                 formatParams,
-                                                 scriptLocation);
+  if (filename.get()) {
+    nsXPIDLString scriptLocation;
+    NS_ConvertUTF8toUTF16 filenameUTF16(filename.get());
+    const char16_t *formatParams[] = { filenameUTF16.get() };
+    rv = nsContentUtils::FormatLocalizedString(nsContentUtils::eDOM_PROPERTIES,
+                                               "KillScriptLocation",
+                                               formatParams,
+                                               scriptLocation);
 
-      if (NS_SUCCEEDED(rv) && scriptLocation) {
-        msg.AppendLiteral("\n\n");
-        msg.Append(scriptLocation);
-        msg.Append(':');
-        msg.AppendInt(lineno);
-      }
+    if (NS_SUCCEEDED(rv) && scriptLocation) {
+      msg.AppendLiteral("\n\n");
+      msg.Append(scriptLocation);
+      msg.Append(':');
+      msg.AppendInt(lineno);
     }
   }
 
@@ -10655,14 +10748,14 @@ nsGlobalWindow::ShowSlowScriptDialog()
 
   // Null out the operation callback while we're re-entering JS here.
   JSRuntime* rt = JS_GetRuntime(cx);
-  JSOperationCallback old = JS_SetOperationCallback(rt, nullptr);
+  JSInterruptCallback old = JS_SetInterruptCallback(rt, nullptr);
 
   // Open the dialog.
   rv = prompt->ConfirmEx(title, msg, buttonFlags, waitButton, stopButton,
                          debugButton, neverShowDlg, &neverShowDlgChk,
                          &buttonPressed);
 
-  JS_SetOperationCallback(rt, old);
+  JS_SetInterruptCallback(rt, old);
 
   if (NS_SUCCEEDED(rv) && (buttonPressed == 0)) {
     return neverShowDlgChk ? AlwaysContinueSlowScript : ContinueSlowScript;
@@ -13053,7 +13146,7 @@ NS_IMETHODIMP
 nsGlobalChromeWindow::BeginWindowMove(nsIDOMEvent *aMouseDownEvent, nsIDOMElement* aPanel)
 {
   NS_ENSURE_TRUE(aMouseDownEvent, NS_ERROR_FAILURE);
-  nsDOMEvent* mouseDownEvent = aMouseDownEvent->InternalDOMEvent();
+  Event* mouseDownEvent = aMouseDownEvent->InternalDOMEvent();
   NS_ENSURE_TRUE(mouseDownEvent, NS_ERROR_FAILURE);
 
   nsCOMPtr<Element> panel = do_QueryInterface(aPanel);
@@ -13065,7 +13158,7 @@ nsGlobalChromeWindow::BeginWindowMove(nsIDOMEvent *aMouseDownEvent, nsIDOMElemen
 }
 
 void
-nsGlobalWindow::BeginWindowMove(nsDOMEvent& aMouseDownEvent, Element* aPanel,
+nsGlobalWindow::BeginWindowMove(Event& aMouseDownEvent, Element* aPanel,
                                 ErrorResult& aError)
 {
   nsCOMPtr<nsIWidget> widget;
@@ -13357,6 +13450,59 @@ nsGlobalWindow::SetHasAudioAvailableEventListeners()
   if (mDoc) {
     mDoc->NotifyAudioAvailableListener();
   }
+}
+
+NS_IMETHODIMP
+nsGlobalWindow::GetConsole(JSContext* aCx,
+                           JS::MutableHandle<JS::Value> aConsole)
+{
+  ErrorResult rv;
+  nsRefPtr<Console> console = GetConsole(rv);
+  if (rv.Failed()) {
+    return rv.ErrorCode();
+  }
+
+  JS::Rooted<JSObject*> thisObj(aCx, mJSObject);
+  if (!mJSObject) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  if (!JS_WrapObject(aCx, &thisObj) ||
+      !WrapNewBindingObject(aCx, thisObj, console, aConsole)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsGlobalWindow::SetConsole(JSContext* aCx, JS::Handle<JS::Value> aValue)
+{
+  JS::Rooted<JSObject*> thisObj(aCx, mJSObject);
+  if (!mJSObject) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  if (!JS_WrapObject(aCx, &thisObj) ||
+      !JS_DefineProperty(aCx, thisObj, "console", aValue,
+                         JS_PropertyStub, JS_StrictPropertyStub,
+                         JSPROP_ENUMERATE)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return NS_OK;
+}
+
+Console*
+nsGlobalWindow::GetConsole(ErrorResult& aRv)
+{
+  FORWARD_TO_INNER_OR_THROW(GetConsole, (aRv), aRv, nullptr);
+
+  if (!mConsole) {
+    mConsole = new Console(this);
+  }
+
+  return mConsole;
 }
 
 #ifdef MOZ_B2G

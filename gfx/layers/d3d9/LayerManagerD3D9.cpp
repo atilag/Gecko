@@ -15,7 +15,7 @@
 #include "nsIGfxInfo.h"
 #include "nsServiceManagerUtils.h"
 #include "gfxFailure.h"
-#include "mozilla/Preferences.h"
+#include "gfxPrefs.h"
 
 #include "gfxCrashReporterUtils.h"
 
@@ -41,7 +41,7 @@ LayerManagerD3D9::Initialize(bool force)
   ScopedGfxFeatureReporter reporter("D3D9 Layers", force);
 
   /* XXX: this preference and blacklist code should move out of the layer manager */
-  bool forceAccelerate = gfxPlatform::GetPrefLayersAccelerationForceEnabled();
+  bool forceAccelerate = gfxPrefs::LayersAccelerationForceEnabled();
 
   nsCOMPtr<nsIGfxInfo> gfxInfo = do_GetService("@mozilla.org/gfx/info;1");
   if (gfxInfo) {
@@ -260,6 +260,25 @@ LayerManagerD3D9::Render()
   device()->SetScissorRect(&r);
 
   static_cast<LayerD3D9*>(mRoot->ImplData())->RenderLayer();
+
+  if (!mRegionToClear.IsEmpty()) {
+    D3DRECT* rects = new D3DRECT[mRegionToClear.GetNumRects()];
+    nsIntRegionRectIterator iter(mRegionToClear);
+    const nsIntRect *r;
+    size_t i = 0;
+    while ((r = iter.Next())) {
+      rects[i].x1 = r->x;
+      rects[i].y1 = r->y;
+      rects[i].x2 = r->x + r->width;
+      rects[i].y2 = r->y + r->height;
+      i++;
+    }
+
+    device()->Clear(i, rects, D3DCLEAR_TARGET,
+                    0x00000000, 0, 0);
+
+    delete [] rects;
+  }
 
   device()->EndScene();
 

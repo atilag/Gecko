@@ -18,10 +18,10 @@
 #include "mozilla/dom/PermissionMessageUtils.h"
 #include "mozilla/LazyIdleThread.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/Scoped.h"
 #include "mozilla/Services.h"
 
 #include "nsAutoPtr.h"
-#include "nsDOMEvent.h"
 #include "nsServiceManagerUtils.h"
 #include "nsIFile.h"
 #include "nsIDirectoryEnumerator.h"
@@ -33,7 +33,6 @@
 #include "nsCycleCollectionParticipant.h"
 #include "nsIPrincipal.h"
 #include "nsJSUtils.h"
-#include "DictionaryHelpers.h"
 #include "nsContentUtils.h"
 #include "nsCxPusher.h"
 #include "nsXULAppAPI.h"
@@ -73,6 +72,10 @@ using namespace mozilla::dom::devicestorage;
 using namespace mozilla::ipc;
 
 #include "nsDirectoryServiceDefs.h"
+
+namespace mozilla {
+  MOZ_TYPE_SPECIFIC_SCOPED_POINTER_TEMPLATE(ScopedPRFileDesc, PRFileDesc, PR_Close);
+}
 
 StaticAutoPtr<DeviceStorageUsedSpaceCache>
   DeviceStorageUsedSpaceCache::sDeviceStorageUsedSpaceCache;
@@ -397,6 +400,8 @@ DeviceStorageTypeChecker::GetAccessForRequest(
     case DEVICE_STORAGE_REQUEST_WRITE:
     case DEVICE_STORAGE_REQUEST_DELETE:
     case DEVICE_STORAGE_REQUEST_FORMAT:
+    case DEVICE_STORAGE_REQUEST_MOUNT:
+    case DEVICE_STORAGE_REQUEST_UNMOUNT:
       aAccessResult.AssignLiteral("write");
       break;
     case DEVICE_STORAGE_REQUEST_CREATE:
@@ -933,14 +938,16 @@ DeviceStorageFile::AppendRelativePath(const nsAString& aPath) {
 nsresult
 DeviceStorageFile::CreateFileDescriptor(FileDescriptor& aFileDescriptor)
 {
-  PRFileDesc* fd;
+  ScopedPRFileDesc fd;
   nsresult rv = mFile->OpenNSPRFileDesc(PR_RDWR | PR_CREATE_FILE,
-                                        0660, &fd);
+                                        0660, &fd.rwget());
   NS_ENSURE_SUCCESS(rv, rv);
 
+  // NOTE: The FileDescriptor::PlatformHandleType constructor returns a dup of
+  //       the file descriptor, so we don't need the original fd after this.
+  //       Our scoped file descriptor will automatically close fd.
   aFileDescriptor =
     FileDescriptor::PlatformHandleType(PR_FileDesc2NativeHandle(fd));
-
   return NS_OK;
 }
 
@@ -1352,6 +1359,66 @@ DeviceStorageFile::DoFormat(nsAString& aStatus)
 }
 
 void
+DeviceStorageFile::DoMount(nsAString& aStatus)
+{
+  DeviceStorageTypeChecker* typeChecker
+    = DeviceStorageTypeChecker::CreateOrGet();
+  if (!typeChecker) {
+    return;
+  }
+  if (!typeChecker->IsVolumeBased(mStorageType)) {
+    aStatus.AssignLiteral("notVolume");
+    return;
+  }
+#ifdef MOZ_WIDGET_GONK
+  nsCOMPtr<nsIVolumeService> vs = do_GetService(NS_VOLUMESERVICE_CONTRACTID);
+  NS_ENSURE_TRUE_VOID(vs);
+
+  nsCOMPtr<nsIVolume> vol;
+  nsresult rv = vs->GetVolumeByName(mStorageName, getter_AddRefs(vol));
+  NS_ENSURE_SUCCESS_VOID(rv);
+  if (!vol) {
+    return;
+  }
+
+  vol->Mount();
+
+  aStatus.AssignLiteral("mounting");
+#endif
+  return;
+}
+
+void
+DeviceStorageFile::DoUnmount(nsAString& aStatus)
+{
+  DeviceStorageTypeChecker* typeChecker
+    = DeviceStorageTypeChecker::CreateOrGet();
+  if (!typeChecker) {
+    return;
+  }
+  if (!typeChecker->IsVolumeBased(mStorageType)) {
+    aStatus.AssignLiteral("notVolume");
+    return;
+  }
+#ifdef MOZ_WIDGET_GONK
+  nsCOMPtr<nsIVolumeService> vs = do_GetService(NS_VOLUMESERVICE_CONTRACTID);
+  NS_ENSURE_TRUE_VOID(vs);
+
+  nsCOMPtr<nsIVolume> vol;
+  nsresult rv = vs->GetVolumeByName(mStorageName, getter_AddRefs(vol));
+  NS_ENSURE_SUCCESS_VOID(rv);
+  if (!vol) {
+    return;
+  }
+
+  vol->Unmount();
+
+  aStatus.AssignLiteral("unmounting");
+#endif
+  return;
+}
+
+void
 DeviceStorageFile::GetStatus(nsAString& aStatus)
 {
   DeviceStorageTypeChecker* typeChecker
@@ -1574,10 +1641,12 @@ public:
 
   ~DeviceStorageCursorRequest() {}
 
-  bool Recv__delete__(const bool& allow)
+  bool Recv__delete__(const bool& allow,
+                      const InfallibleTArray<PermissionChoice>& choices)
   {
+    MOZ_ASSERT(choices.IsEmpty(), "DeviceStorageCursor doesn't support permission choice");
     if (allow) {
-      Allow();
+      Allow(JS::UndefinedHandleValue);
     }
     else {
       Cancel();
@@ -1813,7 +1882,11 @@ nsDOMDeviceStorageCursor::GetTypes(nsIArray** aTypes)
     DeviceStorageTypeChecker::GetPermissionForType(mFile->mStorageType, type);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  return CreatePermissionArray(type, NS_LITERAL_CSTRING("read"), aTypes);
+  nsTArray<nsString> emptyOptions;
+  return CreatePermissionArray(type,
+                               NS_LITERAL_CSTRING("read"),
+                               emptyOptions,
+                               aTypes);
 }
 
 NS_IMETHODIMP
@@ -1846,8 +1919,10 @@ nsDOMDeviceStorageCursor::Cancel()
 }
 
 NS_IMETHODIMP
-nsDOMDeviceStorageCursor::Allow()
+nsDOMDeviceStorageCursor::Allow(JS::HandleValue aChoices)
 {
+  MOZ_ASSERT(aChoices.isUndefined());
+
   if (!mFile->IsSafePath()) {
     nsCOMPtr<nsIRunnable> r
       = new PostErrorEvent(this, POST_ERROR_EVENT_PERMISSION_DENIED);
@@ -1897,10 +1972,13 @@ nsDOMDeviceStorageCursor::Continue(ErrorResult& aRv)
 }
 
 bool
-nsDOMDeviceStorageCursor::Recv__delete__(const bool& allow)
+nsDOMDeviceStorageCursor::Recv__delete__(const bool& allow,
+                                         const InfallibleTArray<PermissionChoice>& choices)
 {
+  MOZ_ASSERT(choices.IsEmpty(), "DeviceStorageCursor doesn't support permission choice");
+
   if (allow) {
-    Allow();
+    Allow(JS::UndefinedHandleValue);
   }
   else {
     Cancel();
@@ -2008,6 +2086,74 @@ public:
     nsString state = NS_LITERAL_STRING("unavailable");
     if (mFile) {
       mFile->DoFormat(state);
+    }
+
+    AutoJSContext cx;
+    JS::Rooted<JS::Value> result(cx,
+                                 StringToJsval(mRequest->GetOwner(), state));
+    mRequest->FireSuccess(result);
+    mRequest = nullptr;
+    return NS_OK;
+  }
+
+private:
+  nsRefPtr<DeviceStorageFile> mFile;
+  nsRefPtr<DOMRequest> mRequest;
+};
+
+class PostMountResultEvent : public nsRunnable
+{
+public:
+  PostMountResultEvent(DeviceStorageFile *aFile, DOMRequest* aRequest)
+    : mFile(aFile)
+    , mRequest(aRequest)
+  {
+    MOZ_ASSERT(mRequest);
+  }
+
+  ~PostMountResultEvent() {}
+
+  NS_IMETHOD Run()
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    nsString state = NS_LITERAL_STRING("unavailable");
+    if (mFile) {
+      mFile->DoMount(state);
+    }
+
+    AutoJSContext cx;
+    JS::Rooted<JS::Value> result(cx,
+                                 StringToJsval(mRequest->GetOwner(), state));
+    mRequest->FireSuccess(result);
+    mRequest = nullptr;
+    return NS_OK;
+  }
+
+private:
+  nsRefPtr<DeviceStorageFile> mFile;
+  nsRefPtr<DOMRequest> mRequest;
+};
+
+class PostUnmountResultEvent : public nsRunnable
+{
+public:
+  PostUnmountResultEvent(DeviceStorageFile *aFile, DOMRequest* aRequest)
+    : mFile(aFile)
+    , mRequest(aRequest)
+  {
+    MOZ_ASSERT(mRequest);
+  }
+
+  ~PostUnmountResultEvent() {}
+
+  NS_IMETHOD Run()
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    nsString state = NS_LITERAL_STRING("unavailable");
+    if (mFile) {
+      mFile->DoUnmount(state);
     }
 
     AutoJSContext cx;
@@ -2422,7 +2568,7 @@ public:
     MOZ_ASSERT(NS_IsMainThread());
 
     if (mozilla::Preferences::GetBool("device.storage.prompt.testing", false)) {
-      Allow();
+      Allow(JS::UndefinedHandleValue);
       return NS_OK;
     }
 
@@ -2453,7 +2599,8 @@ public:
         return rv;
       }
       nsTArray<PermissionRequest> permArray;
-      permArray.AppendElement(PermissionRequest(type, access));
+      nsTArray<nsString> emptyOptions;
+      permArray.AppendElement(PermissionRequest(type, access, emptyOptions));
       child->SendPContentPermissionRequestConstructor(
         this, permArray, IPC::Principal(mPrincipal));
 
@@ -2485,7 +2632,8 @@ public:
       return rv;
     }
 
-    return CreatePermissionArray(type, access, aTypes);
+    nsTArray<nsString> emptyOptions;
+    return CreatePermissionArray(type, access, emptyOptions, aTypes);
   }
 
   NS_IMETHOD GetPrincipal(nsIPrincipal * *aRequestingPrincipal)
@@ -2514,9 +2662,10 @@ public:
     return NS_DispatchToMainThread(event);
   }
 
-  NS_IMETHOD Allow()
+  NS_IMETHOD Allow(JS::HandleValue aChoices)
   {
     MOZ_ASSERT(NS_IsMainThread());
+    MOZ_ASSERT(aChoices.isUndefined());
 
     if (!mRequest) {
       return NS_ERROR_FAILURE;
@@ -2760,6 +2909,35 @@ public:
         return NS_DispatchToCurrentThread(r);
       }
 
+      case DEVICE_STORAGE_REQUEST_MOUNT:
+      {
+        if (XRE_GetProcessType() != GeckoProcessType_Default) {
+          PDeviceStorageRequestChild* child
+            = new DeviceStorageRequestChild(mRequest, mFile);
+          DeviceStorageMountParams params(mFile->mStorageType,
+                                           mFile->mStorageName);
+          ContentChild::GetSingleton()
+            ->SendPDeviceStorageRequestConstructor(child, params);
+          return NS_OK;
+        }
+        r = new PostMountResultEvent(mFile, mRequest);
+        return NS_DispatchToCurrentThread(r);
+      }
+
+      case DEVICE_STORAGE_REQUEST_UNMOUNT:
+      {
+        if (XRE_GetProcessType() != GeckoProcessType_Default) {
+          PDeviceStorageRequestChild* child
+            = new DeviceStorageRequestChild(mRequest, mFile);
+          DeviceStorageUnmountParams params(mFile->mStorageType,
+                                           mFile->mStorageName);
+          ContentChild::GetSingleton()
+            ->SendPDeviceStorageRequestConstructor(child, params);
+          return NS_OK;
+        }
+        r = new PostUnmountResultEvent(mFile, mRequest);
+        return NS_DispatchToCurrentThread(r);
+      }
     }
 
     if (r) {
@@ -2772,10 +2950,13 @@ public:
     return NS_OK;
   }
 
-  bool Recv__delete__(const bool& allow)
+  bool Recv__delete__(const bool& allow,
+                      const InfallibleTArray<PermissionChoice>& choices)
   {
+    MOZ_ASSERT(choices.IsEmpty(), "DeviceStorage doesn't support permission choice");
+
     if (allow) {
-      Allow();
+      Allow(JS::UndefinedHandleValue);
     }
     else {
       Cancel();
@@ -3511,6 +3692,56 @@ nsDOMDeviceStorage::Format(ErrorResult& aRv)
   return request.forget();
 }
 
+already_AddRefed<DOMRequest>
+nsDOMDeviceStorage::Mount(ErrorResult& aRv)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsCOMPtr<nsPIDOMWindow> win = GetOwner();
+  if (!win) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+
+  nsRefPtr<DOMRequest> request = new DOMRequest(win);
+
+  nsRefPtr<DeviceStorageFile> dsf = new DeviceStorageFile(mStorageType,
+                                                          mStorageName);
+  nsCOMPtr<nsIRunnable> r
+    = new DeviceStorageRequest(DEVICE_STORAGE_REQUEST_MOUNT,
+                               win, mPrincipal, dsf, request);
+  nsresult rv = NS_DispatchToCurrentThread(r);
+  if (NS_FAILED(rv)) {
+    aRv.Throw(rv);
+  }
+  return request.forget();
+}
+
+already_AddRefed<DOMRequest>
+nsDOMDeviceStorage::Unmount(ErrorResult& aRv)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsCOMPtr<nsPIDOMWindow> win = GetOwner();
+  if (!win) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+
+  nsRefPtr<DOMRequest> request = new DOMRequest(win);
+
+  nsRefPtr<DeviceStorageFile> dsf = new DeviceStorageFile(mStorageType,
+                                                          mStorageName);
+  nsCOMPtr<nsIRunnable> r
+    = new DeviceStorageRequest(DEVICE_STORAGE_REQUEST_UNMOUNT,
+                               win, mPrincipal, dsf, request);
+  nsresult rv = NS_DispatchToCurrentThread(r);
+  if (NS_FAILED(rv)) {
+    aRv.Throw(rv);
+  }
+  return request.forget();
+}
+
 NS_IMETHODIMP
 nsDOMDeviceStorage::CreateFileDescriptor(const nsAString& aPath,
                                          DeviceStorageFileDescriptor* aDSFileDescriptor,
@@ -3641,7 +3872,7 @@ nsDOMDeviceStorage::EnumerateInternal(const nsAString& aPath,
     = new DeviceStorageCursorRequest(cursor);
 
   if (mozilla::Preferences::GetBool("device.storage.prompt.testing", false)) {
-    r->Allow();
+    r->Allow(JS::UndefinedHandleValue);
     return cursor.forget();
   }
 
@@ -3663,7 +3894,10 @@ nsDOMDeviceStorage::EnumerateInternal(const nsAString& aPath,
       return nullptr;
     }
     nsTArray<PermissionRequest> permArray;
-    permArray.AppendElement(PermissionRequest(type, NS_LITERAL_CSTRING("read")));
+    nsTArray<nsString> emptyOptions;
+    permArray.AppendElement(PermissionRequest(type,
+                                              NS_LITERAL_CSTRING("read"),
+                                              emptyOptions));
     child->SendPContentPermissionRequestConstructor(r,
                                                     permArray,
                                                     IPC::Principal(mPrincipal));

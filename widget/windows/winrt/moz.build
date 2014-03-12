@@ -18,11 +18,16 @@ SOURCES += [
     'ToastNotificationHandler.cpp',
     'UIAAccessibilityBridge.cpp',
     'UIABridge.cpp',
+    'WakeLockListener.cpp',
 ]
 
 EXTRA_COMPONENTS += [
     'MetroUIUtils.js',
     'MetroUIUtils.manifest',
+]
+
+EXPORTS.mozilla.widget += [
+    'MetroD3DCheckHelper.h',
 ]
 
 include('/ipc/chromium/chromium-config.mozbuild')

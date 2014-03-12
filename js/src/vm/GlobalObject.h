@@ -15,6 +15,7 @@
 
 #include "builtin/RegExp.h"
 #include "js/Vector.h"
+#include "vm/ArrayBufferObject.h"
 #include "vm/ErrorObject.h"
 
 extern JSObject *
@@ -25,6 +26,9 @@ js_InitFunctionClass(JSContext *cx, js::HandleObject obj);
 
 extern JSObject *
 js_InitTypedArrayClasses(JSContext *cx, js::HandleObject obj);
+
+extern JSObject *
+js_InitSharedArrayBufferClass(JSContext *cx, js::HandleObject obj);
 
 namespace js {
 
@@ -161,7 +165,9 @@ class GlobalObject : public JSObject
         return getSlot(APPLICATION_SLOTS + key);
     }
     static bool ensureConstructor(JSContext *cx, Handle<GlobalObject*> global, JSProtoKey key);
-    static bool initConstructor(JSContext *cx, Handle<GlobalObject*> global, JSProtoKey key);
+    static bool resolveConstructor(JSContext *cx, Handle<GlobalObject*> global, JSProtoKey key);
+    static bool initBuiltinConstructor(JSContext *cx, Handle<GlobalObject*> global,
+                                       JSProtoKey key, HandleObject ctor, HandleObject proto);
 
     void setConstructor(JSProtoKey key, const Value &v) {
         JS_ASSERT(key <= JSProto_LIMIT);
@@ -261,6 +267,9 @@ class GlobalObject : public JSObject
     }
     bool arrayBufferClassInitialized() const {
         return classIsInitialized(JSProto_ArrayBuffer);
+    }
+    bool sharedArrayBufferClassInitialized() const {
+        return classIsInitialized(JSProto_SharedArrayBuffer);
     }
     bool errorClassesInitialized() const {
         return classIsInitialized(JSProto_Error);
@@ -386,6 +395,12 @@ class GlobalObject : public JSObject
         if (!ensureConstructor(cx, global, JSProto_ArrayBuffer))
             return nullptr;
         return &global->getPrototype(JSProto_ArrayBuffer).toObject();
+    }
+
+    JSObject *getOrCreateSharedArrayBufferPrototype(JSContext *cx, Handle<GlobalObject*> global) {
+        if (!ensureConstructor(cx, global, JSProto_SharedArrayBuffer))
+            return nullptr;
+        return &global->getPrototype(JSProto_SharedArrayBuffer).toObject();
     }
 
     static JSObject *getOrCreateCustomErrorPrototype(JSContext *cx,
@@ -614,9 +629,7 @@ class GlobalObject : public JSObject
     // Warn about use of the given __proto__ setter to attempt to mutate an
     // object's [[Prototype]], if no prior warning was given.
     static bool warnOnceAboutPrototypeMutation(JSContext *cx, HandleObject protoSetter) {
-        // Temporarily disabled until the second half of bug 948583 lands.
-        //return warnOnceAbout(cx, protoSetter, WARNED_PROTO_SETTING_SLOW, JSMSG_PROTO_SETTING_SLOW);
-        return true;
+        return warnOnceAbout(cx, protoSetter, WARNED_PROTO_SETTING_SLOW, JSMSG_PROTO_SETTING_SLOW);
     }
 
     static bool getOrCreateEval(JSContext *cx, Handle<GlobalObject*> global,

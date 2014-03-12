@@ -69,18 +69,18 @@
 #include "nsIContentSecurityPolicy.h"
 #include "nsIChannelPolicy.h"
 #include "nsChannelPolicy.h"
-#include "mozilla/dom/Element.h"
 #include "GeckoProfiler.h"
 #include "nsObjectFrame.h"
 #include "nsDOMClassInfo.h"
 #include "nsWrapperCacheInlines.h"
 #include "nsDOMJSUtils.h"
-#include "nsDOMEvent.h"
 
 #include "nsWidgetsCID.h"
 #include "nsContentCID.h"
 #include "mozilla/BasicEvents.h"
 #include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/Element.h"
+#include "mozilla/dom/Event.h"
 #include "mozilla/Telemetry.h"
 
 #ifdef XP_WIN
@@ -91,6 +91,8 @@
 #endif // XP_WIN
 
 static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
+
+static const char *kPrefJavaMIME = "plugin.java.mime";
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -305,7 +307,7 @@ nsPluginCrashedEvent::Run()
   }
 
   ErrorResult rv;
-  nsRefPtr<nsDOMEvent> event =
+  nsRefPtr<Event> event =
     doc->CreateEvent(NS_LITERAL_STRING("datacontainerevents"), rv);
   nsCOMPtr<nsIDOMDataContainerEvent> containerEvent(do_QueryObject(event));
   if (!containerEvent) {
@@ -902,6 +904,8 @@ nsObjectLoadingContent::InstantiatePluginInstance(bool aIsLoading)
 void
 nsObjectLoadingContent::NotifyOwnerDocumentActivityChanged()
 {
+  // XXX(johns): We cannot touch plugins or run arbitrary script from this call,
+  //             as nsDocument is in a non-reentrant state.
 
   // If we have a plugin we want to queue an event to stop it unless we are
   // moved into an active document before returning to the event loop.
@@ -1410,8 +1414,12 @@ nsObjectLoadingContent::UpdateObjectParameters(bool aJavaURI)
   ///
   /// Initial MIME Type
   ///
+
   if (aJavaURI || thisContent->NodeInfo()->Equals(nsGkAtoms::applet)) {
-    newMime.AssignLiteral("application/x-java-vm");
+    nsAdoptingCString javaMIME = Preferences::GetCString(kPrefJavaMIME);
+    newMime = javaMIME;
+    NS_ASSERTION(nsPluginHost::IsJavaMIMEType(newMime.get()),
+                 "plugin.mime.java should be recognized by IsJavaMIMEType");
     isJava = true;
   } else {
     nsAutoString rawTypeAttr;
@@ -1432,9 +1440,12 @@ nsObjectLoadingContent::UpdateObjectParameters(bool aJavaURI)
     thisContent->GetAttr(kNameSpaceID_None, nsGkAtoms::classid, classIDAttr);
     if (!classIDAttr.IsEmpty()) {
       // Our classid support is limited to 'java:' ids
+      nsAdoptingCString javaMIME = Preferences::GetCString(kPrefJavaMIME);
+      NS_ASSERTION(nsPluginHost::IsJavaMIMEType(javaMIME.get()),
+                   "plugin.mime.java should be recognized by IsJavaMIMEType");
       if (StringBeginsWith(classIDAttr, NS_LITERAL_STRING("java:")) &&
-          PluginExistsForType("application/x-java-vm")) {
-        newMime.Assign("application/x-java-vm");
+          PluginExistsForType(javaMIME)) {
+        newMime = javaMIME;
         isJava = true;
       } else {
         // XXX(johns): Our de-facto behavior since forever was to refuse to load

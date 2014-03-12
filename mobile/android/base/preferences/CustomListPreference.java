@@ -4,17 +4,15 @@
 
 package org.mozilla.gecko.preferences;
 
+import org.mozilla.gecko.R;
+
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.res.Resources;
 import android.preference.Preference;
-import android.util.Log;
 import android.view.View;
 import android.widget.TextView;
-
-import org.mozilla.gecko.R;
-import org.mozilla.gecko.util.ThreadUtils;
 
 /**
  * Represents an element in a <code>CustomListCategory</code> preference menu.
@@ -29,14 +27,15 @@ public abstract class CustomListPreference extends Preference implements View.On
     public static final int INDEX_SET_DEFAULT_BUTTON = 0;
 
     // Dialog item labels.
-    protected final String[] mDialogItems;
+    private String[] mDialogItems;
 
     // Dialog displayed when this element is tapped.
     protected AlertDialog mDialog;
 
     // Cache label to avoid repeated use of the resource system.
-    public final String LABEL_IS_DEFAULT;
-    public final String LABEL_SET_AS_DEFAULT;
+    protected final String LABEL_IS_DEFAULT;
+    protected final String LABEL_SET_AS_DEFAULT;
+    protected final String LABEL_REMOVE;
 
     protected boolean mIsDefault;
 
@@ -70,8 +69,7 @@ public abstract class CustomListPreference extends Preference implements View.On
         // Fetch these strings now, instead of every time we ever want to relabel a button.
         LABEL_IS_DEFAULT = res.getString(R.string.pref_default);
         LABEL_SET_AS_DEFAULT = res.getString(R.string.pref_dialog_set_default);
-
-        mDialogItems = getDialogStrings();
+        LABEL_REMOVE = res.getString(R.string.pref_dialog_remove);
     }
 
     /**
@@ -99,10 +97,17 @@ public abstract class CustomListPreference extends Preference implements View.On
         }
     }
 
+    private String[] getCachedDialogItems() {
+        if (mDialogItems == null) {
+            mDialogItems = createDialogItems();
+        }
+        return mDialogItems;
+    }
+
     /**
      * Returns the strings to be displayed in the dialog.
      */
-    abstract protected String[] getDialogStrings();
+    abstract protected String[] createDialogItems();
 
     /**
      * Display a dialog for this preference, when the preference is clicked.
@@ -110,7 +115,7 @@ public abstract class CustomListPreference extends Preference implements View.On
     public void showDialog() {
         final AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
         builder.setTitle(getTitle().toString());
-        builder.setItems(mDialogItems, new DialogInterface.OnClickListener() {
+        builder.setItems(getCachedDialogItems(), new DialogInterface.OnClickListener() {
             // Forward relevant events to the container class for handling.
             @Override
             public void onClick(DialogInterface dialog, int indexClicked) {

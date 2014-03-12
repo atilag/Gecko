@@ -137,13 +137,9 @@ nsresult HTMLVideoElement::SetAcceptHeader(nsIHttpChannel* aChannel)
 #ifdef MOZ_WEBM
       "video/webm,"
 #endif
-#ifdef MOZ_OGG
       "video/ogg,"
-#endif
       "video/*;q=0.9,"
-#ifdef MOZ_OGG
       "application/ogg;q=0.7,"
-#endif
       "audio/*;q=0.6,*/*;q=0.5");
 
   return aChannel->SetRequestHeader(NS_LITERAL_CSTRING("Accept"),
@@ -258,7 +254,6 @@ HTMLVideoElement::GetVideoPlaybackQuality()
   uint64_t totalFrames = 0;
   uint64_t droppedFrames = 0;
   uint64_t corruptedFrames = 0;
-  double totalFrameDelay = 0.0;
 
   if (sVideoStatsEnabled) {
     nsPIDOMWindow* window = OwnerDoc()->GetInnerWindow();
@@ -274,13 +269,12 @@ HTMLVideoElement::GetVideoPlaybackQuality()
       totalFrames = stats.GetParsedFrames();
       droppedFrames = totalFrames - stats.GetPresentedFrames();
       corruptedFrames = totalFrames - stats.GetDecodedFrames();
-      totalFrameDelay = stats.GetTotalFrameDelay();
     }
   }
 
   nsRefPtr<VideoPlaybackQuality> playbackQuality =
     new VideoPlaybackQuality(this, creationTime, totalFrames, droppedFrames,
-                             corruptedFrames, totalFrameDelay);
+                             corruptedFrames);
   return playbackQuality.forget();
 }
 

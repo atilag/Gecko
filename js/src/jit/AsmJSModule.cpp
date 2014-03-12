@@ -210,6 +210,14 @@ RedirectCall(void *fun, ABIFunctionType type)
     return fun;
 }
 
+#ifdef DEBUG
+static void
+AssumeUnreachable()
+{
+    MOZ_CRASH("Reached unreachable code in asm.js");
+}
+#endif
+
 static void *
 AddressOf(AsmJSImmKind kind, ExclusiveContext *cx)
 {
@@ -221,7 +229,7 @@ AddressOf(AsmJSImmKind kind, ExclusiveContext *cx)
       case AsmJSImm_ReportOverRecursed:
         return RedirectCall(FuncCast<void (JSContext*)>(js_ReportOverRecursed), Args_General1);
       case AsmJSImm_HandleExecutionInterrupt:
-        return RedirectCall(FuncCast(js_HandleExecutionInterrupt), Args_General1);
+        return RedirectCall(FuncCast(js::HandleExecutionInterrupt), Args_General1);
       case AsmJSImm_InvokeFromAsmJS_Ignore:
         return RedirectCall(FuncCast(InvokeFromAsmJS_Ignore), Args_General4);
       case AsmJSImm_InvokeFromAsmJS_ToInt32:
@@ -248,28 +256,16 @@ AddressOf(AsmJSImmKind kind, ExclusiveContext *cx)
         return RedirectCall(FuncCast(NumberMod), Args_Double_DoubleDouble);
       case AsmJSImm_SinD:
         return RedirectCall(FuncCast<double (double)>(sin), Args_Double_Double);
-      case AsmJSImm_SinF:
-        return RedirectCall(FuncCast<float (float)>(sinf), Args_Float32_Float32);
       case AsmJSImm_CosD:
         return RedirectCall(FuncCast<double (double)>(cos), Args_Double_Double);
-      case AsmJSImm_CosF:
-        return RedirectCall(FuncCast<float (float)>(cosf), Args_Float32_Float32);
       case AsmJSImm_TanD:
         return RedirectCall(FuncCast<double (double)>(tan), Args_Double_Double);
-      case AsmJSImm_TanF:
-        return RedirectCall(FuncCast<float (float)>(tanf), Args_Float32_Float32);
       case AsmJSImm_ASinD:
         return RedirectCall(FuncCast<double (double)>(asin), Args_Double_Double);
-      case AsmJSImm_ASinF:
-        return RedirectCall(FuncCast<float (float)>(asinf), Args_Float32_Float32);
       case AsmJSImm_ACosD:
         return RedirectCall(FuncCast<double (double)>(acos), Args_Double_Double);
-      case AsmJSImm_ACosF:
-        return RedirectCall(FuncCast<float (float)>(acosf), Args_Float32_Float32);
       case AsmJSImm_ATanD:
         return RedirectCall(FuncCast<double (double)>(atan), Args_Double_Double);
-      case AsmJSImm_ATanF:
-        return RedirectCall(FuncCast<float (float)>(atanf), Args_Float32_Float32);
       case AsmJSImm_CeilD:
         return RedirectCall(FuncCast<double (double)>(ceil), Args_Double_Double);
       case AsmJSImm_CeilF:
@@ -280,16 +276,16 @@ AddressOf(AsmJSImmKind kind, ExclusiveContext *cx)
         return RedirectCall(FuncCast<float (float)>(floorf), Args_Float32_Float32);
       case AsmJSImm_ExpD:
         return RedirectCall(FuncCast<double (double)>(exp), Args_Double_Double);
-      case AsmJSImm_ExpF:
-        return RedirectCall(FuncCast<float (float)>(expf), Args_Float32_Float32);
       case AsmJSImm_LogD:
         return RedirectCall(FuncCast<double (double)>(log), Args_Double_Double);
-      case AsmJSImm_LogF:
-        return RedirectCall(FuncCast<float (float)>(logf), Args_Float32_Float32);
       case AsmJSImm_PowD:
         return RedirectCall(FuncCast(ecmaPow), Args_Double_DoubleDouble);
       case AsmJSImm_ATan2D:
         return RedirectCall(FuncCast(ecmaAtan2), Args_Double_DoubleDouble);
+#ifdef DEBUG
+      case AsmJSImm_AssumeUnreachable:
+        return RedirectCall(FuncCast(AssumeUnreachable), Args_General0);
+#endif
       case AsmJSImm_Invalid:
         break;
     }
@@ -332,7 +328,7 @@ AsmJSModule::staticallyLink(ExclusiveContext *cx)
 {
     // Process staticLinkData_
 
-    operationCallbackExit_ = code_ + staticLinkData_.operationCallbackExitOffset;
+    interruptExit_ = code_ + staticLinkData_.interruptExitOffset;
 
     for (size_t i = 0; i < staticLinkData_.relativeLinks.length(); i++) {
         RelativeLink link = staticLinkData_.relativeLinks[i];
@@ -359,11 +355,12 @@ AsmJSModule::AsmJSModule(ScriptSource *scriptSource, uint32_t charsBegin)
     importArgumentName_(nullptr),
     bufferArgumentName_(nullptr),
     code_(nullptr),
-    operationCallbackExit_(nullptr),
+    interruptExit_(nullptr),
     dynamicallyLinked_(false),
     loadedFromCache_(false),
     charsBegin_(charsBegin),
-    scriptSource_(scriptSource)
+    scriptSource_(scriptSource),
+    codeIsProtected_(false)
 {
     mozilla::PodZero(&pod);
     scriptSource_->incref();
@@ -749,7 +746,7 @@ AsmJSModule::StaticLinkData::serializedSize() const
 uint8_t *
 AsmJSModule::StaticLinkData::serialize(uint8_t *cursor) const
 {
-    cursor = WriteScalar<uint32_t>(cursor, operationCallbackExitOffset);
+    cursor = WriteScalar<uint32_t>(cursor, interruptExitOffset);
     cursor = SerializePodVector(cursor, relativeLinks);
     cursor = SerializePodVector(cursor, absoluteLinks);
     return cursor;
@@ -758,7 +755,7 @@ AsmJSModule::StaticLinkData::serialize(uint8_t *cursor) const
 const uint8_t *
 AsmJSModule::StaticLinkData::deserialize(ExclusiveContext *cx, const uint8_t *cursor)
 {
-    (cursor = ReadScalar<uint32_t>(cursor, &operationCallbackExitOffset)) &&
+    (cursor = ReadScalar<uint32_t>(cursor, &interruptExitOffset)) &&
     (cursor = DeserializePodVector(cx, cursor, &relativeLinks)) &&
     (cursor = DeserializePodVector(cx, cursor, &absoluteLinks));
     return cursor;
@@ -767,7 +764,7 @@ AsmJSModule::StaticLinkData::deserialize(ExclusiveContext *cx, const uint8_t *cu
 bool
 AsmJSModule::StaticLinkData::clone(ExclusiveContext *cx, StaticLinkData *out) const
 {
-    out->operationCallbackExitOffset = operationCallbackExitOffset;
+    out->interruptExitOffset = interruptExitOffset;
     return ClonePodVector(cx, relativeLinks, &out->relativeLinks) &&
            ClonePodVector(cx, absoluteLinks, &out->absoluteLinks);
 }
@@ -833,9 +830,40 @@ AsmJSModule::deserialize(ExclusiveContext *cx, const uint8_t *cursor)
     return cursor;
 }
 
-bool
-AsmJSModule::clone(ExclusiveContext *cx, ScopedJSDeletePtr<AsmJSModule> *moduleOut) const
+// When a module is cloned, we memcpy its executable code. If, right before or
+// during the clone, another thread calls AsmJSModule::protectCode() then the
+// executable code will become inaccessible. In theory, we could take away only
+// PROT_EXEC, but this seems to break emulators.
+class AutoUnprotectCodeForClone
 {
+    JSRuntime *rt_;
+    JSRuntime::AutoLockForInterrupt lock_;
+    const AsmJSModule &module_;
+    const bool protectedBefore_;
+
+  public:
+    AutoUnprotectCodeForClone(JSContext *cx, const AsmJSModule &module)
+      : rt_(cx->runtime()),
+        lock_(rt_),
+        module_(module),
+        protectedBefore_(module_.codeIsProtected(rt_))
+    {
+        if (protectedBefore_)
+            module_.unprotectCode(rt_);
+    }
+
+    ~AutoUnprotectCodeForClone()
+    {
+        if (protectedBefore_)
+            module_.protectCode(rt_);
+    }
+};
+
+bool
+AsmJSModule::clone(JSContext *cx, ScopedJSDeletePtr<AsmJSModule> *moduleOut) const
+{
+    AutoUnprotectCodeForClone cloneGuard(cx, *this);
+
     *moduleOut = cx->new_<AsmJSModule>(scriptSource_, charsBegin_);
     if (!*moduleOut)
         return false;
@@ -869,6 +897,56 @@ AsmJSModule::clone(ExclusiveContext *cx, ScopedJSDeletePtr<AsmJSModule> *moduleO
 
     out.restoreToInitialState(maybeHeap_, cx);
     return true;
+}
+
+void
+AsmJSModule::protectCode(JSRuntime *rt) const
+{
+    JS_ASSERT(rt->currentThreadOwnsInterruptLock());
+
+    codeIsProtected_ = true;
+
+    if (!pod.functionBytes_)
+        return;
+
+    // Technically, we should be able to only take away the execute permissions,
+    // however this seems to break our emulators which don't always check
+    // execute permissions while executing code.
+#if defined(XP_WIN)
+    DWORD oldProtect;
+    if (!VirtualProtect(codeBase(), functionBytes(), PAGE_NOACCESS, &oldProtect))
+        MOZ_CRASH();
+#else  // assume Unix
+    if (mprotect(codeBase(), functionBytes(), PROT_NONE))
+        MOZ_CRASH();
+#endif
+}
+
+void
+AsmJSModule::unprotectCode(JSRuntime *rt) const
+{
+    JS_ASSERT(rt->currentThreadOwnsInterruptLock());
+
+    codeIsProtected_ = false;
+
+    if (!pod.functionBytes_)
+        return;
+
+#if defined(XP_WIN)
+    DWORD oldProtect;
+    if (!VirtualProtect(codeBase(), functionBytes(), PAGE_EXECUTE_READWRITE, &oldProtect))
+        MOZ_CRASH();
+#else  // assume Unix
+    if (mprotect(codeBase(), functionBytes(), PROT_READ | PROT_WRITE | PROT_EXEC))
+        MOZ_CRASH();
+#endif
+}
+
+bool
+AsmJSModule::codeIsProtected(JSRuntime *rt) const
+{
+    JS_ASSERT(rt->currentThreadOwnsInterruptLock());
+    return codeIsProtected_;
 }
 
 static bool
@@ -1150,10 +1228,13 @@ js::StoreAsmJSModuleInCache(AsmJSParser &parser,
 
     const jschar *begin = parser.tokenStream.rawBase() + ModuleChars::beginOffset(parser);
     const jschar *end = parser.tokenStream.rawBase() + ModuleChars::endOffset(parser);
+    bool installed = parser.options().installedFile;
 
     ScopedCacheEntryOpenedForWrite entry(cx, serializedSize);
-    if (!open(cx->global(), begin, end, entry.serializedSize, &entry.memory, &entry.handle))
+    if (!open(cx->global(), installed, begin, end, entry.serializedSize,
+              &entry.memory, &entry.handle)) {
         return false;
+    }
 
     uint8_t *cursor = entry.memory;
     cursor = machineId.serialize(cursor);

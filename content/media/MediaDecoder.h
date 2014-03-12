@@ -341,6 +341,8 @@ public:
   // of our audio.
   virtual void SetAudioCaptured(bool aCaptured);
 
+  virtual void NotifyWaitingForResourcesStatusChanged() MOZ_OVERRIDE;
+
   void SetPlaybackRate(double aPlaybackRate);
   void SetPreservesPitch(bool aPreservesPitch);
 
@@ -816,10 +818,8 @@ public:
   static bool IsRawEnabled();
 #endif
 
-#ifdef MOZ_OGG
   static bool IsOggEnabled();
   static bool IsOpusEnabled();
-#endif
 
 #ifdef MOZ_WAVE
   static bool IsWaveEnabled();
@@ -895,7 +895,6 @@ public:
 
     FrameStatistics() :
         mReentrantMonitor("MediaDecoder::FrameStats"),
-        mTotalFrameDelay(0.0),
         mParsedFrames(0),
         mDecodedFrames(0),
         mPresentedFrames(0) {}
@@ -922,11 +921,6 @@ public:
       return mPresentedFrames;
     }
 
-    double GetTotalFrameDelay() {
-      ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-      return mTotalFrameDelay;
-    }
-
     // Increments the parsed and decoded frame counters by the passed in counts.
     // Can be called on any thread.
     void NotifyDecodedFrames(uint32_t aParsed, uint32_t aDecoded) {
@@ -944,21 +938,10 @@ public:
       ++mPresentedFrames;
     }
 
-    // Tracks the sum of display delay.
-    // Can be called on any thread.
-    void NotifyFrameDelay(double aFrameDelay) {
-      ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-      mTotalFrameDelay += aFrameDelay;
-    }
-
   private:
 
     // ReentrantMonitor to protect access of playback statistics.
     ReentrantMonitor mReentrantMonitor;
-
-    // Sum of displayed frame delays.
-    // Access protected by mReentrantMonitor.
-    double mTotalFrameDelay;
 
     // Number of frames parsed and demuxed from media.
     // Access protected by mReentrantMonitor.

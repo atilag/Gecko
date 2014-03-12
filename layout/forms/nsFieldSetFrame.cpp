@@ -106,9 +106,10 @@ public:
 #endif
 
   virtual void HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
-                       HitTestState* aState, nsTArray<nsIFrame*> *aOutFrames);
+                       HitTestState* aState,
+                       nsTArray<nsIFrame*> *aOutFrames) MOZ_OVERRIDE;
   virtual void Paint(nsDisplayListBuilder* aBuilder,
-                     nsRenderingContext* aCtx);
+                     nsRenderingContext* aCtx) MOZ_OVERRIDE;
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
                                          nsRegion *aInvalidRegion) MOZ_OVERRIDE;
@@ -404,7 +405,7 @@ nsFieldSetFrame::Reflow(nsPresContext*           aPresContext,
     legendReflowState.construct(aPresContext, aReflowState, legend, availSize);
   }
   if (reflowLegend) {
-    nsHTMLReflowMetrics legendDesiredSize(aReflowState.GetWritingMode());
+    nsHTMLReflowMetrics legendDesiredSize(aReflowState);
 
     ReflowChild(legend, aPresContext, legendDesiredSize, legendReflowState.ref(),
                 0, 0, NS_FRAME_NO_MOVE_FRAME, aStatus);
@@ -469,7 +470,7 @@ nsFieldSetFrame::Reflow(nsPresContext*           aPresContext,
         std::max(0, aReflowState.ComputedMaxHeight() - mLegendSpace);
     }
 
-    nsHTMLReflowMetrics kidDesiredSize(kidReflowState.GetWritingMode(),
+    nsHTMLReflowMetrics kidDesiredSize(kidReflowState,
                                        aDesiredSize.mFlags);
     // Reflow the frame
     NS_ASSERTION(kidReflowState.ComputedPhysicalMargin() == nsMargin(0,0,0,0),

@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set sw=4 ts=8 et tw=80 : */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -1079,10 +1079,6 @@ RemoteBlob<Parent>::MaybeSetInputStream(const ConstructorParamsType& aParams)
       OptionalInputStreamParams::TInputStreamParams) {
     mInputStreamParams =
       aParams.optionalInputStreamParams().get_InputStreamParams();
-  }
-  else {
-    MOZ_ASSERT(aParams.blobParams().type() ==
-               ChildBlobConstructorParams::TMysteryBlobConstructorParams);
   }
 }
 

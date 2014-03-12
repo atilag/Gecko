@@ -12,7 +12,7 @@
 #include "nsButtonFrameRenderer.h"
 #include "nsCSSAnonBoxes.h"
 #include "nsFormControlFrame.h"
-#include "nsINameSpaceManager.h"
+#include "nsNameSpaceManager.h"
 #include "nsStyleSet.h"
 #include "nsDisplayList.h"
 #include <algorithm>
@@ -283,7 +283,7 @@ nsHTMLButtonControlFrame::ReflowButtonContents(nsPresContext* aPresContext,
                                         aFirstKid, availSize);
 
   nsReflowStatus contentsReflowStatus;
-  nsHTMLReflowMetrics contentsDesiredSize(aButtonReflowState.GetWritingMode());
+  nsHTMLReflowMetrics contentsDesiredSize(aButtonReflowState);
   ReflowChild(aFirstKid, aPresContext,
               contentsDesiredSize, contentsReflowState,
               xoffset,

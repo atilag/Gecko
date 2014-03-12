@@ -40,7 +40,7 @@ EXPORTS.mozilla += [
 
 UNIFIED_SOURCES += [
     'AppProcessChecker.cpp',
-    'ContentChild.cpp',
+    'ColorPickerParent.cpp',
     'ContentParent.cpp',
     'ContentProcess.cpp',
     'CrashReporterParent.cpp',
@@ -56,10 +56,12 @@ UNIFIED_SOURCES += [
 ]
 
 # Blob.cpp cannot be compiled in unified mode because it triggers a fatal gcc warning.
+# ContentChild.cpp cannot be compiled in unified mode because it forces NSPR logging.
 # CrashReporterChild.cpp cannot be compiled in unified mode because of name clashes
 # in OS X headers.
 SOURCES += [
     'Blob.cpp',
+    'ContentChild.cpp',
     'CrashReporterChild.cpp',
 ]
 
@@ -68,8 +70,8 @@ IPDL_SOURCES += [
     'PBlob.ipdl',
     'PBlobStream.ipdl',
     'PBrowser.ipdl',
+    'PColorPicker.ipdl',
     'PContent.ipdl',
-    'PContentDialog.ipdl',
     'PContentPermission.ipdlh',
     'PContentPermissionRequest.ipdl',
     'PCrashReporter.ipdl',
@@ -122,4 +124,8 @@ for var in ('MOZ_PERMISSIONS', 'MOZ_CHILD_PERMISSIONS'):
     if CONFIG[var]:
         DEFINES[var] = True
 
+if CONFIG['ENABLE_TESTS']:
+    DEFINES['ENABLE_TESTS'] = 1
+
 JAR_MANIFESTS += ['jar.mn']
+

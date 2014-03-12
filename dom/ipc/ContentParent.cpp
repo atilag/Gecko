@@ -37,8 +37,11 @@
 #include "mozilla/dom/devicestorage/DeviceStorageRequestParent.h"
 #include "mozilla/dom/GeolocationBinding.h"
 #include "mozilla/dom/telephony/TelephonyParent.h"
+#include "mozilla/dom/time/DateCacheCleaner.h"
 #include "SmsParent.h"
 #include "mozilla/hal_sandbox/PHalParent.h"
+#include "mozilla/ipc/BackgroundChild.h"
+#include "mozilla/ipc/BackgroundParent.h"
 #include "mozilla/ipc/TestShellParent.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/layers/CompositorParent.h"
@@ -96,7 +99,7 @@
 #include "nsIWebBrowserChrome.h"
 #include "nsIDocShell.h"
 #include "mozilla/net/NeckoMessageUtils.h"
-#include "gfxPlatform.h"
+#include "gfxPrefs.h"
 
 #if defined(ANDROID) || defined(LINUX)
 #include "nsSystemInfo.h"
@@ -138,6 +141,11 @@ using namespace mozilla::system;
 #include "mozilla/dom/SpeechSynthesisParent.h"
 #endif
 
+#ifdef ENABLE_TESTS
+#include "mozilla/ipc/PBackgroundChild.h"
+#include "nsIIPCBackgroundChildCreateCallback.h"
+#endif
+
 static NS_DEFINE_CID(kCClipboardCID, NS_CLIPBOARD_CID);
 static const char* sClipboardTextFlavors[] = { kUnicodeMime };
 
@@ -154,6 +162,127 @@ using namespace mozilla::ipc;
 using namespace mozilla::layers;
 using namespace mozilla::net;
 using namespace mozilla::jsipc;
+
+#ifdef ENABLE_TESTS
+
+class BackgroundTester MOZ_FINAL : public nsIIPCBackgroundChildCreateCallback,
+                                   public nsIObserver
+{
+    static uint32_t sCallbackCount;
+
+private:
+    ~BackgroundTester()
+    { }
+
+    virtual void
+    ActorCreated(PBackgroundChild* aActor) MOZ_OVERRIDE
+    {
+        MOZ_RELEASE_ASSERT(aActor,
+                           "Failed to create a PBackgroundChild actor!");
+
+        NS_NAMED_LITERAL_CSTRING(testStr, "0123456789");
+
+        PBackgroundTestChild* testActor =
+            aActor->SendPBackgroundTestConstructor(testStr);
+        MOZ_RELEASE_ASSERT(testActor);
+
+        if (!sCallbackCount) {
+            PBackgroundChild* existingBackgroundChild =
+                BackgroundChild::GetForCurrentThread();
+
+            MOZ_RELEASE_ASSERT(existingBackgroundChild);
+            MOZ_RELEASE_ASSERT(existingBackgroundChild == aActor);
+
+            bool ok =
+                existingBackgroundChild->
+                    SendPBackgroundTestConstructor(testStr);
+            MOZ_RELEASE_ASSERT(ok);
+
+            // Callback 3.
+            ok = BackgroundChild::GetOrCreateForCurrentThread(this);
+            MOZ_RELEASE_ASSERT(ok);
+        }
+
+        sCallbackCount++;
+    }
+
+    virtual void
+    ActorFailed() MOZ_OVERRIDE
+    {
+        MOZ_CRASH("Failed to create a PBackgroundChild actor!");
+    }
+
+    NS_IMETHOD
+    Observe(nsISupports* aSubject, const char* aTopic, const char16_t* aData)
+            MOZ_OVERRIDE
+    {
+        nsCOMPtr<nsIObserverService> observerService =
+            mozilla::services::GetObserverService();
+        MOZ_RELEASE_ASSERT(observerService);
+
+        nsresult rv = observerService->RemoveObserver(this, aTopic);
+        MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
+
+        if (!strcmp(aTopic, "profile-after-change")) {
+            if (mozilla::Preferences::GetBool("pbackground.testing", false)) {
+                rv = observerService->AddObserver(this, "xpcom-shutdown",
+                                                  false);
+                MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
+
+                // Callback 1.
+                bool ok = BackgroundChild::GetOrCreateForCurrentThread(this);
+                MOZ_RELEASE_ASSERT(ok);
+
+                // Callback 2.
+                ok = BackgroundChild::GetOrCreateForCurrentThread(this);
+                MOZ_RELEASE_ASSERT(ok);
+            }
+
+            return NS_OK;
+        }
+
+        if (!strcmp(aTopic, "xpcom-shutdown")) {
+            MOZ_RELEASE_ASSERT(sCallbackCount == 3);
+
+            return NS_OK;
+        }
+
+        MOZ_CRASH("Unknown observer topic!");
+    }
+
+public:
+    NS_DECL_ISUPPORTS
+};
+
+uint32_t BackgroundTester::sCallbackCount = 0;
+
+NS_IMPL_ISUPPORTS2(BackgroundTester, nsIIPCBackgroundChildCreateCallback,
+                                     nsIObserver)
+
+#endif // ENABLE_TESTS
+
+void
+MaybeTestPBackground()
+{
+#ifdef ENABLE_TESTS
+    // This test relies on running the event loop and XPCShell does not always
+    // do so. Bail out here if we detect that we're running in XPCShell.
+    if (PR_GetEnv("XPCSHELL_TEST_PROFILE_DIR")) {
+        return;
+    }
+
+    // This is called too early at startup to test preferences directly. We have
+    // to install an observer to be notified when preferences are available.
+    nsCOMPtr<nsIObserverService> observerService =
+        mozilla::services::GetObserverService();
+    MOZ_RELEASE_ASSERT(observerService);
+
+    nsCOMPtr<nsIObserver> observer = new BackgroundTester();
+    nsresult rv = observerService->AddObserver(observer, "profile-after-change",
+                                               false);
+    MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
+#endif
+}
 
 namespace mozilla {
 namespace dom {
@@ -360,10 +489,18 @@ ContentParent::StartUp()
     // Note: This reporter measures all ContentParents.
     RegisterStrongMemoryReporter(new ContentParentsMemoryReporter());
 
+    mozilla::dom::time::InitializeDateCacheCleaner();
+
+    BackgroundChild::Startup();
+
     sCanLaunchSubprocesses = true;
 
     // Try to preallocate a process that we can transform into an app later.
     PreallocatedProcessManager::AllocateAfterDelay();
+
+    // Test the PBackground infrastructure on ENABLE_TESTS builds when a special
+    // testing preference is set.
+    MaybeTestPBackground();
 }
 
 /*static*/ void
@@ -1056,7 +1193,12 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
     // Tell the memory reporter manager that this ContentParent is going away.
     nsRefPtr<nsMemoryReporterManager> mgr =
         nsMemoryReporterManager::GetOrCreate();
-    if (mgr) {
+#ifdef MOZ_NUWA_PROCESS
+    bool isMemoryChild = !IsNuwaProcess();
+#else
+    bool isMemoryChild = true;
+#endif
+    if (mgr && isMemoryChild) {
         mgr->DecrementNumChildProcesses();
     }
 
@@ -1271,11 +1413,13 @@ ContentParent::ContentParent(mozIApplication* aApp,
 
     IToplevelProtocol::SetTransport(mSubprocess->GetChannel());
 
-    // Tell the memory reporter manager that this ContentParent exists.
-    nsRefPtr<nsMemoryReporterManager> mgr =
-        nsMemoryReporterManager::GetOrCreate();
-    if (mgr) {
-        mgr->IncrementNumChildProcesses();
+    if (!aIsNuwaProcess) {
+        // Tell the memory reporter manager that this ContentParent exists.
+        nsRefPtr<nsMemoryReporterManager> mgr =
+            nsMemoryReporterManager::GetOrCreate();
+        if (mgr) {
+            mgr->IncrementNumChildProcesses();
+        }
     }
 
     std::vector<std::string> extraArgs;
@@ -1336,6 +1480,13 @@ ContentParent::ContentParent(ContentParent* aTemplate,
                                                aPid,
                                                *fd,
                                                aOSPrivileges);
+
+    // Tell the memory reporter manager that this ContentParent exists.
+    nsRefPtr<nsMemoryReporterManager> mgr =
+        nsMemoryReporterManager::GetOrCreate();
+    if (mgr) {
+        mgr->IncrementNumChildProcesses();
+    }
 
     mSubprocess->LaunchAndWaitForProcessHandle();
 
@@ -1418,7 +1569,7 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority,
             DebugOnly<bool> opened = PCompositor::Open(this);
             MOZ_ASSERT(opened);
 
-            if (gfxPlatform::AsyncVideoEnabled()) {
+            if (gfxPrefs::AsyncVideoEnabled()) {
                 opened = PImageBridge::Open(this);
                 MOZ_ASSERT(opened);
             }
@@ -1814,6 +1965,12 @@ bool
 ContentParent::RecvNuwaReady()
 {
 #ifdef MOZ_NUWA_PROCESS
+    if (!IsNuwaProcess()) {
+        printf_stderr("Terminating child process %d for unauthorized IPC message: "
+                      "NuwaReady", Pid());
+        KillHard();
+        return false;
+    }
     PreallocatedProcessManager::OnNuwaReady();
     return true;
 #else
@@ -1827,6 +1984,12 @@ ContentParent::RecvAddNewProcess(const uint32_t& aPid,
                                  const InfallibleTArray<ProtocolFdMapping>& aFds)
 {
 #ifdef MOZ_NUWA_PROCESS
+    if (!IsNuwaProcess()) {
+        printf_stderr("Terminating child process %d for unauthorized IPC message: "
+                      "AddNewProcess(%d)", Pid(), aPid);
+        KillHard();
+        return false;
+    }
     nsRefPtr<ContentParent> content;
     content = new ContentParent(this,
                                 MAGIC_PREALLOCATED_APP_MANIFEST_URL,
@@ -1892,10 +2055,28 @@ ContentParent::Observe(nsISupports* aSubject,
             return NS_ERROR_NOT_AVAILABLE;
     }
     else if (!strcmp(aTopic, "child-memory-reporter-request")) {
+        bool isNuwa = false;
 #ifdef MOZ_NUWA_PROCESS
-        if (!IsNuwaProcess())
+        isNuwa = IsNuwaProcess();
 #endif
-            unused << SendPMemoryReportRequestConstructor((uint32_t)(uintptr_t)aData);
+        if (!isNuwa) {
+            unsigned generation;
+            int minimize, identOffset = -1;
+            nsDependentString msg(aData);
+            NS_ConvertUTF16toUTF8 cmsg(msg);
+
+            if (sscanf(cmsg.get(),
+                       "generation=%x minimize=%d DMDident=%n",
+                       &generation, &minimize, &identOffset) < 2
+                || identOffset < 0) {
+                return NS_ERROR_INVALID_ARG;
+            }
+            // The pre-%n part of the string should be all ASCII, so the byte
+            // offset in identOffset should be correct as a char offset.
+            MOZ_ASSERT(cmsg[identOffset - 1] == '=');
+            unused << SendPMemoryReportRequestConstructor(
+              generation, minimize, nsString(Substring(msg, identOffset)));
+        }
     }
     else if (!strcmp(aTopic, "child-gc-request")){
         unused << SendGarbageCollect();
@@ -1971,6 +2152,13 @@ ContentParent::AllocPImageBridgeParent(mozilla::ipc::Transport* aTransport,
                                        base::ProcessId aOtherProcess)
 {
     return ImageBridgeParent::Create(aTransport, aOtherProcess);
+}
+
+PBackgroundParent*
+ContentParent::AllocPBackgroundParent(Transport* aTransport,
+                                      ProcessId aOtherProcess)
+{
+    return BackgroundParent::Alloc(this, aTransport, aOtherProcess);
 }
 
 bool
@@ -2349,7 +2537,9 @@ ContentParent::RecvPIndexedDBConstructor(PIndexedDBParent* aActor)
 }
 
 PMemoryReportRequestParent*
-ContentParent::AllocPMemoryReportRequestParent(const uint32_t& generation)
+ContentParent::AllocPMemoryReportRequestParent(const uint32_t& generation,
+                                               const bool &minimizeMemoryUsage,
+                                               const nsString &aDMDDumpIdent)
 {
   MemoryReportRequestParent* parent = new MemoryReportRequestParent();
   return parent;

@@ -747,6 +747,9 @@ struct JsGcTracer : public TraceCallbacks
   virtual void Trace(JS::Heap<JSObject *> *p, const char *name, void *closure) const MOZ_OVERRIDE {
     JS_CallHeapObjectTracer(static_cast<JSTracer*>(closure), p, name);
   }
+  virtual void Trace(JS::TenuredHeap<JSObject *> *p, const char *name, void *closure) const MOZ_OVERRIDE {
+    JS_CallTenuredObjectTracer(static_cast<JSTracer*>(closure), p, name);
+  }
   virtual void Trace(JS::Heap<JSString *> *p, const char *name, void *closure) const MOZ_OVERRIDE {
     JS_CallHeapStringTracer(static_cast<JSTracer*>(closure), p, name);
   }
@@ -795,6 +798,11 @@ struct ClearJSHolder : TraceCallbacks
   }
 
   virtual void Trace(JS::Heap<JSObject*>* aPtr, const char*, void*) const MOZ_OVERRIDE
+  {
+    *aPtr = nullptr;
+  }
+
+  virtual void Trace(JS::TenuredHeap<JSObject*>* aPtr, const char*, void*) const MOZ_OVERRIDE
   {
     *aPtr = nullptr;
   }
@@ -877,16 +885,6 @@ CycleCollectedJSRuntime::ZoneParticipant()
 nsresult
 CycleCollectedJSRuntime::TraverseRoots(nsCycleCollectionNoteRootCallback &aCb)
 {
-  static bool gcHasRun = false;
-  if (!gcHasRun) {
-    uint32_t gcNumber = JS_GetGCParameter(mJSRuntime, JSGC_NUMBER);
-    if (!gcNumber) {
-      // Cannot cycle collect if GC has not run first!
-      MOZ_CRASH();
-    }
-    gcHasRun = true;
-  }
-
   TraverseNativeRoots(aCb);
 
   NoteWeakMapsTracer trc(mJSRuntime, TraceWeakMapping, aCb);

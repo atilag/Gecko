@@ -237,6 +237,7 @@ this.DebuggerClient = function (aTransport)
 
   // Map actor ID to client instance for each actor type.
   this._threadClients = new Map;
+  this._addonClients = new Map;
   this._tabClients = new Map;
   this._tracerClients = new Map;
   this._consoleClients = new Map;
@@ -413,8 +414,10 @@ DebuggerClient.prototype = {
     detachClients(this._consoleClients, () => {
       detachClients(this._threadClients, () => {
         detachClients(this._tabClients, () => {
-          this._transport.close();
-          this._transport = null;
+          detachClients(this._addonClients, () => {
+            this._transport.close();
+            this._transport = null;
+          });
         });
       });
     });
@@ -446,7 +449,8 @@ DebuggerClient.prototype = {
       let cachedTab = this._tabClients.get(aTabActor);
       let cachedResponse = {
         cacheEnabled: cachedTab.cacheEnabled,
-        javascriptEnabled: cachedTab.javascriptEnabled
+        javascriptEnabled: cachedTab.javascriptEnabled,
+        traits: cachedTab.traits,
       };
       setTimeout(() => aOnResponse(cachedResponse, cachedTab), 0);
       return;
@@ -467,6 +471,31 @@ DebuggerClient.prototype = {
   },
 
   /**
+   * Attach to an addon actor.
+   *
+   * @param string aAddonActor
+   *        The actor ID for the addon to attach.
+   * @param function aOnResponse
+   *        Called with the response packet and a AddonClient
+   *        (which will be undefined on error).
+   */
+  attachAddon: function DC_attachAddon(aAddonActor, aOnResponse) {
+    let packet = {
+      to: aAddonActor,
+      type: "attach"
+    };
+    this.request(packet, aResponse => {
+      let addonClient;
+      if (!aResponse.error) {
+        addonClient = new AddonClient(this, aAddonActor);
+        this._addonClients[aAddonActor] = addonClient;
+        this.activeAddon = addonClient;
+      }
+      aOnResponse(aResponse, addonClient);
+    });
+  },
+
+  /**
    * Attach to a Web Console actor.
    *
    * @param string aConsoleActor
@@ -479,11 +508,6 @@ DebuggerClient.prototype = {
    */
   attachConsole:
   function (aConsoleActor, aListeners, aOnResponse) {
-    if (this._consoleClients.has(aConsoleActor)) {
-      setTimeout(() => aOnResponse({}, this._consoleClients.get(aConsoleActor)), 0);
-      return;
-    }
-
     let packet = {
       to: aConsoleActor,
       type: "startListeners",
@@ -493,8 +517,12 @@ DebuggerClient.prototype = {
     this.request(packet, (aResponse) => {
       let consoleClient;
       if (!aResponse.error) {
-        consoleClient = new WebConsoleClient(this, aConsoleActor);
-        this._consoleClients.set(aConsoleActor, consoleClient);
+        if (this._consoleClients.has(aConsoleActor)) {
+          consoleClient = this._consoleClients.get(aConsoleActor);
+        } else {
+          consoleClient = new WebConsoleClient(this, aResponse);
+          this._consoleClients.set(aConsoleActor, consoleClient);
+        }
       }
       aOnResponse(aResponse, consoleClient);
     });
@@ -744,7 +772,12 @@ DebuggerClient.prototype = {
       if (pool.has(actorID)) return pool;
     }
     return null;
-  }
+  },
+
+  /**
+   * Currently attached addon.
+   */
+  activeAddon: null
 }
 
 eventSource(DebuggerClient.prototype);
@@ -952,6 +985,7 @@ function TabClient(aClient, aForm) {
   this.cacheEnabled = aForm.cacheEnabled;
   this.thread = null;
   this.request = this.client.request;
+  this.traits = aForm.traits || {};
 }
 
 TabClient.prototype = {
@@ -1049,6 +1083,36 @@ TabClient.prototype = {
 };
 
 eventSource(TabClient.prototype);
+
+function AddonClient(aClient, aActor) {
+  this._client = aClient;
+  this._actor = aActor;
+  this.request = this._client.request;
+}
+
+AddonClient.prototype = {
+  get actor() { return this._actor; },
+  get _transport() { return this._client._transport; },
+
+  /**
+   * Detach the client from the addon actor.
+   *
+   * @param function aOnResponse
+   *        Called with the response packet.
+   */
+  detach: DebuggerClient.requester({
+    type: "detach"
+  }, {
+    after: function(aResponse) {
+      if (this._client.activeAddon === this._client._addonClients[this.actor]) {
+        this._client.activeAddon = null
+      }
+      delete this._client._addonClients[this.actor];
+      return aResponse;
+    },
+    telemetry: "ADDONDETACH"
+  })
+};
 
 /**
  * A RootClient object represents a root actor on the server. Each
@@ -1577,10 +1641,11 @@ ThreadClient.prototype = {
    *
    * @param aTotal number
    *        The minimum number of stack frames to be included.
-   *
+   * @param aCallback function
+   *        Optional callback function called when frames have been loaded
    * @returns true if a framesadded notification should be expected.
    */
-  fillFrames: function (aTotal) {
+  fillFrames: function (aTotal, aCallback=noop) {
     this._assertPaused("fillFrames");
 
     if (this._frameCache.length >= aTotal) {
@@ -1590,14 +1655,22 @@ ThreadClient.prototype = {
     let numFrames = this._frameCache.length;
 
     this.getFrames(numFrames, aTotal - numFrames, (aResponse) => {
+      if (aResponse.error) {
+        aCallback(aResponse);
+        return;
+      }
+
       for each (let frame in aResponse.frames) {
         this._frameCache[frame.depth] = frame;
       }
+
       // If we got as many frames as we asked for, there might be more
       // frames available.
-
       this.notify("framesadded");
+
+      aCallback(aResponse);
     });
+
     return true;
   },
 
@@ -2278,3 +2351,4 @@ this.debuggerSocketConnect = function (aHost, aPort)
 function pair(aItemOne, aItemTwo) {
   return [aItemOne, aItemTwo];
 }
+function noop() {}

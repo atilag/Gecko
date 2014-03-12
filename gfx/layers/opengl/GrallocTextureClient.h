@@ -9,6 +9,7 @@
 
 #include "mozilla/layers/TextureClient.h"
 #include "ISurfaceAllocator.h" // For IsSurfaceDescriptorValid
+#include "mozilla/layers/FenceUtils.h" // for FenceHandle
 #include "mozilla/layers/ShadowLayerUtilsGralloc.h"
 #include <ui/GraphicBuffer.h>
 
@@ -36,9 +37,6 @@ public:
   GrallocTextureClientOGL(GrallocBufferActor* aActor,
                           gfx::IntSize aSize,
                           TextureFlags aFlags = TEXTURE_FLAGS_DEFAULT);
-  GrallocTextureClientOGL(CompositableClient* aCompositable,
-                          gfx::SurfaceFormat aFormat,
-                          TextureFlags aFlags = TEXTURE_FLAGS_DEFAULT);
   GrallocTextureClientOGL(ISurfaceAllocator* aAllocator,
                           gfx::SurfaceFormat aFormat,
                           TextureFlags aFlags = TEXTURE_FLAGS_DEFAULT);
@@ -51,6 +49,8 @@ public:
 
   virtual bool ImplementsLocking() const MOZ_OVERRIDE { return true; }
 
+  virtual bool HasInternalBuffer() const MOZ_OVERRIDE { return false; }
+
   virtual bool IsAllocated() const MOZ_OVERRIDE;
 
   virtual bool ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor) MOZ_OVERRIDE;
@@ -58,6 +58,13 @@ public:
   virtual bool UpdateSurface(gfxASurface* aSurface) MOZ_OVERRIDE;
 
   virtual TextureClientData* DropTextureData() MOZ_OVERRIDE;
+
+  virtual void SetReleaseFenceHandle(FenceHandle aReleaseFenceHandle) MOZ_OVERRIDE;
+
+  const FenceHandle& GetReleaseFenceHandle() const
+  {
+    return mReleaseFenceHandle;
+  }
 
   void InitWith(GrallocBufferActor* aActor, gfx::IntSize aSize);
 
@@ -99,8 +106,6 @@ public:
   void SetGraphicBufferLocked(GraphicBufferLocked* aBufferLocked);
 
 protected:
-  ISurfaceAllocator* GetAllocator();
-
   /**
    * Unfortunately, until bug 879681 is fixed we need to use a GrallocBufferActor.
    */
@@ -109,8 +114,6 @@ protected:
   RefPtr<GraphicBufferLocked> mBufferLocked;
 
   android::sp<android::GraphicBuffer> mGraphicBuffer;
-
-  RefPtr<ISurfaceAllocator> mAllocator;
 
   /**
    * Points to a mapped gralloc buffer between calls to lock and unlock.

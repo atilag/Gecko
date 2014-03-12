@@ -20,7 +20,8 @@ using namespace mozilla::layers;
 
 TextureClientX11::TextureClientX11(SurfaceFormat aFormat, TextureFlags aFlags)
   : TextureClient(aFlags),
-    mFormat(aFormat)
+    mFormat(aFormat),
+    mLocked(false)
 {
   MOZ_COUNT_CTOR(TextureClientX11);
 }
@@ -41,8 +42,8 @@ TextureClientX11::Lock(OpenMode aMode)
 {
   // XXX - Turn this into a fatal assertion as soon as Bug 952507 is fixed
   NS_WARN_IF_FALSE(!mLocked, "The TextureClient is already Locked!");
-  mLocked = true;
-  return IsValid() && IsAllocated();
+  mLocked = IsValid() && IsAllocated();
+  return mLocked;
 }
 
 void

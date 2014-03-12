@@ -24,7 +24,7 @@
 #include "nsContentUtils.h"
 #include "nsDOMClassInfo.h"
 #include "nsDOMFile.h"
-#include "nsDOMLists.h"
+#include "mozilla/dom/DOMStringList.h"
 #include "nsEventDispatcher.h"
 #include "nsJSUtils.h"
 #include "nsServiceManagerUtils.h"
@@ -39,7 +39,6 @@
 #include "IDBKeyRange.h"
 #include "IDBTransaction.h"
 #include "DatabaseInfo.h"
-#include "DictionaryHelpers.h"
 #include "KeyPath.h"
 #include "ProfilerHelpers.h"
 #include "ReportInternalError.h"
@@ -780,19 +779,11 @@ public:
     nsRefPtr<IDBFileHandle> fileHandle = IDBFileHandle::Create(aDatabase,
       aData.name, aData.type, fileInfo.forget());
 
-    JS::Rooted<JS::Value> wrappedFileHandle(aCx);
     JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
-    nsresult rv =
-      nsContentUtils::WrapNative(aCx, global,
-                                 static_cast<nsIDOMFileHandle*>(fileHandle),
-                                 &NS_GET_IID(nsIDOMFileHandle),
-                                 &wrappedFileHandle);
-    if (NS_FAILED(rv)) {
-      NS_WARNING("Failed to wrap native!");
+    if (!global) {
       return nullptr;
     }
-
-    return JSVAL_TO_OBJECT(wrappedFileHandle);
+    return fileHandle->WrapObject(aCx, global);
   }
 
   static JSObject* CreateAndWrapBlobOrFile(JSContext* aCx,
@@ -2645,27 +2636,19 @@ IDBObjectStore::GetKeyPath(JSContext* aCx, ErrorResult& aRv)
   return mCachedKeyPath;
 }
 
-already_AddRefed<nsIDOMDOMStringList>
+already_AddRefed<DOMStringList>
 IDBObjectStore::GetIndexNames(ErrorResult& aRv)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  nsRefPtr<nsDOMStringList> list(new nsDOMStringList());
+  nsRefPtr<DOMStringList> list(new DOMStringList());
 
-  nsAutoTArray<nsString, 10> names;
+  nsTArray<nsString>& names = list->StringArray();
   uint32_t count = mInfo->indexes.Length();
   names.SetCapacity(count);
 
   for (uint32_t index = 0; index < count; index++) {
     names.InsertElementSorted(mInfo->indexes[index].name);
-  }
-
-  for (uint32_t index = 0; index < count; index++) {
-    if (!list->Add(names[index])) {
-      IDB_WARNING("Failed to add element!");
-      aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-      return nullptr;
-    }
   }
 
   return list.forget();
@@ -3198,28 +3181,36 @@ AddHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 
   mKey.BindToStatement(stmt, NS_LITERAL_CSTRING("key_value"));
 
+
   // Compress the bytes before adding into the database.
   const char* uncompressed =
     reinterpret_cast<const char*>(mCloneWriteInfo.mCloneBuffer.data());
   size_t uncompressedLength = mCloneWriteInfo.mCloneBuffer.nbytes();
 
-  static const fallible_t fallible = fallible_t();
-  size_t compressedLength = snappy::MaxCompressedLength(uncompressedLength);
-  // This will hold our compressed data until the end of the method. The
-  // BindBlobByName function will copy it.
-  nsAutoArrayPtr<char> compressed(new (fallible) char[compressedLength]);
-  NS_ENSURE_TRUE(compressed, NS_ERROR_OUT_OF_MEMORY);
+  // We don't have a smart pointer class that calls moz_free, so we need to
+  // manage | compressed | manually.
+  {
+    size_t compressedLength = snappy::MaxCompressedLength(uncompressedLength);
+    // moz_malloc is equivalent to NS_Alloc, which we use because mozStorage
+    // expects to be able to free the adopted pointer with NS_Free.
+    char* compressed = (char*)moz_malloc(compressedLength);
+    NS_ENSURE_TRUE(compressed, NS_ERROR_OUT_OF_MEMORY);
 
-  snappy::RawCompress(uncompressed, uncompressedLength, compressed.get(),
-                      &compressedLength);
+    snappy::RawCompress(uncompressed, uncompressedLength, compressed,
+                        &compressedLength);
 
-  const uint8_t* dataBuffer =
-    reinterpret_cast<const uint8_t*>(compressed.get());
-  size_t dataBufferLength = compressedLength;
+    uint8_t* dataBuffer = reinterpret_cast<uint8_t*>(compressed);
+    size_t dataBufferLength = compressedLength;
 
-  rv = stmt->BindBlobByName(NS_LITERAL_CSTRING("data"), dataBuffer,
-                            dataBufferLength);
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+    // If this call succeeds, | compressed | is now owned by the statement, and
+    // we are no longer responsible for it.
+    rv = stmt->BindAdoptedBlobByName(NS_LITERAL_CSTRING("data"), dataBuffer,
+                                     dataBufferLength);
+    if (NS_FAILED(rv)) {
+      moz_free(compressed);
+    }
+    IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  }
 
   // Handle blobs
   uint32_t length = mCloneWriteInfo.mFiles.Length();

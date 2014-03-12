@@ -201,8 +201,10 @@ IsElementClickable(nsIFrame* aFrame, nsIAtom* stopAt = nullptr)
         return true;
       }
     }
-    if (content->AttrValueIs(kNameSpaceID_None, nsGkAtoms::role,
-                             nsGkAtoms::button, eIgnoreCase)) {
+    static nsIContent::AttrValuesArray clickableRoles[] =
+      { &nsGkAtoms::button, &nsGkAtoms::key, nullptr };
+    if (content->FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::role,
+                                 clickableRoles, eIgnoreCase) >= 0) {
       return true;
     }
     if (content->IsEditable()) {
@@ -220,10 +222,8 @@ static nscoord
 AppUnitsFromMM(nsIFrame* aFrame, uint32_t aMM, bool aVertical)
 {
   nsPresContext* pc = aFrame->PresContext();
-  nsIPresShell* presShell = pc->PresShell();
   float result = float(aMM) *
-    (pc->DeviceContext()->AppUnitsPerPhysicalInch() / MM_PER_INCH_FLOAT) *
-    (aVertical ? presShell->GetYResolution() : presShell->GetXResolution());
+    (pc->DeviceContext()->AppUnitsPerPhysicalInch() / MM_PER_INCH_FLOAT);
   return NSToCoordRound(result);
 }
 

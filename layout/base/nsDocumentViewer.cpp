@@ -447,7 +447,7 @@ public:
   nsDocumentShownDispatcher(nsCOMPtr<nsIDocument> aDocument)
   : mDocument(aDocument) {}
 
-  NS_IMETHOD Run();
+  NS_IMETHOD Run() MOZ_OVERRIDE;
 
 private:
   nsCOMPtr<nsIDocument> mDocument;
@@ -592,7 +592,8 @@ nsDocumentViewer::SyncParentSubDocMap()
       if (parent_doc) {
         if (mDocument &&
             parent_doc->GetSubDocumentFor(content) != mDocument) {
-          mDocument->SuppressEventHandling(parent_doc->EventHandlingSuppressed());
+          mDocument->SuppressEventHandling(nsIDocument::eEvents,
+                                           parent_doc->EventHandlingSuppressed());
         }
         return parent_doc->SetSubDocumentFor(content->AsElement(), mDocument);
       }
@@ -682,7 +683,7 @@ nsDocumentViewer::InitPresentationStuff(bool aDoInitialReflow)
   mViewManager->SetWindowDimensions(width, height);
   mPresContext->SetTextZoom(mTextZoom);
   mPresContext->SetFullZoom(mPageZoom);
-  mPresContext->SetMinFontSize(mMinFontSize);
+  mPresContext->SetBaseMinFontSize(mMinFontSize);
 
   p2a = mPresContext->AppUnitsPerDevPixel();  // zoom may have changed it
   width = p2a * mBounds.width;
@@ -2225,6 +2226,11 @@ nsDocumentViewer::CreateStyleSet(nsIDocument* aDocument,
     }
   }
 
+  sheet = nsLayoutStylesheetCache::NumberControlSheet();
+  if (sheet) {
+    styleSet->PrependStyleSheet(nsStyleSet::eAgentSheet, sheet);
+  }
+
   sheet = nsLayoutStylesheetCache::FormsSheet();
   if (sheet) {
     styleSet->PrependStyleSheet(nsStyleSet::eAgentSheet, sheet);
@@ -2799,7 +2805,7 @@ SetExtResourceMinFontSize(nsIDocument* aDocument, void* aClosure)
   if (shell) {
     nsPresContext* ctxt = shell->GetPresContext();
     if (ctxt) {
-      ctxt->SetMinFontSize(NS_PTR_TO_INT32(aClosure));
+      ctxt->SetBaseMinFontSize(NS_PTR_TO_INT32(aClosure));
     }
   }
 
@@ -2891,7 +2897,7 @@ nsDocumentViewer::SetMinFontSize(int32_t aMinFontSize)
   // Now change our own min font
   nsPresContext* pc = GetPresContext();
   if (pc && aMinFontSize != mPresContext->MinFontSize(nullptr)) {
-    pc->SetMinFontSize(aMinFontSize);
+    pc->SetBaseMinFontSize(aMinFontSize);
   }
 
   // And do the external resources
@@ -2906,7 +2912,7 @@ nsDocumentViewer::GetMinFontSize(int32_t* aMinFontSize)
 {
   NS_ENSURE_ARG_POINTER(aMinFontSize);
   nsPresContext* pc = GetPresContext();
-  *aMinFontSize = pc ? pc->MinFontSize(nullptr) : 0;
+  *aMinFontSize = pc ? pc->BaseMinFontSize() : 0;
   return NS_OK;
 }
 

@@ -193,22 +193,6 @@ APZController::ReceiveInputEvent(WidgetInputEvent* aEvent,
   return sAPZC->ReceiveInputEvent(*aEvent->AsInputEvent(), aOutTargetGuid);
 }
 
-nsEventStatus
-APZController::ReceiveInputEvent(WidgetInputEvent* aInEvent,
-                                 ScrollableLayerGuid* aOutTargetGuid,
-                                 WidgetInputEvent* aOutEvent)
-{
-  MOZ_ASSERT(aInEvent);
-  MOZ_ASSERT(aOutEvent);
-
-  if (!sAPZC) {
-    return nsEventStatus_eIgnore;
-  }
-  return sAPZC->ReceiveInputEvent(*aInEvent->AsInputEvent(),
-                                  aOutTargetGuid,
-                                  aOutEvent);
-}
-
 // APZC sends us this request when we need to update the display port on
 // the scrollable frame the apzc is managing.
 void
@@ -292,6 +276,7 @@ APZController::GetRootZoomConstraints(ZoomConstraints* aOutConstraints)
     // Until we support the meta-viewport tag properly allow zooming
     // from 1/4 to 4x by default.
     aOutConstraints->mAllowZoom = true;
+    aOutConstraints->mAllowDoubleTapZoom = false;
     aOutConstraints->mMinZoom = CSSToScreenScale(0.25f);
     aOutConstraints->mMaxZoom = CSSToScreenScale(4.0f);
     return true;

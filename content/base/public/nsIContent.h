@@ -23,6 +23,7 @@ class nsXBLBinding;
 namespace mozilla {
 namespace dom {
 class ShadowRoot;
+struct CustomElementData;
 } // namespace dom
 namespace widget {
 struct IMEState;
@@ -677,6 +678,22 @@ public:
   nsIContent *GetFlattenedTreeParent() const;
 
   /**
+   * Gets the custom element data used by web components custom element.
+   * Custom element data is created at the first attempt to enqueue a callback.
+   *
+   * @return The custom element data or null if none.
+   */
+  virtual mozilla::dom::CustomElementData *GetCustomElementData() const = 0;
+
+  /**
+   * Sets the custom element data, ownership of the
+   * callback data is taken by this content.
+   *
+   * @param aCallbackData The custom element data.
+   */
+  virtual void SetCustomElementData(mozilla::dom::CustomElementData* aData) = 0;
+
+  /**
    * API to check if this is a link that's traversed in response to user input
    * (e.g. a click event). Specializations for HTML/SVG/generic XML allow for
    * different types of link in different types of content.
@@ -932,6 +949,15 @@ public:
   virtual void DumpContent(FILE* out = stdout, int32_t aIndent = 0,
                            bool aDumpAll = true) const = 0;
 #endif
+
+  /**
+   * Append to aOutDescription a short (preferably one line) string
+   * describing the content.
+   * Currently implemented for elements only.
+   */
+  virtual void Describe(nsAString& aOutDescription) const {
+    aOutDescription = NS_LITERAL_STRING("(not an element)");
+  }
 
   enum ETabFocusType {
   //eTabFocus_textControlsMask = (1<<0),  // unused - textboxes always tabbable

@@ -79,6 +79,10 @@ public:
     return mAudioReader;
   }
 
+  // Returns the duration in seconds as provided by the attached MediaSource.
+  // If no MediaSource is attached, returns the duration tracked by the decoder.
+  double GetMediaSourceDuration();
+
 private:
   dom::MediaSource* mMediaSource;
 
@@ -128,6 +132,21 @@ public:
 
   virtual bool IsTransportSeekable() MOZ_OVERRIDE { return true; }
   virtual const nsCString& GetContentType() const MOZ_OVERRIDE { return mType; }
+
+  virtual size_t SizeOfExcludingThis(
+                      MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    size_t size = MediaResource::SizeOfExcludingThis(aMallocSizeOf);
+    size += mType.SizeOfExcludingThisIfUnshared(aMallocSizeOf);
+
+    return size;
+  }
+
+  virtual size_t SizeOfIncludingThis(
+                      MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
 
 private:
   const nsAutoCString mType;

@@ -37,7 +37,7 @@
 #include "prenv.h"
 #include "mozilla/Attributes.h"
 #include "nsContentUtils.h"
-#include "gfxPlatform.h"
+#include "gfxPrefs.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/MouseEvents.h"
 #include "GLConsts.h"
@@ -859,8 +859,8 @@ nsBaseWidget::ComputeShouldAccelerate(bool aDefault)
 #endif
 
   // we should use AddBoolPrefVarCache
-  bool disableAcceleration = gfxPlatform::GetPrefLayersAccelerationDisabled();
-  mForceLayersAcceleration = gfxPlatform::GetPrefLayersAccelerationForceEnabled();
+  bool disableAcceleration = gfxPrefs::LayersAccelerationDisabled();
+  mForceLayersAcceleration = gfxPrefs::LayersAccelerationForceEnabled();
 
   const char *acceleratedEnv = PR_GetEnv("MOZ_ACCELERATED");
   accelerateByDefault = accelerateByDefault ||
@@ -972,7 +972,7 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
   mCompositorChild->Open(parentChannel, childMessageLoop, ipc::ChildSide);
 
   TextureFactoryIdentifier textureFactoryIdentifier;
-  PLayerTransactionChild* shadowManager;
+  PLayerTransactionChild* shadowManager = nullptr;
   nsTArray<LayersBackend> backendHints;
   GetPreferredCompositorBackends(backendHints);
 
@@ -1468,6 +1468,18 @@ nsBaseWidget::NotifySizeMoveDone()
   nsIPresShell* presShell = mWidgetListener->GetPresShell();
   if (presShell) {
     presShell->WindowSizeMoveDone();
+  }
+}
+
+void
+nsBaseWidget::NotifyWindowMoved(int32_t aX, int32_t aY)
+{
+  if (mWidgetListener) {
+    mWidgetListener->WindowMoved(this, aX, aY);
+  }
+
+  if (GetIMEUpdatePreference().WantPositionChanged()) {
+    NotifyIME(IMENotification(IMEMessage::NOTIFY_IME_OF_POSITION_CHANGE));
   }
 }
 

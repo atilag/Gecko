@@ -15,7 +15,7 @@
 #include "nsIPhonetic.h"
 #include "nsTextFragment.h"
 #include "nsIDOMHTMLTextAreaElement.h"
-#include "nsINameSpaceManager.h"
+#include "nsNameSpaceManager.h"
 #include "nsINodeInfo.h"
 #include "nsFormControlFrame.h" //for registering accesskeys
 
@@ -544,7 +544,7 @@ nsTextControlFrame::ReflowTextControlChild(nsIFrame*                aKid,
                     aReflowState.ComputedPhysicalPadding().top;
 
   // reflow the child
-  nsHTMLReflowMetrics desiredSize(aReflowState.GetWritingMode());
+  nsHTMLReflowMetrics desiredSize(aReflowState);
   ReflowChild(aKid, aPresContext, desiredSize, kidReflowState, 
               xOffset, yOffset, 0, aStatus);
 

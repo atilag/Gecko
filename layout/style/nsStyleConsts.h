@@ -317,9 +317,11 @@ static inline mozilla::css::Side operator++(mozilla::css::Side& side, int) {
 #define NS_STYLE_CLEAR_NONE                     0
 #define NS_STYLE_CLEAR_LEFT                     1
 #define NS_STYLE_CLEAR_RIGHT                    2
-#define NS_STYLE_CLEAR_LEFT_AND_RIGHT           3
+#define NS_STYLE_CLEAR_BOTH                     3
 #define NS_STYLE_CLEAR_LINE                     4
-#define NS_STYLE_CLEAR_LAST_VALUE NS_STYLE_CLEAR_LINE
+// @note NS_STYLE_CLEAR_LINE can be added to one of the other values in layout
+// so it needs to use a bit value that none of the other values can have.
+#define NS_STYLE_CLEAR_MAX (NS_STYLE_CLEAR_LINE | NS_STYLE_CLEAR_BOTH)
 
 // See nsStyleContent
 #define NS_STYLE_CONTENT_OPEN_QUOTE             0
@@ -395,10 +397,10 @@ static inline mozilla::css::Side operator++(mozilla::css::Side& side, int) {
 #define NS_STYLE_DISPLAY_BOX                    18
 #define NS_STYLE_DISPLAY_INLINE_BOX             19
 #ifdef MOZ_XUL
-#define NS_STYLE_DISPLAY_GRID                   20
-#define NS_STYLE_DISPLAY_INLINE_GRID            21
-#define NS_STYLE_DISPLAY_GRID_GROUP             22
-#define NS_STYLE_DISPLAY_GRID_LINE              23
+#define NS_STYLE_DISPLAY_XUL_GRID               20
+#define NS_STYLE_DISPLAY_INLINE_XUL_GRID        21
+#define NS_STYLE_DISPLAY_XUL_GRID_GROUP         22
+#define NS_STYLE_DISPLAY_XUL_GRID_LINE          23
 #define NS_STYLE_DISPLAY_STACK                  24
 #define NS_STYLE_DISPLAY_INLINE_STACK           25
 #define NS_STYLE_DISPLAY_DECK                   26
@@ -407,6 +409,8 @@ static inline mozilla::css::Side operator++(mozilla::css::Side& side, int) {
 #endif
 #define NS_STYLE_DISPLAY_FLEX                   29
 #define NS_STYLE_DISPLAY_INLINE_FLEX            30
+#define NS_STYLE_DISPLAY_GRID                   31
+#define NS_STYLE_DISPLAY_INLINE_GRID            32
 
 // See nsStylePosition
 #define NS_STYLE_ALIGN_CONTENT_FLEX_START       0
@@ -535,6 +539,16 @@ static inline mozilla::css::Side operator++(mozilla::css::Side& side, int) {
 #define NS_STYLE_FONT_LIST                      15
 #define NS_STYLE_FONT_FIELD                     16
 
+// grid-auto-flow keywords
+#define NS_STYLE_GRID_AUTO_FLOW_NONE            (1 << 0)
+#define NS_STYLE_GRID_AUTO_FLOW_COLUMN          (1 << 1)
+#define NS_STYLE_GRID_AUTO_FLOW_ROW             (1 << 2)
+#define NS_STYLE_GRID_AUTO_FLOW_DENSE           (1 << 3)
+
+// CSS Grid <track-breadth> keywords
+#define NS_STYLE_GRID_TRACK_BREADTH_MAX_CONTENT 1
+#define NS_STYLE_GRID_TRACK_BREADTH_MIN_CONTENT 2
+
 // defaults per MathML spec
 #define NS_MATHML_DEFAULT_SCRIPT_SIZE_MULTIPLIER 0.71f
 #define NS_MATHML_DEFAULT_SCRIPT_MIN_SIZE_PT 8
@@ -570,14 +584,14 @@ static inline mozilla::css::Side operator++(mozilla::css::Side& side, int) {
 #define NS_STYLE_WIDTH_FIT_CONTENT              2
 #define NS_STYLE_WIDTH_AVAILABLE                3
 
-// See nsStylePosition.mPosition
+// See nsStyleDisplay.mPosition
 #define NS_STYLE_POSITION_STATIC                0
 #define NS_STYLE_POSITION_RELATIVE              1
 #define NS_STYLE_POSITION_ABSOLUTE              2
 #define NS_STYLE_POSITION_FIXED                 3
 #define NS_STYLE_POSITION_STICKY                4
 
-// See nsStylePosition.mClip
+// See nsStyleDisplay.mClip
 #define NS_STYLE_CLIP_AUTO                      0x00
 #define NS_STYLE_CLIP_RECT                      0x01
 #define NS_STYLE_CLIP_TYPE_MASK                 0x0F
@@ -598,7 +612,7 @@ static inline mozilla::css::Side operator++(mozilla::css::Side& side, int) {
 #define NS_STYLE_FRAME_SCROLL                   7
 #define NS_STYLE_FRAME_NOSCROLL                 8
 
-// See nsStylePosition.mOverflow
+// See nsStyleDisplay.mOverflow
 #define NS_STYLE_OVERFLOW_VISIBLE               0
 #define NS_STYLE_OVERFLOW_HIDDEN                1
 #define NS_STYLE_OVERFLOW_SCROLL                2
@@ -606,6 +620,10 @@ static inline mozilla::css::Side operator++(mozilla::css::Side& side, int) {
 #define NS_STYLE_OVERFLOW_CLIP                  4
 #define NS_STYLE_OVERFLOW_SCROLLBARS_HORIZONTAL 5
 #define NS_STYLE_OVERFLOW_SCROLLBARS_VERTICAL   6
+
+// See nsStyleDisplay.mOverflowClipBox
+#define NS_STYLE_OVERFLOW_CLIP_BOX_PADDING_BOX  0
+#define NS_STYLE_OVERFLOW_CLIP_BOX_CONTENT_BOX  1
 
 // See nsStyleList
 #define NS_STYLE_LIST_STYLE_NONE                  0

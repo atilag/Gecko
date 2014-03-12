@@ -13,7 +13,6 @@
 #include "nsIStreamListener.h"
 #include "nsIChannelEventSink.h"
 #include "nsIInterfaceRequestor.h"
-#include "nsProxyRelease.h"
 #include "MediaCache.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/TimeStamp.h"
@@ -47,7 +46,7 @@ class MediaDecoder;
  * an estimate of the "current rate" of the channel, which is some
  * kind of average of the data passing through over the time the
  * channel is active.
- * 
+ *
  * All methods take "now" as a parameter so the user of this class can
  * control the timeline used.
  */
@@ -205,11 +204,15 @@ class RtspMediaResource;
  * access, so the FileMediaResource implementation class bypasses the cache.
  * MediaResource::Create automatically chooses the best implementation class.
  */
-class MediaResource
+class MediaResource : public nsISupports
 {
 public:
-
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MediaResource)
+  // Our refcounting is threadsafe, and when our refcount drops to zero
+  // we dispatch an event to the main thread to delete the MediaResource.
+  // Note that this means it's safe for references to this object to be
+  // released on a non main thread, but the destructor will always run on
+  // the main thread.
+  NS_DECL_THREADSAFE_ISUPPORTS
 
   // The following can be called on the main thread only:
   // Get the URI
@@ -271,7 +274,7 @@ public:
   // channel's listener to close the pipe, forcing an i/o error on any
   // blocked read. This will allow the decode thread to complete the
   // event.
-  // 
+  //
   // In the case of a seek in progress, the byte range request creates
   // a new listener. This is done on the main thread via seek
   // synchronously dispatching an event. This avoids the issue of us
@@ -390,14 +393,45 @@ public:
     return false;
   }
 
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const {
+    return 0;
+  }
+
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
+
 protected:
   virtual ~MediaResource() {};
+
+private:
+  void Destroy();
 };
 
 class BaseMediaResource : public MediaResource {
 public:
-  virtual nsIURI* URI() const { return const_cast<nsIURI*>(mURI.get()); }
+  virtual nsIURI* URI() const { return mURI; }
   virtual void MoveLoadsToBackground();
+
+  virtual size_t SizeOfExcludingThis(
+                  MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    // Might be useful to track in the future:
+    // - mChannel
+    // - mURI (possibly owned, looks like just a ref from mChannel)
+    // Not owned:
+    // - mDecoder
+    size_t size = MediaResource::SizeOfExcludingThis(aMallocSizeOf);
+    size += mContentType.SizeOfIncludingThisIfUnshared(aMallocSizeOf);
+
+    return size;
+  }
+
+  virtual size_t SizeOfIncludingThis(
+                  MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
 
 protected:
   BaseMediaResource(MediaDecoder* aDecoder,
@@ -405,8 +439,8 @@ protected:
                     nsIURI* aURI,
                     const nsACString& aContentType) :
     mDecoder(aDecoder),
-    mChannel(new nsMainThreadPtrHolder<nsIChannel>(aChannel)),
-    mURI(new nsMainThreadPtrHolder<nsIURI>(aURI)),
+    mChannel(aChannel),
+    mURI(aURI),
     mContentType(aContentType),
     mLoadInBackground(false)
   {
@@ -439,11 +473,11 @@ protected:
 
   // Channel used to download the media data. Must be accessed
   // from the main thread only.
-  nsMainThreadPtrHandle<nsIChannel> mChannel;
+  nsCOMPtr<nsIChannel> mChannel;
 
   // URI in case the stream needs to be re-opened. Access from
   // main thread only.
-  nsMainThreadPtrHandle<nsIURI> mURI;
+  nsCOMPtr<nsIURI> mURI;
 
   // Content-Type of the channel. This is copied from the nsIChannel when the
   // MediaResource is created. This is constant, so accessing from any thread
@@ -549,6 +583,24 @@ public:
   virtual bool    IsSuspendedByCache();
   virtual bool    IsSuspended();
   virtual bool    IsTransportSeekable() MOZ_OVERRIDE;
+
+  virtual size_t SizeOfExcludingThis(
+                      MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE {
+    // Might be useful to track in the future:
+    //   - mListener (seems minor)
+    //   - mChannelStatistics (seems minor)
+    //     owned if RecordStatisticsTo is not called
+    //   - mDataReceivedEvent (seems minor)
+    size_t size = BaseMediaResource::SizeOfExcludingThis(aMallocSizeOf);
+    size += mCacheStream.SizeOfExcludingThis(aMallocSizeOf);
+
+    return size;
+  }
+
+  virtual size_t SizeOfIncludingThis(
+                      MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
 
   class Listener MOZ_FINAL : public nsIStreamListener,
                              public nsIInterfaceRequestor,

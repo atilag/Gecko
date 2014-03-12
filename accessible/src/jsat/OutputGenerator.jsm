@@ -14,6 +14,7 @@ const INCLUDE_NAME = 0x02;
 const INCLUDE_VALUE = 0x04;
 const INCLUDE_CUSTOM = 0x08;
 const NAME_FROM_SUBTREE_RULE = 0x10;
+const IGNORE_EXPLICIT_NAME = 0x20;
 
 const OUTPUT_DESC_FIRST = 0;
 const OUTPUT_DESC_LAST = 1;
@@ -31,10 +32,6 @@ XPCOMUtils.defineLazyModuleGetter(this, 'Roles',
   'resource://gre/modules/accessibility/Constants.jsm');
 XPCOMUtils.defineLazyModuleGetter(this, 'States',
   'resource://gre/modules/accessibility/Constants.jsm');
-
-var gStringBundle = Cc['@mozilla.org/intl/stringbundle;1'].
-  getService(Ci.nsIStringBundleService).
-  createBundle('chrome://global/locale/AccessFu.properties');
 
 this.EXPORTED_SYMBOLS = ['UtteranceGenerator', 'BrailleGenerator'];
 
@@ -67,7 +64,8 @@ this.OutputGenerator = {
       // NAME_FROM_SUBTREE_RULE.
       return (((nameRule & INCLUDE_VALUE) && aAccessible.value) ||
               ((nameRule & NAME_FROM_SUBTREE_RULE) &&
-               Utils.getAttributes(aAccessible)['explicit-name'] === 'true'));
+               (Utils.getAttributes(aAccessible)['explicit-name'] === 'true' &&
+               !(nameRule & IGNORE_EXPLICIT_NAME))));
     };
 
     let contextStart = this._getContextStart(aContext);
@@ -157,8 +155,8 @@ this.OutputGenerator = {
 
   _addName: function _addName(aOutput, aAccessible, aFlags) {
     let name;
-    if (Utils.getAttributes(aAccessible)['explicit-name'] === 'true' ||
-      (aFlags & INCLUDE_NAME)) {
+    if ((Utils.getAttributes(aAccessible)['explicit-name'] === 'true' &&
+         !(aFlags & IGNORE_EXPLICIT_NAME)) || (aFlags & INCLUDE_NAME)) {
       name = aAccessible.name;
     }
 
@@ -192,7 +190,7 @@ this.OutputGenerator = {
       return;
     }
 
-    let landmark = gStringBundle.GetStringFromName(landmarkName);
+    let landmark = Utils.stringBundle.GetStringFromName(landmarkName);
     if (!landmark) {
       return;
     }
@@ -219,7 +217,7 @@ this.OutputGenerator = {
     }
     typeName = 'textInputType_' + typeName;
     try {
-      aDesc.push(gStringBundle.GetStringFromName(typeName));
+      aDesc.push(Utils.stringBundle.GetStringFromName(typeName));
     } catch (x) {
       Logger.warning('Failed to get a string from a bundle for', typeName);
     }
@@ -242,7 +240,7 @@ this.OutputGenerator = {
   _getLocalizedState: function _getLocalizedState(aState) {},
 
   _getPluralFormString: function _getPluralFormString(aString, aCount) {
-    let str = gStringBundle.GetStringFromName(this._getOutputName(aString));
+    let str = Utils.stringBundle.GetStringFromName(this._getOutputName(aString));
     str = PluralForm.get(aCount, str);
     return str.replace('#1', aCount);
   },
@@ -319,7 +317,9 @@ this.OutputGenerator = {
     'option': INCLUDE_DESC,
     'listbox': INCLUDE_DESC,
     'definitionlist': INCLUDE_DESC | INCLUDE_NAME,
-    'dialog': INCLUDE_DESC | INCLUDE_NAME },
+    'dialog': INCLUDE_DESC | INCLUDE_NAME,
+    'chrome window': IGNORE_EXPLICIT_NAME,
+    'app root': IGNORE_EXPLICIT_NAME },
 
   objectOutputFunctions: {
     _generateBaseOutput: function _generateBaseOutput(aAccessible, aRoleStr, aState, aFlags) {
@@ -374,7 +374,7 @@ this.OutputGenerator = {
       let output = [];
       let desc = this._getLocalizedState(aState);
       desc.push(
-        gStringBundle.formatStringFromName(
+        Utils.stringBundle.formatStringFromName(
           'objItemOf', [localizedRole, itemno.value, itemof.value], 3));
       output.push(desc.join(' '));
 
@@ -402,7 +402,7 @@ this.OutputGenerator = {
           table.columnCount);
         let tableRowInfo = this._getPluralFormString('tableRowInfo',
           table.rowCount);
-        output.push(gStringBundle.formatStringFromName(
+        output.push(Utils.stringBundle.formatStringFromName(
           this._getOutputName('tableInfo'), [this._getLocalizedRole(aRoleStr),
             tableColumnInfo, tableRowInfo], 3));
         this._addName(output, aAccessible, aFlags);
@@ -451,13 +451,13 @@ this.UtteranceGenerator = {
 
   //TODO: May become more verbose in the future.
   genForAction: function genForAction(aObject, aActionName) {
-    return [gStringBundle.GetStringFromName(this.gActionMap[aActionName])];
+    return [Utils.stringBundle.GetStringFromName(this.gActionMap[aActionName])];
   },
 
   genForLiveRegion: function genForLiveRegion(aContext, aIsHide, aModifiedText) {
     let utterance = [];
     if (aIsHide) {
-      utterance.push(gStringBundle.GetStringFromName('hidden'));
+      utterance.push(Utils.stringBundle.GetStringFromName('hidden'));
     }
     return utterance.concat(
       aModifiedText || this.genForContext(aContext).output);
@@ -465,7 +465,7 @@ this.UtteranceGenerator = {
 
   genForAnnouncement: function genForAnnouncement(aAnnouncement) {
     try {
-      return [gStringBundle.GetStringFromName(aAnnouncement)];
+      return [Utils.stringBundle.GetStringFromName(aAnnouncement)];
     } catch (x) {
       return [aAnnouncement];
     }
@@ -474,24 +474,24 @@ this.UtteranceGenerator = {
   genForTabStateChange: function genForTabStateChange(aObject, aTabState) {
     switch (aTabState) {
       case 'newtab':
-        return [gStringBundle.GetStringFromName('tabNew')];
+        return [Utils.stringBundle.GetStringFromName('tabNew')];
       case 'loading':
-        return [gStringBundle.GetStringFromName('tabLoading')];
+        return [Utils.stringBundle.GetStringFromName('tabLoading')];
       case 'loaded':
         return [aObject.name || '',
-                gStringBundle.GetStringFromName('tabLoaded')];
+                Utils.stringBundle.GetStringFromName('tabLoaded')];
       case 'loadstopped':
-        return [gStringBundle.GetStringFromName('tabLoadStopped')];
+        return [Utils.stringBundle.GetStringFromName('tabLoadStopped')];
       case 'reload':
-        return [gStringBundle.GetStringFromName('tabReload')];
+        return [Utils.stringBundle.GetStringFromName('tabReload')];
       default:
         return [];
     }
   },
 
   genForEditingMode: function genForEditingMode(aIsEditing) {
-    return [gStringBundle.GetStringFromName(
-              aIsEditing ? 'editingMode' : 'navigationMode')];
+    return [Utils.stringBundle.GetStringFromName(
+      aIsEditing ? 'editingMode' : 'navigationMode')];
   },
 
   objectOutputFunctions: {
@@ -506,7 +506,8 @@ this.UtteranceGenerator = {
       let level = {};
       aAccessible.groupPosition(level, {}, {});
       let utterance =
-        [gStringBundle.formatStringFromName('headingLevel', [level.value], 1)];
+        [Utils.stringBundle.formatStringFromName(
+          'headingLevel', [level.value], 1)];
 
       this._addName(utterance, aAccessible, aFlags);
       this._addLandmark(utterance, aAccessible);
@@ -520,9 +521,9 @@ this.UtteranceGenerator = {
       aAccessible.groupPosition({}, itemof, itemno);
       let utterance = [];
       if (itemno.value == 1) // Start of list
-        utterance.push(gStringBundle.GetStringFromName('listStart'));
+        utterance.push(Utils.stringBundle.GetStringFromName('listStart'));
       else if (itemno.value == itemof.value) // last item
-        utterance.push(gStringBundle.GetStringFromName('listEnd'));
+        utterance.push(Utils.stringBundle.GetStringFromName('listEnd'));
 
       this._addName(utterance, aAccessible, aFlags);
       this._addLandmark(utterance, aAccessible);
@@ -556,13 +557,13 @@ this.UtteranceGenerator = {
         let desc = [];
         let addCellChanged = function addCellChanged(aDesc, aChanged, aString, aIndex) {
           if (aChanged) {
-            aDesc.push(gStringBundle.formatStringFromName(aString,
+            aDesc.push(Utils.stringBundle.formatStringFromName(aString,
               [aIndex + 1], 1));
           }
         };
         let addExtent = function addExtent(aDesc, aExtent, aString) {
           if (aExtent > 1) {
-            aDesc.push(gStringBundle.formatStringFromName(aString,
+            aDesc.push(Utils.stringBundle.formatStringFromName(aString,
               [aExtent], 1));
           }
         };
@@ -605,7 +606,8 @@ this.UtteranceGenerator = {
 
   _getLocalizedRole: function _getLocalizedRole(aRoleStr) {
     try {
-      return gStringBundle.GetStringFromName(this._getOutputName(aRoleStr));
+      return Utils.stringBundle.GetStringFromName(
+        this._getOutputName(aRoleStr));
     } catch (x) {
       return '';
     }
@@ -615,7 +617,8 @@ this.UtteranceGenerator = {
     let stateUtterances = [];
 
     if (aState.contains(States.UNAVAILABLE)) {
-      stateUtterances.push(gStringBundle.GetStringFromName('stateUnavailable'));
+      stateUtterances.push(
+        Utils.stringBundle.GetStringFromName('stateUnavailable'));
     }
 
     // Don't utter this in Jelly Bean, we let TalkBack do it for us there.
@@ -625,29 +628,33 @@ this.UtteranceGenerator = {
     if (Utils.AndroidSdkVersion < 16 && aState.contains(States.CHECKABLE)) {
       let statetr = aState.contains(States.CHECKED) ?
         'stateChecked' : 'stateNotChecked';
-      stateUtterances.push(gStringBundle.GetStringFromName(statetr));
+      stateUtterances.push(Utils.stringBundle.GetStringFromName(statetr));
     }
 
     if (aState.contains(States.EXPANDABLE)) {
       let statetr = aState.contains(States.EXPANDED) ?
         'stateExpanded' : 'stateCollapsed';
-      stateUtterances.push(gStringBundle.GetStringFromName(statetr));
+      stateUtterances.push(Utils.stringBundle.GetStringFromName(statetr));
     }
 
     if (aState.contains(States.REQUIRED)) {
-      stateUtterances.push(gStringBundle.GetStringFromName('stateRequired'));
+      stateUtterances.push(
+        Utils.stringBundle.GetStringFromName('stateRequired'));
     }
 
     if (aState.contains(States.TRAVERSED)) {
-      stateUtterances.push(gStringBundle.GetStringFromName('stateTraversed'));
+      stateUtterances.push(
+        Utils.stringBundle.GetStringFromName('stateTraversed'));
     }
 
     if (aState.contains(States.HASPOPUP)) {
-      stateUtterances.push(gStringBundle.GetStringFromName('stateHasPopup'));
+      stateUtterances.push(
+        Utils.stringBundle.GetStringFromName('stateHasPopup'));
     }
 
     if (aState.contains(States.SELECTED)) {
-      stateUtterances.push(gStringBundle.GetStringFromName('stateSelected'));
+      stateUtterances.push(
+        Utils.stringBundle.GetStringFromName('stateSelected'));
     }
 
     return stateUtterances;
@@ -740,7 +747,7 @@ this.BrailleGenerator = {
           }
         };
 
-        desc.push(gStringBundle.formatStringFromName(
+        desc.push(Utils.stringBundle.formatStringFromName(
           this._getOutputName('cellInfo'), [cell.columnIndex + 1,
             cell.rowIndex + 1], 2));
 
@@ -811,10 +818,11 @@ this.BrailleGenerator = {
 
   _getLocalizedRole: function _getLocalizedRole(aRoleStr) {
     try {
-      return gStringBundle.GetStringFromName(this._getOutputName(aRoleStr));
+      return Utils.stringBundle.GetStringFromName(
+        this._getOutputName(aRoleStr));
     } catch (x) {
       try {
-        return gStringBundle.GetStringFromName(
+        return Utils.stringBundle.GetStringFromName(
           OutputGenerator._getOutputName(aRoleStr));
       } catch (y) {
         return '';

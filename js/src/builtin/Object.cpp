@@ -145,7 +145,7 @@ js::ObjectToSource(JSContext *cx, HandleObject obj)
         int valcnt = 0;
         if (shape) {
             bool doGet = true;
-            if (obj2->isNative() && !IsImplicitDenseElement(shape)) {
+            if (obj2->isNative() && !IsImplicitDenseOrTypedArrayElement(shape)) {
                 unsigned attrs = shape->attributes();
                 if (attrs & JSPROP_GETTER) {
                     doGet = false;
@@ -454,7 +454,7 @@ obj_lookupGetter(JSContext *cx, unsigned argc, Value *vp)
         return false;
     args.rval().setUndefined();
     if (shape) {
-        if (pobj->isNative() && !IsImplicitDenseElement(shape)) {
+        if (pobj->isNative() && !IsImplicitDenseOrTypedArrayElement(shape)) {
             if (shape->hasGetterValue())
                 args.rval().set(shape->getterValue());
         }
@@ -490,7 +490,7 @@ obj_lookupSetter(JSContext *cx, unsigned argc, Value *vp)
         return false;
     args.rval().setUndefined();
     if (shape) {
-        if (pobj->isNative() && !IsImplicitDenseElement(shape)) {
+        if (pobj->isNative() && !IsImplicitDenseOrTypedArrayElement(shape)) {
             if (shape->hasSetterValue())
                 args.rval().set(shape->setterValue());
         }
@@ -656,8 +656,6 @@ obj_hasOwnProperty(JSContext *cx, unsigned argc, Value *vp)
         return false;
 
     /* Non-standard code for proxies. */
-    RootedObject obj2(cx);
-    RootedShape prop(cx);
     if (obj->is<ProxyObject>()) {
         bool has;
         if (!Proxy::hasOwn(cx, obj, idRoot, &has))
@@ -667,10 +665,12 @@ obj_hasOwnProperty(JSContext *cx, unsigned argc, Value *vp)
     }
 
     /* Step 3. */
-    if (!HasOwnProperty<CanGC>(cx, obj->getOps()->lookupGeneric, obj, idRoot, &obj2, &prop))
+    bool found;
+    if (!HasOwnProperty(cx, obj, idRoot, &found))
         return false;
+
     /* Step 4,5. */
-    args.rval().setBoolean(!!prop);
+    args.rval().setBoolean(found);
     return true;
 }
 

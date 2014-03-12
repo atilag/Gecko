@@ -15,7 +15,7 @@ loader.lazyServiceGetter(this, "clipboardHelper",
                          "nsIClipboardHelper");
 loader.lazyImporter(this, "Services", "resource://gre/modules/Services.jsm");
 loader.lazyImporter(this, "promise", "resource://gre/modules/Promise.jsm", "Promise");
-loader.lazyGetter(this, "EventEmitter", () => require("devtools/shared/event-emitter"));
+loader.lazyGetter(this, "EventEmitter", () => require("devtools/toolkit/event-emitter"));
 loader.lazyGetter(this, "AutocompletePopup",
                   () => require("devtools/shared/autocomplete-popup").AutocompletePopup);
 loader.lazyGetter(this, "ToolSidebar",
@@ -537,12 +537,12 @@ WebConsoleFrame.prototype = {
     }
 
     let saveBodies = doc.getElementById("saveBodies");
-    saveBodies.addEventListener("click", reverseSaveBodiesPref);
+    saveBodies.addEventListener("command", reverseSaveBodiesPref);
     saveBodies.disabled = !this.getFilterState("networkinfo") &&
                           !this.getFilterState("network");
 
     let saveBodiesContextMenu = doc.getElementById("saveBodiesContextMenu");
-    saveBodiesContextMenu.addEventListener("click", reverseSaveBodiesPref);
+    saveBodiesContextMenu.addEventListener("command", reverseSaveBodiesPref);
     saveBodiesContextMenu.disabled = !this.getFilterState("networkinfo") &&
                                      !this.getFilterState("network");
 
@@ -2140,13 +2140,8 @@ WebConsoleFrame.prototype = {
     }
     else {
       this._outputTimerInitialized = false;
-      if (this._flushCallback) {
-        try {
-          this._flushCallback();
-        }
-        catch (ex) {
-          console.error(ex);
-        }
+      if (this._flushCallback && this._flushCallback() === false) {
+        this._flushCallback = null;
       }
     }
 
@@ -2367,6 +2362,10 @@ WebConsoleFrame.prototype = {
    */
   removeOutputMessage: function WCF_removeOutputMessage(aNode)
   {
+    if (aNode._messageObject) {
+      aNode._messageObject.destroy();
+    }
+
     if (aNode._objectActors) {
       for (let actor of aNode._objectActors) {
         this._releaseObject(actor);
@@ -2676,12 +2675,12 @@ WebConsoleFrame.prototype = {
       let mousedown = this._mousedown;
       this._mousedown = false;
 
+      aEvent.preventDefault();
+
       // Do not allow middle/right-click or 2+ clicks.
       if (aEvent.detail != 1 || aEvent.button != 0) {
         return;
       }
-
-      aEvent.preventDefault();
 
       // If this event started with a mousedown event and it ends at a different
       // location, we consider this text selection.
@@ -3204,10 +3203,10 @@ JSTerm.prototype = {
         if (oldFlushCallback) {
           oldFlushCallback();
           this.hud._flushCallback = oldFlushCallback;
+          return true;
         }
-        else {
-          this.hud._flushCallback = null;
-        }
+
+        return false;
       };
     }
 

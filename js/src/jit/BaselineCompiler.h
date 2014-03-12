@@ -26,7 +26,7 @@ namespace jit {
     _(JSOP_LABEL)              \
     _(JSOP_POP)                \
     _(JSOP_POPN)               \
-    _(JSOP_POPNV)              \
+    _(JSOP_DUPAT)              \
     _(JSOP_ENTERWITH)          \
     _(JSOP_LEAVEWITH)          \
     _(JSOP_DUP)                \
@@ -215,7 +215,7 @@ class BaselineCompiler : public BaselineCompilerSpecific
 
     bool emitStackCheck(bool earlyCheck=false);
     bool emitInterruptCheck();
-    bool emitUseCountIncrement();
+    bool emitUseCountIncrement(bool allowOsr=true);
     bool emitArgumentTypeChecks();
     bool emitDebugPrologue();
     bool emitDebugTrap();

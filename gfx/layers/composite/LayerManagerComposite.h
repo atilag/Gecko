@@ -61,6 +61,7 @@ class RefLayerComposite;
 class SurfaceDescriptor;
 class ThebesLayerComposite;
 class TiledLayerComposer;
+class TextRenderer;
 struct FPSState;
 
 class LayerManagerComposite : public LayerManager
@@ -227,6 +228,8 @@ public:
 
   void NotifyShadowTreeTransaction();
 
+  TextRenderer* GetTextRenderer() { return mTextRenderer; }
+
 private:
   /** Region we're clipping our current drawing to. */
   nsIntRegion mClippingRegion;
@@ -261,6 +264,11 @@ private:
   RefPtr<Compositor> mCompositor;
   nsAutoPtr<LayerProperties> mClonedLayerTreeProperties;
 
+  /** 
+   * Context target, nullptr when drawing directly to our swap chain.
+   */
+  RefPtr<gfx::DrawTarget> mTarget;
+
   gfx::Matrix mWorldMatrix;
   nsIntRegion mInvalidRegion;
   nsAutoPtr<FPSState> mFPS;
@@ -268,6 +276,8 @@ private:
   bool mInTransaction;
   bool mIsCompositorReady;
   bool mDebugOverlayWantsNextFrame;
+
+  RefPtr<TextRenderer> mTextRenderer;
 };
 
 /**
@@ -363,9 +373,9 @@ public:
     mLayerComposited = value;
   }
 
-  void SetClearFB(bool value)
+  void SetClearRect(const nsIntRect& aRect)
   {
-    mClearFB = value;
+    mClearRect = aRect;
   }
 
   // These getters can be used anytime.
@@ -375,7 +385,7 @@ public:
   const gfx::Matrix4x4& GetShadowTransform() { return mShadowTransform; }
   bool GetShadowTransformSetByAnimation() { return mShadowTransformSetByAnimation; }
   bool HasLayerBeenComposited() { return mLayerComposited; }
-  bool GetClearFB() { return mClearFB; }
+  nsIntRect GetClearRect() { return mClearRect; }
 
 protected:
   gfx::Matrix4x4 mShadowTransform;
@@ -388,7 +398,7 @@ protected:
   bool mShadowTransformSetByAnimation;
   bool mDestroyed;
   bool mLayerComposited;
-  bool mClearFB;
+  nsIntRect mClearRect;
 };
 
 

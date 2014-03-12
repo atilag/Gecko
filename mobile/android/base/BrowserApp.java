@@ -5,16 +5,26 @@
 
 package org.mozilla.gecko;
 
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.net.URLEncoder;
+import java.util.EnumSet;
+import java.util.Vector;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+import org.mozilla.gecko.GeckoProfileDirectories.NoMozillaDirectoryException;
 import org.mozilla.gecko.animation.PropertyAnimator;
 import org.mozilla.gecko.animation.ViewHelper;
 import org.mozilla.gecko.db.BrowserContract.Combined;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.favicons.Favicons;
-import org.mozilla.gecko.favicons.OnFaviconLoadedListener;
 import org.mozilla.gecko.favicons.LoadFaviconTask;
+import org.mozilla.gecko.favicons.OnFaviconLoadedListener;
 import org.mozilla.gecko.favicons.decoders.IconDirectoryEntry;
-import org.mozilla.gecko.fxa.activities.FxAccountGetStartedActivity;
 import org.mozilla.gecko.fxa.FirefoxAccounts;
+import org.mozilla.gecko.fxa.activities.FxAccountGetStartedActivity;
 import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.gfx.GeckoLayerClient;
 import org.mozilla.gecko.gfx.ImmutableViewportMetrics;
@@ -32,23 +42,19 @@ import org.mozilla.gecko.home.SearchEngine;
 import org.mozilla.gecko.menu.GeckoMenu;
 import org.mozilla.gecko.preferences.GeckoPreferences;
 import org.mozilla.gecko.prompts.Prompt;
+import org.mozilla.gecko.prompts.PromptListItem;
 import org.mozilla.gecko.sync.setup.SyncAccounts;
 import org.mozilla.gecko.toolbar.AutocompleteHandler;
 import org.mozilla.gecko.toolbar.BrowserToolbar;
 import org.mozilla.gecko.util.Clipboard;
-import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.util.GamepadUtils;
 import org.mozilla.gecko.util.HardwareUtils;
 import org.mozilla.gecko.util.MenuUtils;
 import org.mozilla.gecko.util.StringUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.util.UiAsyncTask;
-import org.mozilla.gecko.widget.GeckoActionProvider;
 import org.mozilla.gecko.widget.ButtonToast;
-
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
+import org.mozilla.gecko.widget.GeckoActionProvider;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -86,16 +92,10 @@ import android.view.ViewStub;
 import android.view.ViewTreeObserver;
 import android.view.Window;
 import android.view.animation.Interpolator;
-import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
+import android.widget.ListView;
 import android.widget.Toast;
 import android.widget.ViewFlipper;
-
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.net.URLEncoder;
-import java.util.EnumSet;
-import java.util.Vector;
 
 abstract public class BrowserApp extends GeckoApp
                                  implements TabsPanel.TabsLayoutChangeListener,
@@ -132,7 +132,7 @@ abstract public class BrowserApp extends GeckoApp
     private BrowserToolbar mBrowserToolbar;
     private HomePager mHomePager;
     private TabsPanel mTabsPanel;
-    private View mHomePagerContainer;
+    private ViewGroup mHomePagerContainer;
     protected Telemetry.Timer mAboutHomeStartupTimer = null;
     private ActionModeCompat mActionMode;
     private boolean mShowActionModeEndAnimation = false;
@@ -444,6 +444,10 @@ abstract public class BrowserApp extends GeckoApp
             GeckoProfile.maybeCleanupGuestProfile(this);
         }
 
+        // This has to be prepared prior to calling GeckoApp.onCreate, because
+        // widget code and BrowserToolbar need it, and they're created by the
+        // layout, which GeckoApp takes care of.
+        ((GeckoApplication) getApplication()).prepareLightweightTheme();
         super.onCreate(savedInstanceState);
 
         mViewFlipper = (ViewFlipper) findViewById(R.id.browser_actionbar);
@@ -451,7 +455,7 @@ abstract public class BrowserApp extends GeckoApp
 
         mBrowserToolbar = (BrowserToolbar) findViewById(R.id.browser_toolbar);
         if (Intent.ACTION_VIEW.equals(intent.getAction())) {
-            // Show the target URL immediately in the toolbar
+            // Show the target URL immediately in the toolbar.
             mBrowserToolbar.setTitle(intent.getDataString());
         }
 
@@ -476,7 +480,7 @@ abstract public class BrowserApp extends GeckoApp
             }
         });
 
-        mHomePagerContainer = findViewById(R.id.home_pager_container);
+        mHomePagerContainer = (ViewGroup) findViewById(R.id.home_pager_container);
 
         mBrowserSearchContainer = findViewById(R.id.search_container);
         mBrowserSearch = (BrowserSearch) getSupportFragmentManager().findFragmentByTag(BROWSER_SEARCH_TAG);
@@ -506,6 +510,15 @@ abstract public class BrowserApp extends GeckoApp
         mBrowserToolbar.setOnFilterListener(new BrowserToolbar.OnFilterListener() {
             public void onFilter(String searchText, AutocompleteHandler handler) {
                 filterEditingMode(searchText, handler);
+            }
+        });
+
+        mBrowserToolbar.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override
+            public void onFocusChange(View v, boolean hasFocus) {
+                if (isHomePagerVisible()) {
+                    mHomePager.onToolbarFocusChange(hasFocus);
+                }
             }
         });
 
@@ -1680,8 +1693,17 @@ abstract public class BrowserApp extends GeckoApp
             final ViewStub homePagerStub = (ViewStub) findViewById(R.id.home_pager_stub);
             mHomePager = (HomePager) homePagerStub.inflate();
 
-            HomeBanner homeBanner = (HomeBanner) findViewById(R.id.home_banner);
+            final HomeBanner homeBanner = (HomeBanner) findViewById(R.id.home_banner);
             mHomePager.setBanner(homeBanner);
+
+            // Remove the banner from the view hierarchy if it is dismissed.
+            homeBanner.setOnDismissListener(new HomeBanner.OnDismissListener() {
+                @Override
+                public void onDismiss() {
+                    mHomePager.setBanner(null);
+                    mHomePagerContainer.removeView(homeBanner);
+                }
+            });
         }
 
         mHomePagerContainer.setVisibility(View.VISIBLE);
@@ -2095,7 +2117,7 @@ abstract public class BrowserApp extends GeckoApp
         MenuItem desktopMode = aMenu.findItem(R.id.desktop_mode);
         MenuItem enterGuestMode = aMenu.findItem(R.id.new_guest_session);
         MenuItem exitGuestMode = aMenu.findItem(R.id.exit_guest_session);
-        MenuItem subscribe = aMenu.findItem(R.id.subscribe);
+        MenuItem subscribe = aMenu.findItem(R.id.save_subscribe);
         MenuItem addToReadingList = aMenu.findItem(R.id.reading_list_add);
         MenuItem save = aMenu.findItem(R.id.save);
 
@@ -2123,6 +2145,11 @@ abstract public class BrowserApp extends GeckoApp
         }
 
         save.setVisible(!GeckoProfile.get(this).inGuestMode());
+        if (tab.isBookmark() || tab.isReadingListItem()) {
+            save.setIcon(R.drawable.ic_menu_bookmark_remove);
+        } else {
+            save.setIcon(R.drawable.ic_menu_bookmark_add);
+        }
 
         bookmark.setEnabled(!AboutPages.isAboutReader(tab.getURL()));
         bookmark.setChecked(tab.isBookmark());
@@ -2371,7 +2398,7 @@ abstract public class BrowserApp extends GeckoApp
             return true;
         }
 
-        if (itemId == R.id.subscribe) {
+        if (itemId == R.id.subscribe || itemId == R.id.save_subscribe) {
             subscribeToFeeds(tab);
             return true;
         }
@@ -2393,7 +2420,7 @@ abstract public class BrowserApp extends GeckoApp
                             GeckoProfile.leaveGuestSession(BrowserApp.this);
                         }
                         doRestart(args);
-                        System.exit(0);
+                        GeckoAppShell.systemExit();
                     }
                 } catch(JSONException ex) {
                     Log.e(LOGTAG, "Exception reading guest mode prompt result", ex);
@@ -2417,7 +2444,7 @@ abstract public class BrowserApp extends GeckoApp
             msgString = R.string.exit_guest_session_text;
         }
 
-        ps.show(res.getString(titleString), res.getString(msgString), null, false);
+        ps.show(res.getString(titleString), res.getString(msgString), null, ListView.CHOICE_MODE_NONE);
     }
 
     public void subscribeToFeeds(Tab tab) {
@@ -2603,9 +2630,8 @@ abstract public class BrowserApp extends GeckoApp
     public int getLayout() { return R.layout.gecko_app; }
 
     @Override
-    protected String getDefaultProfileName() {
-        String profile = GeckoProfile.findDefaultProfile(this);
-        return (profile != null ? profile : GeckoProfile.DEFAULT_PROFILE);
+    protected String getDefaultProfileName() throws NoMozillaDirectoryException {
+        return GeckoProfile.getDefaultProfileName(this);
     }
 
     /**

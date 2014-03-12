@@ -60,8 +60,7 @@ public:
   void RemoveSourceBuffer(SourceBuffer& aSourceBuffer, ErrorResult& aRv);
 
   void EndOfStream(const Optional<MediaSourceEndOfStreamError>& aError, ErrorResult& aRv);
-  static bool IsTypeSupported(const GlobalObject& aGlobal,
-                              const nsAString& aType);
+  static bool IsTypeSupported(const GlobalObject&, const nsAString& aType);
   /** End WebIDL Methods. */
 
   NS_DECL_ISUPPORTS_INHERITED
@@ -85,6 +84,11 @@ public:
     return mDecoder;
   }
 
+  // Called by SourceBuffers to notify this MediaSource that data has
+  // been evicted from the buffered data. The start and end times
+  // that were evicted are provided.
+  void NotifyEvicted(double aStart, double aEnd);
+
 private:
   explicit MediaSource(nsPIDOMWindow* aWindow);
 
@@ -93,9 +97,6 @@ private:
   void QueueAsyncSimpleEvent(const char* aName);
 
   void DurationChange(double aNewDuration, ErrorResult& aRv);
-  void EndOfStreamInternal(const Optional<MediaSourceEndOfStreamError>& aError, ErrorResult& aRv);
-
-  static bool IsTypeSupportedInternal(const nsAString& aType, ErrorResult& aRv);
 
   double mDuration;
 

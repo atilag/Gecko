@@ -52,6 +52,10 @@ let RILQUIRKS_DATA_REGISTRATION_ON_DEMAND =
 let RILQUIRKS_RADIO_OFF_WO_CARD =
   libcutils.property_get("ro.moz.ril.radio_off_wo_card", "false") == "true";
 
+// Ril quirk to enable IPv6 protocol/roaming protocol in APN settings.
+let RILQUIRKS_HAVE_IPV6 =
+  libcutils.property_get("ro.moz.ril.ipv6", "false") == "true";
+
 const RADIOINTERFACELAYER_CID =
   Components.ID("{2d831c8d-6017-435b-a80c-e5d422810cea}");
 const RADIOINTERFACE_CID =
@@ -686,7 +690,7 @@ XPCOMUtils.defineLazyGetter(this, "gRadioEnabledController", function() {
     },
 
     _createTimer: function() {
-      if (_timer) {
+      if (!_timer) {
         _timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
       }
       _timer.initWithCallback(this._executeRequest.bind(this),
@@ -2152,23 +2156,18 @@ RadioInterface.prototype = {
                                                       message.callIndex,
                                                       message.notification);
         break;
-      case "conferenceError":
-        gTelephonyProvider.notifyConferenceError(message.errorName,
-                                                 message.errorMsg);
-        break;
       case "datacallerror":
         connHandler.handleDataCallError(message);
         break;
       case "datacallstatechange":
         message.ip = null;
-        message.netmask = null;
+        message.prefixLength = 0;
         message.broadcast = null;
         if (message.ipaddr) {
           message.ip = message.ipaddr.split("/")[0];
+          message.prefixLength = parseInt(message.ipaddr.split("/")[1], 10);
           let ip_value = netHelpers.stringToIP(message.ip);
-          let prefix_len = message.ipaddr.split("/")[1];
-          let mask_value = netHelpers.makeMask(prefix_len);
-          message.netmask = netHelpers.ipToString(mask_value);
+          let mask_value = netHelpers.makeMask(message.prefixLength);
           message.broadcast = netHelpers.ipToString((ip_value & mask_value) + ~mask_value);
         }
         connHandler.handleDataCallState(message);
@@ -2298,7 +2297,7 @@ RadioInterface.prototype = {
   getIccId: function() {
     let iccInfo = this.rilContext.iccInfo;
 
-    if (!iccInfo || !(iccInfo instanceof GsmIccInfo)) {
+    if (!iccInfo) {
       return null;
     }
 
@@ -2799,6 +2798,7 @@ RadioInterface.prototype = {
     // because the system message mechamism will rewrap the object
     // based on the content window, which needs to know the properties.
     gSystemMessenger.broadcastMessage(aName, {
+      iccId:             aDomMessage.iccId,
       type:              aDomMessage.type,
       id:                aDomMessage.id,
       threadId:          aDomMessage.threadId,
@@ -3937,7 +3937,14 @@ RadioInterface.prototype = {
     }
 
     let notifyResult = (function notifyResult(rv, domMessage) {
-      // TODO bug 832140 handle !Components.isSuccessCode(rv)
+      if (!Components.isSuccessCode(rv)) {
+        if (DEBUG) this.debug("Error! Fail to save sending message! rv = " + rv);
+        request.notifySendMessageFailed(
+          gMobileMessageDatabaseService.translateCrErrorToMessageCallbackError(rv));
+        Services.obs.notifyObservers(domMessage, kSmsFailedObserverTopic, null);
+        return;
+      }
+
       if (!silent) {
         Services.obs.notifyObservers(domMessage, kSmsSendingObserverTopic, null);
       }
@@ -4179,9 +4186,13 @@ RadioInterface.prototype = {
   },
 
   sendWorkerMessage: function(rilMessageType, message, callback) {
-    this.workerMessenger.send(rilMessageType, message, function(response) {
-      return callback.handleResponse(response);
-    });
+    if (callback) {
+      this.workerMessenger.send(rilMessageType, message, function(response) {
+        return callback.handleResponse(response);
+      });
+    } else {
+      this.workerMessenger.send(rilMessageType, message);
+    }
   }
 };
 
@@ -4214,6 +4225,8 @@ RILNetworkInterface.prototype = {
   NETWORK_TYPE_MOBILE:      Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE,
   NETWORK_TYPE_MOBILE_MMS:  Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_MMS,
   NETWORK_TYPE_MOBILE_SUPL: Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_SUPL,
+  NETWORK_TYPE_MOBILE_IMS:  Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_IMS,
+  NETWORK_TYPE_MOBILE_DUN:  Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_DUN,
   // The network manager should only need to add the host route for "other"
   // types, which is the same handling method as the supl type. So let the
   // definition of other types to be the same as the one of supl type.
@@ -4246,6 +4259,13 @@ RILNetworkInterface.prototype = {
     if (this.connectedTypes.indexOf("supl") != -1) {
       return this.NETWORK_TYPE_MOBILE_SUPL;
     }
+    if (this.connectedTypes.indexOf("ims") != -1) {
+      return this.NETWORK_TYPE_MOBILE_IMS;
+    }
+    if (this.connectedTypes.indexOf("dun") != -1) {
+      return this.NETWORK_TYPE_MOBILE_DUN;
+    }
+
     return this.NETWORK_TYPE_MOBILE_OTHERS;
   },
 
@@ -4253,7 +4273,7 @@ RILNetworkInterface.prototype = {
 
   ip: null,
 
-  netmask: null,
+  prefixLength: 0,
 
   broadcast: null,
 
@@ -4374,7 +4394,7 @@ RILNetworkInterface.prototype = {
       this.cid = datacall.cid;
       this.name = datacall.ifname;
       this.ip = datacall.ip;
-      this.netmask = datacall.netmask;
+      this.prefixLength = datacall.prefixLength;
       this.broadcast = datacall.broadcast;
       this.gateway = datacall.gw;
       if (datacall.dns) {
@@ -4509,12 +4529,25 @@ RILNetworkInterface.prototype = {
       }
       authType = RIL.RIL_DATACALL_AUTH_TO_GECKO.indexOf(RIL.GECKO_DATACALL_AUTH_DEFAULT);
     }
+    let pdpType = RIL.GECKO_DATACALL_PDP_TYPE_IP;
+    if (RILQUIRKS_HAVE_IPV6) {
+      pdpType = !radioInterface.rilContext.data.roaming
+              ? this.apnSetting.protocol
+              : this.apnSetting.roaming_protocol;
+      if (RIL.RIL_DATACALL_PDP_TYPES.indexOf(pdpType) < 0) {
+        if (DEBUG) {
+          this.debug("Invalid pdpType '" + pdpType + "', using '" +
+                     RIL.GECKO_DATACALL_PDP_TYPE_DEFAULT + "'");
+        }
+        pdpType = RIL.GECKO_DATACALL_PDP_TYPE_DEFAULT;
+      }
+    }
     radioInterface.setupDataCall(radioTechnology,
                                  this.apnSetting.apn,
                                  this.apnSetting.user,
                                  this.apnSetting.password,
                                  authType,
-                                 "IP");
+                                 pdpType);
     this.connecting = true;
   },
 

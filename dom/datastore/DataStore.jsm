@@ -79,6 +79,7 @@ this.DataStore.prototype = {
   _revisionId: null,
   _exposedObject: null,
   _cursor: null,
+  _shuttingdown: false,
 
   init: function(aWindow, aName, aOwner, aReadOnly) {
     debug("DataStore init");
@@ -96,6 +97,8 @@ this.DataStore.prototype = {
       let wId = aSubject.QueryInterface(Ci.nsISupportsPRUint64).data;
       if (wId == self._innerWindowID) {
         cpmm.removeMessageListener("DataStore:Changed:Return:OK", self);
+        cpmm.sendAsyncMessage("DataStore:UnregisterForMessages");
+        self._shuttingdown = true;
         self._db.close();
       }
     }, "inner-window-destroyed", false);
@@ -297,9 +300,9 @@ this.DataStore.prototype = {
     }
 
     cpmm.sendAsyncMessage("DataStore:Changed",
-                          { store: this.name, owner: this.owner,
+                          { store: this.name, owner: this._owner,
                             message: { revisionId: aRevisionId, id: aId,
-                                       operation: aOperation } } );
+                                       operation: aOperation, owner: this._owner } } );
   },
 
   receiveMessage: function(aMessage) {
@@ -310,16 +313,28 @@ this.DataStore.prototype = {
       return;
     }
 
+    // If this message is not for this DataStore, let's ignore it.
+    if (aMessage.data.owner != this._owner ||
+        aMessage.data.store != this._name) {
+      return;
+    }
+
     let self = this;
 
     this.retrieveRevisionId(
       function() {
+        // If the window has been destroyed we don't emit the events.
+        if (self._shuttingdown) {
+          return;
+        }
+
         // If we have an active cursor we don't emit events.
         if (self._cursor) {
           return;
         }
 
-        let event = new self._window.DataStoreChangeEvent('change', aMessage.data);
+        let event = new self._window.DataStoreChangeEvent('change',
+                                                          aMessage.data.message);
         self.__DOM_IMPL__.dispatchEvent(event);
       }
     );

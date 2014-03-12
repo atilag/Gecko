@@ -20,6 +20,7 @@
 #include "gfxMatrix.h"                  // for gfxMatrix
 #include "GraphicsFilter.h"             // for GraphicsFilter
 #include "gfxPlatform.h"                // for gfxPlatform
+#include "gfxPrefs.h"                   // for gfxPrefs
 #include "gfxRect.h"                    // for gfxRect
 #include "gfxUtils.h"                   // for NextPowerOfTwo, gfxUtils, etc
 #include "mozilla/ArrayUtils.h"         // for ArrayLength
@@ -46,6 +47,7 @@
 #if MOZ_ANDROID_OMTC
 #include "TexturePoolOGL.h"
 #endif
+
 #include "GeckoProfiler.h"
 
 #define BUFFER_OFFSET(i) ((char *)nullptr + (i))
@@ -79,6 +81,7 @@ static void
 DrawQuads(GLContext *aGLContext,
           VBOArena &aVBOs,
           ShaderProgramOGL *aProg,
+          GLenum aMode,
           RectTriangles &aRects)
 {
   NS_ASSERTION(aProg->HasInitialized(), "Shader program not correctly initialized");
@@ -88,8 +91,7 @@ DrawQuads(GLContext *aGLContext,
     aProg->AttribLocation(ShaderProgramOGL::TexCoordAttrib);
   bool texCoords = (texCoordAttribIndex != GLuint(-1));
 
-  GLsizei elements = aRects.elements();
-  GLsizei bytes = elements * 2 * sizeof(GLfloat);
+  GLsizei bytes = aRects.elements() * 2 * sizeof(GLfloat);
 
   GLsizei total = bytes;
   if (texCoords) {
@@ -106,7 +108,7 @@ DrawQuads(GLContext *aGLContext,
   aGLContext->fBufferSubData(LOCAL_GL_ARRAY_BUFFER,
                              0,
                              bytes,
-                             aRects.vertexPointer());
+                             aRects.vertCoords().Elements());
   aGLContext->fEnableVertexAttribArray(vertAttribIndex);
   aGLContext->fVertexAttribPointer(vertAttribIndex,
                                    2, LOCAL_GL_FLOAT,
@@ -117,7 +119,7 @@ DrawQuads(GLContext *aGLContext,
     aGLContext->fBufferSubData(LOCAL_GL_ARRAY_BUFFER,
                                bytes,
                                bytes,
-                               aRects.texCoordPointer());
+                               aRects.texCoords().Elements());
     aGLContext->fEnableVertexAttribArray(texCoordAttribIndex);
     aGLContext->fVertexAttribPointer(texCoordAttribIndex,
                                      2, LOCAL_GL_FLOAT,
@@ -125,7 +127,7 @@ DrawQuads(GLContext *aGLContext,
                                      0, BUFFER_OFFSET(bytes));
   }
 
-  aGLContext->fDrawArrays(LOCAL_GL_TRIANGLES, 0, elements);
+  aGLContext->fDrawArrays(aMode, 0, aRects.elements());
 
   aGLContext->fDisableVertexAttribArray(vertAttribIndex);
   if (texCoords) {
@@ -134,6 +136,72 @@ DrawQuads(GLContext *aGLContext,
 
   aGLContext->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, 0);
 }
+
+#ifdef MOZ_WIDGET_GONK
+CompositorOGLGonkBackendSpecificData::CompositorOGLGonkBackendSpecificData(CompositorOGL* aCompositor)
+  : mCompositor(aCompositor)
+{
+}
+
+CompositorOGLGonkBackendSpecificData::~CompositorOGLGonkBackendSpecificData()
+{
+  // Delete all textures by calling EndFrame twice
+  gl()->MakeCurrent();
+  EndFrame();
+  EndFrame();
+}
+
+GLContext*
+CompositorOGLGonkBackendSpecificData::gl() const
+{
+  return mCompositor->gl();
+}
+
+GLuint
+CompositorOGLGonkBackendSpecificData::GetTexture()
+{
+  GLuint texture = 0;
+
+  if (!mUnusedTextures.IsEmpty()) {
+    // Try to reuse one from the unused pile first
+    texture = mUnusedTextures[0];
+    mUnusedTextures.RemoveElementAt(0);
+  } else if (gl()->MakeCurrent()) {
+    // There isn't one to reuse, create one.
+    gl()->fGenTextures(1, &texture);
+  }
+
+  if (texture) {
+    mCreatedTextures.AppendElement(texture);
+  }
+
+  return texture;
+}
+
+void
+CompositorOGLGonkBackendSpecificData::EndFrame()
+{
+  gl()->MakeCurrent();
+
+  // Some platforms have issues unlocking Gralloc buffers even when they're
+  // rebound.
+  if (gfxPrefs::OverzealousGrallocUnlocking()) {
+    mUnusedTextures.AppendElements(mCreatedTextures);
+    mCreatedTextures.Clear();
+  }
+
+  // Delete unused textures
+  for (size_t i = 0; i < mUnusedTextures.Length(); i++) {
+    GLuint texture = mUnusedTextures[i];
+    gl()->fDeleteTextures(1, &texture);
+  }
+  mUnusedTextures.Clear();
+
+  // Move all created textures into the unused pile
+  mUnusedTextures.AppendElements(mCreatedTextures);
+  mCreatedTextures.Clear();
+}
+#endif
 
 CompositorOGL::CompositorOGL(nsIWidget *aWidget, int aSurfaceWidth,
                              int aSurfaceHeight, bool aUseExternalSurfaceSize)
@@ -488,7 +556,7 @@ CompositorOGL::BindAndDrawQuadWithTextureRect(ShaderProgramOGL *aProg,
   }
 
   gfx3DMatrix textureTransform;
-  if (rects.IsSimpleQuad(textureTransform)) {
+  if (rects.isSimpleQuad(textureTransform)) {
     Matrix4x4 transform;
     ToMatrix4x4(aTextureTransform * textureTransform, transform);
     aProg->SetTextureTransform(transform);
@@ -497,7 +565,7 @@ CompositorOGL::BindAndDrawQuadWithTextureRect(ShaderProgramOGL *aProg,
     Matrix4x4 transform;
     ToMatrix4x4(aTextureTransform, transform);
     aProg->SetTextureTransform(transform);
-    DrawQuads(mGLContext, mVBOs, aProg, rects);
+    DrawQuads(mGLContext, mVBOs, aProg, LOCAL_GL_TRIANGLES, rects);
   }
 }
 
@@ -625,7 +693,11 @@ CompositorOGL::clearFBRect(const gfx::Rect* aRect)
     return;
   }
 
-  ScopedScissorRect autoScissorRect(mGLContext, aRect->x, aRect->y, aRect->width, aRect->height);
+  // Map aRect to OGL coordinates, origin:bottom-left
+  GLint y = mHeight - (aRect->y + aRect->height);
+
+  ScopedGLState scopedScissorTestState(mGLContext, LOCAL_GL_SCISSOR_TEST, true);
+  ScopedScissorRect autoScissorRect(mGLContext, aRect->x, y, aRect->width, aRect->height);
   mGLContext->fClearColor(0.0, 0.0, 0.0, 0.0);
   mGLContext->fClear(LOCAL_GL_COLOR_BUFFER_BIT | LOCAL_GL_DEPTH_BUFFER_BIT);
 }
@@ -824,8 +896,15 @@ CompositorOGL::GetShaderConfigFor(Effect *aEffect, MaskType aMask) const
     config.SetYCbCr(true);
     break;
   case EFFECT_COMPONENT_ALPHA:
+  {
     config.SetComponentAlpha(true);
+    EffectComponentAlpha* effectComponentAlpha =
+      static_cast<EffectComponentAlpha*>(aEffect);
+    gfx::SurfaceFormat format = effectComponentAlpha->mOnWhite->GetFormat();
+    config.SetRBSwap(format == gfx::SurfaceFormat::B8G8R8A8 ||
+                     format == gfx::SurfaceFormat::B8G8R8X8);
     break;
+  }
   case EFFECT_RENDER_TARGET:
     config.SetTextureTarget(mFBOTextureTarget);
     break;
@@ -1198,7 +1277,7 @@ CompositorOGL::DrawQuadInternal(const Rect& aRect,
     }
     break;
   case EFFECT_COMPONENT_ALPHA: {
-      MOZ_ASSERT(gfxPlatform::ComponentAlphaEnabled());
+      MOZ_ASSERT(gfxPrefs::ComponentAlphaEnabled());
       EffectComponentAlpha* effectComponentAlpha =
         static_cast<EffectComponentAlpha*>(aEffectChain.mPrimaryEffect.get());
       TextureSourceOGL* sourceOnWhite = effectComponentAlpha->mOnWhite->AsSourceOGL();
@@ -1286,6 +1365,12 @@ CompositorOGL::EndFrame()
   }
 
   mCurrentRenderTarget = nullptr;
+
+#ifdef MOZ_WIDGET_GONK
+  if (mCompositorBackendSpecificData) {
+    static_cast<CompositorOGLGonkBackendSpecificData*>(mCompositorBackendSpecificData.get())->EndFrame();
+  }
+#endif
 
   mGLContext->SwapBuffers();
   mGLContext->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, 0);
@@ -1394,6 +1479,17 @@ CompositorOGL::Resume()
 #endif
   return true;
 }
+
+#ifdef MOZ_WIDGET_GONK
+CompositorBackendSpecificData*
+CompositorOGL::GetCompositorBackendSpecificData()
+{
+  if (!mCompositorBackendSpecificData) {
+    mCompositorBackendSpecificData = new CompositorOGLGonkBackendSpecificData(this);
+  }
+  return mCompositorBackendSpecificData;
+}
+#endif
 
 TemporaryRef<DataTextureSource>
 CompositorOGL::CreateDataTextureSource(TextureFlags aFlags)
