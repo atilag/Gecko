@@ -682,7 +682,7 @@ static void RecordFrameMetrics(nsIFrame* aForFrame,
     contentBounds.width += scrollableFrame->GetScrollPortRect().width;
     contentBounds.height += scrollableFrame->GetScrollPortRect().height;
     metrics.mScrollableRect = CSSRect::FromAppUnits(contentBounds);
-    metrics.mScrollOffset = CSSPoint::FromAppUnits(scrollPosition);
+    metrics.SetScrollOffset(CSSPoint::FromAppUnits(scrollPosition));
 
     // If the frame was scrolled since the last layers update, and by
     // something other than the APZ code, we want to tell the APZ to update
@@ -728,8 +728,8 @@ static void RecordFrameMetrics(nsIFrame* aForFrame,
   // Initially, AsyncPanZoomController should render the content to the screen
   // at the painted resolution.
   const LayerToScreenScale layerToScreenScale(1.0f);
-  metrics.mZoom = metrics.mCumulativeResolution * metrics.mDevPixelsPerCSSPixel
-                * layerToScreenScale;
+  metrics.SetZoom(metrics.mCumulativeResolution * metrics.mDevPixelsPerCSSPixel
+                  * layerToScreenScale);
 
   if (presShell) {
     nsIDocument* document = nullptr;
@@ -2358,6 +2358,7 @@ nsDisplayThemedBackground::nsDisplayThemedBackground(nsDisplayListBuilder* aBuil
     case NS_THEME_WINDOW_TITLEBAR:
     case NS_THEME_WINDOW_BUTTON_BOX:
     case NS_THEME_MOZ_MAC_FULLSCREEN_BUTTON:
+    case NS_THEME_WINDOW_BUTTON_BOX_MAXIMIZED:
       RegisterThemeGeometry(aBuilder, aFrame);
       break;
     case NS_THEME_WIN_BORDERLESS_GLASS:
@@ -2445,11 +2446,7 @@ nsDisplayThemedBackground::PaintInternal(nsDisplayListBuilder* aBuilder,
   theme->GetWidgetOverflow(presContext->DeviceContext(), mFrame, mAppearance,
                            &drawing);
   drawing.IntersectRect(drawing, aBounds);
-  nsIntRegion clear;
-  theme->DrawWidgetBackground(aCtx, mFrame, mAppearance, borderArea, drawing, &clear);
-  MOZ_ASSERT(clear.IsEmpty() || ReferenceFrame() == aBuilder->RootReferenceFrame(),
-             "Can't add to clear region if we're transformed!");
-  aBuilder->AddRegionToClear(clear);
+  theme->DrawWidgetBackground(aCtx, mFrame, mAppearance, borderArea, drawing);
 }
 
 bool nsDisplayThemedBackground::IsWindowActive()

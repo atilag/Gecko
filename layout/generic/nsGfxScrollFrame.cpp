@@ -1552,7 +1552,7 @@ ScrollFrameHelper::ScrollFrameHelper(nsContainerFrame* aOuter,
   , mOuter(aOuter)
   , mAsyncScroll(nullptr)
   , mOriginOfLastScroll(nsGkAtoms::other)
-  , mScrollGeneration(0)
+  , mScrollGeneration(1) // we start off pretending we scrolled to 0,0 to flush a notification to APZ
   , mDestination(0, 0)
   , mScrollPosAtLastPaint(0, 0)
   , mRestorePos(-1, -1)
@@ -4007,6 +4007,7 @@ ScrollFrameHelper::UpdateOverflow()
     mSkippedScrollbarLayout = true;
     return false;  // reflowing will update overflow
   }
+  PostOverflowEvent();
   return mOuter->nsContainerFrame::UpdateOverflow();
 }
 
