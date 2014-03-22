@@ -6,14 +6,16 @@
 
 #include "FileRequest.h"
 
+#include "mozilla/EventDispatcher.h"
 #include "mozilla/dom/FileRequestBinding.h"
 #include "nsCxPusher.h"
-#include "nsEventDispatcher.h"
 #include "nsError.h"
 #include "nsIDOMProgressEvent.h"
 #include "nsDOMClassInfoID.h"
 #include "FileHelper.h"
 #include "LockedFile.h"
+
+using namespace mozilla;
 
 USING_FILE_NAMESPACE
 
@@ -43,7 +45,7 @@ FileRequest::Create(nsPIDOMWindow* aOwner, LockedFile* aLockedFile,
 }
 
 nsresult
-FileRequest::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
+FileRequest::PreHandleEvent(EventChainPreVisitor& aVisitor)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
@@ -69,7 +71,7 @@ FileRequest::NotifyHelperCompleted(FileHelper* aFileHelper)
   nsIScriptContext* sc = GetContextForEventHandlers(&rv);
   NS_ENSURE_STATE(sc);
 
-  AutoPushJSContext cx(sc->GetNativeContext());
+  AutoJSContext cx;
   NS_ASSERTION(cx, "Failed to get a context!");
 
   JS::Rooted<JS::Value> result(cx);

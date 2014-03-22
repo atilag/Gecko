@@ -38,7 +38,7 @@ public:
 
   virtual GLenum GetTextureTarget() const MOZ_OVERRIDE;
 
-  virtual gfx::SurfaceFormat GetFormat() const MOZ_OVERRIDE;
+  virtual gfx::SurfaceFormat GetFormat() const MOZ_OVERRIDE { return mFormat; }
 
   virtual GLenum GetWrapMode() const MOZ_OVERRIDE
   {

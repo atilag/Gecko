@@ -355,7 +355,9 @@ nsXBLPrototypeBinding::AttributeChanged(nsIAtom* aAttribute,
         // Check to see if the src attribute is xbl:text.  If so, then we need to obtain the
         // children of the real element and get the text nodes' values.
         if (aAttribute == nsGkAtoms::text && aNameSpaceID == kNameSpaceID_XBL) {
-          nsContentUtils::GetNodeTextContent(aChangedElement, false, value);
+          if (!nsContentUtils::GetNodeTextContent(aChangedElement, false, value)) {
+            NS_RUNTIMEABORT("OOM");
+          }
           value.StripChar(char16_t('\n'));
           value.StripChar(char16_t('\r'));
           nsAutoString stripVal(value);
@@ -447,12 +449,11 @@ nsXBLPrototypeBinding::GetImmediateChild(nsIAtom* aTag)
 nsresult
 nsXBLPrototypeBinding::InitClass(const nsCString& aClassName,
                                  JSContext * aContext,
-                                 JS::Handle<JSObject*> aGlobal,
                                  JS::Handle<JSObject*> aScriptObject,
                                  JS::MutableHandle<JSObject*> aClassObject,
                                  bool* aNew)
 {
-  return nsXBLBinding::DoInitJSClass(aContext, aGlobal, aScriptObject,
+  return nsXBLBinding::DoInitJSClass(aContext, aScriptObject,
                                      aClassName, this, aClassObject, aNew);
 }
 
@@ -507,8 +508,10 @@ SetAttrs(nsISupports* aKey, nsXBLAttributeEntry* aEntry, void* aClosure)
   bool attrPresent = true;
 
   if (src == nsGkAtoms::text && srcNs == kNameSpaceID_XBL) {
-    nsContentUtils::GetNodeTextContent(changeData->mBoundElement, false,
-                                       value);
+    if (!nsContentUtils::GetNodeTextContent(changeData->mBoundElement, false,
+                                       value)) {
+      NS_RUNTIMEABORT("OOM");
+    }
     value.StripChar(char16_t('\n'));
     value.StripChar(char16_t('\r'));
     nsAutoString stripVal(value);

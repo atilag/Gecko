@@ -32,7 +32,7 @@
 #include "nsIAtom.h"
 #include "nsContentUtils.h"
 #include "nsCxPusher.h"
-#include "nsEventDispatcher.h"
+#include "mozilla/EventDispatcher.h"
 #include "nsIContent.h"
 #include "nsCycleCollector.h"
 #include "nsNetUtil.h"
@@ -336,8 +336,8 @@ NS_HandleScriptError(nsIScriptGlobalObject *aScriptGlobal,
                                 aErrorEventInit);
       event->SetTrusted(true);
 
-      nsEventDispatcher::DispatchDOMEvent(win, nullptr, event, presContext,
-                                          aStatus);
+      EventDispatcher::DispatchDOMEvent(win, nullptr, event, presContext,
+                                        aStatus);
       called = true;
     }
     --errorDepth;
@@ -355,7 +355,7 @@ AsyncErrorReporter::AsyncErrorReporter(JSRuntime* aRuntime,
                                        nsPIDOMWindow* aWindow)
   : mSourceLine(static_cast<const char16_t*>(aErrorReport->uclinebuf))
   , mLineNumber(aErrorReport->lineno)
-  , mColumn(aErrorReport->uctokenptr - aErrorReport->uclinebuf)
+  , mColumn(aErrorReport->column)
   , mFlags(aErrorReport->flags)
 {
   if (!aErrorReport->filename) {
@@ -431,6 +431,7 @@ public:
                    nsIPrincipal* aScriptOriginPrincipal,
                    nsIPrincipal* aGlobalPrincipal,
                    nsPIDOMWindow* aWindow,
+                   JS::Handle<JS::Value> aError,
                    bool aDispatchEvent)
     // Pass an empty category, then compute ours
     : AsyncErrorReporter(aRuntime, aErrorReport, aFallbackMessage,
@@ -439,6 +440,7 @@ public:
     , mScriptGlobal(aScriptGlobal)
     , mOriginPrincipal(aScriptOriginPrincipal)
     , mDispatchEvent(aDispatchEvent)
+    , mError(aRuntime, aError)
   {
   }
 
@@ -458,7 +460,8 @@ public:
         nsRefPtr<nsPresContext> presContext;
         docShell->GetPresContext(getter_AddRefs(presContext));
 
-        ErrorEventInit init;
+        ThreadsafeAutoJSContext cx;
+        RootedDictionary<ErrorEventInit> init(cx);
         init.mCancelable = true;
         init.mFilename = mFileName;
         init.mBubbles = true;
@@ -480,6 +483,8 @@ public:
         if (sameOrigin) {
           init.mMessage = mErrorMsg;
           init.mLineno = mLineNumber;
+          init.mColumn = mColumn;
+          init.mError = mError;
         } else {
           NS_WARNING("Not same origin error!");
           init.mMessage = xoriginMsg;
@@ -491,8 +496,8 @@ public:
                                   NS_LITERAL_STRING("error"), init);
         event->SetTrusted(true);
 
-        nsEventDispatcher::DispatchDOMEvent(win, nullptr, event, presContext,
-                                            &status);
+        EventDispatcher::DispatchDOMEvent(win, nullptr, event, presContext,
+                                          &status);
       }
     }
 
@@ -507,6 +512,7 @@ private:
   nsCOMPtr<nsIScriptGlobalObject> mScriptGlobal;
   nsCOMPtr<nsIPrincipal>          mOriginPrincipal;
   bool                            mDispatchEvent;
+  JS::PersistentRootedValue       mError;
 
   static bool sHandlingScriptError;
 };
@@ -551,6 +557,9 @@ NS_ScriptErrorReporter(JSContext *cx,
   // XXX this means we are not going to get error reports on non DOM contexts
   nsIScriptContext *context = nsJSUtils::GetDynamicScriptContext(cx);
 
+  JS::Rooted<JS::Value> exception(cx);
+  ::JS_GetPendingException(cx, &exception);
+
   // Note: we must do this before running any more code on cx (if cx is the
   // dynamic script context).
   ::JS_ClearPendingException(cx);
@@ -573,6 +582,7 @@ NS_ScriptErrorReporter(JSContext *cx,
                              nsJSPrincipals::get(report->originPrincipals),
                              scriptPrincipal->GetPrincipal(),
                              win,
+                             exception,
                              /* We do not try to report Out Of Memory via a dom
                               * event because the dom event handler would
                               * encounter an OOM exception trying to process the
@@ -631,24 +641,9 @@ NS_ScriptErrorReporter(JSContext *cx,
 #ifdef DEBUG
 // A couple of useful functions to call when you're debugging.
 nsGlobalWindow *
-JSObject2Win(JSContext *cx, JSObject *obj)
+JSObject2Win(JSObject *obj)
 {
-  nsIXPConnect *xpc = nsContentUtils::XPConnect();
-  if (!xpc) {
-    return nullptr;
-  }
-
-  nsCOMPtr<nsIXPConnectWrappedNative> wrapper;
-  xpc->GetWrappedNativeOfJSObject(cx, obj, getter_AddRefs(wrapper));
-  if (wrapper) {
-    nsCOMPtr<nsPIDOMWindow> win = do_QueryWrappedNative(wrapper);
-    if (win) {
-      return static_cast<nsGlobalWindow *>
-                        (static_cast<nsPIDOMWindow *>(win));
-    }
-  }
-
-  return nullptr;
+  return xpc::WindowOrNull(obj);
 }
 
 void
@@ -895,23 +890,6 @@ nsJSContext::GetCCRefcnt()
   return refcnt;
 }
 
-nsresult
-nsJSContext::EvaluateString(const nsAString& aScript,
-                            JS::Handle<JSObject*> aScopeObject,
-                            JS::CompileOptions& aCompileOptions,
-                            bool aCoerceToString,
-                            JS::Value* aRetValue,
-                            void **aOffThreadToken)
-{
-  NS_ENSURE_TRUE(mIsInitialized, NS_ERROR_NOT_INITIALIZED);
-  AutoCxPusher pusher(mContext);
-  nsJSUtils::EvaluateOptions evalOptions;
-  evalOptions.setCoerceToString(aCoerceToString);
-  return nsJSUtils::EvaluateString(mContext, aScript, aScopeObject,
-                                   aCompileOptions, evalOptions, aRetValue,
-                                   aOffThreadToken);
-}
-
 #ifdef DEBUG
 bool
 AtomIsEventHandlerName(nsIAtom *aName)
@@ -1044,28 +1022,27 @@ nsJSContext::GetGlobalObject()
 
   const JSClass *c = JS_GetClass(global);
 
-  // Whenever we end up with globals that are JSCLASS_IS_DOMJSCLASS
-  // and have an nsISupports DOM object, we will need to modify this
-  // check here.
-  MOZ_ASSERT(!(c->flags & JSCLASS_IS_DOMJSCLASS));
-  if ((~c->flags) & (JSCLASS_HAS_PRIVATE |
-                     JSCLASS_PRIVATE_IS_NSISUPPORTS)) {
-    return nullptr;
-  }
-  
-  nsISupports *priv = static_cast<nsISupports*>(js::GetObjectPrivate(global));
-
-  nsCOMPtr<nsIXPConnectWrappedNative> wrapped_native =
-    do_QueryInterface(priv);
-
   nsCOMPtr<nsIScriptGlobalObject> sgo;
-  if (wrapped_native) {
-    // The global object is a XPConnect wrapped native, the native in
-    // the wrapper might be the nsIScriptGlobalObject
-
-    sgo = do_QueryWrappedNative(wrapped_native);
+  if (IsDOMClass(c)) {
+    sgo = do_QueryInterface(UnwrapDOMObjectToISupports(global));
   } else {
-    sgo = do_QueryInterface(priv);
+    if ((~c->flags) & (JSCLASS_HAS_PRIVATE |
+                       JSCLASS_PRIVATE_IS_NSISUPPORTS)) {
+      return nullptr;
+    }
+
+    nsISupports *priv = static_cast<nsISupports*>(js::GetObjectPrivate(global));
+
+    nsCOMPtr<nsIXPConnectWrappedNative> wrapped_native =
+      do_QueryInterface(priv);
+    if (wrapped_native) {
+      // The global object is a XPConnect wrapped native, the native in
+      // the wrapper might be the nsIScriptGlobalObject
+
+      sgo = do_QueryWrappedNative(wrapped_native);
+    } else {
+      sgo = do_QueryInterface(priv);
+    }
   }
 
   // This'll return a pointer to something we're about to release, but
@@ -1452,22 +1429,26 @@ CheckUniversalXPConnectForTraceMalloc(JSContext *cx)
 static bool
 TraceMallocDisable(JSContext *cx, unsigned argc, JS::Value *vp)
 {
+    JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+
     if (!CheckUniversalXPConnectForTraceMalloc(cx))
         return false;
 
     NS_TraceMallocDisable();
-    JS_SET_RVAL(cx, vp, JSVAL_VOID);
+    args.rval().setUndefined();
     return true;
 }
 
 static bool
 TraceMallocEnable(JSContext *cx, unsigned argc, JS::Value *vp)
 {
+    JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+
     if (!CheckUniversalXPConnectForTraceMalloc(cx))
         return false;
 
     NS_TraceMallocEnable();
-    JS_SET_RVAL(cx, vp, JSVAL_VOID);
+    args.rval().setUndefined();
     return true;
 }
 
@@ -2872,7 +2853,7 @@ NS_DOMReadStructuredClone(JSContext* cx,
     uint32_t width, height;
     JS::Rooted<JS::Value> dataArray(cx);
     if (!JS_ReadUint32Pair(reader, &width, &height) ||
-        !JS_ReadTypedArray(reader, dataArray.address())) {
+        !JS_ReadTypedArray(reader, &dataArray)) {
       return nullptr;
     }
     MOZ_ASSERT(dataArray.isObject());

@@ -74,6 +74,13 @@ static const uint32_t LOW_AUDIO_USECS = 300000;
 // less than the low audio threshold.
 const int64_t AMPLE_AUDIO_USECS = 1000000;
 
+// When we're only playing audio and we don't have a video stream, we divide
+// AMPLE_AUDIO_USECS and LOW_AUDIO_USECS by the following value. This reduces
+// the amount of decoded audio we buffer, reducing our memory usage. We only
+// need to decode far ahead when we're decoding video using software decoding,
+// as otherwise a long video decode could cause an audio underrun.
+const int64_t NO_VIDEO_AMPLE_AUDIO_DIVISOR = 8;
+
 // Maximum number of bytes we'll allocate and write at once to the audio
 // hardware when the audio stream contains missing frames and we're
 // writing silence in order to fill the gap. We limit our silence-writes
@@ -1521,7 +1528,7 @@ void
 MediaDecoderStateMachine::DispatchDecodeTasksIfNeeded()
 {
   AssertCurrentThreadInMonitor();
-  
+
   // NeedToDecodeAudio() can go from false to true while we hold the
   // monitor, but it can't go from true to false. This can happen because
   // NeedToDecodeAudio() takes into account the amount of decoded audio
@@ -1856,6 +1863,14 @@ nsresult MediaDecoderStateMachine::DecodeMetadata()
                              mDecoder.get(), mStartTime, mEndTime, GetDuration(),
                              mTransportSeekable, mMediaSeekable));
 
+  if (HasAudio() && !HasVideo()) {
+    // We're playing audio only. We don't need to worry about slow video
+    // decodes causing audio underruns, so don't buffer so much audio in
+    // order to reduce memory usage.
+    mAmpleAudioThresholdUsecs /= NO_VIDEO_AMPLE_AUDIO_DIVISOR;
+    mLowAudioThresholdUsecs /= NO_VIDEO_AMPLE_AUDIO_DIVISOR;
+  }
+
   // Inform the element that we've loaded the metadata and the first frame,
   // setting the default framebuffer size for audioavailable events.  Also,
   // if there is audio, let the MozAudioAvailable event manager know about
@@ -2060,7 +2075,7 @@ public:
   }
 private:
   nsRefPtr<MediaDecoder> mDecoder;
-  nsCOMPtr<MediaDecoderStateMachine> mStateMachine;
+  nsRefPtr<MediaDecoderStateMachine> mStateMachine;
 };
 
 // Runnable which dispatches an event to the main thread to dispose of the
@@ -2079,7 +2094,7 @@ public:
   }
 private:
   nsRefPtr<MediaDecoder> mDecoder;
-  nsCOMPtr<MediaDecoderStateMachine> mStateMachine;
+  nsRefPtr<MediaDecoderStateMachine> mStateMachine;
 };
 
 nsresult MediaDecoderStateMachine::RunStateMachine()
@@ -2274,9 +2289,16 @@ nsresult MediaDecoderStateMachine::RunStateMachine()
         int64_t clockTime = std::max(mEndTime, std::max(videoTime, GetAudioClock()));
         UpdatePlaybackPosition(clockTime);
 
-        nsCOMPtr<nsIRunnable> event =
-          NS_NewRunnableMethod(mDecoder, &MediaDecoder::PlaybackEnded);
-        NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
+        {
+          // Wait for the state change is completed in the main thread,
+          // otherwise we might see |mDecoder->GetState() == MediaDecoder::PLAY_STATE_PLAYING|
+          // in next loop and send |MediaDecoder::PlaybackEnded| again to trigger 'ended'
+          // event twice in the media element.
+          ReentrantMonitorAutoExit exitMon(mDecoder->GetReentrantMonitor());
+          nsCOMPtr<nsIRunnable> event =
+            NS_NewRunnableMethod(mDecoder, &MediaDecoder::PlaybackEnded);
+          NS_DispatchToMainThread(event, NS_DISPATCH_SYNC);
+        }
       }
       return NS_OK;
     }
@@ -2753,6 +2775,12 @@ nsresult MediaDecoderStateMachine::ScheduleStateMachine(int64_t aUsecs) {
     // We're not currently running this state machine on the state machine
     // thread, but something has already dispatched an event to run it again,
     // so just exit; it's going to run real soon.
+    return NS_OK;
+  }
+
+  // Since there is already a pending task that will run immediately,
+  // we don't need to schedule a timer task.
+  if (mRunAgain) {
     return NS_OK;
   }
 

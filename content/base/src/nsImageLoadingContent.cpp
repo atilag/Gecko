@@ -40,7 +40,6 @@
 #include "nsContentUtils.h"
 #include "nsLayoutUtils.h"
 #include "nsIContentPolicy.h"
-#include "nsEventDispatcher.h"
 #include "nsSVGEffects.h"
 
 #include "mozAutoDocUpdate.h"
@@ -48,7 +47,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ScriptSettings.h"
 
-#if defined(XP_WIN)
+#ifdef LoadImage
 // Undefine LoadImage to prevent naming conflict with Windows.
 #undef LoadImage
 #endif

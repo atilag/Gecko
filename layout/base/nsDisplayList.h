@@ -375,6 +375,12 @@ public:
   void SetInTransform(bool aInTransform) { mInTransform = aInTransform; }
 
   /**
+   * Returns true if we're currently building display items that are in
+   * true fixed position subtree.
+   */
+  bool IsInFixedPos() const { return mInFixedPos; }
+
+  /**
    * @return true if images have been set to decode synchronously.
    */
   bool ShouldSyncDecodeImages() { return mSyncDecodeImages; }
@@ -574,6 +580,25 @@ public:
     bool                  mOldValue;
   };
 
+  /**
+   * A helper class to temporarily set the value of mInFixedPos.
+   */
+  class AutoInFixedPosSetter;
+  friend class AutoInFixedPosSetter;
+  class AutoInFixedPosSetter {
+  public:
+    AutoInFixedPosSetter(nsDisplayListBuilder* aBuilder, bool aInFixedPos)
+      : mBuilder(aBuilder), mOldValue(aBuilder->mInFixedPos) {
+      aBuilder->mInFixedPos = aInFixedPos;
+    }
+    ~AutoInFixedPosSetter() {
+      mBuilder->mInFixedPos = mOldValue;
+    }
+  private:
+    nsDisplayListBuilder* mBuilder;
+    bool                  mOldValue;
+  };
+
   // Helpers for tables
   nsDisplayTableItem* GetCurrentTableItem() { return mCurrentTableItem; }
   void SetCurrentTableItem(nsDisplayTableItem* aTableItem) { mCurrentTableItem = aTableItem; }
@@ -691,6 +716,7 @@ private:
   // True when we're building a display list that's directly or indirectly
   // under an nsDisplayTransform
   bool                           mInTransform;
+  bool                           mInFixedPos;
   bool                           mSyncDecodeImages;
   bool                           mIsPaintingToWindow;
   bool                           mIsCompositingCheap;
@@ -745,6 +771,7 @@ public:
   nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame)
     : mFrame(aFrame)
     , mClip(aBuilder->ClipState().GetCurrentCombinedClip(aBuilder))
+    , mInFixedPos(aBuilder->IsInFixedPos())
 #ifdef MOZ_DUMP_PAINTING
     , mPainted(false)
 #endif
@@ -759,6 +786,7 @@ public:
     , mClip(aBuilder->ClipState().GetCurrentCombinedClip(aBuilder))
     , mReferenceFrame(aReferenceFrame)
     , mToReferenceFrame(aToReferenceFrame)
+    , mInFixedPos(aBuilder->IsInFixedPos())
 #ifdef MOZ_DUMP_PAINTING
     , mPainted(false)
 #endif
@@ -772,6 +800,7 @@ public:
     : mFrame(aFrame)
     , mClip(nullptr)
     , mReferenceFrame(nullptr)
+    , mInFixedPos(false)
 #ifdef MOZ_DUMP_PAINTING
     , mPainted(false)
 #endif
@@ -840,6 +869,12 @@ public:
    * returns null.
    */
   inline nsIFrame* Frame() const { return mFrame; }
+  /**
+   * Compute the used z-index of our frame; returns zero for elements to which
+   * z-index does not apply, and for z-index:auto.
+   * @note This can be overridden, @see nsDisplayWrapList::SetOverrideZIndex.
+   */
+  virtual int32_t ZIndex() const;
   /**
    * The default bounds is the frame border rect.
    * @param aSnap *aSnap is set to true if the returned rect will be
@@ -1252,6 +1287,8 @@ public:
   // should set the visible region, usually in BuildContainerLayer.
   virtual bool SetVisibleRegionOnLayer() { return true; }
 
+  bool IsInFixedPos() { return mInFixedPos; }
+
 protected:
   friend class nsDisplayList;
 
@@ -1269,6 +1306,7 @@ protected:
   // of the item. Paint implementations can use this to limit their drawing.
   // Guaranteed to be contained in GetBounds().
   nsRect    mVisibleRect;
+  bool      mInFixedPos;
 #ifdef MOZ_DUMP_PAINTING
   // True if this frame has been painted.
   bool      mPainted;
@@ -1464,12 +1502,16 @@ public:
    * I.e., opaque contents of this list are subtracted from aVisibleRegion.
    * @param aListVisibleBounds must be equal to the bounds of the intersection
    * of aVisibleRegion and GetBounds() for this list.
+   * @param aDisplayPortFrame If the item for which this list corresponds is
+   * within a displayport, the scroll frame for which that display port
+   * applies. For root scroll frames, you can pass the the root frame instead.
    * @return true if any item in the list is visible.
    */
   bool ComputeVisibilityForSublist(nsDisplayListBuilder* aBuilder,
                                    nsRegion* aVisibleRegion,
                                    const nsRect& aListVisibleBounds,
-                                   const nsRect& aAllowVisibleRegionExpansion);
+                                   const nsRect& aAllowVisibleRegionExpansion,
+                                   nsIFrame* aDisplayPortFrame = nullptr);
 
   /**
    * As ComputeVisibilityForSublist, but computes visibility for a root
@@ -1477,9 +1519,11 @@ public:
    * This method needs to be idempotent.
    *
    * @param aVisibleRegion the area that is visible
+   * @param aDisplayPortFrame The root scroll frame, if a displayport is set
    */
   bool ComputeVisibilityForRoot(nsDisplayListBuilder* aBuilder,
-                                nsRegion* aVisibleRegion);
+                                nsRegion* aVisibleRegion,
+                                nsIFrame* aDisplayPortFrame = nullptr);
 
   /**
    * Returns true if the visible region output from ComputeVisiblity was
@@ -2441,7 +2485,7 @@ public:
   nsDisplayWrapList(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                     nsDisplayItem* aItem, const nsIFrame* aReferenceFrame, const nsPoint& aToReferenceFrame);
   nsDisplayWrapList(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame)
-    : nsDisplayItem(aBuilder, aFrame) {}
+    : nsDisplayItem(aBuilder, aFrame), mOverrideZIndex(0) {}
   virtual ~nsDisplayWrapList();
   /**
    * Call this if the wrapped list is changed.
@@ -2500,6 +2544,16 @@ public:
   }
   virtual nsDisplayList* GetChildren() MOZ_OVERRIDE { return &mList; }
 
+  virtual int32_t ZIndex() const MOZ_OVERRIDE
+  {
+    return (mOverrideZIndex > 0) ? mOverrideZIndex : nsDisplayItem::ZIndex();
+  }
+
+  void SetOverrideZIndex(int32_t aZIndex)
+  {
+    mOverrideZIndex = aZIndex;
+  }
+
   /**
    * This creates a copy of this item, but wrapping aItem instead of
    * our existing list. Only gets called if this item returned nullptr
@@ -2543,6 +2597,8 @@ protected:
   // this item's own frame.
   nsTArray<nsIFrame*> mMergedFrames;
   nsRect mBounds;
+  // Overrides the ZIndex of our frame if > 0.
+  int32_t mOverrideZIndex;
 };
 
 /**

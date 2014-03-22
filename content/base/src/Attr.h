@@ -23,6 +23,7 @@
 #include "nsIDocument.h"
 
 namespace mozilla {
+class EventChainPreVisitor;
 namespace dom {
 
 // Attribute helper class used to wrap up an attribute with a dom
@@ -51,11 +52,11 @@ public:
   // nsIDOMAttr interface
   NS_DECL_NSIDOMATTR
 
-  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
 
   // nsIAttribute interface
   void SetMap(nsDOMAttributeMap *aMap) MOZ_OVERRIDE;
-  Element *GetElement() const;
+  nsIContent *GetContent() const MOZ_OVERRIDE;
   nsresult SetOwnerDocument(nsIDocument* aDocument) MOZ_OVERRIDE;
 
   // nsINode interface
@@ -93,16 +94,19 @@ public:
   // XPCOM GetPrefix() is OK
   // XPCOM GetLocalName() is OK
 
+  Element* GetOwnerElement(ErrorResult& aRv);
+
 protected:
   virtual Element* GetNameSpaceElement()
   {
-    return GetElement();
+    return GetContentInternal();
   }
 
   static bool sInitialized;
 
 private:
   already_AddRefed<nsIAtom> GetNameAtom(nsIContent* aContent);
+  Element* GetContentInternal() const;
 
   nsString mValue;
 };

@@ -134,7 +134,7 @@ typedef InlineList<MUse>::iterator MUseIterator;
 // A node is an entry in the MIR graph. It has two kinds:
 //   MInstruction: an instruction which appears in the IR stream.
 //   MResumePoint: a list of instructions that correspond to the state of the
-//              interpreter stack.
+//                 interpreter/Baseline stack.
 //
 // Nodes can hold references to MDefinitions. Each MDefinition has a list of
 // nodes holding such a reference (its use chain).
@@ -745,7 +745,7 @@ class MBinaryInstruction : public MAryInstruction<2>
         replaceOperand(1, temp);
     }
 
-    bool congruentTo(MDefinition *ins) const
+    bool binaryCongruentTo(MDefinition *ins) const
     {
         if (op() != ins->op())
             return false;
@@ -804,30 +804,6 @@ class MTernaryInstruction : public MAryInstruction<3>
 
         return op() ^ first->valueNumber() ^ second->valueNumber() ^ third->valueNumber();
     }
-
-    bool congruentTo(MDefinition *ins) const
-    {
-        if (op() != ins->op())
-            return false;
-
-        if (type() != ins->type())
-            return false;
-
-        if (isEffectful() || ins->isEffectful())
-            return false;
-
-        MTernaryInstruction *ter = static_cast<MTernaryInstruction *>(ins);
-        MDefinition *first = getOperand(0);
-        MDefinition *second = getOperand(1);
-        MDefinition *third = getOperand(2);
-        MDefinition *insFirst = ter->getOperand(0);
-        MDefinition *insSecond = ter->getOperand(1);
-        MDefinition *insThird = ter->getOperand(2);
-
-        return first->valueNumber() == insFirst->valueNumber() &&
-               second->valueNumber() == insSecond->valueNumber() &&
-               third->valueNumber() == insThird->valueNumber();
-    }
 };
 
 class MQuaternaryInstruction : public MAryInstruction<4>
@@ -852,33 +828,6 @@ class MQuaternaryInstruction : public MAryInstruction<4>
 
         return op() ^ first->valueNumber() ^ second->valueNumber() ^
                       third->valueNumber() ^ fourth->valueNumber();
-    }
-
-    bool congruentTo(MDefinition *ins) const
-    {
-        if (op() != ins->op())
-            return false;
-
-        if (type() != ins->type())
-            return false;
-
-        if (isEffectful() || ins->isEffectful())
-            return false;
-
-        MQuaternaryInstruction *qua = static_cast<MQuaternaryInstruction *>(ins);
-        MDefinition *first = getOperand(0);
-        MDefinition *second = getOperand(1);
-        MDefinition *third = getOperand(2);
-        MDefinition *fourth = getOperand(3);
-        MDefinition *insFirst = qua->getOperand(0);
-        MDefinition *insSecond = qua->getOperand(1);
-        MDefinition *insThird = qua->getOperand(2);
-        MDefinition *insFourth = qua->getOperand(3);
-
-        return first->valueNumber() == insFirst->valueNumber() &&
-               second->valueNumber() == insSecond->valueNumber() &&
-               third->valueNumber() == insThird->valueNumber() &&
-               fourth->valueNumber() == insFourth->valueNumber();
     }
 };
 
@@ -2348,7 +2297,7 @@ class MCompare
 
   protected:
     bool congruentTo(MDefinition *ins) const {
-        if (!MBinaryInstruction::congruentTo(ins))
+        if (!binaryCongruentTo(ins))
             return false;
         return compareType() == ins->toCompare()->compareType() &&
                jsop() == ins->toCompare()->jsop();
@@ -3271,7 +3220,7 @@ class MBinaryBitwiseInstruction
         setMovable();
     }
 
-    void specializeForAsmJS();
+    void specializeAsInt32();
 
   public:
     TypePolicy *typePolicy() {
@@ -3286,7 +3235,7 @@ class MBinaryBitwiseInstruction
     virtual void infer(BaselineInspector *inspector, jsbytecode *pc);
 
     bool congruentTo(MDefinition *ins) const {
-        return congruentIfOperandsEqual(ins);
+        return binaryCongruentTo(ins);
     }
     AliasSet getAliasSet() const {
         if (specialization_ >= MIRType_Object)
@@ -3502,7 +3451,7 @@ class MBinaryArithInstruction
     virtual void trySpecializeFloat32(TempAllocator &alloc);
 
     bool congruentTo(MDefinition *ins) const {
-        return MBinaryInstruction::congruentTo(ins);
+        return binaryCongruentTo(ins);
     }
     AliasSet getAliasSet() const {
         if (specialization_ >= MIRType_Object)
@@ -4080,7 +4029,7 @@ class MMul : public MBinaryArithInstruction
         if (mode_ != mul->mode())
             return false;
 
-        return MBinaryInstruction::congruentTo(ins);
+        return binaryCongruentTo(ins);
     }
 
     bool canOverflow() const;
@@ -4335,6 +4284,10 @@ class MCharCodeAt
         return this;
     }
 
+    bool congruentTo(MDefinition *ins) const {
+        return congruentIfOperandsEqual(ins);
+    }
+
     virtual AliasSet getAliasSet() const {
         // Strings are immutable, so there is no implicit dependency.
         return AliasSet::None();
@@ -4556,17 +4509,7 @@ class MPhi MOZ_FINAL : public MDefinition, public InlineForwardListNode<MPhi>
     }
     void computeRange(TempAllocator &alloc);
 
-    MDefinition *operandIfRedundant() {
-        // If this phi is redundant (e.g., phi(a,a) or b=phi(a,this)),
-        // returns the operand that it will always be equal to (a, in
-        // those two cases).
-        MDefinition *first = getOperand(0);
-        for (size_t i = 1, e = numOperands(); i < e; i++) {
-            if (getOperand(i) != first && getOperand(i) != this)
-                return nullptr;
-        }
-        return first;
-    }
+    MDefinition *operandIfRedundant();
 
     bool canProduceFloat32() const {
         return canProduceFloat32_;
@@ -4619,7 +4562,7 @@ class MBeta : public MUnaryInstruction
     void computeRange(TempAllocator &alloc);
 };
 
-// MIR representation of a Value on the OSR StackFrame.
+// MIR representation of a Value on the OSR BaselineFrame.
 // The Value is indexed off of OsrFrameReg.
 class MOsrValue : public MUnaryInstruction
 {
@@ -4652,7 +4595,7 @@ class MOsrValue : public MUnaryInstruction
     }
 };
 
-// MIR representation of a JSObject scope chain pointer on the OSR StackFrame.
+// MIR representation of a JSObject scope chain pointer on the OSR BaselineFrame.
 // The pointer is indexed off of OsrFrameReg.
 class MOsrScopeChain : public MUnaryInstruction
 {
@@ -4674,7 +4617,7 @@ class MOsrScopeChain : public MUnaryInstruction
     }
 };
 
-// MIR representation of a JSObject ArgumentsObject pointer on the OSR StackFrame.
+// MIR representation of a JSObject ArgumentsObject pointer on the OSR BaselineFrame.
 // The pointer is indexed off of OsrFrameReg.
 class MOsrArgumentsObject : public MUnaryInstruction
 {
@@ -4696,7 +4639,7 @@ class MOsrArgumentsObject : public MUnaryInstruction
     }
 };
 
-// MIR representation of the return value on the OSR StackFrame.
+// MIR representation of the return value on the OSR BaselineFrame.
 // The Value is indexed off of OsrFrameReg.
 class MOsrReturnValue : public MUnaryInstruction
 {
@@ -5037,6 +4980,9 @@ class MStringReplace
         return new(alloc) MStringReplace(string, pattern, replacement);
     }
 
+    bool congruentTo(MDefinition *ins) const {
+        return congruentIfOperandsEqual(ins);
+    }
     AliasSet getAliasSet() const {
         return AliasSet::None();
     }
@@ -5820,6 +5766,16 @@ class MLoadElement
     bool fallible() const {
         return needsHoleCheck();
     }
+    bool congruentTo(MDefinition *ins) const {
+        if (!ins->isLoadElement())
+            return false;
+        MLoadElement *other = ins->toLoadElement();
+        if (needsHoleCheck() != other->needsHoleCheck())
+            return false;
+        if (loadDoubles() != other->loadDoubles())
+            return false;
+        return congruentIfOperandsEqual(other);
+    }
     AliasSet getAliasSet() const {
         return AliasSet::Load(AliasSet::Element);
     }
@@ -5872,6 +5828,16 @@ class MLoadElementHole
     }
     bool needsHoleCheck() const {
         return needsHoleCheck_;
+    }
+    bool congruentTo(MDefinition *ins) const {
+        if (!ins->isLoadElementHole())
+            return false;
+        MLoadElementHole *other = ins->toLoadElementHole();
+        if (needsHoleCheck() != other->needsHoleCheck())
+            return false;
+        if (needsNegativeIntCheck() != other->needsNegativeIntCheck())
+            return false;
+        return congruentIfOperandsEqual(other);
     }
     AliasSet getAliasSet() const {
         return AliasSet::Load(AliasSet::Element);
@@ -6182,6 +6148,15 @@ class MLoadTypedArrayElement
         return AliasSet::Load(AliasSet::TypedArrayElement);
     }
 
+    bool congruentTo(MDefinition *ins) const {
+        if (!ins->isLoadTypedArrayElement())
+            return false;
+        MLoadTypedArrayElement *other = ins->toLoadTypedArrayElement();
+        if (arrayType_ != other->arrayType_)
+            return false;
+        return congruentIfOperandsEqual(other);
+    }
+
     void printOpcode(FILE *fp) const;
 
     void computeRange(TempAllocator &alloc);
@@ -6233,6 +6208,16 @@ class MLoadTypedArrayElementHole
     }
     MDefinition *index() const {
         return getOperand(1);
+    }
+    bool congruentTo(MDefinition *ins) const {
+        if (!ins->isLoadTypedArrayElementHole())
+            return false;
+        MLoadTypedArrayElementHole *other = ins->toLoadTypedArrayElementHole();
+        if (arrayType() != other->arrayType())
+            return false;
+        if (allowDouble() != other->allowDouble())
+            return false;
+        return congruentIfOperandsEqual(other);
     }
     AliasSet getAliasSet() const {
         return AliasSet::Load(AliasSet::TypedArrayElement);
@@ -8509,6 +8494,16 @@ class MInArray
     AliasSet getAliasSet() const {
         return AliasSet::Load(AliasSet::Element);
     }
+    bool congruentTo(MDefinition *ins) const {
+        if (!ins->isInArray())
+            return false;
+        MInArray *other = ins->toInArray();
+        if (needsHoleCheck() != other->needsHoleCheck())
+            return false;
+        if (needsNegativeIntCheck() != other->needsNegativeIntCheck())
+            return false;
+        return congruentIfOperandsEqual(other);
+    }
     TypePolicy *typePolicy() {
         return this;
     }
@@ -8802,6 +8797,9 @@ class MGuardThreadExclusive
     BailoutKind bailoutKind() const {
         return Bailout_Normal;
     }
+    bool congruentTo(MDefinition *ins) const {
+        return congruentIfOperandsEqual(ins);
+    }
     AliasSet getAliasSet() const {
         return AliasSet::None();
     }
@@ -8967,6 +8965,33 @@ class MPostWriteBarrier : public MBinaryInstruction, public ObjectPolicy<0>
 #endif
 };
 
+class MNewSlots : public MNullaryInstruction
+{
+    unsigned nslots_;
+
+    MNewSlots(unsigned nslots)
+      : nslots_(nslots)
+    {
+        setResultType(MIRType_Slots);
+    }
+
+  public:
+    INSTRUCTION_HEADER(NewSlots)
+
+    static MNewSlots *New(TempAllocator &alloc, unsigned nslots) {
+        return new(alloc) MNewSlots(nslots);
+    }
+    unsigned nslots() const {
+        return nslots_;
+    }
+    AliasSet getAliasSet() const {
+        return AliasSet::None();
+    }
+    bool possiblyCalls() const {
+        return true;
+    }
+};
+
 class MNewDeclEnvObject : public MNullaryInstruction
 {
     CompilerRootObject templateObj_;
@@ -8993,13 +9018,13 @@ class MNewDeclEnvObject : public MNullaryInstruction
     }
 };
 
-class MNewCallObject : public MNullaryInstruction
+class MNewCallObject : public MUnaryInstruction
 {
     CompilerRootObject templateObj_;
     bool needsSingletonType_;
 
-    MNewCallObject(JSObject *templateObj, bool needsSingletonType)
-      : MNullaryInstruction(),
+    MNewCallObject(JSObject *templateObj, bool needsSingletonType, MDefinition *slots)
+      : MUnaryInstruction(slots),
         templateObj_(templateObj),
         needsSingletonType_(needsSingletonType)
     {
@@ -9009,11 +9034,15 @@ class MNewCallObject : public MNullaryInstruction
   public:
     INSTRUCTION_HEADER(NewCallObject)
 
-    static MNewCallObject *New(TempAllocator &alloc, JSObject *templateObj, bool needsSingletonType)
+    static MNewCallObject *New(TempAllocator &alloc, JSObject *templateObj, bool needsSingletonType,
+                               MDefinition *slots)
     {
-        return new(alloc) MNewCallObject(templateObj, needsSingletonType);
+        return new(alloc) MNewCallObject(templateObj, needsSingletonType, slots);
     }
 
+    MDefinition *slots() {
+        return getOperand(0);
+    }
     JSObject *templateObject() {
         return templateObj_;
     }
@@ -9025,12 +9054,12 @@ class MNewCallObject : public MNullaryInstruction
     }
 };
 
-class MNewCallObjectPar : public MUnaryInstruction
+class MNewCallObjectPar : public MBinaryInstruction
 {
     CompilerRootObject templateObj_;
 
-    MNewCallObjectPar(MDefinition *cx, JSObject *templateObj)
-        : MUnaryInstruction(cx),
+    MNewCallObjectPar(MDefinition *cx, JSObject *templateObj, MDefinition *slots)
+        : MBinaryInstruction(cx, slots),
           templateObj_(templateObj)
     {
         setResultType(MIRType_Object);
@@ -9040,11 +9069,15 @@ class MNewCallObjectPar : public MUnaryInstruction
     INSTRUCTION_HEADER(NewCallObjectPar);
 
     static MNewCallObjectPar *New(TempAllocator &alloc, MDefinition *cx, MNewCallObject *callObj) {
-        return new(alloc) MNewCallObjectPar(cx, callObj->templateObject());
+        return new(alloc) MNewCallObjectPar(cx, callObj->templateObject(), callObj->slots());
     }
 
     MDefinition *forkJoinContext() const {
         return getOperand(0);
+    }
+
+    MDefinition *slots() const {
+        return getOperand(1);
     }
 
     JSObject *templateObj() const {
@@ -9197,7 +9230,7 @@ class MNewDenseArrayPar : public MBinaryInstruction
     }
 };
 
-// A resume point contains the information needed to reconstruct the interpreter
+// A resume point contains the information needed to reconstruct the Baseline
 // state from a position in the JIT. See the big comment near resumeAfter() in
 // IonBuilder.cpp.
 class MResumePoint MOZ_FINAL : public MNode, public InlineForwardListNode<MResumePoint>
@@ -9380,6 +9413,9 @@ class MHaveSameClass
 
     TypePolicy *typePolicy() {
         return this;
+    }
+    bool congruentTo(MDefinition *ins) const {
+        return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
         return AliasSet::None();

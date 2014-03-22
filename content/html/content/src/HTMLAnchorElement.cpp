@@ -7,6 +7,7 @@
 #include "mozilla/dom/HTMLAnchorElement.h"
 
 #include "mozilla/dom/HTMLAnchorElementBinding.h"
+#include "mozilla/EventDispatcher.h"
 #include "mozilla/MemoryReporting.h"
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
@@ -244,13 +245,13 @@ HTMLAnchorElement::IsHTMLFocusable(bool aWithMouse,
 }
 
 nsresult
-HTMLAnchorElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
+HTMLAnchorElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
 {
   return PreHandleEventForAnchors(aVisitor);
 }
 
 nsresult
-HTMLAnchorElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
+HTMLAnchorElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
 {
   return PostHandleEventForAnchors(aVisitor);
 }
@@ -321,7 +322,9 @@ IMPL_URI_PART(Hash)
 NS_IMETHODIMP    
 HTMLAnchorElement::GetText(nsAString& aText)
 {
-  nsContentUtils::GetNodeTextContent(this, true, aText);
+  if(!nsContentUtils::GetNodeTextContent(this, true, aText)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
   return NS_OK;
 }
 

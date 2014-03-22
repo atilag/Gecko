@@ -21,6 +21,7 @@ class nsIFrame;
 class nsXBLBinding;
 
 namespace mozilla {
+class EventChainPreVisitor;
 namespace dom {
 class ShadowRoot;
 struct CustomElementData;
@@ -539,6 +540,13 @@ public:
   virtual void AppendTextTo(nsAString& aResult) = 0;
 
   /**
+   * Append the text content to aResult.
+   * NOTE: This asserts and returns for elements
+   */
+  virtual bool AppendTextTo(nsAString& aResult,
+                            const mozilla::fallible_t&) NS_WARN_UNUSED_RESULT = 0;
+
+  /**
    * Check if this content is focusable and in the current tab order.
    * Note: most callers should use nsIFrame::IsFocusable() instead as it 
    *       checks visibility and other layout factors as well.
@@ -913,7 +921,8 @@ public:
   // Overloaded from nsINode
   virtual already_AddRefed<nsIURI> GetBaseURI() const MOZ_OVERRIDE;
 
-  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PreHandleEvent(
+                     mozilla::EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
 
   virtual bool IsPurple() = 0;
   virtual void RemovePurple() = 0;

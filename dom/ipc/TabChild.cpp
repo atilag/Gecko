@@ -1917,8 +1917,20 @@ TabChild::RecvRealTouchMoveEvent(const WidgetTouchEvent& aEvent,
 }
 
 bool
-TabChild::RecvRealKeyEvent(const WidgetKeyboardEvent& event)
-{
+TabChild::RecvRealKeyEvent(const WidgetKeyboardEvent& event,
+                           const MaybeNativeKeyBinding& aBindings)
+ {
+  if (event.message == NS_KEY_PRESS) {
+    PuppetWidget* widget = static_cast<PuppetWidget*>(mWidget.get());
+    if (aBindings.type() == MaybeNativeKeyBinding::TNativeKeyBinding) {
+      const NativeKeyBinding& bindings = aBindings;
+      widget->CacheNativeKeyCommands(bindings.singleLineCommands(),
+                                     bindings.multiLineCommands(),
+                                     bindings.richTextCommands());
+    } else {
+      widget->ClearNativeKeyCommands();
+    }
+  }
   // If content code called preventDefault() on a keydown event, then we don't
   // want to process any following keypress events.
   if (event.message == NS_KEY_PRESS && mIgnoreKeyPressEvent) {
@@ -1930,6 +1942,10 @@ TabChild::RecvRealKeyEvent(const WidgetKeyboardEvent& event)
 
   if (event.message == NS_KEY_DOWN) {
     mIgnoreKeyPressEvent = status == nsEventStatus_eConsumeNoDefault;
+  }
+
+  if (localEvent.mFlags.mWantReplyFromContentProcess) {
+    SendReplyKeyEvent(localEvent);
   }
 
   return true;

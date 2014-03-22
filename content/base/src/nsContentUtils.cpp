@@ -41,6 +41,7 @@
 #include "mozilla/dom/TextDecoder.h"
 #include "mozilla/dom/TouchEvent.h"
 #include "mozilla/dom/ShadowRoot.h"
+#include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/InternalMutationEvent.h"
@@ -74,7 +75,6 @@
 #include "nsDOMJSUtils.h"
 #include "nsDOMMutationObserver.h"
 #include "nsError.h"
-#include "nsEventDispatcher.h"
 #include "nsEventStateManager.h"
 #include "nsFocusManager.h"
 #include "nsGenericHTMLElement.h"
@@ -3630,7 +3630,7 @@ nsContentUtils::MaybeFireNodeRemoved(nsINode* aChild, nsINode* aParent,
   NS_PRECONDITION(aChild->OwnerDoc() == aOwnerDoc, "Wrong owner-doc");
 
   // This checks that IsSafeToRunScript is true since we don't want to fire
-  // events when that is false. We can't rely on nsEventDispatcher to assert
+  // events when that is false. We can't rely on EventDispatcher to assert
   // this in this situation since most of the time there are no mutation
   // event listeners, in which case we won't even attempt to dispatch events.
   // However this also allows for two exceptions. First off, we don't assert
@@ -3661,7 +3661,7 @@ nsContentUtils::MaybeFireNodeRemoved(nsINode* aChild, nsINode* aParent,
     mutation.mRelatedNode = do_QueryInterface(aParent);
 
     mozAutoSubtreeModified subtree(aOwnerDoc, aParent);
-    nsEventDispatcher::Dispatch(aChild, nullptr, &mutation);
+    EventDispatcher::Dispatch(aChild, nullptr, &mutation);
   }
 }
 
@@ -4191,40 +4191,58 @@ nsContentUtils::SetNodeTextContent(nsIContent* aContent,
   return rv;
 }
 
-static void AppendNodeTextContentsRecurse(nsINode* aNode, nsAString& aResult)
+static bool
+AppendNodeTextContentsRecurse(nsINode* aNode, nsAString& aResult,
+                              const mozilla::fallible_t&)
 {
   for (nsIContent* child = aNode->GetFirstChild();
        child;
        child = child->GetNextSibling()) {
     if (child->IsElement()) {
-      AppendNodeTextContentsRecurse(child, aResult);
+      bool ok = AppendNodeTextContentsRecurse(child, aResult,
+                                              mozilla::fallible_t());
+      if (!ok) {
+        return false;
+      }
     }
     else if (child->IsNodeOfType(nsINode::eTEXT)) {
-      child->AppendTextTo(aResult);
+      bool ok = child->AppendTextTo(aResult, mozilla::fallible_t());
+      if (!ok) {
+        return false;
+      }
     }
   }
+
+  return true;
 }
 
 /* static */
-void
+bool
 nsContentUtils::AppendNodeTextContent(nsINode* aNode, bool aDeep,
-                                      nsAString& aResult)
+                                      nsAString& aResult,
+                                      const mozilla::fallible_t&)
 {
   if (aNode->IsNodeOfType(nsINode::eTEXT)) {
-    static_cast<nsIContent*>(aNode)->AppendTextTo(aResult);
+    return static_cast<nsIContent*>(aNode)->AppendTextTo(aResult,
+                                                         mozilla::fallible_t());
   }
   else if (aDeep) {
-    AppendNodeTextContentsRecurse(aNode, aResult);
+    return AppendNodeTextContentsRecurse(aNode, aResult, mozilla::fallible_t());
   }
   else {
     for (nsIContent* child = aNode->GetFirstChild();
          child;
          child = child->GetNextSibling()) {
       if (child->IsNodeOfType(nsINode::eTEXT)) {
-        child->AppendTextTo(aResult);
+        bool ok = child->AppendTextTo(aResult, mozilla::fallible_t());
+        if (!ok) {
+            return false;
+        }
       }
     }
   }
+
+  return true;
 }
 
 bool
@@ -6569,11 +6587,11 @@ nsContentUtils::DOMWindowDumpEnabled()
 #endif
 }
 
-void
+bool
 nsContentUtils::GetNodeTextContent(nsINode* aNode, bool aDeep, nsAString& aResult)
 {
   aResult.Truncate();
-  AppendNodeTextContent(aNode, aDeep, aResult);
+  return AppendNodeTextContent(aNode, aDeep, aResult, mozilla::fallible_t());
 }
 
 void

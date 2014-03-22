@@ -2024,13 +2024,10 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
   // 3: negative z-index children.
   for (;;) {
     nsDisplayItem* item = set.PositionedDescendants()->GetBottom();
-    if (item) {
-      nsIFrame* f = item->Frame();
-      if (nsLayoutUtils::GetZIndex(f) < 0) {
-        set.PositionedDescendants()->RemoveBottom();
-        resultList.AppendToTop(item);
-        continue;
-      }
+    if (item && item->ZIndex() < 0) {
+      set.PositionedDescendants()->RemoveBottom();
+      resultList.AppendToTop(item);
+      continue;
     }
     break;
   }
@@ -2301,6 +2298,13 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
   }
   NS_ASSERTION(!isStackingContext || pseudoStackingContext,
                "Stacking contexts must also be pseudo-stacking-contexts");
+
+  bool isInFixedPos = aBuilder->IsInFixedPos() ||
+                        (isPositioned &&
+                         disp->mPosition == NS_STYLE_POSITION_FIXED &&
+                         nsLayoutUtils::IsReallyFixedPos(child));
+  nsDisplayListBuilder::AutoInFixedPosSetter
+    buildingInFixedPos(aBuilder, isInFixedPos);
 
   nsDisplayListBuilder::AutoBuildingDisplayList
     buildingForChild(aBuilder, child, pseudoStackingContext);

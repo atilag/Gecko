@@ -18,6 +18,7 @@
 #include "mozilla/dom/FragmentOrElement.h"
 
 #include "mozilla/AsyncEventDispatcher.h"
+#include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/dom/Attr.h"
 #include "nsDOMAttributeMap.h"
@@ -91,7 +92,6 @@
 #include "nsGenericHTMLElement.h"
 #include "nsIEditor.h"
 #include "nsIEditorIMESupport.h"
-#include "nsEventDispatcher.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsIControllers.h"
 #include "nsView.h"
@@ -703,7 +703,7 @@ FindChromeAccessOnlySubtreeOwner(nsIContent* aContent)
 }
 
 nsresult
-nsIContent::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
+nsIContent::PreHandleEvent(EventChainPreVisitor& aVisitor)
 {
   //FIXME! Document how this event retargeting works, Bug 329124.
   aVisitor.mCanHandle = true;
@@ -1067,7 +1067,8 @@ FragmentOrElement::RemoveChildAt(uint32_t aIndex, bool aNotify)
 void
 FragmentOrElement::GetTextContentInternal(nsAString& aTextContent)
 {
-  nsContentUtils::GetNodeTextContent(this, true, aTextContent);
+  if(!nsContentUtils::GetNodeTextContent(this, true, aTextContent))
+    NS_RUNTIMEABORT("OOM");
 }
 
 void
@@ -1925,6 +1926,16 @@ FragmentOrElement::AppendTextTo(nsAString& aResult)
   // We can remove this assertion if it turns out to be useful to be able
   // to depend on this appending nothing.
   NS_NOTREACHED("called FragmentOrElement::TextLength");
+}
+
+bool
+FragmentOrElement::AppendTextTo(nsAString& aResult, const mozilla::fallible_t&)
+{
+  // We can remove this assertion if it turns out to be useful to be able
+  // to depend on this appending nothing.
+  NS_NOTREACHED("called FragmentOrElement::TextLength");
+
+  return false;
 }
 
 uint32_t

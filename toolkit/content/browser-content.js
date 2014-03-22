@@ -107,14 +107,20 @@ let ClickEventHandler = {
       }
     }
 
+    let [enabled] = sendSyncMessage("Autoscroll:Start",
+                                    {scrolldir: this._scrolldir,
+                                     screenX: event.screenX,
+                                     screenY: event.screenY});
+    if (!enabled) {
+      this._scrollable = null;
+      return;
+    }
+
     Cc["@mozilla.org/eventlistenerservice;1"]
       .getService(Ci.nsIEventListenerService)
       .addSystemEventListener(global, "mousemove", this, true);
     addEventListener("pagehide", this, true);
 
-    sendAsyncMessage("Autoscroll:Start", {scrolldir: this._scrolldir,
-                                          screenX: event.screenX,
-                                          screenY: event.screenY});
     this._ignoreMouseEvents = true;
     this._startX = event.screenX;
     this._startY = event.screenY;
@@ -232,3 +238,105 @@ let ClickEventHandler = {
   },
 };
 ClickEventHandler.init();
+
+let PopupBlocking = {
+  popupData: null,
+  popupDataInternal: null,
+
+  init: function() {
+    addEventListener("DOMPopupBlocked", this, true);
+    addEventListener("pageshow", this, true);
+    addEventListener("pagehide", this, true);
+
+    addMessageListener("PopupBlocking:UnblockPopup", this);
+  },
+
+  receiveMessage: function(msg) {
+    switch (msg.name) {
+      case "PopupBlocking:UnblockPopup": {
+        let i = msg.data.index;
+        if (this.popupData && this.popupData[i]) {
+          let data = this.popupData[i];
+          let internals = this.popupDataInternal[i];
+          let dwi = internals.requestingWindow;
+
+          // If we have a requesting window and the requesting document is
+          // still the current document, open the popup.
+          if (dwi && dwi.document == internals.requestingDocument) {
+            dwi.open(data.popupWindowURI, data.popupWindowName, data.popupWindowFeatures);
+          }
+        }
+        break;
+      }
+    }
+  },
+
+  handleEvent: function(ev) {
+    switch (ev.type) {
+      case "DOMPopupBlocked":
+        return this.onPopupBlocked(ev);
+      case "pageshow":
+        return this.onPageShow(ev);
+      case "pagehide":
+        return this.onPageHide(ev);
+    }
+  },
+
+  onPopupBlocked: function(ev) {
+    if (!this.popupData) {
+      this.popupData = new Array();
+      this.popupDataInternal = new Array();
+    }
+
+    let obj = {
+      popupWindowURI: ev.popupWindowURI.spec,
+      popupWindowFeatures: ev.popupWindowFeatures,
+      popupWindowName: ev.popupWindowName
+    };
+
+    let internals = {
+      requestingWindow: ev.requestingWindow,
+      requestingDocument: ev.requestingWindow.document,
+    };
+
+    this.popupData.push(obj);
+    this.popupDataInternal.push(internals);
+    this.updateBlockedPopups(true);
+  },
+
+  onPageShow: function(ev) {
+    if (this.popupData) {
+      let i = 0;
+      while (i < this.popupData.length) {
+        // Filter out irrelevant reports.
+        if (this.popupDataInternal[i].requestingWindow &&
+            (this.popupDataInternal[i].requestingWindow.document ==
+             this.popupDataInternal[i].requestingDocument)) {
+          i++;
+        } else {
+          this.popupData.splice(i, 1);
+          this.popupDataInternal.splice(i, 1);
+        }
+      }
+      if (this.popupData.length == 0) {
+        this.popupData = null;
+        this.popupDataInternal = null;
+      }
+      this.updateBlockedPopups(false);
+    }
+  },
+
+  onPageHide: function(ev) {
+    if (this.popupData) {
+      this.popupData = null;
+      this.popupDataInternal = null;
+      this.updateBlockedPopups(false);
+    }
+  },
+
+  updateBlockedPopups: function(freshPopup) {
+    sendAsyncMessage("PopupBlocking:UpdateBlockedPopups",
+                     {blockedPopups: this.popupData, freshPopup: freshPopup});
+  },
+};
+PopupBlocking.init();

@@ -53,16 +53,17 @@ extern JS_FRIEND_API(void)
 JS_SetIsWorkerRuntime(JSRuntime *rt);
 
 extern JS_FRIEND_API(JSObject *)
-JS_FindCompilationScope(JSContext *cx, JSObject *obj);
+JS_FindCompilationScope(JSContext *cx, JS::HandleObject obj);
 
 extern JS_FRIEND_API(JSFunction *)
 JS_GetObjectFunction(JSObject *obj);
 
 extern JS_FRIEND_API(bool)
-JS_SplicePrototype(JSContext *cx, JSObject *obj, JSObject *proto);
+JS_SplicePrototype(JSContext *cx, JS::HandleObject obj, JS::HandleObject proto);
 
 extern JS_FRIEND_API(JSObject *)
-JS_NewObjectWithUniqueType(JSContext *cx, const JSClass *clasp, JSObject *proto, JSObject *parent);
+JS_NewObjectWithUniqueType(JSContext *cx, const JSClass *clasp, JS::HandleObject proto,
+                           JS::HandleObject parent);
 
 extern JS_FRIEND_API(uint32_t)
 JS_ObjectCountDynamicSlots(JS::HandleObject obj);
@@ -74,7 +75,7 @@ extern JS_FRIEND_API(size_t)
 JS_GetCustomIteratorCount(JSContext *cx);
 
 extern JS_FRIEND_API(bool)
-JS_NondeterministicGetWeakMapKeys(JSContext *cx, JSObject *obj, JSObject **ret);
+JS_NondeterministicGetWeakMapKeys(JSContext *cx, JS::HandleObject obj, JS::MutableHandleObject ret);
 
 /*
  * Determine whether the given object is backed by a DeadObjectProxy.
@@ -185,7 +186,7 @@ js_DumpChars(const jschar *s, size_t n);
  * restrictions on the compartment of |cx|.
  */
 extern JS_FRIEND_API(bool)
-JS_CopyPropertiesFrom(JSContext *cx, JSObject *target, JSObject *obj);
+JS_CopyPropertiesFrom(JSContext *cx, JS::HandleObject target, JS::HandleObject obj);
 
 /*
  * Single-property version of the above. This function asserts that an |own|
@@ -222,7 +223,7 @@ struct JSFunctionSpecWithHelp {
     {nullptr, nullptr, 0, 0, nullptr, nullptr}
 
 extern JS_FRIEND_API(bool)
-JS_DefineFunctionsWithHelp(JSContext *cx, JSObject *obj, const JSFunctionSpecWithHelp *fs);
+JS_DefineFunctionsWithHelp(JSContext *cx, JS::HandleObject obj, const JSFunctionSpecWithHelp *fs);
 
 namespace js {
 
@@ -1577,6 +1578,12 @@ class JSJitMethodCallArgs : protected JS::detail::CallArgsBase<JS::detail::NoUse
         return Base::hasDefined(i);
     }
 
+    JSObject &callee() const {
+        // We can't use Base::callee() because that will try to poke at
+        // this->usedRval_, which we don't have.
+        return argv_[-2].toObject();
+    }
+
     // Add get() as needed
 };
 
@@ -1607,6 +1614,7 @@ struct JSJitInfo {
         Setter,
         Method,
         ParallelNative,
+        StaticMethod,
         // Must be last
         OpTypeCount
     };
@@ -1665,9 +1673,9 @@ struct JSJitInfo {
         return type() == ParallelNative;
     }
 
-    bool isDOMJitInfo() const
+    bool needsOuterizedThisObject() const
     {
-        return type() != ParallelNative;
+        return type() != Getter && type() != Setter;
     }
 
     bool isTypedMethodJitInfo() const
@@ -1696,6 +1704,8 @@ struct JSJitInfo {
         JSJitMethodOp method;
         /* An alternative native that's safe to call in parallel mode. */
         JSParallelNative parallelNative;
+        /* A DOM static method, used for Promise wrappers */
+        JSNative staticMethod;
     };
 
     uint16_t protoID;
@@ -1709,9 +1719,7 @@ struct JSJitInfo {
 #define JITINFO_ALIAS_SET_BITS 4
 #define JITINFO_RETURN_TYPE_BITS 8
 
-    // If this field is not ParallelNative, then this is a DOM method.
-    // If you change that, come up with a different way of implementing
-    // isDOMJitInfo().
+    // The OpType that says what sort of function we are.
     uint32_t type_ : JITINFO_OP_TYPE_BITS;
 
     // The alias set for this op.  This is a _minimal_ alias set; in

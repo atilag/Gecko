@@ -11,7 +11,6 @@
 #include "nsIWebNavigation.h"
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
-#include "nsEventDispatcher.h"
 #include "nsIWebBrowserChrome2.h"
 #include "nsIEmbeddingSiteWindow.h"
 #include "nsIWebBrowserChromeFocus.h"
@@ -31,6 +30,7 @@
 #include "nsITooltipListener.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/TabContext.h"
+#include "mozilla/EventDispatcher.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/layers/CompositorTypes.h"
 
@@ -118,7 +118,7 @@ public:
   }
 
   nsresult
-  PreHandleEvent(nsEventChainPreVisitor& aVisitor)
+  PreHandleEvent(EventChainPreVisitor& aVisitor)
   {
     aVisitor.mForceContentDispatch = true;
     return NS_OK;
@@ -238,7 +238,8 @@ public:
                                 const int32_t&  aModifiers,
                                 const bool&     aIgnoreRootScrollFrame) MOZ_OVERRIDE;
     virtual bool RecvRealMouseEvent(const mozilla::WidgetMouseEvent& event) MOZ_OVERRIDE;
-    virtual bool RecvRealKeyEvent(const mozilla::WidgetKeyboardEvent& event) MOZ_OVERRIDE;
+    virtual bool RecvRealKeyEvent(const mozilla::WidgetKeyboardEvent& event,
+                                  const MaybeNativeKeyBinding& aBindings) MOZ_OVERRIDE;
     virtual bool RecvMouseWheelEvent(const mozilla::WidgetWheelEvent& event) MOZ_OVERRIDE;
     virtual bool RecvRealTouchEvent(const WidgetTouchEvent& aEvent,
                                     const ScrollableLayerGuid& aGuid) MOZ_OVERRIDE;

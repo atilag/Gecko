@@ -96,6 +96,10 @@
 #include "GStreamerFormatHelper.h"
 #endif
 
+#ifdef MOZ_FFMPEG
+#include "FFmpegRuntimeLinker.h"
+#endif
+
 #include "AudioStream.h"
 #include "Latency.h"
 #include "WebAudioUtils.h"
@@ -122,11 +126,10 @@ using namespace mozilla::system;
 #include "nsCookieService.h"
 #include "nsApplicationCacheService.h"
 #include "mozilla/dom/time/DateCacheCleaner.h"
+#include "mozilla/EventDispatcher.h"
 #include "mozilla/IMEStateManager.h"
 #include "nsDocument.h"
 #include "mozilla/dom/HTMLVideoElement.h"
-
-extern void NS_ShutdownEventTargetChainRecycler();
 
 using namespace mozilla;
 using namespace mozilla::net;
@@ -364,6 +367,10 @@ nsLayoutStatics::Shutdown()
   GStreamerFormatHelper::Shutdown();
 #endif
 
+#ifdef MOZ_FFMPEG
+  FFmpegRuntimeLinker::Unlink();
+#endif
+
   AudioStream::ShutdownLibrary();
   AsyncLatencyLogger::ShutdownLogger();
   WebAudioUtils::Shutdown();
@@ -393,7 +400,7 @@ nsLayoutStatics::Shutdown()
 
   nsRegion::ShutdownStatic();
 
-  NS_ShutdownEventTargetChainRecycler();
+  mozilla::EventDispatcher::Shutdown();
 
   HTMLInputElement::DestroyUploadLastDir();
 

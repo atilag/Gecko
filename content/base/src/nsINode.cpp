@@ -15,6 +15,7 @@
 #include "mozAutoDocUpdate.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/CORSMode.h"
+#include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/InternalMutationEvent.h"
 #include "mozilla/Likely.h"
@@ -39,7 +40,6 @@
 #include "nsDOMMutationObserver.h"
 #include "nsDOMString.h"
 #include "nsDOMTokenList.h"
-#include "nsEventDispatcher.h"
 #include "nsEventStateManager.h"
 #include "nsFocusManager.h"
 #include "nsFrameManager.h"
@@ -103,6 +103,7 @@
 #include <algorithm>
 #include "nsGlobalWindow.h"
 #include "nsDOMMutationObserver.h"
+#include "GeometryUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -773,10 +774,10 @@ nsINode::CompareDocumentPosition(nsINode& aOtherNode) const
   const nsINode *node1 = &aOtherNode, *node2 = this;
 
   // Check if either node is an attribute
-  const Attr* attr1 = nullptr;
+  const nsIAttribute* attr1 = nullptr;
   if (node1->IsNodeOfType(nsINode::eATTRIBUTE)) {
-    attr1 = static_cast<const Attr*>(node1);
-    const nsIContent* elem = attr1->GetElement();
+    attr1 = static_cast<const nsIAttribute*>(node1);
+    const nsIContent* elem = attr1->GetContent();
     // If there is an owner element add the attribute
     // to the chain and walk up to the element
     if (elem) {
@@ -785,8 +786,8 @@ nsINode::CompareDocumentPosition(nsINode& aOtherNode) const
     }
   }
   if (node2->IsNodeOfType(nsINode::eATTRIBUTE)) {
-    const Attr* attr2 = static_cast<const Attr*>(node2);
-    const nsIContent* elem = attr2->GetElement();
+    const nsIAttribute* attr2 = static_cast<const nsIAttribute*>(node2);
+    const nsIContent* elem = attr2->GetContent();
     if (elem == node1 && attr1) {
       // Both nodes are attributes on the same element.
       // Compare position between the attributes.
@@ -1133,11 +1134,46 @@ nsINode::RemoveEventListener(const nsAString& aType,
 NS_IMPL_REMOVE_SYSTEM_EVENT_LISTENER(nsINode)
 
 nsresult
-nsINode::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
+nsINode::PreHandleEvent(EventChainPreVisitor& aVisitor)
 {
   // This is only here so that we can use the NS_DECL_NSIDOMTARGET macro
   NS_ABORT();
   return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+void
+nsINode::GetBoxQuads(const BoxQuadOptions& aOptions,
+                     nsTArray<nsRefPtr<DOMQuad> >& aResult,
+                     mozilla::ErrorResult& aRv)
+{
+  mozilla::GetBoxQuads(this, aOptions, aResult, aRv);
+}
+
+already_AddRefed<DOMQuad>
+nsINode::ConvertQuadFromNode(DOMQuad& aQuad,
+                             const GeometryNode& aFrom,
+                             const ConvertCoordinateOptions& aOptions,
+                             ErrorResult& aRv)
+{
+  return mozilla::ConvertQuadFromNode(this, aQuad, aFrom, aOptions, aRv);
+}
+
+already_AddRefed<DOMQuad>
+nsINode::ConvertRectFromNode(DOMRectReadOnly& aRect,
+                             const GeometryNode& aFrom,
+                             const ConvertCoordinateOptions& aOptions,
+                             ErrorResult& aRv)
+{
+  return mozilla::ConvertRectFromNode(this, aRect, aFrom, aOptions, aRv);
+}
+
+already_AddRefed<DOMPoint>
+nsINode::ConvertPointFromNode(const DOMPointInit& aPoint,
+                              const GeometryNode& aFrom,
+                              const ConvertCoordinateOptions& aOptions,
+                              ErrorResult& aRv)
+{
+  return mozilla::ConvertPointFromNode(this, aPoint, aFrom, aOptions, aRv);
 }
 
 nsresult
@@ -1162,14 +1198,13 @@ nsINode::DispatchEvent(nsIDOMEvent *aEvent, bool* aRetVal)
 
   nsEventStatus status = nsEventStatus_eIgnore;
   nsresult rv =
-    nsEventDispatcher::DispatchDOMEvent(this, nullptr, aEvent, context,
-                                        &status);
+    EventDispatcher::DispatchDOMEvent(this, nullptr, aEvent, context, &status);
   *aRetVal = (status != nsEventStatus_eConsumeNoDefault);
   return rv;
 }
 
 nsresult
-nsINode::PostHandleEvent(nsEventChainPostVisitor& /*aVisitor*/)
+nsINode::PostHandleEvent(EventChainPostVisitor& /*aVisitor*/)
 {
   return NS_OK;
 }
@@ -1180,8 +1215,8 @@ nsINode::DispatchDOMEvent(WidgetEvent* aEvent,
                           nsPresContext* aPresContext,
                           nsEventStatus* aEventStatus)
 {
-  return nsEventDispatcher::DispatchDOMEvent(this, aEvent, aDOMEvent,
-                                             aPresContext, aEventStatus);
+  return EventDispatcher::DispatchDOMEvent(this, aEvent, aDOMEvent,
+                                           aPresContext, aEventStatus);
 }
 
 EventListenerManager*
@@ -2595,19 +2630,8 @@ nsINode::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aScope)
   }
 
   JS::Rooted<JSObject*> obj(aCx, WrapNode(aCx, aScope));
-  if (obj && ChromeOnlyAccess() &&
-      !nsContentUtils::IsSystemPrincipal(NodePrincipal()) &&
-      xpc::AllowXBLScope(js::GetObjectCompartment(obj)))
-  {
-    // Create a new wrapper and cache it.
-    JSAutoCompartment ac(aCx, obj);
-    JSObject* wrapper = xpc::WrapperFactory::WrapSOWObject(aCx, obj);
-    if (!wrapper) {
-      ClearWrapper();
-      return nullptr;
-    }
-    dom::SetSystemOnlyWrapper(obj, this, *wrapper);
-  }
+  MOZ_ASSERT_IF(ChromeOnlyAccess(),
+                xpc::IsInXBLScope(obj) || !xpc::UseXBLScope(js::GetObjectCompartment(obj)));
   return obj;
 }
 

@@ -7,6 +7,7 @@
 #undef CreateEvent
 
 #include "mozilla/BasicEvents.h"
+#include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
 #ifdef MOZ_B2G
 #include "mozilla/Hal.h"
@@ -24,7 +25,6 @@
 #include "nsContentUtils.h"
 #include "nsDOMCID.h"
 #include "nsError.h"
-#include "nsEventDispatcher.h"
 #include "nsGkAtoms.h"
 #include "nsIContent.h"
 #include "nsIContentSecurityPolicy.h"
@@ -811,7 +811,7 @@ EventListenerManager::CompileEventHandlerInternal(Listener* aListener,
   NS_ENSURE_STATE(context);
 
   // Push a context to make sure exceptions are reported in the right place.
-  AutoPushJSContext cx(context->GetNativeContext());
+  AutoPushJSContextForErrorReporting cx(context->GetNativeContext());
   JS::Rooted<JSObject*> handler(cx);
 
   JS::Rooted<JSObject*> scope(cx, jsListener->GetEventScope());
@@ -962,7 +962,7 @@ EventListenerManager::HandleEventSubType(Listener* aListener,
     if (mIsMainThreadELM) {
       nsContentUtils::EnterMicroTask();
     }
-    // nsIDOMEvent::currentTarget is set in nsEventDispatcher.
+    // nsIDOMEvent::currentTarget is set in EventDispatcher.
     if (listenerHolder.HasWebIDLCallback()) {
       ErrorResult rv;
       listenerHolder.GetWebIDLCallback()->
@@ -1019,8 +1019,8 @@ EventListenerManager::HandleEventInternal(nsPresContext* aPresContext,
           // This is tiny bit slow, but happens only once per event.
           nsCOMPtr<EventTarget> et =
             do_QueryInterface(aEvent->originalTarget);
-          nsEventDispatcher::CreateEvent(et, aPresContext,
-                                         aEvent, EmptyString(), aDOMEvent);
+          EventDispatcher::CreateEvent(et, aPresContext,
+                                       aEvent, EmptyString(), aDOMEvent);
         }
         if (*aDOMEvent) {
           if (!aEvent->currentTarget) {

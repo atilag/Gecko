@@ -81,7 +81,7 @@ class TypedArrayObject : public ArrayBufferViewObject
     Value getElement(uint32_t index);
     bool setElement(ThreadSafeContext *cx, uint32_t index, const Value &value);
 
-    void neuter(JSContext *cx);
+    void neuter(void *newData);
 
     static uint32_t slotWidth(int atype) {
         switch (atype) {
@@ -321,7 +321,7 @@ class DataViewObject : public ArrayBufferViewObject
     static bool write(JSContext *cx, Handle<DataViewObject*> obj,
                       CallArgs &args, const char *method);
 
-    void neuter();
+    void neuter(void *newData);
 
   private:
     static const JSFunctionSpec jsfuncs[];
@@ -337,7 +337,7 @@ ClampIntForUint8Array(int32_t x)
     return x;
 }
 
-extern js::ArrayBufferObject * const UNSET_BUFFER_LINK;
+bool ToDoubleForTypedArray(JSContext *cx, JS::HandleValue vp, double *d);
 
 } // namespace js
 

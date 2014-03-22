@@ -980,6 +980,7 @@ ParentImpl::ShutdownBackgroundThread()
   AssertIsOnMainThread();
   MOZ_ASSERT_IF(!sBackgroundThread, !sBackgroundThreadMessageLoop);
   MOZ_ASSERT_IF(!sShutdownHasStarted, !sLiveActorCount);
+  MOZ_ASSERT_IF(!sBackgroundThread, !sLiveActorCount);
   MOZ_ASSERT_IF(sBackgroundThread, sShutdownTimer);
 
   if (sPendingCallbacks) {
@@ -1001,6 +1002,12 @@ ParentImpl::ShutdownBackgroundThread()
     }
   }
 
+  nsCOMPtr<nsITimer> shutdownTimer;
+  if (sShutdownHasStarted) {
+    shutdownTimer = sShutdownTimer.get();
+    sShutdownTimer = nullptr;
+  }
+
   if (sBackgroundThread) {
     nsCOMPtr<nsIThread> thread = sBackgroundThread.get();
     nsAutoPtr<nsTArray<ParentImpl*>> liveActors(sLiveActorsForBackgroundThread);
@@ -1015,8 +1022,6 @@ ParentImpl::ShutdownBackgroundThread()
       // If this is final shutdown then we need to spin the event loop while we
       // wait for all the actors to be cleaned up. We also set a timeout to
       // force-kill any hanging actors.
-      nsCOMPtr<nsITimer> shutdownTimer = sShutdownTimer.get();
-      sShutdownTimer = nullptr;
 
       if (sLiveActorCount) {
         TimerCallbackClosure closure(thread, liveActors);
@@ -1521,7 +1526,7 @@ ChildImpl::GetOrCreateForCurrentThread(
     return true;
   }
 
-  nsCOMPtr<CreateActorRunnable> runnable = new CreateActorRunnable();
+  nsRefPtr<CreateActorRunnable> runnable = new CreateActorRunnable();
   if (NS_FAILED(NS_DispatchToMainThread(runnable, NS_DISPATCH_NORMAL))) {
     CRASH_IN_CHILD_PROCESS("Failed to dispatch to main thread!");
     return false;

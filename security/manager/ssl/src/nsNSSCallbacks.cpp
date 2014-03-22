@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsNSSCallbacks.h"
-#include "insanity/pkixtypes.h"
+#include "pkix/pkixtypes.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
 #include "nsNSSComponent.h"
@@ -59,7 +59,7 @@ public:
 
   nsNSSHttpRequestSession *mRequestSession;
   
-  nsCOMPtr<nsHTTPListener> mListener;
+  nsRefPtr<nsHTTPListener> mListener;
   bool mResponsibleForDoneSignal;
   TimeStamp mStartTime;
 };
@@ -167,7 +167,7 @@ nsHTTPDownloadEvent::Run()
 }
 
 struct nsCancelHTTPDownloadEvent : nsRunnable {
-  nsCOMPtr<nsHTTPListener> mListener;
+  nsRefPtr<nsHTTPListener> mListener;
 
   NS_IMETHOD Run() {
     mListener->FreeLoadGroup(true);
@@ -1189,7 +1189,7 @@ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
     nsContentUtils::LogSimpleConsoleError(msg, "SSL");
   }
 
-  insanity::pkix::ScopedCERTCertificate serverCert(SSL_PeerCertificate(fd));
+  mozilla::pkix::ScopedCERTCertificate serverCert(SSL_PeerCertificate(fd));
 
   /* Set the SSL Status information */
   RefPtr<nsSSLStatus> status(infoObject->SSLStatus());

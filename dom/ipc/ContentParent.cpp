@@ -15,6 +15,11 @@
 # include <sys/resource.h>
 #endif
 
+#ifdef XP_UNIX
+#include <sys/types.h>
+#include <sys/wait.h>
+#endif
+
 #include "chrome/common/process_watcher.h"
 
 #include "AppProcessChecker.h"
@@ -448,7 +453,7 @@ ContentParent::PreallocateAppProcess()
         new ContentParent(/* app = */ nullptr,
                           /* isForBrowserElement = */ false,
                           /* isForPreallocated = */ true,
-                          PROCESS_PRIORITY_BACKGROUND);
+                          PROCESS_PRIORITY_PREALLOC);
     process->Init();
     return process.forget();
 }
@@ -778,11 +783,6 @@ ContentParent::Init()
         }
     }
     Preferences::AddStrongObserver(this, "");
-    nsCOMPtr<nsIThreadInternal>
-            threadInt(do_QueryInterface(NS_GetCurrentThread()));
-    if (threadInt) {
-        threadInt->AddObserver(this);
-    }
     if (obs) {
         obs->NotifyObservers(static_cast<nsIObserver*>(this), "ipc:content-created", nullptr);
     }
@@ -917,12 +917,17 @@ ContentParent::SetPriorityAndCheckIsAlive(ProcessPriority aPriority)
     // still alive.  Hopefully we've set the priority to FOREGROUND*, so the
     // process won't unexpectedly crash after this point!
     //
-    // It's not legal to call DidProcessCrash on Windows if the process has not
-    // terminated yet, so we have to skip this check here.
-#ifndef XP_WIN
-    bool exited = false;
-    base::DidProcessCrash(&exited, mSubprocess->GetChildProcessHandle());
-    if (exited) {
+    // Bug 943174: use waitid() with WNOWAIT so that, if the process
+    // did exit, we won't consume its zombie and confuse the
+    // GeckoChildProcessHost dtor.  Also, if the process isn't a
+    // direct child because of Nuwa this will fail with ECHILD, and we
+    // need to assume the child is alive in that case rather than
+    // assuming it's dead (as is otherwise a reasonable fallback).
+#ifdef XP_UNIX
+    siginfo_t info;
+    info.si_pid = 0;
+    if (waitid(P_PID, Pid(), &info, WNOWAIT | WNOHANG | WEXITED) == 0
+        && info.si_pid != 0) {
         return false;
     }
 #endif
@@ -1137,8 +1142,7 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
                           CHILD_PROCESS_SHUTDOWN_MESSAGE, false,
                           nullptr, nullptr, nullptr, nullptr);
     }
-    nsCOMPtr<nsIThreadObserver>
-        kungFuDeathGrip(static_cast<nsIThreadObserver*>(this));
+    nsRefPtr<ContentParent> kungFuDeathGrip(this);
     nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
     if (obs) {
         size_t length = ArrayLength(sObserverTopics);
@@ -1170,11 +1174,6 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
     RecvRemoveGeolocationListener();
 
     mConsoleService = nullptr;
-
-    nsCOMPtr<nsIThreadInternal>
-        threadInt(do_QueryInterface(NS_GetCurrentThread()));
-    if (threadInt)
-        threadInt->RemoveObserver(this);
 
     MarkAsDead();
 
@@ -1464,7 +1463,7 @@ ContentParent::ContentParent(ContentParent* aTemplate,
     // memory priority, which it has inherited from this process.
     ProcessPriority priority;
     if (IsPreallocated()) {
-        priority = PROCESS_PRIORITY_BACKGROUND;
+        priority = PROCESS_PRIORITY_PREALLOC;
     } else {
         priority = PROCESS_PRIORITY_FOREGROUND;
     }
@@ -1961,10 +1960,18 @@ ContentParent::RecvAddNewProcess(const uint32_t& aPid,
 #endif
 }
 
-NS_IMPL_ISUPPORTS3(ContentParent,
-                   nsIObserver,
-                   nsIThreadObserver,
-                   nsIDOMGeoPositionCallback)
+// We want ContentParent to show up in CC logs for debugging purposes, but we
+// don't actually cycle collect it.
+NS_IMPL_CYCLE_COLLECTION_0(ContentParent)
+
+NS_IMPL_CYCLE_COLLECTING_ADDREF(ContentParent)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(ContentParent)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ContentParent)
+  NS_INTERFACE_MAP_ENTRY(nsIObserver)
+  NS_INTERFACE_MAP_ENTRY(nsIDOMGeoPositionCallback)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIObserver)
+NS_INTERFACE_MAP_END
 
 NS_IMETHODIMP
 ContentParent::Observe(nsISupports* aSubject,
@@ -2390,6 +2397,7 @@ ContentParent::KillHard()
     if (!KillProcess(OtherProcess(), 1, false)) {
         NS_WARNING("failed to kill subprocess!");
     }
+    mSubprocess->SetAlreadyDead();
     XRE_GetIOMessageLoop()->PostTask(
         FROM_HERE,
         NewRunnableFunction(&ProcessWatcher::EnsureProcessTerminated,
@@ -2857,32 +2865,6 @@ ContentParent::RecvLoadURIExternal(const URIParams& uri)
     return true;
 }
 
-/* void onDispatchedEvent (in nsIThreadInternal thread); */
-NS_IMETHODIMP
-ContentParent::OnDispatchedEvent(nsIThreadInternal *thread)
-{
-   NS_NOTREACHED("OnDispatchedEvent unimplemented");
-   return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-/* void onProcessNextEvent (in nsIThreadInternal thread, in boolean mayWait, in unsigned long recursionDepth); */
-NS_IMETHODIMP
-ContentParent::OnProcessNextEvent(nsIThreadInternal *thread,
-                                  bool mayWait,
-                                  uint32_t recursionDepth)
-{
-    return NS_OK;
-}
-
-/* void afterProcessNextEvent (in nsIThreadInternal thread, in unsigned long recursionDepth); */
-NS_IMETHODIMP
-ContentParent::AfterProcessNextEvent(nsIThreadInternal *thread,
-                                     uint32_t recursionDepth,
-                                     bool eventWasProcessed)
-{
-    return NS_OK;
-}
-
 bool
 ContentParent::RecvShowAlertNotification(const nsString& aImageUrl, const nsString& aTitle,
                                          const nsString& aText, const bool& aTextClickable,
@@ -3329,7 +3311,7 @@ ContentParent::RecvAddIdleObserver(const uint64_t& aObserver, const uint32_t& aI
     do_GetService("@mozilla.org/widget/idleservice;1", &rv);
   NS_ENSURE_SUCCESS(rv, false);
 
-  nsCOMPtr<ParentIdleListener> listener = new ParentIdleListener(this, aObserver);
+  nsRefPtr<ParentIdleListener> listener = new ParentIdleListener(this, aObserver);
   mIdleListeners.Put(aObserver, listener);
   idleService->AddIdleObserver(listener, aIdleTimeInS);
   return true;
@@ -3343,7 +3325,7 @@ ContentParent::RecvRemoveIdleObserver(const uint64_t& aObserver, const uint32_t&
     do_GetService("@mozilla.org/widget/idleservice;1", &rv);
   NS_ENSURE_SUCCESS(rv, false);
 
-  nsCOMPtr<ParentIdleListener> listener;
+  nsRefPtr<ParentIdleListener> listener;
   bool found = mIdleListeners.Get(aObserver, &listener);
   if (found) {
     mIdleListeners.Remove(aObserver);

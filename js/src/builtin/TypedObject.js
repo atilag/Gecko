@@ -851,11 +851,6 @@ function TypeOfTypedObject(obj) {
   }
 }
 
-function ObjectIsTypedObject(obj) {
-  assert(IsObject(obj), "ObjectIsTypedObject invoked with non-object")
-  return ObjectIsTransparentTypedObject(obj) || ObjectIsOpaqueTypedObject(obj);
-}
-
 ///////////////////////////////////////////////////////////////////////////
 // TypedObject surface API methods (sequential implementations).
 
@@ -945,18 +940,21 @@ function TypedArrayMap(a, b) {
 
 // Warning: user exposed!
 function TypedArrayMapPar(a, b) {
+  // Arguments: [depth], func
+
+  // Defer to the sequential variant for error cases or
+  // when not working with typed objects.
   if (!IsObject(this) || !ObjectIsTypedObject(this))
-    return ThrowError(JSMSG_TYPEDOBJECT_BAD_ARGS);
+    return callFunction(TypedArrayMap, this, a, b);
   var thisType = TYPEDOBJ_TYPE_DESCR(this);
   if (!TypeDescrIsArrayType(thisType))
-    return ThrowError(JSMSG_TYPEDOBJECT_BAD_ARGS);
+    return callFunction(TypedArrayMap, this, a, b);
 
-  // Arguments: [depth], func
-  if (typeof a === "number" && typeof b === "function")
+  if (typeof a === "number" && IsCallable(b))
     return MapTypedParImpl(this, a, thisType, b);
-  else if (typeof a === "function")
+  else if (IsCallable(a))
     return MapTypedParImpl(this, 1, thisType, a);
-  return ThrowError(JSMSG_TYPEDOBJECT_BAD_ARGS);
+  return callFunction(TypedArrayMap, this, a, b);
 }
 
 // Warning: user exposed!
@@ -1017,6 +1015,20 @@ function TypedObjectArrayTypeBuildPar(a,b,c) {
 
 // Warning: user exposed!
 function TypedObjectArrayTypeFromPar(a,b,c) {
+  // Arguments: arrayLike, [depth], func
+
+  // Use the sequential version for error cases or when arrayLike is
+  // not a typed object.
+  if (!IsObject(this) || !ObjectIsTypeDescr(this) || !TypeDescrIsArrayType(this))
+    return callFunction(TypedObjectArrayTypeFrom, this, a, b, c);
+  if (!IsObject(a) || !ObjectIsTypedObject(a))
+    return callFunction(TypedObjectArrayTypeFrom, this, a, b, c);
+
+  // Detect whether an explicit depth is supplied.
+  if (typeof b === "number" && IsCallable(c))
+    return MapTypedParImpl(a, b, this, c);
+  if (IsCallable(b))
+    return MapTypedParImpl(a, 1, this, b);
   return callFunction(TypedObjectArrayTypeFrom, this, a, b, c);
 }
 
@@ -1048,67 +1060,6 @@ function GET_BIT(data, index) {
   var word = index >> 3;
   var mask = 1 << (index & 0x7);
   return (data[word] & mask) != 0;
-}
-
-function TypeDescrIsUnsizedArrayType(t) {
-  assert(IsObject(t) && ObjectIsTypeDescr(t),
-         "TypeDescrIsArrayType called on non-type-object");
-  return DESCR_KIND(t) === JS_TYPEREPR_UNSIZED_ARRAY_KIND;
-}
-
-function TypeDescrIsArrayType(t) {
-  assert(IsObject(t) && ObjectIsTypeDescr(t), "TypeDescrIsArrayType called on non-type-object");
-
-  var kind = DESCR_KIND(t);
-  switch (kind) {
-  case JS_TYPEREPR_SIZED_ARRAY_KIND:
-  case JS_TYPEREPR_UNSIZED_ARRAY_KIND:
-    return true;
-  case JS_TYPEREPR_SCALAR_KIND:
-  case JS_TYPEREPR_REFERENCE_KIND:
-  case JS_TYPEREPR_X4_KIND:
-  case JS_TYPEREPR_STRUCT_KIND:
-    return false;
-  default:
-    return ThrowError(JSMSG_TYPEDOBJECT_BAD_ARGS);
-  }
-}
-
-function TypeDescrIsSizedArrayType(t) {
-  assert(IsObject(t) && ObjectIsTypeDescr(t), "TypeDescrIsSizedArrayType called on non-type-object");
-
-  var kind = DESCR_KIND(t);
-  switch (kind) {
-  case JS_TYPEREPR_SIZED_ARRAY_KIND:
-    return true;
-  case JS_TYPEREPR_UNSIZED_ARRAY_KIND:
-  case JS_TYPEREPR_SCALAR_KIND:
-  case JS_TYPEREPR_REFERENCE_KIND:
-  case JS_TYPEREPR_X4_KIND:
-  case JS_TYPEREPR_STRUCT_KIND:
-    return false;
-  default:
-    return ThrowError(JSMSG_TYPEDOBJECT_BAD_ARGS);
-  }
-}
-
-function TypeDescrIsSimpleType(t) {
-  assert(IsObject(t) && ObjectIsTypeDescr(t),
-         "TypeDescrIsSimpleType called on non-type-object");
-
-  var kind = DESCR_KIND(t);
-  switch (kind) {
-  case JS_TYPEREPR_SCALAR_KIND:
-  case JS_TYPEREPR_REFERENCE_KIND:
-  case JS_TYPEREPR_X4_KIND:
-    return true;
-  case JS_TYPEREPR_SIZED_ARRAY_KIND:
-  case JS_TYPEREPR_UNSIZED_ARRAY_KIND:
-  case JS_TYPEREPR_STRUCT_KIND:
-    return false;
-  default:
-    return ThrowError(JSMSG_TYPEDOBJECT_BAD_ARGS);
-  }
 }
 
 // Bug 956914: make performance-tuned variants tailored to 1, 2, and 3 dimensions.
@@ -1285,11 +1236,16 @@ function MapTypedSeqImpl(inArray, depth, outputType, func) {
   var inGrainTypeIsComplex = !TypeDescrIsSimpleType(inGrainType);
   var outGrainTypeIsComplex = !TypeDescrIsSimpleType(outGrainType);
 
-  var inPointer = new TypedObjectPointer(inGrainType, inArray, 0);
-  var outPointer = new TypedObjectPointer(outGrainType, result, 0);
+  // Specialize for depth=1 non-complex types, for now.  May disappear if
+  // optimization becomes good enough or be generalized beyond depth=1.
 
-  var inUnitSize = DESCR_SIZE(inGrainType);
-  var outUnitSize = DESCR_SIZE(outGrainType);
+  var isDepth1Simple = depth == 1 && !(inGrainTypeIsComplex || outGrainTypeIsComplex);
+
+  var inPointer = isDepth1Simple ? null : new TypedObjectPointer(inGrainType, inArray, 0);
+  var outPointer = isDepth1Simple ? null : new TypedObjectPointer(outGrainType, result, 0);
+
+  var inUnitSize = isDepth1Simple ? 0 : DESCR_SIZE(inGrainType);
+  var outUnitSize = isDepth1Simple ? 0 : DESCR_SIZE(outGrainType);
 
   // Bug 956914: add additional variants for depth = 2, 3, etc.
 
@@ -1309,6 +1265,16 @@ function MapTypedSeqImpl(inArray, depth, outputType, func) {
       // Update offsets and (implicitly) increment indices.
       inPointer.bump(inUnitSize);
       outPointer.bump(outUnitSize);
+    }
+
+    return result;
+  }
+
+  function DoMapTypedSeqDepth1Simple(inArray, totalLength, func, result) {
+    for (var i = 0; i < totalLength; i++) {
+      var r = func(inArray[i], i, inArray, undefined);
+      if (r !== undefined)
+        result[i] = r;
     }
 
     return result;
@@ -1339,12 +1305,13 @@ function MapTypedSeqImpl(inArray, depth, outputType, func) {
     return result;
   }
 
-  if  (depth == 1) {
-    return DoMapTypedSeqDepth1();
-  } else {
-    return DoMapTypedSeqDepthN();
-  }
+  if (isDepth1Simple)
+    return DoMapTypedSeqDepth1Simple(inArray, totalLength, func, result);
 
+  if (depth == 1)
+    return DoMapTypedSeqDepth1();
+
+  return DoMapTypedSeqDepthN();
 }
 
 // Implements |map| and |from| methods for typed |inArray|.
@@ -1355,6 +1322,10 @@ function MapTypedParImpl(inArray, depth, outputType, func) {
          "Map/From called on non-object or untyped input array.");
   assert(TypeDescrIsArrayType(outputType),
          "Map/From called on non array-type outputType");
+  assert(typeof depth === "number",
+         "Map/From called with non-numeric depth");
+  assert(IsCallable(func),
+         "Map/From called on something not callable");
 
   var inArrayType = TypeOfTypedObject(inArray);
 
@@ -1515,6 +1486,12 @@ function MapTypedParImplDepth1(inArray, inArrayType, outArrayType, func) {
         inOffset += inGrainTypeSize;
         outOffset += outGrainTypeSize;
       }
+
+      // A transparent result type cannot contain references, and
+      // hence there is no way for a pointer to a thread-local object
+      // to escape.
+      if (outGrainTypeIsTransparent)
+        ClearThreadLocalArenas();
 
       MARK_SLICE_DONE(slicesInfo, sliceId);
       if (warmup)

@@ -37,11 +37,11 @@ SurfaceFormatForAndroidPixelFormat(android::PixelFormat aFormat,
   case GrallocImage::HAL_PIXEL_FORMAT_YCbCr_420_SP_TILED:
   case GrallocImage::HAL_PIXEL_FORMAT_YCbCr_420_SP_VENUS:
   case HAL_PIXEL_FORMAT_YV12:
-    return gfx::SurfaceFormat::B8G8R8A8; // yup, use SurfaceFormat::B8G8R8A8 even though it's a YUV texture. This is an external texture.
+    return gfx::SurfaceFormat::R8G8B8A8; // yup, use SurfaceFormat::R8G8B8A8 even though it's a YUV texture. This is an external texture.
   default:
     if (aFormat >= 0x100 && aFormat <= 0x1FF) {
       // Reserved range for HAL specific formats.
-      return gfx::SurfaceFormat::B8G8R8A8;
+      return gfx::SurfaceFormat::R8G8B8A8;
     } else {
       // This is not super-unreachable, there's a bunch of hypothetical pixel
       // formats we don't deal with.
@@ -66,6 +66,7 @@ TextureTargetForAndroidPixelFormat(android::PixelFormat aFormat)
   case GrallocImage::HAL_PIXEL_FORMAT_YCbCr_420_SP_VENUS:
   case HAL_PIXEL_FORMAT_YV12:
     return LOCAL_GL_TEXTURE_EXTERNAL;
+  case android::PIXEL_FORMAT_BGRA_8888:
   case android::PIXEL_FORMAT_RGBA_8888:
   case android::PIXEL_FORMAT_RGBX_8888:
   case android::PIXEL_FORMAT_RGB_565:
@@ -147,9 +148,7 @@ void GrallocTextureSourceOGL::Lock()
 
   MOZ_ASSERT(IsValid());
 
-  CompositorOGLGonkBackendSpecificData* backendData =
-    static_cast<CompositorOGLGonkBackendSpecificData*>(mCompositor->GetCompositorBackendSpecificData());
-  mTexture = backendData->GetTexture();
+  mTexture = mCompositor->GetTemporaryTexture(GetTextureTarget(), LOCAL_GL_TEXTURE0);
 
   GLuint textureTarget = GetTextureTarget();
 
@@ -187,22 +186,24 @@ GrallocTextureSourceOGL::SetCompositor(Compositor* aCompositor)
 GLenum
 GrallocTextureSourceOGL::GetTextureTarget() const
 {
+  MOZ_ASSERT(gl());
   MOZ_ASSERT(mGraphicBuffer.get());
-  if (!mGraphicBuffer.get()) {
+
+  if (!gl() || !mGraphicBuffer.get()) {
     return LOCAL_GL_TEXTURE_EXTERNAL;
   }
-  return TextureTargetForAndroidPixelFormat(mGraphicBuffer->getPixelFormat());
-}
 
-gfx::SurfaceFormat
-GrallocTextureSourceOGL::GetFormat() const {
-  if (!mGraphicBuffer.get()) {
-    return gfx::SurfaceFormat::UNKNOWN;
+  // SGX has a quirk that only TEXTURE_EXTERNAL works and any other value will
+  // result in black pixels when trying to draw from bound textures.
+  // Unfortunately, using TEXTURE_EXTERNAL on Adreno has a terrible effect on
+  // performance.
+  // See Bug 950050.
+  if (gl()->Renderer() == gl::GLRenderer::SGX530 ||
+      gl()->Renderer() == gl::GLRenderer::SGX540) {
+    return LOCAL_GL_TEXTURE_EXTERNAL;
   }
-  if (GetTextureTarget() == LOCAL_GL_TEXTURE_EXTERNAL) {
-    return gfx::SurfaceFormat::R8G8B8A8;
-  }
-  return mFormat;
+
+  return TextureTargetForAndroidPixelFormat(mGraphicBuffer->getPixelFormat());
 }
 
 void

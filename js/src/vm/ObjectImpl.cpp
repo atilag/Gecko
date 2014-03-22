@@ -159,9 +159,7 @@ bool
 ObjectImpl::canHaveNonEmptyElements()
 {
     JSObject *obj = static_cast<JSObject *>(this);
-    if (isNative())
-        return !obj->is<TypedArrayObject>();
-    return obj->is<ArrayBufferObject>() || obj->is<SharedArrayBufferObject>();
+    return isNative() && !obj->is<TypedArrayObject>();
 }
 
 #endif // DEBUG
@@ -381,20 +379,6 @@ js::ObjectImpl::markChildren(JSTracer *trc)
         MarkObjectSlots(trc, obj, 0, obj->slotSpan());
         gc::MarkArraySlots(trc, obj->getDenseInitializedLength(), obj->getDenseElements(), "objectElements");
     }
-}
-
-JSObject *
-js::ArrayBufferDelegate(JSContext *cx, Handle<ObjectImpl*> obj)
-{
-    MOZ_ASSERT(obj->hasClass(&ArrayBufferObject::class_) ||
-               obj->hasClass(&SharedArrayBufferObject::class_));
-
-    if (obj->getPrivate())
-        return static_cast<JSObject *>(obj->getPrivate());
-    JSObject *delegate = NewObjectWithGivenProto(cx, &JSObject::class_,
-                                                 obj->getTaggedProto(), nullptr);
-    obj->setPrivateGCThing(delegate);
-    return delegate;
 }
 
 void

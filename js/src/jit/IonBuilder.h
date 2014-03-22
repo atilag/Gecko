@@ -560,6 +560,7 @@ class IonBuilder : public MIRGenerator
     bool jsop_compare(JSOp op);
     bool getStaticName(JSObject *staticObject, PropertyName *name, bool *psucceeded);
     bool setStaticName(JSObject *staticObject, PropertyName *name);
+    bool jsop_getgname(PropertyName *name);
     bool jsop_getname(PropertyName *name);
     bool jsop_intrinsic(PropertyName *name);
     bool jsop_bindname(PropertyName *name);
@@ -701,7 +702,10 @@ class IonBuilder : public MIRGenerator
     InliningStatus inlineHaveSameClass(CallInfo &callInfo);
     InliningStatus inlineToObject(CallInfo &callInfo);
     InliningStatus inlineDump(CallInfo &callInfo);
-    InliningStatus inlineHasClass(CallInfo &callInfo, const Class *clasp);
+    InliningStatus inlineHasClass(CallInfo &callInfo, const Class *clasp) {
+        return inlineHasClasses(callInfo, clasp, nullptr);
+    }
+    InliningStatus inlineHasClasses(CallInfo &callInfo, const Class *clasp1, const Class *clasp2);
 
     // Testing functions.
     InliningStatus inlineForceSequentialOrInParallelSection(CallInfo &callInfo);

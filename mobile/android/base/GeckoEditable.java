@@ -8,6 +8,7 @@ package org.mozilla.gecko;
 import org.mozilla.gecko.gfx.InputConnectionHandler;
 import org.mozilla.gecko.gfx.LayerView;
 import org.mozilla.gecko.util.ThreadUtils;
+import org.mozilla.gecko.util.ThreadUtils.AssertBehavior;
 
 import android.os.Build;
 import android.os.Handler;
@@ -52,8 +53,8 @@ interface GeckoEditableListener {
     final int NOTIFY_IME_REPLY_EVENT = -1;
     final int NOTIFY_IME_OF_FOCUS = 1;
     final int NOTIFY_IME_OF_BLUR = 2;
-    final int NOTIFY_IME_TO_COMMIT_COMPOSITION = 4;
-    final int NOTIFY_IME_TO_CANCEL_COMPOSITION = 5;
+    final int NOTIFY_IME_TO_COMMIT_COMPOSITION = 7;
+    final int NOTIFY_IME_TO_CANCEL_COMPOSITION = 8;
     // IME enabled state for notifyIMEContext()
     final int IME_STATE_DISABLED = 0;
     final int IME_STATE_ENABLED = 1;
@@ -361,7 +362,7 @@ final class GeckoEditable
     }
 
     private void assertOnIcThread() {
-        ThreadUtils.assertOnThread(mIcRunHandler.getLooper().getThread());
+        ThreadUtils.assertOnThread(mIcRunHandler.getLooper().getThread(), AssertBehavior.THROW);
     }
 
     private void geckoPostToIc(Runnable runnable) {

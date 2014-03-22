@@ -93,7 +93,7 @@ js::StartOffThreadIonCompile(JSContext *cx, jit::IonBuilder *builder)
     if (!WorkerThreadState().ionWorklist().append(builder))
         return false;
 
-    WorkerThreadState().notifyAll(GlobalWorkerThreadState::PRODUCER);
+    WorkerThreadState().notifyOne(GlobalWorkerThreadState::PRODUCER);
     return true;
 }
 
@@ -312,7 +312,6 @@ js::StartOffThreadParseScript(JSContext *cx, const ReadOnlyCompileOptions &optio
     if (!global)
         return false;
 
-    global->zone()->types.inferenceEnabled = cx->typeInferenceEnabled();
     JS_SetCompartmentPrincipals(global->compartment(), cx->compartment()->principals);
 
     RootedObject obj(cx);
@@ -367,7 +366,7 @@ js::StartOffThreadParseScript(JSContext *cx, const ReadOnlyCompileOptions &optio
         if (!WorkerThreadState().parseWorklist().append(task.get()))
             return false;
 
-        WorkerThreadState().notifyAll(GlobalWorkerThreadState::PRODUCER);
+        WorkerThreadState().notifyOne(GlobalWorkerThreadState::PRODUCER);
     }
 
     task.forget();
@@ -902,7 +901,7 @@ js::StartOffThreadCompression(ExclusiveContext *cx, SourceCompressionTask *task)
     if (!WorkerThreadState().compressionWorklist().append(task))
         return false;
 
-    WorkerThreadState().notifyAll(GlobalWorkerThreadState::PRODUCER);
+    WorkerThreadState().notifyOne(GlobalWorkerThreadState::PRODUCER);
     return true;
 }
 

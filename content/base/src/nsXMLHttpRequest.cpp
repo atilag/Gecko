@@ -8,6 +8,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/dom/XMLHttpRequestUploadBinding.h"
+#include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/MemoryReporting.h"
 #include "nsDOMBlobBuilder.h"
@@ -36,7 +37,6 @@
 #include "nsICachingChannel.h"
 #include "nsContentUtils.h"
 #include "nsCxPusher.h"
-#include "nsEventDispatcher.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsIContentPolicy.h"
 #include "nsContentPolicyUtils.h"
@@ -1393,9 +1393,9 @@ nsXMLHttpRequest::GetLoadGroup() const
 nsresult
 nsXMLHttpRequest::CreateReadystatechangeEvent(nsIDOMEvent** aDOMEvent)
 {
-  nsresult rv = nsEventDispatcher::CreateEvent(this, nullptr, nullptr,
-                                               NS_LITERAL_STRING("Events"),
-                                               aDOMEvent);
+  nsresult rv = EventDispatcher::CreateEvent(this, nullptr, nullptr,
+                                             NS_LITERAL_STRING("Events"),
+                                             aDOMEvent);
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -1537,11 +1537,11 @@ nsXMLHttpRequest::Open(const nsACString& method, const nsACString& url,
 }
 
 nsresult
-nsXMLHttpRequest::Open(const nsACString& method, const nsACString& url,
+nsXMLHttpRequest::Open(const nsACString& inMethod, const nsACString& url,
                        bool async, const Optional<nsAString>& user,
                        const Optional<nsAString>& password)
 {
-  NS_ENSURE_ARG(!method.IsEmpty());
+  NS_ENSURE_ARG(!inMethod.IsEmpty());
 
   if (!async && !DontWarnAboutSyncXHR() && GetOwner() &&
       GetOwner()->GetExtantDoc()) {
@@ -1555,9 +1555,29 @@ nsXMLHttpRequest::Open(const nsACString& method, const nsACString& url,
 
   // Disallow HTTP/1.1 TRACE method (see bug 302489)
   // and MS IIS equivalent TRACK (see bug 381264)
-  if (method.LowerCaseEqualsLiteral("trace") ||
-      method.LowerCaseEqualsLiteral("track")) {
-    return NS_ERROR_INVALID_ARG;
+  // and CONNECT
+  if (inMethod.LowerCaseEqualsLiteral("trace") ||
+      inMethod.LowerCaseEqualsLiteral("connect") ||
+      inMethod.LowerCaseEqualsLiteral("track")) {
+    return NS_ERROR_DOM_SECURITY_ERR;
+  }
+
+  nsAutoCString method;
+  // GET, POST, DELETE, HEAD, OPTIONS, PUT methods normalized to upper case
+  if (inMethod.LowerCaseEqualsLiteral("get")) {
+    method.Assign(NS_LITERAL_CSTRING("GET"));
+  } else if (inMethod.LowerCaseEqualsLiteral("post")) {
+    method.Assign(NS_LITERAL_CSTRING("POST"));
+  } else if (inMethod.LowerCaseEqualsLiteral("delete")) {
+    method.Assign(NS_LITERAL_CSTRING("DELETE"));
+  } else if (inMethod.LowerCaseEqualsLiteral("head")) {
+    method.Assign(NS_LITERAL_CSTRING("HEAD"));
+  } else if (inMethod.LowerCaseEqualsLiteral("options")) {
+    method.Assign(NS_LITERAL_CSTRING("OPTIONS"));
+  } else if (inMethod.LowerCaseEqualsLiteral("put")) {
+    method.Assign(NS_LITERAL_CSTRING("PUT"));
+  } else {
+    method = inMethod; // other methods are not normalized
   }
 
   // sync request is not allowed using withCredential or responseType
@@ -3817,8 +3837,7 @@ nsXMLHttpRequestXPCOMifier::GetInterface(const nsIID & aIID, void **aResult)
 namespace mozilla {
 
 ArrayBufferBuilder::ArrayBufferBuilder()
-  : mRawContents(nullptr),
-    mDataPtr(nullptr),
+  : mDataPtr(nullptr),
     mCapacity(0),
     mLength(0)
 {
@@ -3832,20 +3851,22 @@ ArrayBufferBuilder::~ArrayBufferBuilder()
 void
 ArrayBufferBuilder::reset()
 {
-  if (mRawContents) {
-    JS_free(nullptr, mRawContents);
+  if (mDataPtr) {
+    JS_free(nullptr, mDataPtr);
   }
-  mRawContents = mDataPtr = nullptr;
+  mDataPtr = nullptr;
   mCapacity = mLength = 0;
 }
 
 bool
 ArrayBufferBuilder::setCapacity(uint32_t aNewCap)
 {
-  if (!JS_ReallocateArrayBufferContents(nullptr, aNewCap, &mRawContents, &mDataPtr)) {
+  uint8_t *newdata = (uint8_t *) JS_ReallocateArrayBufferContents(nullptr, aNewCap, mDataPtr, mCapacity);
+  if (!newdata) {
     return false;
   }
 
+  mDataPtr = newdata;
   mCapacity = aNewCap;
   if (mLength > aNewCap) {
     mLength = aNewCap;
@@ -3903,12 +3924,12 @@ ArrayBufferBuilder::getArrayBuffer(JSContext* aCx)
     }
   }
 
-  JSObject* obj = JS_NewArrayBufferWithContents(aCx, mRawContents);
+  JSObject* obj = JS_NewArrayBufferWithContents(aCx, mLength, mDataPtr);
   if (!obj) {
     return nullptr;
   }
 
-  mRawContents = mDataPtr = nullptr;
+  mDataPtr = nullptr;
   mLength = mCapacity = 0;
 
   return obj;

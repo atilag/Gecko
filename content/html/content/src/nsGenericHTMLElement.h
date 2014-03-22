@@ -19,27 +19,20 @@
 #include "mozilla/dom/ValidityState.h"
 #include "mozilla/dom/ElementInlines.h"
 
-class nsIDOMAttr;
-class nsIDOMEventListener;
-class nsIDOMNodeList;
-class nsIFrame;
-class nsIStyleRule;
-class nsChildContentList;
-class nsDOMCSSDeclaration;
-class nsIDOMCSSStyleDeclaration;
-class nsIURI;
-class nsIFormControlFrame;
-class nsIForm;
-class nsPresState;
-class nsILayoutHistoryState;
-class nsIEditor;
-struct nsRect;
-struct nsSize;
-class nsIDOMHTMLMenuElement;
-class nsIDOMHTMLCollection;
 class nsDOMSettableTokenList;
+class nsIDOMHTMLMenuElement;
+class nsIEditor;
+class nsIFormControlFrame;
+class nsIFrame;
+class nsILayoutHistoryState;
+class nsIURI;
+class nsPresState;
+struct nsSize;
 
 namespace mozilla {
+class EventChainPostVisitor;
+class EventChainPreVisitor;
+class EventChainVisitor;
 class EventListenerManager;
 namespace dom {
 class HTMLFormElement;
@@ -588,9 +581,10 @@ public:
    * Check if an event for an anchor can be handled
    * @return true if the event can be handled, false otherwise
    */
-  bool CheckHandleEventForAnchorsPreconditions(nsEventChainVisitor& aVisitor);
-  nsresult PreHandleEventForAnchors(nsEventChainPreVisitor& aVisitor);
-  nsresult PostHandleEventForAnchors(nsEventChainPostVisitor& aVisitor);
+  bool CheckHandleEventForAnchorsPreconditions(
+         mozilla::EventChainVisitor& aVisitor);
+  nsresult PreHandleEventForAnchors(mozilla::EventChainPreVisitor& aVisitor);
+  nsresult PostHandleEventForAnchors(mozilla::EventChainPostVisitor& aVisitor);
   bool IsHTMLLink(nsIURI** aURI) const;
 
   // HTML element methods
@@ -1286,7 +1280,7 @@ public:
 
   NS_DECL_ISUPPORTS_INHERITED
 
-  nsINode* GetParentObject() const;
+  mozilla::dom::ParentObject GetParentObject() const;
 
   virtual bool IsNodeOfType(uint32_t aFlags) const MOZ_OVERRIDE;
   virtual void SaveSubtreeState() MOZ_OVERRIDE;
@@ -1326,7 +1320,8 @@ public:
   virtual IMEState GetDesiredIMEState() MOZ_OVERRIDE;
   virtual nsEventStates IntrinsicState() const MOZ_OVERRIDE;
 
-  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PreHandleEvent(
+                     mozilla::EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
 
   virtual bool IsDisabled() const MOZ_OVERRIDE;
 

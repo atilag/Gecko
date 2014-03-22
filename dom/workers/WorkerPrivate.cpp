@@ -35,6 +35,7 @@
 #include "js/MemoryMetrics.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/ContentEvents.h"
+#include "mozilla/EventDispatcher.h"
 #include "mozilla/Likely.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/ErrorEvent.h"
@@ -52,7 +53,6 @@
 #include "nsContentUtils.h"
 #include "nsCxPusher.h"
 #include "nsError.h"
-#include "nsEventDispatcher.h"
 #include "nsDOMJSUtils.h"
 #include "nsHostObjectProtocolHandler.h"
 #include "nsJSEnvironment.h"
@@ -358,7 +358,7 @@ struct WorkerStructuredCloneCallbacks
       uint32_t width, height;
       JS::Rooted<JS::Value> dataArray(aCx);
       if (!JS_ReadUint32Pair(aReader, &width, &height) ||
-          !JS_ReadTypedArray(aReader, dataArray.address()))
+          !JS_ReadTypedArray(aReader, &dataArray))
       {
         return nullptr;
       }
@@ -1185,7 +1185,7 @@ public:
     // they show up in the error console.
     if (!JSREPORT_IS_WARNING(aFlags)) {
       // First fire an ErrorEvent at the worker.
-      ErrorEventInit init;
+      RootedDictionary<ErrorEventInit> init(aCx);
       init.mMessage = aMessage;
       init.mFilename = aFilename;
       init.mLineno = aLineNumber;
@@ -1223,9 +1223,9 @@ public:
           event->SetTrusted(true);
 
           nsIDOMEventTarget* target = static_cast<nsIDOMEventTarget*>(globalTarget);
-          if (NS_FAILED(nsEventDispatcher::DispatchDOMEvent(target, nullptr,
-                                                            event, nullptr,
-                                                            &status))) {
+          if (NS_FAILED(EventDispatcher::DispatchDOMEvent(target, nullptr,
+                                                          event, nullptr,
+                                                          &status))) {
             NS_WARNING("Failed to dispatch worker thread error event!");
             status = nsEventStatus_eIgnore;
           }
@@ -3135,7 +3135,7 @@ WorkerPrivateParent<Derived>::BroadcastErrorToSharedWorkers(
       continue;
     }
 
-    ErrorEventInit errorInit;
+    RootedDictionary<ErrorEventInit> errorInit(aCx);
     errorInit.mBubbles = false;
     errorInit.mCancelable = true;
     errorInit.mMessage = aMessage;
@@ -3201,7 +3201,7 @@ WorkerPrivateParent<Derived>::BroadcastErrorToSharedWorkers(
     MOZ_ASSERT(sgo);
 
     MOZ_ASSERT(NS_IsMainThread());
-    ErrorEventInit init;
+    RootedDictionary<ErrorEventInit> init(aCx);
     init.mLineno = aLineNumber;
     init.mFilename = aFilename;
     init.mMessage = aMessage;

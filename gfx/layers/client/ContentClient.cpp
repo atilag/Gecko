@@ -103,7 +103,6 @@ ContentClientBasic::CreateBuffer(ContentType aType,
                                  RefPtr<gfx::DrawTarget>* aWhiteDT)
 {
   MOZ_ASSERT(!(aFlags & BUFFER_COMPONENT_ALPHA));
-  MOZ_ASSERT(gfxPlatform::GetPlatform()->SupportsAzureContent());
   gfxImageFormat format =
     gfxPlatform::GetPlatform()->OptimalFormatForContent(aType);
 
@@ -168,8 +167,10 @@ bool
 ContentClientRemoteBuffer::CreateAndAllocateTextureClient(RefPtr<TextureClient>& aClient,
                                                           TextureFlags aFlags)
 {
+  // gfx::BackendType::NONE means fallback to the content backend
   aClient = CreateTextureClientForDrawing(mSurfaceFormat,
                                           mTextureInfo.mTextureFlags | aFlags,
+                                          gfx::BackendType::NONE,
                                           mSize);
   if (!aClient) {
     return false;
@@ -178,6 +179,7 @@ ContentClientRemoteBuffer::CreateAndAllocateTextureClient(RefPtr<TextureClient>&
   if (!aClient->AsTextureClientDrawTarget()->AllocateForSurface(mSize, ALLOC_CLEAR_BUFFER)) {
     aClient = CreateTextureClientForDrawing(mSurfaceFormat,
                 mTextureInfo.mTextureFlags | TEXTURE_ALLOC_FALLBACK | aFlags,
+                gfx::BackendType::NONE,
                 mSize);
     if (!aClient) {
       return false;
@@ -1282,7 +1284,6 @@ ContentClientIncremental::BorrowDrawTargetForPainting(ThebesLayer* aLayer,
                    "BeginUpdate should always modify the draw region in the same way!");
       FillSurface(onBlack, aPaintState.mRegionToDraw, nsIntPoint(drawBounds.x, drawBounds.y), gfxRGBA(0.0, 0.0, 0.0, 1.0));
       FillSurface(onWhite, aPaintState.mRegionToDraw, nsIntPoint(drawBounds.x, drawBounds.y), gfxRGBA(1.0, 1.0, 1.0, 1.0));
-      MOZ_ASSERT(gfxPlatform::GetPlatform()->SupportsAzureContent());
       RefPtr<DrawTarget> onBlackDT = gfxPlatform::GetPlatform()->CreateDrawTargetForUpdateSurface(onBlack, onBlack->GetSize().ToIntSize());
       RefPtr<DrawTarget> onWhiteDT = gfxPlatform::GetPlatform()->CreateDrawTargetForUpdateSurface(onWhite, onWhite->GetSize().ToIntSize());
       mLoanedDrawTarget = Factory::CreateDualDrawTarget(onBlackDT, onWhiteDT);
@@ -1291,7 +1292,6 @@ ContentClientIncremental::BorrowDrawTargetForPainting(ThebesLayer* aLayer,
     }
   } else {
     nsRefPtr<gfxASurface> surf = GetUpdateSurface(BUFFER_BLACK, aPaintState.mRegionToDraw);
-    MOZ_ASSERT(gfxPlatform::GetPlatform()->SupportsAzureContent());
     mLoanedDrawTarget = gfxPlatform::GetPlatform()->CreateDrawTargetForUpdateSurface(surf, surf->GetSize().ToIntSize());
   }
   if (!mLoanedDrawTarget) {

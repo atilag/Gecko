@@ -26,7 +26,6 @@
 #include "nsDOMString.h"
 #include "nsIDOMUserDataHandler.h"
 #include "nsChangeHint.h"
-#include "nsEventDispatcher.h"
 #include "nsCOMArray.h"
 #include "nsNodeUtils.h"
 #include "mozilla/dom/DirectionalityUtils.h"
@@ -995,6 +994,12 @@ void
 nsGenericDOMDataNode::AppendTextTo(nsAString& aResult)
 {
   mText.AppendTo(aResult);
+}
+
+bool
+nsGenericDOMDataNode::AppendTextTo(nsAString& aResult, const mozilla::fallible_t&)
+{
+  return mText.AppendTo(aResult, mozilla::fallible_t());
 }
 
 already_AddRefed<nsIAtom>

@@ -20,6 +20,7 @@
 #include "mozilla/dom/EventTarget.h" // for base class
 #include "js/TypeDecls.h"     // for Handle, Value, JSObject, JSContext
 #include "mozilla/dom/DOMString.h"
+#include "mozilla/dom/BindingDeclarations.h"
 
 // Including 'windows.h' will #define GetClassInfo to something else.
 #ifdef XP_WIN
@@ -64,10 +65,17 @@ inline bool IsSpaceCharacter(char aChar) {
   return aChar == ' ' || aChar == '\t' || aChar == '\n' || aChar == '\r' ||
          aChar == '\f';
 }
+struct BoxQuadOptions;
+struct ConvertCoordinateOptions;
+class DOMPoint;
+class DOMQuad;
+class DOMRectReadOnly;
 class Element;
 class EventHandlerNonNull;
 class OnErrorEventHandlerNonNull;
 template<typename T> class Optional;
+class TextOrElementOrDocument;
+struct DOMPointInit;
 } // namespace dom
 } // namespace mozilla
 
@@ -278,6 +286,15 @@ private:
 class nsINode : public mozilla::dom::EventTarget
 {
 public:
+  typedef mozilla::dom::BoxQuadOptions BoxQuadOptions;
+  typedef mozilla::dom::ConvertCoordinateOptions ConvertCoordinateOptions;
+  typedef mozilla::dom::DOMPoint DOMPoint;
+  typedef mozilla::dom::DOMPointInit DOMPointInit;
+  typedef mozilla::dom::DOMQuad DOMQuad;
+  typedef mozilla::dom::DOMRectReadOnly DOMRectReadOnly;
+  typedef mozilla::dom::TextOrElementOrDocument TextOrElementOrDocument;
+  typedef mozilla::ErrorResult ErrorResult;
+
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_INODE_IID)
 
   // Among the sub-classes that inherit (directly or indirectly) from nsINode,
@@ -392,17 +409,17 @@ protected:
     return nullptr;
   }
 
-public:
-  nsIDocument* GetParentObject() const
-  {
-    // Make sure that we get the owner document of the content node, in case
-    // we're in document teardown.  If we are, it's important to *not* use
-    // globalObj as the node's parent since that would give the node the
-    // principal of globalObj (i.e. the principal of the document that's being
-    // loaded) and not the principal of the document that's being unloaded.
-    // See http://bugzilla.mozilla.org/show_bug.cgi?id=227417
-    return OwnerDoc();
+  // Subclasses that wish to override the parent behavior should return the
+  // result of GetParentObjectIntenral, which handles the XBL scope stuff.
+  //
+  mozilla::dom::ParentObject GetParentObjectInternal(nsINode* aNativeParent) const {
+    mozilla::dom::ParentObject p(aNativeParent);
+    p.mUseXBLScope = ChromeOnlyAccess();
+    return p;
   }
+
+public:
+  mozilla::dom::ParentObject GetParentObject() const; // Implemented in nsIDocument.h
 
   /**
    * Return whether the node is an Element node
@@ -1608,6 +1625,23 @@ public:
   // ParentNode methods
   mozilla::dom::Element* GetFirstElementChild() const;
   mozilla::dom::Element* GetLastElementChild() const;
+
+  void GetBoxQuads(const BoxQuadOptions& aOptions,
+                   nsTArray<nsRefPtr<DOMQuad> >& aResult,
+                   mozilla::ErrorResult& aRv);
+
+  already_AddRefed<DOMQuad> ConvertQuadFromNode(DOMQuad& aQuad,
+                                                const TextOrElementOrDocument& aFrom,
+                                                const ConvertCoordinateOptions& aOptions,
+                                                ErrorResult& aRv);
+  already_AddRefed<DOMQuad> ConvertRectFromNode(DOMRectReadOnly& aRect,
+                                                const TextOrElementOrDocument& aFrom,
+                                                const ConvertCoordinateOptions& aOptions,
+                                                ErrorResult& aRv);
+  already_AddRefed<DOMPoint> ConvertPointFromNode(const DOMPointInit& aPoint,
+                                                  const TextOrElementOrDocument& aFrom,
+                                                  const ConvertCoordinateOptions& aOptions,
+                                                  ErrorResult& aRv);
 
 protected:
 

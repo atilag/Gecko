@@ -21,10 +21,10 @@ function add_ocsp_test(aHost, aExpectedResult, aStaplingEnabled) {
     });
 }
 
-function add_tests_in_mode(useInsanity, certDB, otherTestCA) {
+function add_tests_in_mode(useMozillaPKIX, certDB, otherTestCA) {
   add_test(function () {
-    Services.prefs.setBoolPref("security.use_insanity_verification",
-                               useInsanity);
+    Services.prefs.setBoolPref("security.use_mozillapkix_verification",
+                               useMozillaPKIX);
     run_next_test();
   });
 
@@ -42,6 +42,7 @@ function add_tests_in_mode(useInsanity, certDB, otherTestCA) {
   add_ocsp_test("ocsp-stapling-none.example.com", Cr.NS_OK, false);
   add_ocsp_test("ocsp-stapling-expired.example.com", Cr.NS_OK, false);
   add_ocsp_test("ocsp-stapling-expired-fresh-ca.example.com", Cr.NS_OK, false);
+  add_ocsp_test("ocsp-stapling-skip-responseBytes.example.com", Cr.NS_OK, false);
 
   // Now test OCSP stapling
   // The following error codes are defined in security/nss/lib/util/SECerrs.h
@@ -53,7 +54,7 @@ function add_tests_in_mode(useInsanity, certDB, otherTestCA) {
 
   // SEC_ERROR_OCSP_INVALID_SIGNING_CERT vs SEC_ERROR_OCSP_UNAUTHORIZED_RESPONSE
   // depends on whether the CA that signed the response is a trusted CA
-  // (but only with the classic implementation - insanity::pkix always
+  // (but only with the classic implementation - mozilla::pkix always
   // results in the error SEC_ERROR_OCSP_INVALID_SIGNING_CERT).
 
   // This stapled response is from a CA that is untrusted and did not issue
@@ -95,11 +96,8 @@ function add_tests_in_mode(useInsanity, certDB, otherTestCA) {
                 true);
   add_ocsp_test("ocsp-stapling-unknown.example.com",
                 getXPCOMStatusFromNSS(SEC_ERROR_OCSP_UNKNOWN_CERT), true);
-  // TODO(bug 977870): this should not result in SEC_ERROR_BAD_DER
   add_ocsp_test("ocsp-stapling-good-other.example.com",
-                getXPCOMStatusFromNSS(
-                  useInsanity ? SEC_ERROR_BAD_DER
-                              : SEC_ERROR_OCSP_UNKNOWN_CERT), true);
+                getXPCOMStatusFromNSS(SEC_ERROR_OCSP_UNKNOWN_CERT), true);
   // If the server doesn't staple an OCSP response, we continue as normal
   // (this means that even though stapling is enabled, we expect an OCSP
   // request).
@@ -111,11 +109,15 @@ function add_tests_in_mode(useInsanity, certDB, otherTestCA) {
       Services.prefs.setBoolPref("security.ssl.enable_ocsp_stapling", true);
     }
   );
-  // TODO(bug 977870): this should not result in SEC_ERROR_BAD_DER
   add_ocsp_test("ocsp-stapling-empty.example.com",
-                getXPCOMStatusFromNSS(
-                  useInsanity ? SEC_ERROR_BAD_DER
-                              : SEC_ERROR_OCSP_MALFORMED_RESPONSE), true);
+                getXPCOMStatusFromNSS(SEC_ERROR_OCSP_MALFORMED_RESPONSE), true);
+
+  // TODO(bug 979070): NSS can't handle this yet.
+  if (useMozillaPKIX) {
+    add_ocsp_test("ocsp-stapling-skip-responseBytes.example.com",
+                  getXPCOMStatusFromNSS(SEC_ERROR_OCSP_MALFORMED_RESPONSE), true);
+  }
+
   // ocsp-stapling-expired.example.com and
   // ocsp-stapling-expired-fresh-ca.example.com are handled in
   // test_ocsp_stapling_expired.js
@@ -128,9 +130,9 @@ function check_ocsp_stapling_telemetry() {
                     .snapshot();
   do_check_eq(histogram.counts[0], 2 * 0); // histogram bucket 0 is unused
   do_check_eq(histogram.counts[1], 2 * 1); // 1 connection with a good response
-  do_check_eq(histogram.counts[2], 2 * 14); // 14 connections with no stapled resp.
+  do_check_eq(histogram.counts[2], 2 * 15); // 15 connections with no stapled resp.
   do_check_eq(histogram.counts[3], 2 * 0); // 0 connections with an expired response
-  do_check_eq(histogram.counts[4], 2 * 11); // 11 connections with bad responses
+  do_check_eq(histogram.counts[4], 12 + 11); // 12 or 11 connections with bad responses (bug 979070)
   run_next_test();
 }
 
