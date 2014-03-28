@@ -27,6 +27,10 @@
 #include "nsRegion.h"                   // for nsIntRegion
 #include "nscore.h"                     // for nsACString
 
+#if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 17
+#include <ui/Fence.h>
+#endif
+
 class gfxReusableSurfaceWrapper;
 struct nsIntPoint;
 struct nsIntRect;
@@ -114,7 +118,7 @@ public:
 
   // Stores the absolute resolution of the containing frame, calculated
   // by the sum of the resolutions of all parent layers' FrameMetrics.
-  const CSSToScreenScale& GetFrameResolution() { return mFrameResolution; }
+  const CSSToParentLayerScale& GetFrameResolution() { return mFrameResolution; }
 
   void ReadUnlock();
 
@@ -133,6 +137,14 @@ public:
 
   bool IsValid() const { return !mUninitialized; }
 
+#if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 17
+  virtual void SetReleaseFence(const android::sp<android::Fence>& aReleaseFence);
+#endif
+
+  // Recycle callback for TextureHost.
+  // Used when TiledContentClient is present in client side.
+  static void RecycleCallback(TextureHost* textureHost, void* aClosure);
+
 protected:
   TileHost ValidateTile(TileHost aTile,
                         const nsIntPoint& aTileRect,
@@ -144,7 +156,7 @@ protected:
   void SwapTiles(TileHost& aTileA, TileHost& aTileB) { std::swap(aTileA, aTileB); }
 
 private:
-  CSSToScreenScale mFrameResolution;
+  CSSToParentLayerScale mFrameResolution;
   bool mHasDoubleBufferedTiles;
   bool mUninitialized;
 };
@@ -243,15 +255,25 @@ public:
 
   virtual void PrintInfo(nsACString& aTo, const char* aPrefix);
 
+#if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 17
+  /**
+   * Store a fence that will signal when the current buffer is no longer being read.
+   * Similar to android's GLConsumer::setReleaseFence()
+   */
+  virtual void SetReleaseFence(const android::sp<android::Fence>& aReleaseFence)
+  {
+    mTiledBuffer.SetReleaseFence(aReleaseFence);
+    mLowPrecisionTiledBuffer.SetReleaseFence(aReleaseFence);
+  }
+#endif
+
 private:
   void RenderLayerBuffer(TiledLayerBufferComposite& aLayerBuffer,
-                         const nsIntRegion& aValidRegion,
                          EffectChain& aEffectChain,
                          float aOpacity,
                          const gfx::Filter& aFilter,
                          const gfx::Rect& aClipRect,
-                         const nsIntRegion& aMaskRegion,
-                         nsIntRect aVisibleRect,
+                         nsIntRegion aMaskRegion,
                          gfx::Matrix4x4 aTransform);
 
   void EnsureTileStore() {}

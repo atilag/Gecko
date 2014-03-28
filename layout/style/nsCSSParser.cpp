@@ -63,6 +63,18 @@ nsCSSProps::kParserVariantTable[eCSSProperty_COUNT_no_shorthands] = {
 // Length of the "var-" prefix of custom property names.
 #define VAR_PREFIX_LENGTH 4
 
+// End-of-array marker for mask arguments to ParseBitmaskValues
+#define MASK_END_VALUE  (-1)
+
+MOZ_BEGIN_ENUM_CLASS(CSSParseResult, int32_t)
+  // Parsed something successfully:
+  Ok,
+  // Did not find what we were looking for, but did not consume any token:
+  NotFound,
+  // Unexpected token or token value, too late for UngetToken() to be enough:
+  Error
+MOZ_END_ENUM_CLASS(CSSParseResult)
+
 namespace {
 
 // Rule processing function
@@ -633,21 +645,55 @@ protected:
 
   // CSS Grid
   bool ParseGridAutoFlow();
-  bool ParseGridLineNames(nsCSSValue& aValue);
+
+  // Parse a <line-names> expression.
+  // If successful, either leave aValue untouched,
+  // to indicate that we parsed the empty list,
+  // or set it to a eCSSUnit_List of eCSSUnit_Ident.
+  //
+  // To parse an optional <line-names> (ie. if not finding an open paren
+  // is considered the same as an empty list),
+  // treat CSSParseResult::NotFound the same as CSSParseResult::Ok.
+  //
+  // If aValue is already a eCSSUnit_List, append to that list.
+  CSSParseResult ParseGridLineNames(nsCSSValue& aValue);
+  bool ParseOptionalLineNameListAfterSubgrid(nsCSSValue& aValue);
   bool ParseGridTrackBreadth(nsCSSValue& aValue);
-  bool ParseGridTrackSize(nsCSSValue& aValue);
+  CSSParseResult ParseGridTrackSize(nsCSSValue& aValue);
   bool ParseGridAutoColumnsRows(nsCSSProperty aPropID);
-  bool ParseGridTrackList(nsCSSProperty aPropID);
+
+  // Assuming a [ <line-names>? ] has already been parsed,
+  // parse the rest of a <track-list>.
+  //
+  // This exists because [ <line-names>? ] is ambiguous in the
+  // 'grid-template' shorthand: it can be either the start of a <track-list>,
+  // or of the intertwined syntax that sets both
+  // grid-template-rows and grid-template-areas.
+  //
+  // On success, |aValue| will be a list of odd length >= 3,
+  // starting with a <line-names> (which is itself a list)
+  // and alternating between that and <track-size>.
+  bool ParseGridTrackListWithFirstLineNames(nsCSSValue& aValue,
+                                            const nsCSSValue& aFirstLineNames);
+  bool ParseGridTemplateColumnsRows(nsCSSProperty aPropID);
 
   // |aAreaIndices| is a lookup table to help us parse faster,
   // mapping area names to indices in |aResult.mNamedAreas|.
   bool ParseGridTemplateAreasLine(const nsAutoString& aInput,
-                                  nsCSSValueGridTemplateAreas& aResult,
+                                  css::GridTemplateAreasValue* aResult,
                                   nsDataHashtable<nsStringHashKey, uint32_t>& aAreaIndices);
   bool ParseGridTemplateAreas();
+  bool ParseGridTemplate();
+  bool ParseGridTemplateAfterSlash(bool aColumnsIsTrackList);
+  bool ParseGridTemplateAfterString(const nsCSSValue& aFirstLineNames);
+  bool ParseGrid();
+  bool ParseGridShorthandAutoProps();
   bool ParseGridLine(nsCSSValue& aValue);
   bool ParseGridAutoPosition();
   bool ParseGridColumnRowStartEnd(nsCSSProperty aPropID);
+  bool ParseGridColumnRow(nsCSSProperty aStartPropID,
+                          nsCSSProperty aEndPropID);
+  bool ParseGridArea();
 
   // for 'clip' and '-moz-image-region'
   bool ParseRect(nsCSSProperty aPropID);
@@ -6885,95 +6931,101 @@ bool
 CSSParserImpl::ParseGridAutoFlow()
 {
   nsCSSValue value;
-  if (ParseVariant(value, VARIANT_INHERIT | VARIANT_NONE, nullptr)) {
+  if (ParseVariant(value, VARIANT_INHERIT, nullptr)) {
     AppendValue(eCSSProperty_grid_auto_flow, value);
     return true;
   }
 
-  bool gotDense = false;
-  bool gotColumn = false;
-  bool gotRow = false;
-  do {
-    if (!GetToken(true)) {
-      return false;
-    }
-    if (mToken.mType != eCSSToken_Ident) {
-      UngetToken();
-      return false;
-    }
-    nsCSSKeyword keyword = nsCSSKeywords::LookupKeyword(mToken.mIdent);
-    if (keyword == eCSSKeyword_dense && !gotDense) {
-      gotDense = true;
-    } else if (keyword == eCSSKeyword_column && !gotColumn && !gotRow) {
-      gotColumn = true;
-    } else if (keyword == eCSSKeyword_row && !gotColumn && !gotRow) {
-      gotRow = true;
-    } else {
-      return false;
-    }
-  } while (!CheckEndProperty());
+  static const int32_t mask[] = {
+    NS_STYLE_GRID_AUTO_FLOW_COLUMN | NS_STYLE_GRID_AUTO_FLOW_ROW,
+    MASK_END_VALUE
+  };
+  if (!ParseBitmaskValues(value, nsCSSProps::kGridAutoFlowKTable, mask)) {
+    return false;
+  }
+  int32_t bitField = value.GetIntValue();
 
-  if (!(gotColumn || gotRow)) {
+  // Requires one of these
+  if (!(bitField & NS_STYLE_GRID_AUTO_FLOW_NONE ||
+        bitField & NS_STYLE_GRID_AUTO_FLOW_COLUMN ||
+        bitField & NS_STYLE_GRID_AUTO_FLOW_ROW)) {
     return false;
   }
 
-  int32_t bitField;
-  if (gotColumn) {
-    MOZ_ASSERT(!gotRow,
-               "code above should've rejected values with both row and column");
-    bitField = NS_STYLE_GRID_AUTO_FLOW_COLUMN;
-  } else if (gotRow) {
-    bitField = NS_STYLE_GRID_AUTO_FLOW_ROW;
-  } else {
-    // got neither row nor column; invalid.
+  // 'none' is only valid if it occurs alone:
+  if (bitField & NS_STYLE_GRID_AUTO_FLOW_NONE &&
+      bitField != NS_STYLE_GRID_AUTO_FLOW_NONE) {
     return false;
   }
 
-  if (gotDense) {
-    bitField |= NS_STYLE_GRID_AUTO_FLOW_DENSE;
-  }
-
-  value.SetIntValue(bitField, eCSSUnit_Enumerated);
   AppendValue(eCSSProperty_grid_auto_flow, value);
   return true;
 }
 
-// Parse an optional <line-names> expression.
-// If successful, leaves aValue with eCSSUnit_Null for the empty list,
-// or sets it to a eCSSUnit_List of eCSSUnit_Ident.
-// Not finding an open paren is considered the same as an empty list.
-
-// aPropertyKeywords contains additional keywords for the 'grid' shorthand.
-bool
+CSSParseResult
 CSSParserImpl::ParseGridLineNames(nsCSSValue& aValue)
 {
-  MOZ_ASSERT(aValue.GetUnit() == eCSSUnit_Null,
-             "Unexpected unit, aValue should not be initialized yet");
-  if (!GetToken(true)) {
-    return true;
-  }
-  if (!mToken.IsSymbol('(')) {
-    UngetToken();
-    return true;
+  if (!ExpectSymbol('(', true)) {
+    return CSSParseResult::NotFound;
   }
   if (!GetToken(true) || mToken.IsSymbol(')')) {
-    return true;
+    return CSSParseResult::Ok;
   }
-  // 'return true' so far keeps eCSSUnit_Null, to represent an empty list.
+  // 'return' so far leaves aValue untouched, to represent an empty list.
 
-  nsCSSValueList* item = aValue.SetListValue();
+  nsCSSValueList* item;
+  if (aValue.GetUnit() == eCSSUnit_List) {
+    // Find the end of an existing list.
+    // The grid-template shorthand uses this, at most once for a given list.
+
+    // NOTE: we could avoid this traversal by somehow keeping around
+    // a pointer to the last item from the previous call.
+    // It's not yet clear if this is worth the additional code complexity.
+    item = aValue.GetListValue();
+    while (item->mNext) {
+      item = item->mNext;
+    }
+    item->mNext = new nsCSSValueList;
+    item = item->mNext;
+  } else {
+    MOZ_ASSERT(aValue.GetUnit() == eCSSUnit_Null, "Unexpected unit");
+    item = aValue.SetListValue();
+  }
   for (;;) {
     if (!(eCSSToken_Ident == mToken.mType &&
           ParseCustomIdent(item->mValue, mToken.mIdent))) {
       UngetToken();
       SkipUntil(')');
-      return false;
+      return CSSParseResult::Error;
     }
     if (!GetToken(true) || mToken.IsSymbol(')')) {
-      return true;
+      return CSSParseResult::Ok;
     }
     item->mNext = new nsCSSValueList;
     item = item->mNext;
+  }
+}
+
+// Assuming a 'subgrid' keyword was already consumed, parse <line-name-list>?
+bool
+CSSParserImpl::ParseOptionalLineNameListAfterSubgrid(nsCSSValue& aValue)
+{
+  nsCSSValueList* item = aValue.SetListValue();
+  // This marker distinguishes the value from a <track-list>.
+  item->mValue.SetIntValue(NS_STYLE_GRID_TEMPLATE_SUBGRID,
+                           eCSSUnit_Enumerated);
+  for (;;) {
+    nsCSSValue lineNames;
+    CSSParseResult result = ParseGridLineNames(lineNames);
+    if (result == CSSParseResult::NotFound) {
+      return true;
+    }
+    if (result == CSSParseResult::Error) {
+      return false;
+    }
+    item->mNext = new nsCSSValueList;
+    item = item->mNext;
+    item->mValue = lineNames;
   }
 }
 
@@ -7002,33 +7054,33 @@ CSSParserImpl::ParseGridTrackBreadth(nsCSSValue& aValue)
 }
 
 // Parse a <track-size>
-bool
+CSSParseResult
 CSSParserImpl::ParseGridTrackSize(nsCSSValue& aValue)
 {
   // Attempt to parse 'auto' or a single <track-breadth>
   if (ParseGridTrackBreadth(aValue) ||
       ParseVariant(aValue, VARIANT_AUTO, nullptr)) {
-    return true;
+    return CSSParseResult::Ok;
   }
 
   // Attempt to parse a minmax() function
   if (!GetToken(true)) {
-    return false;
+    return CSSParseResult::NotFound;
   }
   if (!(eCSSToken_Function == mToken.mType &&
         mToken.mIdent.LowerCaseEqualsLiteral("minmax"))) {
     UngetToken();
-    return false;
+    return CSSParseResult::NotFound;
   }
   nsCSSValue::Array* func = aValue.InitFunction(eCSSKeyword_minmax, 2);
   if (ParseGridTrackBreadth(func->Item(1)) &&
       ExpectSymbol(',', true) &&
       ParseGridTrackBreadth(func->Item(2)) &&
       ExpectSymbol(')', true)) {
-    return true;
+    return CSSParseResult::Ok;
   }
   SkipUntil(')');
-  return false;
+  return CSSParseResult::Error;
 }
 
 bool
@@ -7036,7 +7088,7 @@ CSSParserImpl::ParseGridAutoColumnsRows(nsCSSProperty aPropID)
 {
   nsCSSValue value;
   if (ParseVariant(value, VARIANT_INHERIT, nullptr) ||
-      ParseGridTrackSize(value)) {
+      ParseGridTrackSize(value) == CSSParseResult::Ok) {
     AppendValue(aPropID, value);
     return true;
   }
@@ -7044,53 +7096,93 @@ CSSParserImpl::ParseGridAutoColumnsRows(nsCSSProperty aPropID)
 }
 
 bool
-CSSParserImpl::ParseGridTrackList(nsCSSProperty aPropID)
+CSSParserImpl::ParseGridTrackListWithFirstLineNames(nsCSSValue& aValue,
+                                                    const nsCSSValue& aFirstLineNames)
+{
+  nsAutoPtr<nsCSSValueList> firstTrackSizeItem(new nsCSSValueList);
+
+  // FIXME: add repeat()
+  if (ParseGridTrackSize(firstTrackSizeItem->mValue) != CSSParseResult::Ok) {
+    // We need at least one <track-size>,
+    // so even CSSParseResult::NotFound is an error here.
+    return false;
+  }
+
+  nsCSSValueList* item = firstTrackSizeItem;
+  for (;;) {
+    item->mNext = new nsCSSValueList;
+    item = item->mNext;
+    if (ParseGridLineNames(item->mValue) == CSSParseResult::Error) {
+      return false;
+    }
+
+    // FIXME: add repeat()
+    nsCSSValue trackSize;
+    CSSParseResult result = ParseGridTrackSize(trackSize);
+    if (result == CSSParseResult::Error) {
+      return false;
+    }
+    if (result == CSSParseResult::NotFound) {
+      // What we've parsed so far is a valid <track-list>. Stop here.
+      break;
+    }
+    item->mNext = new nsCSSValueList;
+    item = item->mNext;
+    item->mValue = trackSize;
+  }
+
+  // Set up our outparam as a list, with aFirstLineNames as the first entry,
+  // followed by the rest of the <track-list> that we just finished parsing.
+  item = aValue.SetListValue();
+  item->mValue = aFirstLineNames;
+  item->mNext = firstTrackSizeItem.forget();
+  MOZ_ASSERT(aValue.GetListValue() && aValue.GetListValue()->mNext &&
+             aValue.GetListValue()->mNext->mNext,
+             "<track-list> should have a minimum length of 3");
+  return true;
+}
+
+bool
+CSSParserImpl::ParseGridTemplateColumnsRows(nsCSSProperty aPropID)
 {
   nsCSSValue value;
   if (ParseVariant(value, VARIANT_INHERIT | VARIANT_NONE, nullptr)) {
     AppendValue(aPropID, value);
     return true;
   }
-  // FIXME: add subgrid
 
-  // |value| will be a list of odd length >= 3,
-  // starting with a <line-names> (which is itself a list)
-  // and alternating between that and <track-size>
-  nsCSSValueList* item = value.SetListValue();
-  if (!ParseGridLineNames(item->mValue)) {
+  nsSubstring* ident = NextIdent();
+  if (ident) {
+    if (ident->LowerCaseEqualsLiteral("subgrid")) {
+      if (!ParseOptionalLineNameListAfterSubgrid(value)) {
+        return false;
+      }
+      AppendValue(aPropID, value);
+      return true;
+    }
+    UngetToken();
+  }
+
+  nsCSSValue firstLineNames;
+  if (ParseGridLineNames(firstLineNames) == CSSParseResult::Error ||
+      !ParseGridTrackListWithFirstLineNames(value, firstLineNames)) {
     return false;
   }
-  do {
-    item->mNext = new nsCSSValueList;
-    item = item->mNext;
-    // FIXME: add repeat()
-    if (!ParseGridTrackSize(item->mValue)) {
-      return false;
-    }
-    item->mNext = new nsCSSValueList;
-    item = item->mNext;
-    if (!ParseGridLineNames(item->mValue)) {
-      return false;
-    }
-  } while (!CheckEndProperty());
-  MOZ_ASSERT(value.GetListValue() && value.GetListValue()->mNext &&
-             value.GetListValue()->mNext->mNext,
-             "<track-list> should have a minimum length of 3");
   AppendValue(aPropID, value);
   return true;
 }
 
 bool
 CSSParserImpl::ParseGridTemplateAreasLine(const nsAutoString& aInput,
-                                          nsCSSValueGridTemplateAreas& aAreas,
+                                          css::GridTemplateAreasValue* aAreas,
                                           nsDataHashtable<nsStringHashKey, uint32_t>& aAreaIndices)
 {
-  aAreas.mTemplates.AppendElement(mToken.mIdent);
+  aAreas->mTemplates.AppendElement(mToken.mIdent);
 
   nsCSSGridTemplateAreaScanner scanner(aInput);
   nsCSSGridTemplateAreaToken token;
-  nsCSSGridNamedArea* currentArea = nullptr;
-  uint32_t row = aAreas.NRows();
+  css::GridNamedArea* currentArea = nullptr;
+  uint32_t row = aAreas->NRows();
   uint32_t column;
   for (column = 1; scanner.Next(token); column++) {
     if (token.isTrash) {
@@ -7120,9 +7212,9 @@ CSSParserImpl::ParseGridTemplateAreasLine(const nsAutoString& aInput,
       // Check if this is the continuation of an existing named area:
       uint32_t index;
       if (aAreaIndices.Get(token.mName, &index)) {
-        MOZ_ASSERT(index < aAreas.mNamedAreas.Length(),
+        MOZ_ASSERT(index < aAreas->mNamedAreas.Length(),
                    "Invalid aAreaIndices hash table");
-        currentArea = &aAreas.mNamedAreas[index];
+        currentArea = &aAreas->mNamedAreas[index];
         if (currentArea->mColumnStart != column ||
             currentArea->mRowEnd != row) {
           // Existing named area, but not forming a rectangle
@@ -7132,8 +7224,8 @@ CSSParserImpl::ParseGridTemplateAreasLine(const nsAutoString& aInput,
         currentArea->mRowEnd++;
       } else {
         // New named area
-        aAreaIndices.Put(token.mName, aAreas.mNamedAreas.Length());
-        currentArea = aAreas.mNamedAreas.AppendElement();
+        aAreaIndices.Put(token.mName, aAreas->mNamedAreas.Length());
+        currentArea = aAreas->mNamedAreas.AppendElement();
         currentArea->mName = token.mName;
         // For column or row N (starting at 1),
         // the start line is N, the end line is N + 1
@@ -7156,8 +7248,8 @@ CSSParserImpl::ParseGridTemplateAreasLine(const nsAutoString& aInput,
   // On other rows, check that the number of columns is consistent
   // between rows.
   if (row == 1) {
-    aAreas.mNColumns = column;
-  } else if (aAreas.mNColumns != column) {
+    aAreas->mNColumns = column;
+  } else if (aAreas->mNColumns != column) {
     return false;
   }
   return true;
@@ -7172,7 +7264,8 @@ CSSParserImpl::ParseGridTemplateAreas()
     return true;
   }
 
-  nsCSSValueGridTemplateAreas& areas = value.SetGridTemplateAreas();
+  nsRefPtr<css::GridTemplateAreasValue> areas =
+    new css::GridTemplateAreasValue();
   nsDataHashtable<nsStringHashKey, uint32_t> areaIndices;
   for (;;) {
     if (!GetToken(true)) {
@@ -7187,11 +7280,306 @@ CSSParserImpl::ParseGridTemplateAreas()
     }
   }
 
-  if (areas.NRows() == 0) {
+  if (areas->NRows() == 0) {
     return false;
   }
 
-  AppendValue(eCSSProperty_grid_template_areas, value);
+  AppendValue(eCSSProperty_grid_template_areas, nsCSSValue(areas));
+  return true;
+}
+
+bool
+CSSParserImpl::ParseGridTemplate()
+{
+  // none |
+  // subgrid |
+  // <'grid-template-columns'> / <'grid-template-rows'> |
+  // [ <track-list> / ]? [ <line-names>? <string> <track-size>? <line-names>? ]+
+  nsCSSValue value;
+  if (ParseVariant(value, VARIANT_INHERIT, nullptr)) {
+    AppendValue(eCSSProperty_grid_template_areas, value);
+    AppendValue(eCSSProperty_grid_template_columns, value);
+    AppendValue(eCSSProperty_grid_template_rows, value);
+    return true;
+  }
+
+  // TODO (bug 983175): add parsing for 'subgrid' by itself
+
+  // 'none' can appear either by itself,
+  // or as the beginning of <'grid-template-columns'> / <'grid-template-rows'>
+  if (ParseVariant(value, VARIANT_NONE, nullptr)) {
+    AppendValue(eCSSProperty_grid_template_columns, value);
+    if (ExpectSymbol('/', true)) {
+      return ParseGridTemplateAfterSlash(/* aColumnsIsTrackList = */ false);
+    }
+    AppendValue(eCSSProperty_grid_template_areas, value);
+    AppendValue(eCSSProperty_grid_template_rows, value);
+    return true;
+  }
+
+  // 'subgrid' can appear either by itself,
+  // or as the beginning of <'grid-template-columns'> / <'grid-template-rows'>
+  nsSubstring* ident = NextIdent();
+  if (ident) {
+    if (ident->LowerCaseEqualsLiteral("subgrid")) {
+      if (!ParseOptionalLineNameListAfterSubgrid(value)) {
+        return false;
+      }
+      AppendValue(eCSSProperty_grid_template_columns, value);
+      if (ExpectSymbol('/', true)) {
+        return ParseGridTemplateAfterSlash(/* aColumnsIsTrackList = */ false);
+      }
+      if (value.GetListValue()->mNext) {
+        // Non-empty <line-name-list> after 'subgrid'.
+        // This is only valid as part of <'grid-template-columns'>,
+        // which must be followed by a slash.
+        return false;
+      }
+      // 'subgrid' by itself sets both grid-template-columns
+      // and grid-template-rows.
+      AppendValue(eCSSProperty_grid_template_rows, value);
+      value.SetNoneValue();
+      AppendValue(eCSSProperty_grid_template_areas, value);
+      return true;
+    }
+    UngetToken();
+  }
+
+  // [ <line-names>? ] here is ambiguous:
+  // it can be either the start of a <track-list>,
+  // or the start of [ <line-names>? <string> <track-size>? <line-names>? ]+
+  nsCSSValue firstLineNames;
+  if (ParseGridLineNames(firstLineNames) == CSSParseResult::Error ||
+      !GetToken(true)) {
+    return false;
+  }
+  if (mToken.mType == eCSSToken_String) {
+    // [ <track-list> / ]? was omitted
+    // Parse [ <line-names>? <string> <track-size>? <line-names>? ]+
+    value.SetNoneValue();
+    AppendValue(eCSSProperty_grid_template_columns, value);
+    return ParseGridTemplateAfterString(firstLineNames);
+  }
+  UngetToken();
+
+  if (!(ParseGridTrackListWithFirstLineNames(value, firstLineNames) &&
+        ExpectSymbol('/', true))) {
+    return false;
+  }
+  AppendValue(eCSSProperty_grid_template_columns, value);
+  return ParseGridTemplateAfterSlash(/* aColumnsIsTrackList = */ true);
+}
+
+// Helper for parsing the 'grid-template' shorthand
+//
+// NOTE: This parses the portion after the slash, for *one* of the
+// following types of expressions:
+// - <'grid-template-columns'> / <'grid-template-rows'>
+// - <track-list> / [ <line-names>? <string> <track-size>? <line-names>? ]+
+//
+// We don't know which type of expression we've got until we've parsed the
+// second half, since the pre-slash part is ambiguous. The various return
+// clauses below are labeled with the type of expression they're completing.
+bool
+CSSParserImpl::ParseGridTemplateAfterSlash(bool aColumnsIsTrackList)
+{
+  nsCSSValue rowsValue;
+  if (ParseVariant(rowsValue, VARIANT_NONE, nullptr)) {
+    // <'grid-template-columns'> / <'grid-template-rows'>
+    AppendValue(eCSSProperty_grid_template_rows, rowsValue);
+    nsCSSValue areasValue(eCSSUnit_None);  // implied
+    AppendValue(eCSSProperty_grid_template_areas, areasValue);
+    return true;
+  }
+
+  nsSubstring* ident = NextIdent();
+  if (ident) {
+    if (ident->LowerCaseEqualsLiteral("subgrid")) {
+      if (!ParseOptionalLineNameListAfterSubgrid(rowsValue)) {
+        return false;
+      }
+      // <'grid-template-columns'> / <'grid-template-rows'>
+      AppendValue(eCSSProperty_grid_template_rows, rowsValue);
+      nsCSSValue areasValue(eCSSUnit_None);  // implied
+      AppendValue(eCSSProperty_grid_template_areas, areasValue);
+      return true;
+    }
+    UngetToken();
+  }
+
+  nsCSSValue firstLineNames;
+  if (ParseGridLineNames(firstLineNames) == CSSParseResult::Error ||
+      !GetToken(true)) {
+    return false;
+  }
+  if (aColumnsIsTrackList && mToken.mType == eCSSToken_String) {
+    // [ <track-list> / ]? [ <line-names>? <string> <track-size>? <line-names>? ]+
+    return ParseGridTemplateAfterString(firstLineNames);
+  }
+  UngetToken();
+
+  if (!ParseGridTrackListWithFirstLineNames(rowsValue, firstLineNames)) {
+    return false;
+  }
+
+  // <'grid-template-columns'> / <'grid-template-rows'>
+  AppendValue(eCSSProperty_grid_template_rows, rowsValue);
+  nsCSSValue areasValue(eCSSUnit_None);  // implied
+  AppendValue(eCSSProperty_grid_template_areas, areasValue);
+  return true;
+}
+
+// Helper for parsing the 'grid-template' shorthand:
+// Parse [ <line-names>? <string> <track-size>? <line-names>? ]+
+// with a <line-names>? already consumed, stored in |aFirstLineNames|,
+// and the current token a <string>
+bool
+CSSParserImpl::ParseGridTemplateAfterString(const nsCSSValue& aFirstLineNames)
+{
+  MOZ_ASSERT(mToken.mType == eCSSToken_String,
+             "ParseGridTemplateAfterString called with a non-string token");
+
+  nsCSSValue rowsValue;
+  nsRefPtr<css::GridTemplateAreasValue> areas =
+    new css::GridTemplateAreasValue();
+  nsDataHashtable<nsStringHashKey, uint32_t> areaIndices;
+  nsCSSValueList* rowsItem = rowsValue.SetListValue();
+  rowsItem->mValue = aFirstLineNames;
+
+  for (;;) {
+    if (!ParseGridTemplateAreasLine(mToken.mIdent, areas, areaIndices)) {
+      return false;
+    }
+
+    rowsItem->mNext = new nsCSSValueList;
+    rowsItem = rowsItem->mNext;
+    // TODO: add repeat()
+    CSSParseResult result = ParseGridTrackSize(rowsItem->mValue);
+    if (result == CSSParseResult::Error) {
+      return false;
+    }
+    if (result == CSSParseResult::NotFound) {
+      rowsItem->mValue.SetAutoValue();
+    }
+
+    rowsItem->mNext = new nsCSSValueList;
+    rowsItem = rowsItem->mNext;
+    if (ParseGridLineNames(rowsItem->mValue) == CSSParseResult::Error) {
+      return false;
+    }
+
+    if (CheckEndProperty()) {
+      break;
+    }
+
+    // Append to the same list as the previous call to ParseGridLineNames.
+    if (ParseGridLineNames(rowsItem->mValue) == CSSParseResult::Error ||
+        !GetToken(true)) {
+      return false;
+    }
+    if (eCSSToken_String != mToken.mType) {
+      UngetToken();
+      return false;
+    }
+  }
+
+  AppendValue(eCSSProperty_grid_template_areas, nsCSSValue(areas));
+  AppendValue(eCSSProperty_grid_template_rows, rowsValue);
+  return true;
+}
+
+// <'grid-template'> |
+// [ <'grid-auto-flow'> [ <'grid-auto-columns'> [ / <'grid-auto-rows'> ]? ]? ]
+bool
+CSSParserImpl::ParseGrid()
+{
+  nsCSSValue value;
+  if (ParseVariant(value, VARIANT_INHERIT, nullptr)) {
+    for (const nsCSSProperty* subprops =
+           nsCSSProps::SubpropertyEntryFor(eCSSProperty_grid);
+         *subprops != eCSSProperty_UNKNOWN; ++subprops) {
+      AppendValue(*subprops, value);
+    }
+    return true;
+  }
+
+  // 'none' at the beginning could be a <'grid-auto-flow'>
+  // (which also covers 'none' by itself)
+  // or a <'grid-template-columns'> (as part of <'grid-template'>)
+  if (ParseVariant(value, VARIANT_NONE, nullptr)) {
+    if (ExpectSymbol('/', true)) {
+      AppendValue(eCSSProperty_grid_template_columns, value);
+
+      // Set grid-auto-* subproperties to their initial values.
+      value.SetIntValue(NS_STYLE_GRID_AUTO_FLOW_NONE, eCSSUnit_Enumerated);
+      AppendValue(eCSSProperty_grid_auto_flow, value);
+      value.SetAutoValue();
+      AppendValue(eCSSProperty_grid_auto_columns, value);
+      AppendValue(eCSSProperty_grid_auto_rows, value);
+
+      return ParseGridTemplateAfterSlash(/* aColumnsIsTrackList = */ false);
+    }
+    value.SetIntValue(NS_STYLE_GRID_AUTO_FLOW_NONE, eCSSUnit_Enumerated);
+    AppendValue(eCSSProperty_grid_auto_flow, value);
+    return ParseGridShorthandAutoProps();
+  }
+
+  // An empty value is always invalid.
+  if (!GetToken(true)) {
+    return false;
+  }
+
+  // If the value starts with a 'dense', 'column' or 'row' keyword,
+  // it can only start with a <'grid-auto-flow'>
+  if (mToken.mType == eCSSToken_Ident) {
+    nsCSSKeyword keyword = nsCSSKeywords::LookupKeyword(mToken.mIdent);
+    if (keyword == eCSSKeyword_dense ||
+        keyword == eCSSKeyword_column ||
+        keyword == eCSSKeyword_row) {
+      UngetToken();
+      return ParseGridAutoFlow() && ParseGridShorthandAutoProps();
+    }
+  }
+  UngetToken();
+
+  // Set other subproperties to their initial values
+  // and parse <'grid-template'>.
+  value.SetIntValue(NS_STYLE_GRID_AUTO_FLOW_NONE, eCSSUnit_Enumerated);
+  AppendValue(eCSSProperty_grid_auto_flow, value);
+  value.SetAutoValue();
+  AppendValue(eCSSProperty_grid_auto_columns, value);
+  AppendValue(eCSSProperty_grid_auto_rows, value);
+  return ParseGridTemplate();
+}
+
+// Parse [ <'grid-auto-columns'> [ / <'grid-auto-rows'> ]? ]?
+// for the 'grid' shorthand.
+// Assumes that <'grid-auto-flow'> was already parsed by the caller.
+bool
+CSSParserImpl::ParseGridShorthandAutoProps()
+{
+  nsCSSValue autoColumnsValue;
+  nsCSSValue autoRowsValue;
+  CSSParseResult result = ParseGridTrackSize(autoColumnsValue);
+  if (result == CSSParseResult::Error) {
+    return false;
+  }
+  if (result == CSSParseResult::NotFound) {
+    autoColumnsValue.SetAutoValue();
+    autoRowsValue.SetAutoValue();
+  } else {
+    if (!ExpectSymbol('/', true)) {
+      autoRowsValue.SetAutoValue();
+    } else if (ParseGridTrackSize(autoRowsValue) != CSSParseResult::Ok) {
+      return false;
+    }
+  }
+  AppendValue(eCSSProperty_grid_auto_columns, autoColumnsValue);
+  AppendValue(eCSSProperty_grid_auto_rows, autoRowsValue);
+  nsCSSValue templateValue(eCSSUnit_None);  // Initial values
+  AppendValue(eCSSProperty_grid_template_areas, templateValue);
+  AppendValue(eCSSProperty_grid_template_columns, templateValue);
+  AppendValue(eCSSProperty_grid_template_rows, templateValue);
   return true;
 }
 
@@ -7330,6 +7718,102 @@ CSSParserImpl::ParseGridColumnRowStartEnd(nsCSSProperty aPropID)
     return true;
   }
   return false;
+}
+
+// If |aFallback| is a List containing a single Ident, set |aValue| to that.
+// Otherwise, set |aValue| to Auto.
+// Used with |aFallback| from ParseGridLine()
+static void
+HandleGridLineFallback(const nsCSSValue& aFallback, nsCSSValue& aValue)
+{
+  if (aFallback.GetUnit() == eCSSUnit_List &&
+      aFallback.GetListValue()->mValue.GetUnit() == eCSSUnit_Ident &&
+      !aFallback.GetListValue()->mNext) {
+    aValue = aFallback;
+  } else {
+    aValue.SetAutoValue();
+  }
+}
+
+bool
+CSSParserImpl::ParseGridColumnRow(nsCSSProperty aStartPropID,
+                                  nsCSSProperty aEndPropID)
+{
+  nsCSSValue value;
+  nsCSSValue secondValue;
+  if (ParseVariant(value, VARIANT_INHERIT, nullptr)) {
+    AppendValue(aStartPropID, value);
+    AppendValue(aEndPropID, value);
+    return true;
+  }
+
+  if (!ParseGridLine(value)) {
+    return false;
+  }
+  if (GetToken(true)) {
+    if (mToken.IsSymbol('/')) {
+      if (ParseGridLine(secondValue)) {
+        AppendValue(aStartPropID, value);
+        AppendValue(aEndPropID, secondValue);
+        return true;
+      } else {
+        return false;
+      }
+    }
+    UngetToken();
+  }
+
+  // A single <custom-ident> is repeated to both properties,
+  // anything else sets the grid-{column,row}-end property to 'auto'.
+  HandleGridLineFallback(value, secondValue);
+
+  AppendValue(aStartPropID, value);
+  AppendValue(aEndPropID, secondValue);
+  return true;
+}
+
+bool
+CSSParserImpl::ParseGridArea()
+{
+  nsCSSValue values[4];
+  if (ParseVariant(values[0], VARIANT_INHERIT, nullptr)) {
+    AppendValue(eCSSProperty_grid_row_start, values[0]);
+    AppendValue(eCSSProperty_grid_column_start, values[0]);
+    AppendValue(eCSSProperty_grid_row_end, values[0]);
+    AppendValue(eCSSProperty_grid_column_end, values[0]);
+    return true;
+  }
+
+  int32_t i = 0;
+  for (;;) {
+    if (!ParseGridLine(values[i])) {
+      return false;
+    }
+    if (++i == 4 || !GetToken(true)) {
+      break;
+    }
+    if (!mToken.IsSymbol('/')) {
+      UngetToken();
+      break;
+    }
+  }
+
+  MOZ_ASSERT(i >= 1, "should have parsed at least one grid-line (or returned)");
+  if (i < 2) {
+    HandleGridLineFallback(values[0], values[1]);
+  }
+  if (i < 3) {
+    HandleGridLineFallback(values[0], values[2]);
+  }
+  if (i < 4) {
+    HandleGridLineFallback(values[1], values[3]);
+  }
+
+  AppendValue(eCSSProperty_grid_row_start, values[0]);
+  AppendValue(eCSSProperty_grid_column_start, values[1]);
+  AppendValue(eCSSProperty_grid_row_end, values[2]);
+  AppendValue(eCSSProperty_grid_column_end, values[3]);
+  return true;
 }
 
 // <color-stop> : <color> [ <percentage> | <length> ]?
@@ -8355,7 +8839,11 @@ CSSParserImpl::ParsePropertyByFunction(nsCSSProperty aPropID)
     return ParseGridTemplateAreas();
   case eCSSProperty_grid_template_columns:
   case eCSSProperty_grid_template_rows:
-    return ParseGridTrackList(aPropID);
+    return ParseGridTemplateColumnsRows(aPropID);
+  case eCSSProperty_grid_template:
+    return ParseGridTemplate();
+  case eCSSProperty_grid:
+    return ParseGrid();
   case eCSSProperty_grid_auto_position:
     return ParseGridAutoPosition();
   case eCSSProperty_grid_column_start:
@@ -8363,6 +8851,14 @@ CSSParserImpl::ParsePropertyByFunction(nsCSSProperty aPropID)
   case eCSSProperty_grid_row_start:
   case eCSSProperty_grid_row_end:
     return ParseGridColumnRowStartEnd(aPropID);
+  case eCSSProperty_grid_column:
+    return ParseGridColumnRow(eCSSProperty_grid_column_start,
+                              eCSSProperty_grid_column_end);
+  case eCSSProperty_grid_row:
+    return ParseGridColumnRow(eCSSProperty_grid_row_start,
+                              eCSSProperty_grid_row_end);
+  case eCSSProperty_grid_area:
+    return ParseGridArea();
   case eCSSProperty_image_region:
     return ParseRect(eCSSProperty_image_region);
   case eCSSProperty_list_style:
@@ -10727,8 +11223,6 @@ CSSParserImpl::ParseFontVariantAlternates(nsCSSValue& aValue)
   return true;
 }
 
-#define MASK_END_VALUE  -1
-
 // aMasks - array of masks for mutually-exclusive property values,
 //          e.g. proportial-nums, tabular-nums
 
@@ -10737,17 +11231,9 @@ CSSParserImpl::ParseBitmaskValues(nsCSSValue& aValue,
                                   const KTableValue aKeywordTable[],
                                   const int32_t aMasks[])
 {
-  if (!ParseVariant(aValue, VARIANT_HMK, aKeywordTable)) {
+  // Parse at least one keyword
+  if (!ParseEnum(aValue, aKeywordTable)) {
     return false;
-  }
-
-  // first value 'normal', 'inherit', 'unset', 'initial', 'unset' ==> done
-  if (eCSSUnit_Normal == aValue.GetUnit() ||
-      eCSSUnit_Initial == aValue.GetUnit() ||
-      eCSSUnit_Inherit == aValue.GetUnit() ||
-      eCSSUnit_Unset == aValue.GetUnit())
-  {
-    return true;
   }
 
   // look for more values
@@ -10795,6 +11281,10 @@ static const int32_t maskEastAsian[] = {
 bool
 CSSParserImpl::ParseFontVariantEastAsian(nsCSSValue& aValue)
 {
+  if (ParseVariant(aValue, VARIANT_INHERIT | VARIANT_NORMAL, nullptr)) {
+    return true;
+  }
+
   NS_ASSERTION(maskEastAsian[ArrayLength(maskEastAsian) - 1] ==
                  MASK_END_VALUE,
                "incorrectly terminated array");
@@ -10814,6 +11304,10 @@ static const int32_t maskLigatures[] = {
 bool
 CSSParserImpl::ParseFontVariantLigatures(nsCSSValue& aValue)
 {
+  if (ParseVariant(aValue, VARIANT_INHERIT | VARIANT_NORMAL, nullptr)) {
+    return true;
+  }
+
   NS_ASSERTION(maskLigatures[ArrayLength(maskLigatures) - 1] ==
                  MASK_END_VALUE,
                "incorrectly terminated array");
@@ -10844,6 +11338,10 @@ static const int32_t maskNumeric[] = {
 bool
 CSSParserImpl::ParseFontVariantNumeric(nsCSSValue& aValue)
 {
+  if (ParseVariant(aValue, VARIANT_INHERIT | VARIANT_NORMAL, nullptr)) {
+    return true;
+  }
+
   NS_ASSERTION(maskNumeric[ArrayLength(maskNumeric) - 1] ==
                  MASK_END_VALUE,
                "incorrectly terminated array");

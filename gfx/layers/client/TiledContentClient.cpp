@@ -156,7 +156,7 @@ SharedFrameMetricsHelper::UpdateFromCompositorFrameMetrics(
   const FrameMetrics& contentMetrics = aLayer->GetFrameMetrics();
   FrameMetrics compositorMetrics;
 
-  if (!compositor->LookupCompositorFrameMetrics(contentMetrics.mScrollId,
+  if (!compositor->LookupCompositorFrameMetrics(contentMetrics.GetScrollId(),
                                                 compositorMetrics)) {
     FindFallbackContentFrameMetrics(aLayer, aCompositionBounds, aZoom);
     return false;
@@ -732,10 +732,12 @@ ClientTiledLayerBuffer::ValidateTile(TileClient aTile,
   }
 
   bool createdTextureClient = false;
-  nsIntRegion offsetDirtyRegion = aDirtyRegion.MovedBy(-aTileOrigin);
+  nsIntRegion offsetScaledDirtyRegion = aDirtyRegion.MovedBy(-aTileOrigin);
+  offsetScaledDirtyRegion.ScaleRoundOut(mResolution, mResolution);
+
   bool usingSinglePaintBuffer = !!mSinglePaintDrawTarget;
   RefPtr<TextureClient> backBuffer =
-    aTile.GetBackBuffer(offsetDirtyRegion,
+    aTile.GetBackBuffer(offsetScaledDirtyRegion,
                         mManager->GetTexturePool(gfxPlatform::GetPlatform()->Optimal2DFormatForContent(GetContentType())),
                         &createdTextureClient, !usingSinglePaintBuffer);
 
@@ -781,33 +783,40 @@ ClientTiledLayerBuffer::ValidateTile(TileClient aTile,
 
     // The new buffer is now validated, remove the dirty region from it.
     aTile.mInvalidBack.Sub(nsIntRect(0, 0, TILEDLAYERBUFFER_TILE_SIZE, TILEDLAYERBUFFER_TILE_SIZE),
-                           offsetDirtyRegion);
+                           offsetScaledDirtyRegion);
   } else {
     // Area of the full tile...
-    nsIntRegion tileRegion = nsIntRect(aTileOrigin.x, aTileOrigin.y, TILEDLAYERBUFFER_TILE_SIZE, TILEDLAYERBUFFER_TILE_SIZE);
+    nsIntRegion tileRegion =
+      nsIntRect(aTileOrigin.x, aTileOrigin.y,
+                GetScaledTileLength(), GetScaledTileLength());
 
     // Intersect this area with the portion that's dirty.
     tileRegion = tileRegion.Intersect(aDirtyRegion);
 
-    // Move invalid areas into layer space.
-    aTile.mInvalidFront.MoveBy(aTileOrigin);
-    aTile.mInvalidBack.MoveBy(aTileOrigin);
+    // Add the resolution scale to store the dirty region.
+    nsIntPoint unscaledTileOrigin = nsIntPoint(aTileOrigin.x * mResolution,
+                                               aTileOrigin.y * mResolution);
+    nsIntRegion unscaledTileRegion(tileRegion);
+    unscaledTileRegion.ScaleRoundOut(mResolution, mResolution);
+
+    // Move invalid areas into scaled layer space.
+    aTile.mInvalidFront.MoveBy(unscaledTileOrigin);
+    aTile.mInvalidBack.MoveBy(unscaledTileOrigin);
 
     // Add the area that's going to be redrawn to the invalid area of the
     // front region.
-    aTile.mInvalidFront.Or(aTile.mInvalidFront, tileRegion);
+    aTile.mInvalidFront.Or(aTile.mInvalidFront, unscaledTileRegion);
 
     // Add invalid areas of the backbuffer to the area to redraw.
     tileRegion.Or(tileRegion, aTile.mInvalidBack);
 
     // Move invalid areas back into tile space.
-    aTile.mInvalidFront.MoveBy(-aTileOrigin);
+    aTile.mInvalidFront.MoveBy(-unscaledTileOrigin);
 
     // This will be validated now.
     aTile.mInvalidBack.SetEmpty();
 
     nsIntRect bounds = tileRegion.GetBounds();
-    bounds.ScaleRoundOut(mResolution, mResolution);
     bounds.MoveBy(-aTileOrigin);
 
     if (GetContentType() != gfxContentType::COLOR) {
@@ -816,8 +825,8 @@ ClientTiledLayerBuffer::ValidateTile(TileClient aTile,
 
     ctxt->NewPath();
     ctxt->Clip(gfxRect(bounds.x, bounds.y, bounds.width, bounds.height));
+    ctxt->Translate(gfxPoint(-unscaledTileOrigin.x, -unscaledTileOrigin.y));
     ctxt->Scale(mResolution, mResolution);
-    ctxt->Translate(gfxPoint(-aTileOrigin.x, -aTileOrigin.y));
     mCallback(mThebesLayer, ctxt,
               tileRegion.GetBounds(),
               DrawRegionClip::CLIP_NONE,
@@ -861,18 +870,18 @@ ClientTiledLayerBuffer::ValidateTile(TileClient aTile,
 static LayoutDeviceRect
 TransformCompositionBounds(const ParentLayerRect& aCompositionBounds,
                            const CSSToParentLayerScale& aZoom,
-                           const ScreenPoint& aScrollOffset,
-                           const CSSToScreenScale& aResolution,
-                           const gfx3DMatrix& aTransformScreenToLayout)
+                           const ParentLayerPoint& aScrollOffset,
+                           const CSSToParentLayerScale& aResolution,
+                           const gfx3DMatrix& aTransformParentLayerToLayoutDevice)
 {
-  // Transform the current composition bounds into transformed layout device
-  // space by compensating for the difference in resolution and subtracting the
+  // Transform the current composition bounds into ParentLayer coordinates
+  // by compensating for the difference in resolution and subtracting the
   // old composition bounds origin.
-  ScreenRect offsetViewportRect = (aCompositionBounds / aZoom) * aResolution;
+  ParentLayerRect offsetViewportRect = (aCompositionBounds / aZoom) * aResolution;
   offsetViewportRect.MoveBy(-aScrollOffset);
 
   gfxRect transformedViewport =
-    aTransformScreenToLayout.TransformBounds(
+    aTransformParentLayerToLayoutDevice.TransformBounds(
       gfxRect(offsetViewportRect.x, offsetViewportRect.y,
               offsetViewportRect.width, offsetViewportRect.height));
 
@@ -884,10 +893,10 @@ TransformCompositionBounds(const ParentLayerRect& aCompositionBounds,
 
 bool
 ClientTiledLayerBuffer::ComputeProgressiveUpdateRegion(const nsIntRegion& aInvalidRegion,
-                                                      const nsIntRegion& aOldValidRegion,
-                                                      nsIntRegion& aRegionToPaint,
-                                                      BasicTiledLayerPaintData* aPaintData,
-                                                      bool aIsRepeated)
+                                                       const nsIntRegion& aOldValidRegion,
+                                                       nsIntRegion& aRegionToPaint,
+                                                       BasicTiledLayerPaintData* aPaintData,
+                                                       bool aIsRepeated)
 {
   aRegionToPaint = aInvalidRegion;
 
@@ -942,20 +951,27 @@ ClientTiledLayerBuffer::ComputeProgressiveUpdateRegion(const nsIntRegion& aInval
     }
   }
 
-  // Transform the screen coordinates into transformed layout device coordinates.
+  // Transform the composition bounds, which is in the ParentLayer coordinates
+  // of the nearest ContainerLayer with a valid displayport to LayoutDevice
+  // coordinates relative to this layer.
   LayoutDeviceRect transformedCompositionBounds =
     TransformCompositionBounds(compositionBounds, zoom, aPaintData->mScrollOffset,
-                               aPaintData->mResolution, aPaintData->mTransformParentLayerToLayout);
+                               aPaintData->mResolution, aPaintData->mTransformParentLayerToLayoutDevice);
 
   // Paint tiles that have stale content or that intersected with the screen
   // at the time of issuing the draw command in a single transaction first.
   // This is to avoid rendering glitches on animated page content, and when
   // layers change size/shape.
-  LayoutDeviceRect coherentUpdateRect =
+  LayoutDeviceRect typedCoherentUpdateRect =
     transformedCompositionBounds.Intersect(aPaintData->mCompositionBounds);
 
+  // Offset by the viewport origin, as the composition bounds are stored in
+  // Layer space and not LayoutDevice space.
+  typedCoherentUpdateRect.MoveBy(aPaintData->mViewport.TopLeft());
+
+  // Convert to untyped to intersect with the invalid region.
   nsIntRect roundedCoherentUpdateRect =
-    LayoutDeviceIntRect::ToUntyped(RoundedOut(coherentUpdateRect));
+    LayoutDeviceIntRect::ToUntyped(RoundedOut(typedCoherentUpdateRect));
 
   aRegionToPaint.And(aInvalidRegion, roundedCoherentUpdateRect);
   aRegionToPaint.Or(aRegionToPaint, staleRegion);

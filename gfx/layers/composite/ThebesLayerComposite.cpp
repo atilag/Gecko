@@ -91,7 +91,10 @@ ThebesLayerComposite::GetLayer()
 TiledLayerComposer*
 ThebesLayerComposite::GetTiledLayerComposer()
 {
-  MOZ_ASSERT(mBuffer && mBuffer->IsAttached());
+  if (!mBuffer) {
+    return nullptr;
+  }
+  MOZ_ASSERT(mBuffer->IsAttached());
   return mBuffer->AsTiledLayerComposer();
 }
 
@@ -149,7 +152,7 @@ ThebesLayerComposite::RenderLayer(const nsIntRect& aClipRect)
                      &visibleRegion,
                      mRequiresTiledProperties ? &tiledLayerProps
                                               : nullptr);
-
+  mBuffer->BumpFlashCounter();
 
   if (mRequiresTiledProperties) {
     mValidRegion = tiledLayerProps.mValidRegion;
@@ -182,7 +185,7 @@ ThebesLayerComposite::GetEffectiveResolution()
 {
   for (ContainerLayer* parent = GetParent(); parent; parent = parent->GetParent()) {
     const FrameMetrics& metrics = parent->GetFrameMetrics();
-    if (metrics.mScrollId != FrameMetrics::NULL_SCROLL_ID) {
+    if (metrics.GetScrollId() != FrameMetrics::NULL_SCROLL_ID) {
       return metrics.GetZoom();
     }
   }

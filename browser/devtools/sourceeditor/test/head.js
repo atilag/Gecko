@@ -74,9 +74,37 @@ function read(url) {
   let input = channel.open();
   scriptableStream.init(input);
 
-  let data = scriptableStream.read(input.available());
+  let data = "";
+  while (input.available()) {
+    data = data.concat(scriptableStream.read(input.available()));
+  }
   scriptableStream.close();
   input.close();
 
   return data;
+}
+
+/**
+ * This function is called by the CodeMirror test runner to report status
+ * messages from the CM tests.
+ * @see codemirror.html
+ */
+function codeMirror_setStatus(statusMsg, type, customMsg) {
+  switch (type) {
+    case "expected":
+    case "ok":
+      ok(1, statusMsg);
+      break;
+    case "error":
+    case "fail":
+      ok(0, statusMsg);
+      break;
+    default:
+      info(statusMsg);
+      break;
+  }
+
+  if (customMsg && typeof customMsg == "string" && customMsg != statusMsg) {
+    info(customMsg);
+  }
 }
