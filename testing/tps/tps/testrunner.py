@@ -60,7 +60,7 @@ class TPSTestRunner(object):
                             'browser.warnOnQuit': False,
                             # Allow installing extensions dropped into the profile folder
                             'extensions.autoDisableScopes': 10,
-                            'extensions.getAddons.get.url': 'http://127.0.0.1:4567/en-US/firefox/api/%API_VERSION%/search/guid:%IDS%',
+                            'extensions.getAddons.get.url': 'http://127.0.0.1:4567/addons/api/%IDS%.xml',
                             'extensions.update.enabled'    : False,
                             # Don't open a dialog to show available add-on updates
                             'extensions.update.notifyUser' : False,
@@ -313,9 +313,11 @@ class TPSTestRunner(object):
         if self.mobile:
             self.preferences.update({'services.sync.client.type' : 'mobile'})
 
-        # If sync accounts have been chosen, disable Firefox Accounts
-        if self.config.get('auth_type', 'fx_account') != 'fx_account':
-            self.preferences.update({'services.sync.fxaccounts.enabled' : False})
+        # Set a dummy username to force the correct authentication type. For the
+        # old sync, the username is not allowed to contain a '@'.
+        dummy = {'fx_account': 'dummy@somewhere', 'sync_account': 'dummy'}
+        auth_type = self.config.get('auth_type', 'fx_account')
+        self.preferences.update({'services.sync.username': dummy[auth_type]})
 
         # Acquire a lock to make sure no other threads are running tests
         # at the same time.

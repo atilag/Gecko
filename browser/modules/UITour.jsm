@@ -71,7 +71,17 @@ this.UITour = {
       widgetName: "PanelUI-fxa-status",
     }],
     ["addons",      {query: "#add-ons-button"}],
-    ["appMenu",     {query: "#PanelUI-button"}],
+    ["appMenu",     {
+      addTargetListener: (aDocument, aCallback) => {
+        let panelPopup = aDocument.getElementById("PanelUI-popup");
+        panelPopup.addEventListener("popupshown", aCallback);
+      },
+      query: "#PanelUI-button",
+      removeTargetListener: (aDocument, aCallback) => {
+        let panelPopup = aDocument.getElementById("PanelUI-popup");
+        panelPopup.removeEventListener("popupshown", aCallback);
+      },
+    }],
     ["backForward", {
       query: "#back-button",
       widgetName: "urlbar-container",
@@ -329,6 +339,8 @@ this.UITour = {
 
           if (typeof data.closeButtonCallbackID == "string")
             infoOptions.closeButtonCallbackID = data.closeButtonCallbackID;
+          if (typeof data.targetCallbackID == "string")
+            infoOptions.targetCallbackID = data.targetCallbackID;
 
           this.showInfo(contentDocument, target, data.title, data.text, iconURL, buttons, infoOptions);
         }).then(null, Cu.reportError);
@@ -671,18 +683,22 @@ this.UITour = {
 
     let targetQuery = targetObject.query;
     aWindow.PanelUI.ensureReady().then(() => {
+      let node;
       if (typeof targetQuery == "function") {
-        deferred.resolve({
-          targetName: aTargetName,
-          node: targetQuery(aWindow.document),
-          widgetName: targetObject.widgetName,
-        });
-        return;
+        try {
+          node = targetQuery(aWindow.document);
+        } catch (ex) {
+          node = null;
+        }
+      } else {
+        node = aWindow.document.querySelector(targetQuery);
       }
 
       deferred.resolve({
+        addTargetListener: targetObject.addTargetListener,
+        node: node,
+        removeTargetListener: targetObject.removeTargetListener,
         targetName: aTargetName,
-        node: aWindow.document.querySelector(targetQuery),
         widgetName: targetObject.widgetName,
       });
     }).then(null, Cu.reportError);
@@ -936,9 +952,24 @@ this.UITour = {
           this.sendPageCallback(aContentDocument, aOptions.closeButtonCallbackID);
       };
       tooltipClose.addEventListener("command", closeButtonCallback);
+
+      let targetCallback = (event) => {
+        let details = {
+          target: aAnchor.targetName,
+          type: event.type,
+        };
+        this.sendPageCallback(aContentDocument, aOptions.targetCallbackID, details);
+      };
+      if (aOptions.targetCallbackID && aAnchor.addTargetListener) {
+        aAnchor.addTargetListener(document, targetCallback);
+      }
+
       tooltip.addEventListener("popuphiding", function tooltipHiding(event) {
         tooltip.removeEventListener("popuphiding", tooltipHiding);
         tooltipClose.removeEventListener("command", closeButtonCallback);
+        if (aOptions.targetCallbackID && aAnchor.removeTargetListener) {
+          aAnchor.removeTargetListener(document, targetCallback);
+        }
       });
 
       tooltip.setAttribute("targetName", aAnchor.targetName);
