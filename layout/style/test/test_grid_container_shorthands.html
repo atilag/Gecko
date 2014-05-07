@@ -16,7 +16,7 @@ var initial_values = {
     gridTemplateAreas: "none",
     gridTemplateColumns: "none",
     gridTemplateRows: "none",
-    gridAutoFlow: "none",
+    gridAutoFlow: "row",
     // Computed value for 'auto'
     gridAutoColumns: "minmax(min-content, max-content)",
     gridAutoRows: "minmax(min-content, max-content)",
@@ -47,6 +47,61 @@ var grid_template_test_cases = [
         specified: "40px/none",
         gridTemplateColumns: "40px",
         gridTemplateRows: "none",
+    },
+    {
+        specified: "40px/repeat(1, 20px)",
+        gridTemplateColumns: "40px",
+        gridTemplateRows: "20px",
+    },
+    {
+        specified: "40px/(a)repeat(1, 20px)",
+        gridTemplateColumns: "40px",
+        gridTemplateRows: "(a) 20px",
+    },
+    {
+        specified: "40px/repeat(1, (a) 20px)",
+        gridTemplateColumns: "40px",
+        gridTemplateRows: "(a) 20px",
+    },
+    {
+        specified: "40px/(a)repeat(2, (b)20px)",
+        gridTemplateColumns: "40px",
+        gridTemplateRows: "(a b) 20px (b) 20px",
+    },
+    {
+        specified: "40px/(a)repeat(2, 20px)",
+        gridTemplateColumns: "40px",
+        gridTemplateRows: "(a) 20px 20px",
+    },
+    {
+        specified: "40px/repeat(2, (a) 20px)",
+        gridTemplateColumns: "40px",
+        gridTemplateRows: "(a) 20px (a) 20px",
+    },
+    {
+        specified: "40px/(a)repeat(2, (b)20px)",
+        gridTemplateColumns: "40px",
+        gridTemplateRows: "(a b) 20px (b) 20px",
+    },
+    {
+        specified: "40px/repeat(2, 20px(a))",
+        gridTemplateColumns: "40px",
+        gridTemplateRows: "20px (a) 20px (a)",
+    },
+    {
+        specified: "40px/repeat(2, 20px(a)) (b)",
+        gridTemplateColumns: "40px",
+        gridTemplateRows: "20px (a) 20px (a b)",
+    },
+    {
+        specified: "40px/repeat(2, (a) 20px(b)) (c)",
+        gridTemplateColumns: "40px",
+        gridTemplateRows: "(a) 20px (b a) 20px (b c)",
+    },
+    {
+        specified: "40px/(a) repeat(3, (b c) 20px (d) 100px (e f)) (g)",
+        gridTemplateColumns: "40px",
+        gridTemplateRows: "(a b c) 20px (d) 100px (e f b c) 20px (d) 100px (e f b c) 20px (d) 100px (e f g)",
     },
     {
         specified: "'fizz'",
@@ -98,6 +153,20 @@ var grid_template_test_cases = [
         gridTemplateRows: "subgrid (foo)",
     },
     {
+        specified: "subgrid / subgrid (foo) repeat(3, () (a b) (c))",
+        gridTemplateColumns: "subgrid",
+        gridTemplateRows: "subgrid (foo) () (a b) (c) () (a b) (c) () (a b) (c)",
+    },
+    {
+        // https://bugzilla.mozilla.org/show_bug.cgi?id=978478#c1
+        // The number of repetitions is clamped to
+        // #define GRID_TEMPLATE_MAX_REPETITIONS 10000
+        specified: "subgrid / subgrid (foo) repeat(999999999, (a))",
+        gridTemplateColumns: "subgrid",
+        // Array(n + 1).join(s) is a hack for the non-standard s.repeat(n)
+        gridTemplateRows: "subgrid (foo)" + Array(10000 + 1).join(" (a)"),
+    },
+    {
         specified: "subgrid () (foo)/ subgrid (bar",
         gridTemplateColumns: "subgrid () (foo)",
         gridTemplateRows: "subgrid (bar)",
@@ -110,8 +179,13 @@ grid_test_cases = grid_template_test_cases.concat([
         gridAutoFlow: "row",
     },
     {
-        specified: "none 40px",
-        gridAutoFlow: "none",
+        specified: "stack 40px",
+        gridAutoFlow: "stack row",
+        gridAutoColumns: "40px",
+    },
+    {
+        specified: "stack column 40px",
+        gridAutoFlow: "stack column",
         gridAutoColumns: "40px",
     },
     {

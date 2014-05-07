@@ -130,6 +130,16 @@ public:
     MOZ_ASSERT(inSamples == WEBAUDIO_BLOCK_SIZE*aBlocks && outSamples == WEBAUDIO_BLOCK_SIZE);
   }
 
+  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
+  {
+    size_t amount = 0;
+    // Future: properly measure speex memory
+    amount += aMallocSizeOf(mUpSampler);
+    amount += aMallocSizeOf(mDownSampler);
+    amount += mBuffer.SizeOfExcludingThis(aMallocSizeOf);
+    return amount;
+  }
+
 private:
   void Destroy()
   {
@@ -186,18 +196,21 @@ public:
   {
     for (uint32_t j = 0; j < WEBAUDIO_BLOCK_SIZE*blocks; ++j) {
       // Index into the curve array based on the amplitude of the
-      // incoming signal by clamping the amplitude to [-1, 1] and
+      // incoming signal by using an amplitude range of [-1, 1] and
       // performing a linear interpolation of the neighbor values.
-      float index = std::max(0.0f, std::min(float(mCurve.Length() - 1),
-                                            mCurve.Length() * (aInputBuffer[j] + 1) / 2));
-      uint32_t indexLower = uint32_t(index);
-      uint32_t indexHigher = uint32_t(index + 1.0f);
-      if (indexHigher == mCurve.Length()) {
-        aOutputBuffer[j] = mCurve[indexLower];
+      float index = (mCurve.Length() - 1) * (aInputBuffer[j] + 1.0f) / 2.0f;
+      if (index < 0.0f) {
+        aOutputBuffer[j] = mCurve[0];
       } else {
-        float interpolationFactor = index - indexLower;
-        aOutputBuffer[j] = (1.0f - interpolationFactor) * mCurve[indexLower] +
-                                   interpolationFactor  * mCurve[indexHigher];
+        int32_t indexLower = index;
+        if (static_cast<uint32_t>(indexLower) >= mCurve.Length() - 1) {
+          aOutputBuffer[j] = mCurve[mCurve.Length() - 1];
+        } else {
+          uint32_t indexHigher = indexLower + 1;
+          float interpolationFactor = index - indexLower;
+          aOutputBuffer[j] = (1.0f - interpolationFactor) * mCurve[indexLower] +
+                                     interpolationFactor  * mCurve[indexHigher];
+        }
       }
     }
   }
@@ -244,6 +257,19 @@ public:
     }
   }
 
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    size_t amount = AudioNodeEngine::SizeOfExcludingThis(aMallocSizeOf);
+    amount += mCurve.SizeOfExcludingThis(aMallocSizeOf);
+    amount += mResampler.SizeOfExcludingThis(aMallocSizeOf);
+    return amount;
+  }
+
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
+
 private:
   nsTArray<float> mCurve;
   OverSampleType mType;
@@ -277,9 +303,9 @@ WaveShaperNode::ClearCurve()
 }
 
 JSObject*
-WaveShaperNode::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aScope)
+WaveShaperNode::WrapObject(JSContext *aCx)
 {
-  return WaveShaperNodeBinding::Wrap(aCx, aScope, this);
+  return WaveShaperNodeBinding::Wrap(aCx, this);
 }
 
 void

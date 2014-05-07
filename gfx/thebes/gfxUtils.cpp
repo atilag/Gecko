@@ -7,12 +7,15 @@
 #include "gfxContext.h"
 #include "gfxPlatform.h"
 #include "gfxDrawable.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/RefPtr.h"
 #include "nsRegion.h"
 #include "yuv_convert.h"
 #include "ycbcr_to_rgb565.h"
 #include "GeckoProfiler.h"
 #include "ImageContainer.h"
 #include "gfx2DGlue.h"
+#include "gfxPrefs.h"
 
 #ifdef XP_WIN
 #include "gfxWindowsPlatform.h"
@@ -139,6 +142,66 @@ gfxUtils::UnpremultiplyImageSurface(gfxImageSurface *aSourceSurface,
     }
 }
 
+TemporaryRef<DataSourceSurface>
+gfxUtils::UnpremultiplyDataSurface(DataSourceSurface* aSurface)
+{
+    // Only premultiply ARGB32
+    if (aSurface->GetFormat() != SurfaceFormat::B8G8R8A8) {
+        return aSurface;
+    }
+
+    DataSourceSurface::MappedSurface map;
+    if (!aSurface->Map(DataSourceSurface::MapType::READ, &map)) {
+        return nullptr;
+    }
+
+    RefPtr<DataSourceSurface> dest = Factory::CreateDataSourceSurfaceWithStride(aSurface->GetSize(),
+                                                                                aSurface->GetFormat(),
+                                                                                map.mStride);
+
+    DataSourceSurface::MappedSurface destMap;
+    if (!dest->Map(DataSourceSurface::MapType::WRITE, &destMap)) {
+        aSurface->Unmap();
+        return nullptr;
+    }
+
+    uint8_t *src = map.mData;
+    uint8_t *dst = destMap.mData;
+
+    for (int32_t i = 0; i < aSurface->GetSize().height; ++i) {
+        uint8_t *srcRow = src + (i * map.mStride);
+        uint8_t *dstRow = dst + (i * destMap.mStride);
+
+        for (int32_t j = 0; j < aSurface->GetSize().width; ++j) {
+#ifdef IS_LITTLE_ENDIAN
+          uint8_t b = *srcRow++;
+          uint8_t g = *srcRow++;
+          uint8_t r = *srcRow++;
+          uint8_t a = *srcRow++;
+
+          *dstRow++ = UnpremultiplyValue(a, b);
+          *dstRow++ = UnpremultiplyValue(a, g);
+          *dstRow++ = UnpremultiplyValue(a, r);
+          *dstRow++ = a;
+#else
+          uint8_t a = *srcRow++;
+          uint8_t r = *srcRow++;
+          uint8_t g = *srcRow++;
+          uint8_t b = *srcRow++;
+
+          *dstRow++ = a;
+          *dstRow++ = UnpremultiplyValue(a, r);
+          *dstRow++ = UnpremultiplyValue(a, g);
+          *dstRow++ = UnpremultiplyValue(a, b);
+#endif
+        }
+    }
+
+    aSurface->Unmap();
+    dest->Unmap();
+    return dest;
+}
+
 void
 gfxUtils::ConvertBGRAtoRGBA(gfxImageSurface *aSourceSurface,
                             gfxImageSurface *aDestSurface) {
@@ -181,6 +244,24 @@ gfxUtils::ConvertBGRAtoRGBA(gfxImageSurface *aSourceSurface,
             dst[2] = src[0];
             dst[3] = src[3];
         }
+    }
+}
+
+void
+gfxUtils::ConvertBGRAtoRGBA(uint8_t* aData, uint32_t aLength)
+{
+    uint8_t *src = aData;
+    uint8_t *srcEnd = src + aLength;
+
+    uint8_t buffer[4];
+    for (; src != srcEnd; src += 4) {
+        buffer[0] = src[2];
+        buffer[1] = src[1];
+        buffer[2] = src[0];
+
+        src[0] = buffer[0];
+        src[1] = buffer[1];
+        src[2] = buffer[2];
     }
 }
 
@@ -848,6 +929,76 @@ gfxUtils::ConvertYCbCrToRGB(const PlanarYCbCrData& aData,
   }
 }
 
+/* static */ TemporaryRef<DataSourceSurface>
+gfxUtils::CopySurfaceToDataSourceSurfaceWithFormat(SourceSurface* aSurface,
+                                                   SurfaceFormat aFormat)
+{
+  MOZ_ASSERT(aFormat != aSurface->GetFormat(),
+             "Unnecessary - and very expersive - surface format conversion");
+
+  Rect bounds(0, 0, aSurface->GetSize().width, aSurface->GetSize().height);
+
+  if (aSurface->GetType() != SurfaceType::DATA) {
+    // If the surface is NOT of type DATA then its data is not mapped into main
+    // memory. Format conversion is probably faster on the GPU, and by doing it
+    // there we can avoid any expensive uploads/readbacks except for (possibly)
+    // a single readback due to the unavoidable GetDataSurface() call. Using
+    // CreateOffscreenContentDrawTarget ensures the conversion happens on the
+    // GPU.
+    RefPtr<DrawTarget> dt = gfxPlatform::GetPlatform()->
+      CreateOffscreenContentDrawTarget(aSurface->GetSize(), aFormat);
+    // Using DrawSurface() here rather than CopySurface() because CopySurface
+    // is optimized for memcpy and therefore isn't good for format conversion.
+    // Using OP_OVER since in our case it's equivalent to OP_SOURCE and
+    // generally more optimized.
+    dt->DrawSurface(aSurface, bounds, bounds, DrawSurfaceOptions(),
+                    DrawOptions(1.0f, CompositionOp::OP_OVER));
+    RefPtr<SourceSurface> surface = dt->Snapshot();
+    return surface->GetDataSurface();
+  }
+
+  // If the surface IS of type DATA then it may or may not be in main memory
+  // depending on whether or not it has been mapped yet. We have no way of
+  // knowing, so we can't be sure if it's best to create a data wrapping
+  // DrawTarget for the conversion or an offscreen content DrawTarget. We could
+  // guess it's not mapped and create an offscreen content DrawTarget, but if
+  // it is then we'll end up uploading the surface data, and most likely the
+  // caller is going to be accessing the resulting surface data, resulting in a
+  // readback (both very expensive operations). Alternatively we could guess
+  // the data is mapped and create a data wrapping DrawTarget and, if the
+  // surface is not in main memory, then we will incure a readback. The latter
+  // of these two "wrong choices" is the least costly (a readback, vs an
+  // upload and a readback), and more than likely the DATA surface that we've
+  // been passed actually IS in main memory anyway. For these reasons it's most
+  // likely best to create a data wrapping DrawTarget here to do the format
+  // conversion.
+  RefPtr<DataSourceSurface> dataSurface =
+    Factory::CreateDataSourceSurface(aSurface->GetSize(), aFormat);
+  DataSourceSurface::MappedSurface map;
+  if (!dataSurface ||
+      !dataSurface->Map(DataSourceSurface::MapType::READ_WRITE, &map)) {
+    return nullptr;
+  }
+  RefPtr<DrawTarget> dt =
+    Factory::CreateDrawTargetForData(BackendType::CAIRO,
+                                     map.mData,
+                                     dataSurface->GetSize(),
+                                     map.mStride,
+                                     aFormat);
+  if (!dt) {
+    dataSurface->Unmap();
+    return nullptr;
+  }
+  // Using DrawSurface() here rather than CopySurface() because CopySurface
+  // is optimized for memcpy and therefore isn't good for format conversion.
+  // Using OP_OVER since in our case it's equivalent to OP_SOURCE and
+  // generally more optimized.
+  dt->DrawSurface(aSurface, bounds, bounds, DrawSurfaceOptions(),
+                  DrawOptions(1.0f, CompositionOp::OP_OVER));
+  dataSurface->Unmap();
+  return dataSurface.forget();
+}
+
 #ifdef MOZ_DUMP_PAINTING
 /* static */ void
 gfxUtils::WriteAsPNG(DrawTarget* aDT, const char* aFile)
@@ -925,7 +1076,13 @@ gfxUtils::CopyAsDataURL(RefPtr<gfx::SourceSurface> aSourceSurface)
   gfxUtils::CopyAsDataURL(dt.get());
 }
 
-bool gfxUtils::sDumpPaintList = getenv("MOZ_DUMP_PAINT_LIST") != 0;
+static bool sDumpPaintList = getenv("MOZ_DUMP_PAINT_LIST") != 0;
+
+/* static */ bool
+gfxUtils::DumpPaintList() {
+  return sDumpPaintList || gfxPrefs::LayoutDumpDisplayList();
+}
+
 bool gfxUtils::sDumpPainting = getenv("MOZ_DUMP_PAINT") != 0;
 bool gfxUtils::sDumpPaintingToFile = getenv("MOZ_DUMP_PAINT_TO_FILE") != 0;
 FILE *gfxUtils::sDumpPaintFile = nullptr;

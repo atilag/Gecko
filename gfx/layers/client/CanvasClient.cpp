@@ -10,7 +10,6 @@
 #include "SurfaceStream.h"              // for SurfaceStream
 #include "SurfaceTypes.h"               // for SurfaceStreamHandle
 #include "gfx2DGlue.h"                  // for ImageFormatToSurfaceFormat
-#include "gfxASurface.h"                // for gfxASurface, etc
 #include "gfxPlatform.h"                // for gfxPlatform
 #include "mozilla/gfx/BaseSize.h"       // for BaseSize
 #include "mozilla/layers/CompositableForwarder.h"
@@ -36,9 +35,15 @@ CanvasClient::CreateCanvasClient(CanvasClientType aType,
                                  CompositableForwarder* aForwarder,
                                  TextureFlags aFlags)
 {
+#ifndef MOZ_WIDGET_GONK
+  if (XRE_GetProcessType() != GeckoProcessType_Default) {
+    NS_WARNING("Most platforms still need an optimized way to share GL cross process.");
+    return new CanvasClient2D(aForwarder, aFlags);
+  }
+#endif
   if (aType == CanvasClientGLContext &&
       aForwarder->GetCompositorBackendType() == LayersBackend::LAYERS_OPENGL) {
-    aFlags |= TEXTURE_DEALLOCATE_CLIENT;
+    aFlags |= TextureFlags::DEALLOCATE_CLIENT;
     return new CanvasClientSurfaceStream(aForwarder, aFlags);
   }
   return new CanvasClient2D(aForwarder, aFlags);
@@ -61,26 +66,31 @@ CanvasClient2D::Update(gfx::IntSize aSize, ClientCanvasLayer* aLayer)
                                                 : gfxContentType::COLOR_ALPHA;
     gfxImageFormat format
       = gfxPlatform::GetPlatform()->OptimalFormatForContent(contentType);
+    TextureFlags flags = TextureFlags::DEFAULT;
+    if (mTextureFlags & TextureFlags::NEEDS_Y_FLIP) {
+      flags |= TextureFlags::NEEDS_Y_FLIP;
+    }
     mBuffer = CreateBufferTextureClient(gfx::ImageFormatToSurfaceFormat(format),
-                                        TEXTURE_FLAGS_DEFAULT,
+                                        flags,
                                         gfxPlatform::GetPlatform()->GetPreferredCanvasBackend());
-    MOZ_ASSERT(mBuffer->AsTextureClientSurface());
-    mBuffer->AsTextureClientSurface()->AllocateForSurface(aSize);
+    MOZ_ASSERT(mBuffer->CanExposeDrawTarget());
+    mBuffer->AllocateForSurface(aSize);
 
     bufferCreated = true;
   }
 
-  if (!mBuffer->Lock(OPEN_WRITE_ONLY)) {
+  if (!mBuffer->Lock(OpenMode::OPEN_WRITE_ONLY)) {
+    mBuffer = nullptr;
     return;
   }
 
   bool updated = false;
   {
     // Restrict drawTarget to a scope so that terminates before Unlock.
-    nsRefPtr<gfxASurface> surface =
-      mBuffer->AsTextureClientSurface()->GetAsSurface();
-    if (surface) {
-      aLayer->DeprecatedUpdateSurface(surface);
+    RefPtr<DrawTarget> target =
+      mBuffer->GetAsDrawTarget();
+    if (target) {
+      aLayer->UpdateTarget(target);
       updated = true;
     }
   }

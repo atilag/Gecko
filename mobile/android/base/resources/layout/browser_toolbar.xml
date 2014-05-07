@@ -12,33 +12,42 @@
     <ImageButton android:id="@+id/forward"
                  style="@style/UrlBar.ImageButton.Unused"/>
 
+    <!-- Note: any layout parameters setting the right edge of
+         this View should be matched in the url_bar_translating_edge.
+
+         Note 2: On devices where the editing mode cancel button is
+         wider than the tabs counter and nearby buttons, the url bar will
+         shrink, in which case the LayoutParams of this View are
+         changed dynamically. -->
     <ImageView android:id="@+id/url_bar_entry"
                style="@style/UrlBar.Button"
                android:layout_marginLeft="4dp"
-               android:layout_marginRight="-19dp"
+               android:layout_marginRight="-15dp"
                android:layout_marginTop="5dp"
                android:layout_marginBottom="5dp"
                android:layout_centerVertical="true"
                android:layout_toLeftOf="@+id/tabs"
-               android:paddingRight="4dp"
                android:duplicateParentState="true"
                android:clickable="false"
                android:focusable="false"
                android:src="@drawable/url_bar_entry"
                android:scaleType="fitXY"/>
 
-    <ImageView android:id="@+id/url_bar_right_edge"
+    <!-- A View that clips with url_bar_entry and translates
+         around it to animate shrinking or growing the url bar,
+         which occurs in the display/editing mode transitions. -->
+    <ImageView android:id="@+id/url_bar_translating_edge"
                style="@style/UrlBar.Button"
                android:layout_alignLeft="@id/url_bar_entry"
-               android:layout_alignRight="@id/url_bar_entry"
+               android:layout_toLeftOf="@+id/tabs"
                android:layout_alignTop="@id/url_bar_entry"
                android:layout_alignBottom="@id/url_bar_entry"
-               android:paddingRight="4dp"
+               android:layout_marginRight="-15dp"
                android:duplicateParentState="true"
                android:clickable="false"
                android:focusable="false"
                android:visibility="invisible"
-               android:src="@drawable/url_bar_right_edge"
+               android:src="@drawable/url_bar_translating_edge"
                android:scaleType="fitXY"/>
 
     <LinearLayout android:id="@+id/menu_items"
@@ -52,13 +61,13 @@
                                             android:background="@drawable/shaped_button"
                                             android:visibility="gone"/>
 
-    <org.mozilla.gecko.widget.GeckoImageView android:id="@+id/menu_icon"
-                                             style="@style/UrlBar.ImageButton"
-                                             android:layout_alignLeft="@id/menu"
-                                             android:layout_alignRight="@id/menu"
-                                             android:gravity="center_vertical"
-                                             android:src="@drawable/menu_level"
-                                             android:visibility="gone"/>
+    <org.mozilla.gecko.widget.ThemedImageView android:id="@+id/menu_icon"
+                                              style="@style/UrlBar.ImageButton"
+                                              android:layout_alignLeft="@id/menu"
+                                              android:layout_alignRight="@id/menu"
+                                              android:gravity="center_vertical"
+                                              android:src="@drawable/menu_level"
+                                              android:visibility="gone"/>
 
     <org.mozilla.gecko.toolbar.ShapedButton android:id="@+id/tabs"
                                             style="@style/UrlBar.ImageButton"
@@ -86,12 +95,28 @@
                         android:layout_marginTop="12dip"
                         android:layout_alignRight="@id/tabs"/>
 
+    <!-- Note that the edit components are invisible so that the views
+         depending on their location can properly layout. -->
+    <ImageView android:id="@+id/edit_cancel"
+               style="@style/UrlBar.ImageButton.Icon"
+               android:layout_alignParentRight="true"
+               android:src="@drawable/close_edit_mode"
+               android:layout_marginLeft="2dp"
+               android:layout_marginRight="2dp"
+               android:contentDescription="@string/edit_mode_cancel"
+               android:visibility="invisible"/>
+
+    <!-- The left margin of the cancel button is larger than the right because
+         the url bar drawable contains some whitespace, so we compensate by adding
+         a negative right margin (value determined through experimentation). -->
     <org.mozilla.gecko.toolbar.ToolbarEditLayout android:id="@+id/edit_layout"
                   style="@style/UrlBar.Button"
+                  android:layout_toLeftOf="@id/edit_cancel"
                   android:layout_marginLeft="4dp"
-                  android:layout_marginRight="4dp"
+                  android:layout_marginRight="-2dp"
                   android:paddingLeft="8dp"
-                  android:visibility="gone"/>
+                  android:paddingRight="8dp"
+                  android:visibility="invisible"/>
 
     <org.mozilla.gecko.toolbar.ToolbarDisplayLayout android:id="@+id/display_layout"
                   style="@style/UrlBar.Button"

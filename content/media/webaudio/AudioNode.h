@@ -7,7 +7,7 @@
 #ifndef AudioNode_h_
 #define AudioNode_h_
 
-#include "nsDOMEventTargetHelper.h"
+#include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/dom/AudioNodeBinding.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsAutoPtr.h"
@@ -15,6 +15,7 @@
 #include "AudioContext.h"
 #include "MediaStreamGraph.h"
 #include "WebAudioUtils.h"
+#include "mozilla/MemoryReporting.h"
 
 namespace mozilla {
 
@@ -81,7 +82,7 @@ private:
  * still alive, and will still be alive when it receives a message from the
  * engine.
  */
-class AudioNode : public nsDOMEventTargetHelper
+class AudioNode : public DOMEventTargetHelper
 {
 protected:
   // You can only use refcounting to delete this object
@@ -98,7 +99,7 @@ public:
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(AudioNode,
-                                           nsDOMEventTargetHelper)
+                                           DOMEventTargetHelper)
 
   virtual AudioBufferSourceNode* AsAudioBufferSourceNode() {
     return nullptr;
@@ -170,6 +171,16 @@ public:
       }
     }
 
+    size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
+    {
+      size_t amount = 0;
+      if (mStreamPort) {
+        amount += mStreamPort->SizeOfIncludingThis(aMallocSizeOf);
+      }
+
+      return amount;
+    }
+
     // Weak reference.
     AudioNode* mInputNode;
     nsRefPtr<MediaInputPort> mStreamPort;
@@ -207,6 +218,11 @@ public:
   // called, then the node is already inactive.
   // MarkInactive() may delete |this|.
   void MarkInactive() { Context()->UnregisterActiveNode(this); }
+
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const;
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const;
+
+  virtual const char* NodeType() const = 0;
 
 private:
   friend class AudioBufferSourceNode;

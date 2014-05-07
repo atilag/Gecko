@@ -12,8 +12,8 @@
 using namespace mozilla;
 
 JSObject*
-WebGLVertexArray::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope) {
-    return dom::WebGLVertexArrayBinding::Wrap(cx, scope, this);
+WebGLVertexArray::WrapObject(JSContext *cx) {
+    return dom::WebGLVertexArrayBinding::Wrap(cx, this);
 }
 
 WebGLVertexArray::WebGLVertexArray(WebGLContext* context)
@@ -56,7 +56,7 @@ bool WebGLVertexArray::EnsureAttrib(GLuint index, const char *info)
     return true;
 }
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(WebGLVertexArray,
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(WebGLVertexArray,
   mAttribs,
   mBoundElementArrayBuffer)
 

@@ -133,7 +133,8 @@ extern JS_FRIEND_API(JSObject *)
 JS_ObjectToOuterObject(JSContext *cx, JS::HandleObject obj);
 
 extern JS_FRIEND_API(JSObject *)
-JS_CloneObject(JSContext *cx, JSObject *obj, JSObject *proto, JSObject *parent);
+JS_CloneObject(JSContext *cx, JS::HandleObject obj, JS::HandleObject proto,
+               JS::HandleObject parent);
 
 extern JS_FRIEND_API(JSString *)
 JS_BasicObjectToString(JSContext *cx, JS::HandleObject obj);
@@ -151,11 +152,15 @@ js_ObjectClassIs(JSContext *cx, JS::HandleObject obj, js::ESClassValue classValu
 JS_FRIEND_API(const char *)
 js_ObjectClassName(JSContext *cx, JS::HandleObject obj);
 
+namespace js {
+
 JS_FRIEND_API(bool)
-js_AddObjectRoot(JSRuntime *rt, JSObject **objp);
+AddRawValueRoot(JSContext *cx, JS::Value *vp, const char *name);
 
 JS_FRIEND_API(void)
-js_RemoveObjectRoot(JSRuntime *rt, JSObject **objp);
+RemoveRawValueRoot(JSContext *cx, JS::Value *vp);
+
+} /* namespace js */
 
 #ifdef JS_DEBUG
 
@@ -378,13 +383,13 @@ proxy_Slice(JSContext *cx, JS::HandleObject proxy, uint32_t begin, uint32_t end,
 /*
  * A class of objects that return source code on demand.
  *
- * When code is compiled with CompileOptions::LAZY_SOURCE, SpiderMonkey
- * doesn't retain the source code (and doesn't do lazy bytecode
- * generation). If we ever need the source code, say, in response to a call
- * to Function.prototype.toSource or Debugger.Source.prototype.text, then
- * we call the 'load' member function of the instance of this class that
- * has hopefully been registered with the runtime, passing the code's URL,
- * and hope that it will be able to find the source.
+ * When code is compiled with setSourceIsLazy(true), SpiderMonkey doesn't
+ * retain the source code (and doesn't do lazy bytecode generation). If we ever
+ * need the source code, say, in response to a call to Function.prototype.
+ * toSource or Debugger.Source.prototype.text, then we call the 'load' member
+ * function of the instance of this class that has hopefully been registered
+ * with the runtime, passing the code's URL, and hope that it will be able to
+ * find the source.
  */
 class SourceHook {
   public:
@@ -399,7 +404,7 @@ class SourceHook {
 };
 
 /*
- * Have |rt| use |hook| to retrieve LAZY_SOURCE source code. See the
+ * Have |rt| use |hook| to retrieve lazily-retrieved source code. See the
  * comments for SourceHook. The runtime takes ownership of the hook, and
  * will delete it when the runtime itself is deleted, or when a new hook is
  * set.
@@ -1334,6 +1339,14 @@ extern JS_FRIEND_API(uint32_t)
 JS_GetArrayBufferByteLength(JSObject *obj);
 
 /*
+ * Check whether the obj is ArrayBufferObject and memory mapped. Note that this
+ * may return false if a security wrapper is encountered that denies the
+ * unwrapping.
+ */
+extern JS_FRIEND_API(bool)
+JS_IsMappedArrayBufferObject(JSObject *obj);
+
+/*
  * Return the number of elements in a typed array.
  *
  * |obj| must have passed a JS_IsTypedArrayObject/JS_Is*Array test, or somehow
@@ -1416,7 +1429,7 @@ JS_GetFloat64ArrayData(JSObject *obj);
  * as the object is live.
  */
 extern JS_FRIEND_API(uint8_t *)
-JS_GetStableArrayBufferData(JSContext *cx, JSObject *obj);
+JS_GetStableArrayBufferData(JSContext *cx, JS::HandleObject obj);
 
 /*
  * Same as above, but for any kind of ArrayBufferView. Prefer the type-specific
@@ -1431,13 +1444,25 @@ JS_GetArrayBufferViewData(JSObject *obj);
  * object that would return true for JS_IsArrayBufferViewObject().
  */
 extern JS_FRIEND_API(JSObject *)
-JS_GetArrayBufferViewBuffer(JSObject *obj);
+JS_GetArrayBufferViewBuffer(JSContext *cx, JS::HandleObject obj);
+
+typedef enum {
+    ChangeData,
+    KeepData
+} NeuterDataDisposition;
 
 /*
  * Set an ArrayBuffer's length to 0 and neuter all of its views.
+ *
+ * The |changeData| argument is a hint to inform internal behavior with respect
+ * to the internal pointer to the ArrayBuffer's data after being neutered.
+ * There is no guarantee it will be respected.  But if it is respected, the
+ * ArrayBuffer's internal data pointer will, or will not, have changed
+ * accordingly.
  */
 extern JS_FRIEND_API(bool)
-JS_NeuterArrayBuffer(JSContext *cx, JS::HandleObject obj);
+JS_NeuterArrayBuffer(JSContext *cx, JS::HandleObject obj,
+                     NeuterDataDisposition changeData);
 
 /*
  * Check whether obj supports JS_GetDataView* APIs.
@@ -2041,7 +2066,8 @@ DefaultValue(JSContext *cx, JS::HandleObject obj, JSType hint, JS::MutableHandle
  */
 extern JS_FRIEND_API(bool)
 CheckDefineProperty(JSContext *cx, JS::HandleObject obj, JS::HandleId id, JS::HandleValue value,
-                    JSPropertyOp getter, JSStrictPropertyOp setter, unsigned attrs);
+                    unsigned attrs,
+                    JSPropertyOp getter = nullptr, JSStrictPropertyOp setter = nullptr);
 
 } /* namespace js */
 

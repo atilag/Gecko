@@ -58,7 +58,8 @@ AudioNodeExternalInputStream::GetTrackMapEntry(const StreamBuffer::Track& aTrack
   // Create a speex resampler with the same sample rate and number of channels
   // as the track.
   SpeexResamplerState* resampler = nullptr;
-  uint32_t channelCount = (*ci).mChannelData.Length();
+  uint32_t channelCount = std::min((*ci).mChannelData.Length(),
+                                   WebAudioUtils::MaxChannelCount);
   if (aTrack.GetRate() != mSampleRate) {
     resampler = speex_resampler_init(channelCount,
       aTrack.GetRate(), mSampleRate, SPEEX_RESAMPLER_QUALITY_DEFAULT, nullptr);
@@ -105,15 +106,6 @@ ResampleChannelBuffer(SpeexResamplerState* aResampler, uint32_t aChannel,
     aOutput->SetLength(prevLength + out);
   }
 }
-
-class SharedChannelArrayBuffer : public ThreadSharedObject {
-public:
-  SharedChannelArrayBuffer(nsTArray<nsTArray<float> >* aBuffers)
-  {
-    mBuffers.SwapElements(*aBuffers);
-  }
-  nsTArray<nsTArray<float> > mBuffers;
-};
 
 void
 AudioNodeExternalInputStream::TrackMapEntry::ResampleChannels(const nsTArray<const void*>& aBuffers,
@@ -177,7 +169,7 @@ AudioNodeExternalInputStream::TrackMapEntry::ResampleChannels(const nsTArray<con
   }
 
   uint32_t length = resampledBuffers[0].Length();
-  nsRefPtr<ThreadSharedObject> buf = new SharedChannelArrayBuffer(&resampledBuffers);
+  nsRefPtr<ThreadSharedObject> buf = new SharedChannelArrayBuffer<float>(&resampledBuffers);
   mResampledData.AppendFrames(buf.forget(), bufferPtrs, length);
 }
 
@@ -412,7 +404,7 @@ AudioNodeExternalInputStream::ProcessInput(GraphTime aFrom, GraphTime aTo,
                               std::min(inputTrackEndPoint, inputEndTicks));
         }
         // Pad if we're looking past the end of the track
-        segment.AppendNullData(std::max<TrackTicks>(0, inputEndTicks - inputTrackEndPoint));
+        segment.AppendNullData(ticks - segment.GetDuration());
       }
     }
 
@@ -436,19 +428,22 @@ AudioNodeExternalInputStream::ProcessInput(GraphTime aFrom, GraphTime aTo,
     }
   }
 
-  uint32_t outputChannels = ComputeFinalOuputChannelCount(inputChannels);
-
-  if (outputChannels) {
-    AllocateAudioBlock(outputChannels, &mLastChunks[0]);
+  uint32_t accumulateIndex = 0;
+  if (inputChannels) {
     nsAutoTArray<float,GUESS_AUDIO_CHANNELS*WEBAUDIO_BLOCK_SIZE> downmixBuffer;
     for (uint32_t i = 0; i < audioSegments.Length(); ++i) {
       AudioChunk tmpChunk;
       ConvertSegmentToAudioBlock(&audioSegments[i], &tmpChunk);
       if (!tmpChunk.IsNull()) {
-        AccumulateInputChunk(i, tmpChunk, &mLastChunks[0], &downmixBuffer);
+        if (accumulateIndex == 0) {
+          AllocateAudioBlock(inputChannels, &mLastChunks[0]);
+        }
+        AccumulateInputChunk(accumulateIndex, tmpChunk, &mLastChunks[0], &downmixBuffer);
+        accumulateIndex++;
       }
     }
-  } else {
+  }
+  if (accumulateIndex == 0) {
     mLastChunks[0].SetNull(WEBAUDIO_BLOCK_SIZE);
   }
   mCurrentOutputPosition += WEBAUDIO_BLOCK_SIZE;

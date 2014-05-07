@@ -72,6 +72,11 @@ public:
       NS_DispatchToMainThread(transfer);
     }
   }
+
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
 };
 
 AnalyserNode::AnalyserNode(AudioContext* aContext)
@@ -90,10 +95,26 @@ AnalyserNode::AnalyserNode(AudioContext* aContext)
   AllocateBuffer();
 }
 
-JSObject*
-AnalyserNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+size_t
+AnalyserNode::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
-  return AnalyserNodeBinding::Wrap(aCx, aScope, this);
+  size_t amount = AudioNode::SizeOfExcludingThis(aMallocSizeOf);
+  amount += mAnalysisBlock.SizeOfExcludingThis(aMallocSizeOf);
+  amount += mBuffer.SizeOfExcludingThis(aMallocSizeOf);
+  amount += mOutputBuffer.SizeOfExcludingThis(aMallocSizeOf);
+  return amount;
+}
+
+size_t
+AnalyserNode::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
+{
+  return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+}
+
+JSObject*
+AnalyserNode::WrapObject(JSContext* aCx)
+{
+  return AnalyserNodeBinding::Wrap(aCx, this);
 }
 
 void

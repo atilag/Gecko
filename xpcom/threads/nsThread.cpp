@@ -24,6 +24,7 @@
 #include "prlog.h"
 #include "nsIObserverService.h"
 #include "mozilla/HangMonitor.h"
+#include "mozilla/IOInterposer.h"
 #include "mozilla/Services.h"
 #include "nsXPCOMPrivate.h"
 #include "mozilla/ChaosMode.h"
@@ -56,6 +57,11 @@
 #endif
 #ifdef NS_FUNCTION_TIMER
 #include "nsCRT.h"
+#endif
+
+#ifdef MOZ_TASK_TRACER
+#include "GeckoTaskTracer.h"
+using namespace mozilla::tasktracer;
 #endif
 
 using namespace mozilla;
@@ -93,7 +99,7 @@ public:
 
 NS_IMETHODIMP_(MozExternalRefCountType) nsThreadClassInfo::AddRef() { return 2; }
 NS_IMETHODIMP_(MozExternalRefCountType) nsThreadClassInfo::Release() { return 1; }
-NS_IMPL_QUERY_INTERFACE1(nsThreadClassInfo, nsIClassInfo)
+NS_IMPL_QUERY_INTERFACE(nsThreadClassInfo, nsIClassInfo)
 
 NS_IMETHODIMP
 nsThreadClassInfo::GetInterfaces(uint32_t *count, nsIID ***array)
@@ -164,8 +170,8 @@ NS_INTERFACE_MAP_BEGIN(nsThread)
     foundInterface = static_cast<nsIClassInfo*>(&sThreadClassInfo);
   } else
 NS_INTERFACE_MAP_END
-NS_IMPL_CI_INTERFACE_GETTER4(nsThread, nsIThread, nsIThreadInternal,
-                             nsIEventTarget, nsISupportsPriority)
+NS_IMPL_CI_INTERFACE_GETTER(nsThread, nsIThread, nsIThreadInternal,
+                            nsIEventTarget, nsISupportsPriority)
 
 //-----------------------------------------------------------------------------
 
@@ -291,6 +297,8 @@ nsThread::ThreadFunc(void *arg)
   // Inform the ThreadManager
   nsThreadManager::get()->RegisterCurrentThread(self);
 
+  mozilla::IOInterposer::RegisterCurrentThread();
+
   // Wait for and process startup event
   nsCOMPtr<nsIRunnable> event;
   if (!self->GetEvent(true, getter_AddRefs(event))) {
@@ -328,6 +336,8 @@ nsThread::ThreadFunc(void *arg)
     }
   }
 
+  mozilla::IOInterposer::UnregisterCurrentThread();
+
   // Inform the threadmanager that this thread is going away
   nsThreadManager::get()->UnregisterCurrentThread(self);
 
@@ -337,6 +347,10 @@ nsThread::ThreadFunc(void *arg)
 
   // Release any observer of the thread here.
   self->SetObserver(nullptr);
+
+#ifdef MOZ_TASK_TRACER
+  FreeTraceInfo();
+#endif
 
   NS_RELEASE(self);
 }
@@ -440,6 +454,11 @@ nsThread::DispatchInternal(nsIRunnable *event, uint32_t flags,
     return NS_ERROR_ILLEGAL_DURING_SHUTDOWN;
   }
 
+#ifdef MOZ_TASK_TRACER
+  nsRefPtr<nsIRunnable> tracedRunnable = CreateTracedRunnable(event);
+  event = tracedRunnable;
+#endif
+
   if (flags & DISPATCH_SYNC) {
     nsThread *thread = nsThreadManager::get()->GetCurrentThread();
     if (NS_WARN_IF(!thread))
@@ -448,7 +467,7 @@ nsThread::DispatchInternal(nsIRunnable *event, uint32_t flags,
     // XXX we should be able to do something better here... we should
     //     be able to monitor the slot occupied by this event and use
     //     that to tell us when the event has been processed.
- 
+
     nsRefPtr<nsThreadSyncDispatch> wrapper =
         new nsThreadSyncDispatch(thread, event);
     if (!wrapper)
@@ -458,8 +477,9 @@ nsThread::DispatchInternal(nsIRunnable *event, uint32_t flags,
     if (NS_FAILED(rv))
       return rv;
 
+    // Allows waiting; ensure no locks are held that would deadlock us!
     while (wrapper->IsPending())
-      NS_ProcessNextEvent(thread);
+      NS_ProcessNextEvent(thread, true);
     return wrapper->Result();
   }
 
@@ -534,8 +554,9 @@ nsThread::Shutdown()
   // after setting mShutdownContext just before exiting.
   
   // Process events on the current thread until we receive a shutdown ACK.
+  // Allows waiting; ensure no locks are held that would deadlock us!
   while (!context.shutdownAck)
-    NS_ProcessNextEvent(context.joiningThread);
+    NS_ProcessNextEvent(context.joiningThread, true);
 
   // Now, it should be safe to join without fear of dead-locking.
 
@@ -913,7 +934,7 @@ nsThreadSyncDispatch::Run()
 
 //-----------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS1(nsThread::nsNestedEventTarget, nsIEventTarget)
+NS_IMPL_ISUPPORTS(nsThread::nsNestedEventTarget, nsIEventTarget)
 
 NS_IMETHODIMP
 nsThread::nsNestedEventTarget::Dispatch(nsIRunnable *event, uint32_t flags)

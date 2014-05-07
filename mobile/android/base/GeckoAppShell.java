@@ -8,16 +8,12 @@ package org.mozilla.gecko;
 import java.io.BufferedReader;
 import java.io.Closeable;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.net.Proxy;
-import java.net.URL;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -34,7 +30,6 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import org.mozilla.gecko.favicons.OnFaviconLoadedListener;
 import org.mozilla.gecko.favicons.decoders.FaviconDecoder;
 import org.mozilla.gecko.gfx.BitmapUtils;
-import org.mozilla.gecko.gfx.GeckoLayerClient;
 import org.mozilla.gecko.gfx.LayerView;
 import org.mozilla.gecko.gfx.PanZoomController;
 import org.mozilla.gecko.mozglue.GeckoLoader;
@@ -45,6 +40,7 @@ import org.mozilla.gecko.mozglue.generatorannotations.WrapElementForJNI;
 import org.mozilla.gecko.prompts.PromptService;
 import org.mozilla.gecko.util.GeckoEventListener;
 import org.mozilla.gecko.util.HardwareUtils;
+import org.mozilla.gecko.util.NativeJSContainer;
 import org.mozilla.gecko.util.ProxySelector;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.webapp.Allocator;
@@ -110,7 +106,6 @@ import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.webkit.MimeTypeMap;
 import android.widget.AbsoluteLayout;
-import android.widget.Toast;
 
 public class GeckoAppShell
 {
@@ -139,8 +134,6 @@ public class GeckoAppShell
 
     static private int sDensityDpi = 0;
     static private int sScreenDepth = 0;
-
-    private static final EventDispatcher sEventDispatcher = new EventDispatcher();
 
     /* Default colors. */
     private static final float[] DEFAULT_LAUNCHER_ICON_HSV = { 32.0f, 1.0f, 1.0f };
@@ -191,7 +184,7 @@ public class GeckoAppShell
 
     // helper methods
     //    public static native void setSurfaceView(GeckoSurfaceView sv);
-    public static native void setLayerClient(GeckoLayerClient client);
+    public static native void setLayerClient(Object client);
     public static native void onResume();
     public static void callObserver(String observerKey, String topic, String data) {
         sendEventToGecko(GeckoEvent.createCallObserverEvent(observerKey, topic, data));
@@ -319,7 +312,7 @@ public class GeckoAppShell
         GeckoAppShell.nativeInit();
 
         if (sLayerView != null)
-            GeckoAppShell.setLayerClient(sLayerView.getLayerClient());
+            GeckoAppShell.setLayerClient(sLayerView.getLayerClientObject());
 
         // First argument is the .apk path
         String combinedArgs = apkPath + " -greomni " + apkPath;
@@ -329,6 +322,16 @@ public class GeckoAppShell
             combinedArgs += " -url " + url;
         if (type != null)
             combinedArgs += " " + type;
+
+        // In un-official builds, we want to load Javascript resources fresh
+        // with each build.  In official builds, the startup cache is purged by
+        // the buildid mechanism, but most un-official builds don't bump the
+        // buildid, so we purge here instead.
+        if (!AppConstants.MOZILLA_OFFICIAL) {
+            Log.w(LOGTAG, "STARTUP PERFORMANCE WARNING: un-official build: purging the " +
+                          "startup (JavaScript) caches.");
+            combinedArgs += " -purgecaches";
+        }
 
         DisplayMetrics metrics = getContext().getResources().getDisplayMetrics();
         combinedArgs += " -width " + metrics.widthPixels + " -height " + metrics.heightPixels;
@@ -704,6 +707,43 @@ public class GeckoAppShell
     }
 
     @WrapElementForJNI
+    public static void startMonitoringGamepad() {
+        if (Build.VERSION.SDK_INT < 9) {
+            return;
+        }
+        ThreadUtils.postToUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    AndroidGamepadManager.startup();
+                }
+            });
+    }
+
+    @WrapElementForJNI
+    public static void stopMonitoringGamepad() {
+        if (Build.VERSION.SDK_INT < 9) {
+            return;
+        }
+
+        ThreadUtils.postToUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    AndroidGamepadManager.shutdown();
+                }
+            });
+    }
+
+    @WrapElementForJNI
+    public static void gamepadAdded(final int device_id, final int service_id) {
+        ThreadUtils.postToUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    AndroidGamepadManager.gamepadAdded(device_id, service_id);
+                }
+            });
+    }
+
+    @WrapElementForJNI
     public static void moveTaskToBack() {
         if (getGeckoInterface() != null)
             getGeckoInterface().getActivity().moveTaskToBack(true);
@@ -833,7 +873,7 @@ public class GeckoAppShell
             shortcutIntent.setAction(GeckoApp.ACTION_BOOKMARK);
             shortcutIntent.setData(Uri.parse(aURI));
             shortcutIntent.setClassName(AppConstants.ANDROID_PACKAGE_NAME,
-                                        AppConstants.BROWSER_INTENT_CLASS);
+                                        AppConstants.BROWSER_INTENT_CLASS_NAME);
         }
 
         Intent intent = new Intent();
@@ -871,7 +911,7 @@ public class GeckoAppShell
                     shortcutIntent = new Intent();
                     shortcutIntent.setAction(GeckoApp.ACTION_BOOKMARK);
                     shortcutIntent.setClassName(AppConstants.ANDROID_PACKAGE_NAME,
-                                                AppConstants.BROWSER_INTENT_CLASS);
+                                                AppConstants.BROWSER_INTENT_CLASS_NAME);
                     shortcutIntent.setData(Uri.parse(aURI));
                 }
         
@@ -2250,34 +2290,6 @@ public class GeckoAppShell
         }
     }
 
-    /**
-     * Adds a listener for a gecko event.
-     * This method is thread-safe and may be called at any time. In particular, calling it
-     * with an event that is currently being processed has the properly-defined behaviour that
-     * any added listeners will not be invoked on the event currently being processed, but
-     * will be invoked on future events of that type.
-     */
-    @RobocopTarget
-    public static void registerEventListener(String event, GeckoEventListener listener) {
-        sEventDispatcher.registerEventListener(event, listener);
-    }
-
-    public static EventDispatcher getEventDispatcher() {
-        return sEventDispatcher;
-    }
-
-    /**
-     * Remove a previously-registered listener for a gecko event.
-     * This method is thread-safe and may be called at any time. In particular, calling it
-     * with an event that is currently being processed has the properly-defined behaviour that
-     * any removed listeners will still be invoked on the event currently being processed, but
-     * will not be invoked on future events of that type.
-     */
-    @RobocopTarget
-    public static void unregisterEventListener(String event, GeckoEventListener listener) {
-        sEventDispatcher.unregisterEventListener(event, listener);
-    }
-
     /*
      * Battery API related methods.
      */
@@ -2287,13 +2299,9 @@ public class GeckoAppShell
     }
 
     @WrapElementForJNI(stubName = "HandleGeckoMessageWrapper")
-    public static void handleGeckoMessage(final String message) {
-        ThreadUtils.postToBackgroundThread(new Runnable() {
-            @Override
-            public void run() {
-                sEventDispatcher.dispatchEvent(message);
-            }
-        });
+    public static void handleGeckoMessage(final NativeJSContainer message) {
+        EventDispatcher.getInstance().dispatchEvent(message);
+        message.dispose();
     }
 
     @WrapElementForJNI

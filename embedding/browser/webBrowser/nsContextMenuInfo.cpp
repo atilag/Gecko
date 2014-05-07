@@ -34,7 +34,7 @@
 // class nsContextMenuInfo
 //*****************************************************************************
 
-NS_IMPL_ISUPPORTS1(nsContextMenuInfo, nsIContextMenuInfo)
+NS_IMPL_ISUPPORTS(nsContextMenuInfo, nsIContextMenuInfo)
 
 nsContextMenuInfo::nsContextMenuInfo()
 {
@@ -310,7 +310,7 @@ nsContextMenuInfo::GetBackgroundImageRequestInternal(nsIDOMNode *aDOMNode, imgRe
 
           return il->LoadImage(bgUri, nullptr, nullptr, principal, nullptr,
                                nullptr, nullptr, nsIRequest::LOAD_NORMAL,
-                               nullptr, channelPolicy, aRequest);
+                               nullptr, channelPolicy, EmptyString(), aRequest);
         }
       }
 

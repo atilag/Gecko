@@ -111,36 +111,104 @@ LBlock::getExitMoveGroup(TempAllocator &alloc)
 }
 
 static size_t
-TotalOperandCount(MResumePoint *mir)
+TotalOperandCount(LRecoverInfo *recoverInfo)
 {
-    size_t accum = mir->numOperands();
-    while ((mir = mir->caller()))
-        accum += mir->numOperands();
+    LRecoverInfo::OperandIter it(recoverInfo->begin());
+    LRecoverInfo::OperandIter end(recoverInfo->end());
+    size_t accum = 0;
+
+    for (; it != end; ++it) {
+        if (!it->isRecoveredOnBailout())
+            accum++;
+    }
     return accum;
 }
 
-LRecoverInfo::LRecoverInfo(MResumePoint *mir)
-  : mir_(mir),
+LRecoverInfo::LRecoverInfo(TempAllocator &alloc)
+  : instructions_(alloc),
     recoverOffset_(INVALID_RECOVER_OFFSET)
 { }
 
 LRecoverInfo *
 LRecoverInfo::New(MIRGenerator *gen, MResumePoint *mir)
 {
-    LRecoverInfo *recover = new(gen->alloc()) LRecoverInfo(mir);
-    if (!recover)
+    LRecoverInfo *recoverInfo = new(gen->alloc()) LRecoverInfo(gen->alloc());
+    if (!recoverInfo || !recoverInfo->init(mir))
         return nullptr;
 
-    IonSpew(IonSpew_Snapshots, "Generating LIR recover %p from MIR (%p)",
-            (void *)recover, (void *)mir);
+    IonSpew(IonSpew_Snapshots, "Generating LIR recover info %p from MIR (%p)",
+            (void *)recoverInfo, (void *)mir);
 
-    return recover;
+    return recoverInfo;
 }
 
-LSnapshot::LSnapshot(LRecoverInfo *recover, BailoutKind kind)
-  : numSlots_(TotalOperandCount(recover->mir()) * BOX_PIECES),
+bool
+LRecoverInfo::appendOperands(MNode *ins)
+{
+    for (size_t i = 0, end = ins->numOperands(); i < end; i++) {
+        MDefinition *def = ins->getOperand(i);
+
+        // As there is no cycle in the data-flow (without MPhi), checking for
+        // isInWorkList implies that the definition is already in the
+        // instruction vector, and not processed by a caller of the current
+        // function.
+        if (def->isRecoveredOnBailout() && !def->isInWorklist()) {
+            if (!appendDefinition(def))
+                return false;
+        }
+    }
+
+    return true;
+}
+
+bool
+LRecoverInfo::appendDefinition(MDefinition *def)
+{
+    MOZ_ASSERT(def->isRecoveredOnBailout());
+    def->setInWorklist();
+    if (!appendOperands(def))
+        return false;
+    return instructions_.append(def);
+}
+
+bool
+LRecoverInfo::appendResumePoint(MResumePoint *rp)
+{
+    if (rp->caller() && !appendResumePoint(rp->caller()))
+        return false;
+
+    if (!appendOperands(rp))
+        return false;
+
+    return instructions_.append(rp);
+}
+
+bool
+LRecoverInfo::init(MResumePoint *rp)
+{
+    // Sort operations in the order in which we need to restore the stack. This
+    // implies that outer frames, as well as operations needed to recover the
+    // current frame, are located before the current frame. The inner-most
+    // resume point should be the last element in the list.
+    if (!appendResumePoint(rp))
+        return false;
+
+    // Remove temporary flags from all definitions.
+    for (MNode **it = begin(); it != end(); it++) {
+        if (!(*it)->isDefinition())
+            continue;
+
+        (*it)->toDefinition()->setNotInWorklist();
+    }
+
+    MOZ_ASSERT(mir() == rp);
+    return true;
+}
+
+LSnapshot::LSnapshot(LRecoverInfo *recoverInfo, BailoutKind kind)
+  : numSlots_(TotalOperandCount(recoverInfo) * BOX_PIECES),
     slots_(nullptr),
-    recoverInfo_(recover),
+    recoverInfo_(recoverInfo),
     snapshotOffset_(INVALID_SNAPSHOT_OFFSET),
     bailoutId_(INVALID_BAILOUT_ID),
     bailoutKind_(kind)
@@ -177,24 +245,16 @@ LSnapshot::rewriteRecoveredInput(LUse input)
     }
 }
 
-bool
-LPhi::init(MIRGenerator *gen)
-{
-    inputs_ = gen->allocate<LAllocation>(numInputs_);
-    return !!inputs_;
-}
-
-LPhi::LPhi(MPhi *mir)
-  : numInputs_(mir->numOperands())
-{
-}
-
 LPhi *
 LPhi::New(MIRGenerator *gen, MPhi *ins)
 {
-    LPhi *phi = new(gen->alloc()) LPhi(ins);
-    if (!phi->init(gen))
+    LPhi *phi = new (gen->alloc()) LPhi();
+    LAllocation *inputs = gen->allocate<LAllocation>(ins->numOperands());
+    if (!inputs)
         return nullptr;
+
+    phi->inputs_ = inputs;
+    phi->setMir(ins);
     return phi;
 }
 
@@ -356,8 +416,6 @@ LInstruction::dump(FILE *fp)
     fprintf(fp, "} <- ");
 
     printName(fp);
-
-
     printInfo(fp);
 
     if (numTemps()) {
@@ -369,13 +427,13 @@ LInstruction::dump(FILE *fp)
         }
         fprintf(fp, ")");
     }
-    fprintf(stderr, "\n");
 }
 
 void
 LInstruction::dump()
 {
-    return dump(stderr);
+    dump(stderr);
+    fprintf(stderr, "\n");
 }
 
 void

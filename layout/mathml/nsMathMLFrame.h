@@ -98,6 +98,12 @@ public:
     return 0;
   }
 
+  bool
+  IsMrowLike() MOZ_OVERRIDE
+  {
+    return false;
+  }
+
   // helper to give a style context suitable for doing the stretching to the
   // MathMLChar. Frame classes that use this should make the extra style contexts
   // accessible to the Style System via Get/Set AdditionalStyleContext.
@@ -105,8 +111,7 @@ public:
   ResolveMathMLCharStyle(nsPresContext*  aPresContext,
                          nsIContent*      aContent,
                          nsStyleContext*  aParenStyleContext,
-                         nsMathMLChar*    aMathMLChar,
-                         bool             aIsMutableChar);
+                         nsMathMLChar*    aMathMLChar);
 
   // helper to get the mEmbellishData of a frame
   // The MathML REC precisely defines an "embellished operator" as:

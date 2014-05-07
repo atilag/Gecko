@@ -122,7 +122,7 @@ CheckQuotaHelper::GetQuotaPermission(nsIPrincipal* aPrincipal)
                "Chrome windows shouldn't track quota!");
 
   nsCOMPtr<nsIPermissionManager> pm =
-    do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
+    services::GetPermissionManager();
   NS_ENSURE_TRUE(pm, nsIPermissionManager::DENY_ACTION);
 
   uint32_t permission;
@@ -134,9 +134,9 @@ CheckQuotaHelper::GetQuotaPermission(nsIPrincipal* aPrincipal)
   return permission;
 }
 
-NS_IMPL_ISUPPORTS3(CheckQuotaHelper, nsIRunnable,
-                   nsIInterfaceRequestor,
-                   nsIObserver)
+NS_IMPL_ISUPPORTS(CheckQuotaHelper, nsIRunnable,
+                  nsIInterfaceRequestor,
+                  nsIObserver)
 
 NS_IMETHODIMP
 CheckQuotaHelper::Run()
@@ -161,7 +161,7 @@ CheckQuotaHelper::Run()
         NS_ENSURE_TRUE(sop, NS_ERROR_FAILURE);
 
         nsCOMPtr<nsIPermissionManager> permissionManager =
-          do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
+          services::GetPermissionManager();
         NS_ENSURE_STATE(permissionManager);
 
         rv = permissionManager->AddFromPrincipal(sop->GetPrincipal(),

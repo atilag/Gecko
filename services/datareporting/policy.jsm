@@ -26,9 +26,11 @@ const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 #endif
 
+Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Promise.jsm");
 Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://services-common/utils.js");
+Cu.import("resource://gre/modules/UpdateChannel.jsm");
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -288,8 +290,19 @@ this.DataReportingPolicy = function (prefs, healthReportPrefs, listener) {
   this._healthReportPrefs = healthReportPrefs;
   this._listener = listener;
 
-  // If we've never run before, record the current time.
-  if (!this.firstRunDate.getTime()) {
+  // If the policy version has changed, reset all preferences, so that
+  // the notification reappears.
+  let acceptedVersion = this._prefs.get("dataSubmissionPolicyAcceptedVersion");
+  if (typeof(acceptedVersion) == "number" &&
+      acceptedVersion < this.minimumPolicyVersion) {
+    this._log.info("policy version has changed - resetting all prefs");
+    // We don't want to delay the notification in this case.
+    let firstRunToRestore = this.firstRunDate;
+    this._prefs.resetBranch();
+    this.firstRunDate = firstRunToRestore.getTime() ?
+                        firstRunToRestore : this.now();
+  } else if (!this.firstRunDate.getTime()) {
+    // If we've never run before, record the current time.
     this.firstRunDate = this.now();
   }
 
@@ -495,6 +508,18 @@ this.DataReportingPolicy.prototype = Object.freeze({
   },
 
   /**
+   * The minimum policy version which for dataSubmissionPolicyAccepted to
+   * to be valid.
+   */
+  get minimumPolicyVersion() {
+    // First check if the current channel has an ove
+    let channel = UpdateChannel.get(false);
+    let channelPref = this._prefs.get("minimumPolicyVersion.channel-" + channel);
+    return channelPref !== undefined ?
+           channelPref : this._prefs.get("minimumPolicyVersion", 1);
+  },
+
+  /**
    * Whether the user has accepted that data submission can occur.
    *
    * This overrides dataSubmissionEnabled.
@@ -506,10 +531,12 @@ this.DataReportingPolicy.prototype = Object.freeze({
 
   set dataSubmissionPolicyAccepted(value) {
     this._prefs.set("dataSubmissionPolicyAccepted", !!value);
-  },
-
-  set dataSubmissionPolicyAcceptedVersion(value) {
-    this._prefs.set("dataSubmissionPolicyAcceptedVersion", value);
+    if (!!value) {
+      let currentPolicyVersion = this._prefs.get("currentPolicyVersion", 1);
+      this._prefs.set("dataSubmissionPolicyAcceptedVersion", currentPolicyVersion);
+    } else {
+      this._prefs.reset("dataSubmissionPolicyAcceptedVersion");
+    }
   },
 
   /**
@@ -684,7 +711,6 @@ this.DataReportingPolicy.prototype = Object.freeze({
     this.dataSubmissionPolicyResponseDate = this.now();
     this.dataSubmissionPolicyResponseType = "accepted-" + reason;
     this.dataSubmissionPolicyAccepted = true;
-    this.dataSubmissionPolicyAcceptedVersion = 1;
   },
 
   /**
@@ -913,7 +939,7 @@ this.DataReportingPolicy.prototype = Object.freeze({
 
       let deferred = Promise.defer();
 
-      deferred.promise.then(onComplete, function onError(error) {
+      deferred.promise.then(onComplete, (error) => {
         this._log.warn("Data policy notification presentation failed: " +
                        CommonUtils.exceptionStr(error));
       });
@@ -996,7 +1022,7 @@ this.DataReportingPolicy.prototype = Object.freeze({
 
     let onError = function onError(error) {
       this._log.error("Error when handling data submission result: " +
-                      CommonUtils.exceptionStr(result));
+                      CommonUtils.exceptionStr(error));
       this._inProgressSubmissionRequest = null;
       this._handleSubmissionFailure();
     }.bind(this);

@@ -11,8 +11,8 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_3(AudioProcessingEvent, Event,
-                                     mInputBuffer, mOutputBuffer, mNode)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(AudioProcessingEvent, Event,
+                                   mInputBuffer, mOutputBuffer, mNode)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(AudioProcessingEvent)
 NS_INTERFACE_MAP_END_INHERITING(Event)
@@ -31,9 +31,9 @@ AudioProcessingEvent::AudioProcessingEvent(ScriptProcessorNode* aOwner,
 }
 
 JSObject*
-AudioProcessingEvent::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+AudioProcessingEvent::WrapObject(JSContext* aCx)
 {
-  return AudioProcessingEventBinding::Wrap(aCx, aScope, this);
+  return AudioProcessingEventBinding::Wrap(aCx, this);
 }
 
 void

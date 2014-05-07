@@ -13,7 +13,7 @@
 #include "mozilla/dom/BindingDeclarations.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/dom/PromiseBinding.h"
-#include "mozilla/dom/TypedArray.h"
+#include "mozilla/dom/ToJSValue.h"
 #include "nsWrapperCache.h"
 #include "nsAutoPtr.h"
 #include "js/TypeDecls.h"
@@ -55,6 +55,8 @@ class Promise MOZ_FINAL : public nsISupports,
   friend class PromiseResolverTask;
   friend class PromiseTask;
   friend class PromiseReportRejectFeature;
+  friend class PromiseWorkerProxy;
+  friend class PromiseWorkerProxyRunnable;
   friend class RejectPromiseCallback;
   friend class ResolvePromiseCallback;
   friend class WorkerPromiseResolverTask;
@@ -78,15 +80,17 @@ public:
                    JS::Handle<JS::Value> aValue);
 
   // Helpers for using Promise from C++.
-  // Most DOM objects are handled already.  To add a new type T, such as ints,
-  // or dictionaries, add an ArgumentToJSVal overload below.
+  // Most DOM objects are handled already.  To add a new type T, add a
+  // ToJSValue overload in ToJSValue.h.
+  // aArg is a const reference so we can pass rvalues like integer constants
   template <typename T>
-  void MaybeResolve(T& aArg) {
+  void MaybeResolve(const T& aArg) {
     MaybeSomething(aArg, &Promise::MaybeResolve);
   }
 
+  // aArg is a const reference so we can pass rvalues like NS_ERROR_*
   template <typename T>
-  void MaybeReject(T& aArg) {
+  void MaybeReject(const T& aArg) {
     MaybeSomething(aArg, &Promise::MaybeReject);
   }
 
@@ -98,7 +102,7 @@ public:
   }
 
   virtual JSObject*
-  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   static already_AddRefed<Promise>
   Constructor(const GlobalObject& aGlobal, PromiseInit& aInit,
@@ -121,10 +125,11 @@ public:
          JS::Handle<JS::Value> aValue, ErrorResult& aRv);
 
   already_AddRefed<Promise>
-  Then(AnyCallback* aResolveCallback, AnyCallback* aRejectCallback);
+  Then(JSContext* aCx, AnyCallback* aResolveCallback,
+       AnyCallback* aRejectCallback);
 
   already_AddRefed<Promise>
-  Catch(AnyCallback* aRejectCallback);
+  Catch(JSContext* aCx, AnyCallback* aRejectCallback);
 
   static already_AddRefed<Promise>
   All(const GlobalObject& aGlobal, JSContext* aCx,
@@ -202,82 +207,6 @@ private:
   // Helper methods for using Promises from C++
   JSObject* GetOrCreateWrapper(JSContext* aCx);
 
-  // If ArgumentToJSValue returns false, it must set an exception on the
-  // JSContext.
-
-  // Accept strings.
-  bool
-  ArgumentToJSValue(const nsAString& aArgument,
-                    JSContext* aCx,
-                    JSObject* aScope,
-                    JS::MutableHandle<JS::Value> aValue);
-
-  // Accept booleans.
-  bool
-  ArgumentToJSValue(bool aArgument,
-                    JSContext* aCx,
-                    JSObject* aScope,
-                    JS::MutableHandle<JS::Value> aValue);
-
-  // Accept objects that inherit from nsWrapperCache and nsISupports (e.g. most
-  // DOM objects).
-  template <class T>
-  typename EnableIf<IsBaseOf<nsWrapperCache, T>::value &&
-                    IsBaseOf<nsISupports, T>::value, bool>::Type
-  ArgumentToJSValue(T& aArgument,
-                    JSContext* aCx,
-                    JSObject* aScope,
-                    JS::MutableHandle<JS::Value> aValue)
-  {
-    JS::Rooted<JSObject*> scope(aCx, aScope);
-
-    return WrapNewBindingObject(aCx, scope, aArgument, aValue);
-  }
-
-  // Accept typed arrays built from appropriate nsTArray values
-  template<typename T>
-  typename EnableIf<IsBaseOf<AllTypedArraysBase, T>::value, bool>::Type
-  ArgumentToJSValue(const TypedArrayCreator<T>& aArgument,
-                    JSContext* aCx,
-                    JSObject* aScope,
-                    JS::MutableHandle<JS::Value> aValue)
-  {
-    JS::RootedObject scope(aCx, aScope);
-
-    JSObject* abv = aArgument.Create(aCx, scope);
-    if (!abv) {
-      return false;
-    }
-    aValue.setObject(*abv);
-    return true;
-  }
-
-  // Accept objects that inherit from nsISupports but not nsWrapperCache (e.g.
-  // nsIDOMFile).
-  template <class T>
-  typename EnableIf<!IsBaseOf<nsWrapperCache, T>::value &&
-                    IsBaseOf<nsISupports, T>::value, bool>::Type
-  ArgumentToJSValue(T& aArgument,
-                    JSContext* aCx,
-                    JSObject* aScope,
-                    JS::MutableHandle<JS::Value> aValue)
-  {
-    JS::Rooted<JSObject*> scope(aCx, aScope);
-
-    nsresult rv = nsContentUtils::WrapNative(aCx, scope, &aArgument, aValue);
-    return NS_SUCCEEDED(rv);
-  }
-
-  template <template <typename> class SmartPtr, typename T>
-  bool
-  ArgumentToJSValue(const SmartPtr<T>& aArgument,
-                    JSContext* aCx,
-                    JSObject* aScope,
-                    JS::MutableHandle<JS::Value> aValue)
-  {
-    return ArgumentToJSValue(*aArgument.get(), aCx, aScope, aValue);
-  }
-
   template <typename T>
   void MaybeSomething(T& aArgument, MaybeFunc aFunc) {
     ThreadsafeAutoJSContext cx;
@@ -290,7 +219,7 @@ private:
 
     JSAutoCompartment ac(cx, wrapper);
     JS::Rooted<JS::Value> val(cx);
-    if (!ArgumentToJSValue(aArgument, cx, wrapper, &val)) {
+    if (!ToJSValue(cx, aArgument, &val)) {
       HandleException(cx);
       return;
     }

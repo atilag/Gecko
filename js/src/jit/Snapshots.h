@@ -7,6 +7,8 @@
 #ifndef jit_Snapshot_h
 #define jit_Snapshot_h
 
+#include "mozilla/Alignment.h"
+
 #include "jsalloc.h"
 #include "jsbytecode.h"
 
@@ -52,6 +54,8 @@ class RValueAllocation
         UNTYPED_REG         = 0x06,
         UNTYPED_STACK       = 0x07,
 #endif
+        RECOVER_INSTRUCTION = 0x0a,
+
         // The JSValueType is packed in the Mode.
         TYPED_REG_MIN       = 0x10,
         TYPED_REG_MAX       = 0x17,
@@ -234,6 +238,11 @@ class RValueAllocation
         return RValueAllocation(CONSTANT, payloadOfIndex(index));
     }
 
+    // Recover instruction's index
+    static RValueAllocation RecoverInstruction(uint32_t index) {
+        return RValueAllocation(RECOVER_INSTRUCTION, payloadOfIndex(index));
+    }
+
     void writeHeader(CompactBufferWriter &writer, JSValueType type, uint32_t regCode) const;
   public:
     static RValueAllocation read(CompactBufferReader &reader);
@@ -308,7 +317,6 @@ class RecoverWriter;
 // memory after code generation.
 class SnapshotWriter
 {
-    friend class RecoverWriter;
     CompactBufferWriter writer_;
     CompactBufferWriter allocWriter_;
 
@@ -359,17 +367,19 @@ class SnapshotWriter
     }
 };
 
+class MNode;
+
 class RecoverWriter
 {
     CompactBufferWriter writer_;
 
-    uint32_t nframes_;
-    uint32_t framesWritten_;
+    uint32_t instructionCount_;
+    uint32_t instructionsWritten_;
 
   public:
-    SnapshotOffset startRecover(uint32_t frameCount, bool resumeAfter);
+    SnapshotOffset startRecover(uint32_t instructionCount, bool resumeAfter);
 
-    void writeFrame(JSFunction *fun, JSScript *script, jsbytecode *pc, uint32_t exprStack);
+    bool writeInstruction(const MNode *rp);
 
     void endRecover();
 
@@ -393,8 +403,6 @@ class RecoverReader;
 // recover the corresponding Value from an Ion frame.
 class SnapshotReader
 {
-    friend class RecoverReader;
-
     CompactBufferReader reader_;
     CompactBufferReader allocReader_;
     const uint8_t* allocTable_;
@@ -418,13 +426,16 @@ class SnapshotReader
 
   private:
     void readSnapshotHeader();
-    void readFrameHeader();
+    uint32_t readAllocationIndex();
 
   public:
     SnapshotReader(const uint8_t *snapshots, uint32_t offset,
                    uint32_t RVATableSize, uint32_t listSize);
 
     RValueAllocation readAllocation();
+    void skipAllocation() {
+        readAllocationIndex();
+    }
 
     BailoutKind bailoutKind() const {
         return bailoutKind_;
@@ -432,47 +443,63 @@ class SnapshotReader
     RecoverOffset recoverOffset() const {
         return recoverOffset_;
     }
+
+    uint32_t numAllocationsRead() const {
+        return allocRead_;
+    }
+    void resetNumAllocationsRead() {
+        allocRead_ = 0;
+    }
 };
+
+typedef mozilla::AlignedStorage<4 * sizeof(uint32_t)> RInstructionStorage;
+class RInstruction;
 
 class RecoverReader
 {
     CompactBufferReader reader_;
 
-    uint32_t frameCount_;
-    uint32_t framesRead_;         // Number of frame headers that have been read.
-    uint32_t pcOffset_;           // Offset from script->code.
-    uint32_t allocCount_;         // Number of slots.
+    // Number of encoded instructions.
+    uint32_t numInstructions_;
+
+    // Number of instruction read.
+    uint32_t numInstructionsRead_;
+
+    // True if we need to resume after the Resume Point instruction of the
+    // innermost frame.
     bool resumeAfter_;
+
+    // Space is reserved as part of the RecoverReader to avoid allocations of
+    // data which is needed to decode the current instruction.
+    RInstructionStorage rawData_;
 
   private:
     void readRecoverHeader();
-    void readFrame(SnapshotReader &snapshot);
+    void readInstruction();
 
   public:
     RecoverReader(SnapshotReader &snapshot, const uint8_t *recovers, uint32_t size);
 
-    bool moreFrames() const {
-        return framesRead_ < frameCount_;
+    uint32_t numInstructions() const {
+        return numInstructions_;
     }
-    void nextFrame(SnapshotReader &snapshot) {
-        readFrame(snapshot);
-    }
-    uint32_t frameCount() const {
-        return frameCount_;
+    uint32_t numInstructionsRead() const {
+        return numInstructionsRead_;
     }
 
-    uint32_t pcOffset() const {
-        return pcOffset_;
+    bool moreInstructions() const {
+        return numInstructionsRead_ < numInstructions_;
     }
+    void nextInstruction() {
+        readInstruction();
+    }
+
+    const RInstruction *instruction() const {
+        return reinterpret_cast<const RInstruction *>(rawData_.addr());
+    }
+
     bool resumeAfter() const {
         return resumeAfter_;
-    }
-
-    uint32_t allocations() const {
-        return allocCount_;
-    }
-    bool moreAllocations(const SnapshotReader &snapshot) const {
-        return snapshot.allocRead_ < allocCount_;
     }
 };
 

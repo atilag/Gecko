@@ -57,6 +57,9 @@
 #  if __has_extension(cxx_constexpr)
 #    define MOZ_HAVE_CXX11_CONSTEXPR
 #  endif
+#  if __has_extension(cxx_explicit_conversions)
+#    define MOZ_HAVE_EXPLICIT_CONVERSION
+#  endif
 #  if __has_extension(cxx_deleted_functions)
 #    define MOZ_HAVE_CXX11_DELETE
 #  endif
@@ -78,6 +81,9 @@
 #    endif
 #    if MOZ_GCC_VERSION_AT_LEAST(4, 6, 0)
 #      define MOZ_HAVE_CXX11_CONSTEXPR
+#    endif
+#    if MOZ_GCC_VERSION_AT_LEAST(4, 5, 0)
+#      define MOZ_HAVE_EXPLICIT_CONVERSION
 #    endif
 #    define MOZ_HAVE_CXX11_DELETE
 #  else
@@ -101,6 +107,18 @@
 #  define MOZ_HAVE_CXX11_OVERRIDE
 #  define MOZ_HAVE_NEVER_INLINE          __declspec(noinline)
 #  define MOZ_HAVE_NORETURN              __declspec(noreturn)
+// Staying away from explicit conversion operators in MSVC for now, see
+// http://stackoverflow.com/questions/20498142/visual-studio-2013-explicit-keyword-bug
+#endif
+
+/*
+ * When built with clang analyzer (a.k.a scan-build), define MOZ_HAVE_NORETURN
+ * to mark some false positives
+ */
+#ifdef __clang_analyzer__
+#  if __has_extension(attribute_analyzer_noreturn)
+#    define MOZ_HAVE_ANALYZER_NORETURN __attribute__((analyzer_noreturn))
+#  endif
 #endif
 
 /*
@@ -119,6 +137,30 @@
 #else
 #  define MOZ_CONSTEXPR         /* no support */
 #  define MOZ_CONSTEXPR_VAR     const
+#endif
+
+/*
+ * MOZ_EXPLICIT_CONVERSION is a specifier on a type conversion
+ * overloaded operator that declares that a C++11 compiler should restrict
+ * this operator to allow only explicit type conversions, disallowing
+ * implicit conversions.
+ *
+ * Example:
+ *
+ *   template<typename T>
+ *   class Ptr
+ *   {
+ *      T* ptr;
+ *      MOZ_EXPLICIT_CONVERSION operator bool() const {
+ *        return ptr != nullptr;
+ *      }
+ *   };
+ *
+ */
+#ifdef MOZ_HAVE_EXPLICIT_CONVERSION
+#  define MOZ_EXPLICIT_CONVERSION explicit
+#else
+#  define MOZ_EXPLICIT_CONVERSION /* no support */
 #endif
 
 /*
@@ -151,6 +193,27 @@
 #  define MOZ_NORETURN          MOZ_HAVE_NORETURN
 #else
 #  define MOZ_NORETURN          /* no support */
+#endif
+
+/*
+ * MOZ_PRETEND_NORETURN_FOR_STATIC_ANALYSIS, specified at the end of a function
+ * declaration, indicates that for the purposes of static analysis, this
+ * function does not return.  (The function definition does not need to be
+ * annotated.)
+ *
+ * MOZ_ReportCrash(const char* s, const char* file, int ln) MOZ_PRETEND_NORETURN_FOR_STATIC_ANALYSIS
+ *
+ * Some static analyzers, like scan-build from clang, can use this information
+ * to eliminate false positives.  From the upstream documentation of scan-build:
+ * "This attribute is useful for annotating assertion handlers that actually
+ * can return, but for the purpose of using the analyzer we want to pretend
+ * that such functions do not return."
+ *
+ */
+#if defined(MOZ_HAVE_ANALYZER_NORETURN)
+#  define MOZ_PRETEND_NORETURN_FOR_STATIC_ANALYSIS          MOZ_HAVE_ANALYZER_NORETURN
+#else
+#  define MOZ_PRETEND_NORETURN_FOR_STATIC_ANALYSIS          /* no support */
 #endif
 
 /*

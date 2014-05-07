@@ -85,7 +85,7 @@ NS_IMETHODIMP_(MozExternalRefCountType) StartTransactionRunnable::Release()
   return 1;
 }
 
-NS_IMPL_QUERY_INTERFACE1(StartTransactionRunnable, nsIRunnable)
+NS_IMPL_QUERY_INTERFACE(StartTransactionRunnable, nsIRunnable)
 
 } // anonymous namespace
 
@@ -632,9 +632,9 @@ NS_IMPL_ADDREF_INHERITED(IDBTransaction, IDBWrapperCache)
 NS_IMPL_RELEASE_INHERITED(IDBTransaction, IDBWrapperCache)
 
 JSObject*
-IDBTransaction::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+IDBTransaction::WrapObject(JSContext* aCx)
 {
-  return IDBTransactionBinding::Wrap(aCx, aScope, this);
+  return IDBTransactionBinding::Wrap(aCx, this);
 }
 
 mozilla::dom::IDBTransactionMode
@@ -783,7 +783,7 @@ CommitHelper::~CommitHelper()
 {
 }
 
-NS_IMPL_ISUPPORTS1(CommitHelper, nsIRunnable)
+NS_IMPL_ISUPPORTS(CommitHelper, nsIRunnable)
 
 NS_IMETHODIMP
 CommitHelper::Run()
@@ -980,7 +980,7 @@ CommitHelper::RevertAutoIncrementCounts()
   }
 }
 
-NS_IMPL_ISUPPORTS1(UpdateRefcountFunction, mozIStorageFunction)
+NS_IMPL_ISUPPORTS(UpdateRefcountFunction, mozIStorageFunction)
 
 NS_IMETHODIMP
 UpdateRefcountFunction::OnFunctionCall(mozIStorageValueArray* aValues,

@@ -7,7 +7,7 @@ package org.mozilla.gecko.toolbar;
 
 import org.mozilla.gecko.animation.Rotate3DAnimation;
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.widget.GeckoTextSwitcher;
+import org.mozilla.gecko.widget.ThemedTextSwitcher;
 
 import android.content.Context;
 import android.os.Build;
@@ -20,7 +20,7 @@ import android.view.View;
 import android.util.AttributeSet;
 import android.widget.ViewSwitcher;
 
-public class TabCounter extends GeckoTextSwitcher
+public class TabCounter extends ThemedTextSwitcher
                         implements ViewSwitcher.ViewFactory {
 
     private static final float CENTER_X = 0.5f;
@@ -67,7 +67,7 @@ public class TabCounter extends GeckoTextSwitcher
         }
     }
 
-    public void setCountWithAnimation(int count) {
+    void setCountWithAnimation(int count) {
         // Don't animate from initial state
         if (mCount == 0) {
             setCount(count);
@@ -97,7 +97,7 @@ public class TabCounter extends GeckoTextSwitcher
         mCount = count;
     }
 
-    public void setCount(int count) {
+    void setCount(int count) {
         setCurrentText(String.valueOf(count));
         mCount = count;
     }

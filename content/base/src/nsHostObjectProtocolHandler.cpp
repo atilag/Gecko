@@ -47,7 +47,7 @@ class HostObjectURLsReporter MOZ_FINAL : public nsIMemoryReporter
   }
 };
 
-NS_IMPL_ISUPPORTS1(HostObjectURLsReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(HostObjectURLsReporter, nsIMemoryReporter)
 
 class BlobURLsReporter MOZ_FINAL : public nsIMemoryReporter
 {
@@ -94,13 +94,14 @@ class BlobURLsReporter MOZ_FINAL : public nsIMemoryReporter
     }
 
     for (uint32_t i = 0; i < maxFrames && frame; ++i) {
-      nsCString fileName;
+      nsString fileNameUTF16;
       int32_t lineNumber = 0;
 
-      frame->GetFilename(fileName);
+      frame->GetFilename(fileNameUTF16);
       frame->GetLineNumber(&lineNumber);
 
-      if (!fileName.IsEmpty()) {
+      if (!fileNameUTF16.IsEmpty()) {
+        NS_ConvertUTF16toUTF8 fileName(fileNameUTF16);
         stack += "js(";
         if (!origin.IsEmpty()) {
           // Make the file name root-relative for conciseness if possible.
@@ -249,7 +250,7 @@ class BlobURLsReporter MOZ_FINAL : public nsIMemoryReporter
   }
 };
 
-NS_IMPL_ISUPPORTS1(BlobURLsReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(BlobURLsReporter, nsIMemoryReporter)
 
 }
 
@@ -406,7 +407,7 @@ GetDataObject(nsIURI* aURI)
 // -----------------------------------------------------------------------
 // Protocol handler
 
-NS_IMPL_ISUPPORTS1(nsHostObjectProtocolHandler, nsIProtocolHandler)
+NS_IMPL_ISUPPORTS(nsHostObjectProtocolHandler, nsIProtocolHandler)
 
 NS_IMETHODIMP
 nsHostObjectProtocolHandler::GetDefaultPort(int32_t *result)

@@ -132,28 +132,19 @@ ProfilerMarker::GetTime() {
   return mTime;
 }
 
-template<typename Builder> void
-ProfilerMarker::BuildJSObject(Builder& b, typename Builder::ArrayHandle markers) const {
-  typename Builder::RootedObject marker(b.context(), b.CreateObject());
-  b.DefineProperty(marker, "name", GetMarkerName());
-  // TODO: Store the callsite for this marker if available:
-  // if have location data
-  //   b.DefineProperty(marker, "location", ...);
-  if (mPayload) {
-    typename Builder::RootedObject markerData(b.context(),
-                                              mPayload->PreparePayload(b));
-    b.DefineProperty(marker, "data", markerData);
-  }
-  b.DefineProperty(marker, "time", mTime);
-  b.ArrayPush(markers, marker);
+void ProfilerMarker::StreamJSObject(JSStreamWriter& b) const {
+  b.BeginObject();
+    b.NameValue("name", GetMarkerName());
+    // TODO: Store the callsite for this marker if available:
+    // if have location data
+    //   b.NameValue(marker, "location", ...);
+    if (mPayload) {
+      b.Name("data");
+      mPayload->StreamPayload(b);
+    }
+    b.NameValue("time", mTime);
+  b.EndObject();
 }
-
-template void
-ProfilerMarker::BuildJSObject<JSCustomObjectBuilder>(JSCustomObjectBuilder& b,
-                              JSCustomObjectBuilder::ArrayHandle markers) const;
-template void
-ProfilerMarker::BuildJSObject<JSObjectBuilder>(JSObjectBuilder& b,
-                                    JSObjectBuilder::ArrayHandle markers) const;
 
 PendingMarkers::~PendingMarkers() {
   clearMarkers();
@@ -237,7 +228,6 @@ bool sps_version2()
   return version == 2;
 }
 
-#if !defined(ANDROID)
 /* Has MOZ_PROFILER_VERBOSE been set? */
 bool moz_profiler_verbose()
 {
@@ -253,7 +243,6 @@ bool moz_profiler_verbose()
 
   return status == 2;
 }
-#endif
 
 static inline const char* name_UnwMode(UnwMode m)
 {
@@ -367,6 +356,7 @@ void read_profiler_env_vars()
     LOGF("SPS: UnwindStackScan   = %d (max dubious frames per unwind).",
         (int)sUnwindStackScan);
     LOG( "SPS: Use env var MOZ_PROFILER_MODE=help for further information.");
+    LOG( "SPS: Note that MOZ_PROFILER_MODE=help sets all values to defaults.");
     LOG( "SPS:");
   }
 }
@@ -394,7 +384,11 @@ void profiler_usage() {
   LOG( "SPS:   The number of dubious (stack-scanned) frames allowed");
   LOG( "SPS: ");
   LOG( "SPS:   MOZ_PROFILER_NEW");
-  LOG( "SPS:   Needs to be set to use Breakpad-based unwinding.");
+  LOG( "SPS:   Needs to be set to use LUL-based unwinding.");
+  LOG( "SPS: ");
+  LOG( "SPS:   MOZ_PROFILER_LUL_TEST");
+  LOG( "SPS:   If set to any value, runs LUL unit tests at startup of");
+  LOG( "SPS:   the unwinder thread, and prints a short summary of results.");
   LOG( "SPS: ");
   LOGF("SPS:   This platform %s native unwinding.",
        is_native_unwinding_avail() ? "supports" : "does not support");
@@ -415,6 +409,7 @@ void profiler_usage() {
   LOGF("SPS: UnwindStackScan   = %d (max dubious frames per unwind).",
        (int)sUnwindStackScan);
   LOG( "SPS: Use env var MOZ_PROFILER_MODE=help for further information.");
+  LOG( "SPS: Note that MOZ_PROFILER_MODE=help sets all values to defaults.");
   LOG( "SPS:");
 
   return;
@@ -569,6 +564,24 @@ JSObject *mozilla_sampler_get_profile_data(JSContext *aCx)
   return t->ToJSObject(aCx);
 }
 
+void mozilla_sampler_save_profile_to_file(const char* aFilename)
+{
+  TableTicker *t = tlsTicker.get();
+  if (!t) {
+    return;
+  }
+
+  std::ofstream stream;
+  stream.open(aFilename);
+  if (stream.is_open()) {
+    t->ToStreamAsJSON(stream);
+    stream.close();
+    LOGF("Saved to %s", aFilename);
+  } else {
+    LOG("Fail to open profile log file.");
+  }
+}
+
 
 const char** mozilla_sampler_get_features()
 {
@@ -614,6 +627,8 @@ void mozilla_sampler_start(int aProfileEntries, double aInterval,
                            const char** aThreadNameFilters, uint32_t aFilterCount)
 
 {
+  LOG("BEGIN mozilla_sampler_start");
+
   if (!stack_key_initialized)
     profiler_init(nullptr);
 
@@ -668,7 +683,7 @@ void mozilla_sampler_start(int aProfileEntries, double aInterval,
     if (javaInterval < 10) {
       aInterval = 10;
     }
-    GeckoJavaSampler::StartJavaProfiling(javaInterval, 1000);
+    mozilla::widget::android::GeckoJavaSampler::StartJavaProfiling(javaInterval, 1000);
   }
 #endif
 
@@ -683,18 +698,25 @@ void mozilla_sampler_start(int aProfileEntries, double aInterval,
 
   sIsProfiling = true;
 
-  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-  if (os)
-    os->NotifyObservers(nullptr, "profiler-started", nullptr);
+  if (Sampler::CanNotifyObservers()) {
+    nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+    if (os)
+      os->NotifyObservers(nullptr, "profiler-started", nullptr);
+  }
+
+  LOG("END   mozilla_sampler_start");
 }
 
 void mozilla_sampler_stop()
 {
+  LOG("BEGIN mozilla_sampler_stop");
+
   if (!stack_key_initialized)
     profiler_init(nullptr);
 
   TableTicker *t = tlsTicker.get();
   if (!t) {
+    LOG("END   mozilla_sampler_stop-early");
     return;
   }
 
@@ -729,9 +751,13 @@ void mozilla_sampler_stop()
 
   sIsProfiling = false;
 
-  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-  if (os)
-    os->NotifyObservers(nullptr, "profiler-stopped", nullptr);
+  if (Sampler::CanNotifyObservers()) {
+    nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+    if (os)
+      os->NotifyObservers(nullptr, "profiler-stopped", nullptr);
+  }
+
+  LOG("END   mozilla_sampler_stop");
 }
 
 bool mozilla_sampler_is_paused() {

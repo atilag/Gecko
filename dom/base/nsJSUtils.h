@@ -64,9 +64,11 @@ public:
   struct EvaluateOptions {
     bool coerceToString;
     bool reportUncaught;
+    bool needResult;
 
     explicit EvaluateOptions() : coerceToString(false)
                                , reportUncaught(true)
+                               , needResult(true)
     {}
 
     EvaluateOptions& setCoerceToString(bool aCoerce) {
@@ -78,14 +80,40 @@ public:
       reportUncaught = aReport;
       return *this;
     }
+
+    EvaluateOptions& setNeedResult(bool aNeedResult) {
+      needResult = aNeedResult;
+      return *this;
+    }
   };
 
   static nsresult EvaluateString(JSContext* aCx,
                                  const nsAString& aScript,
                                  JS::Handle<JSObject*> aScopeObject,
                                  JS::CompileOptions &aCompileOptions,
-                                 EvaluateOptions& aEvaluateOptions,
-                                 JS::Value* aRetValue,
+                                 const EvaluateOptions& aEvaluateOptions,
+                                 JS::MutableHandle<JS::Value> aRetValue,
+                                 void **aOffThreadToken = nullptr);
+
+  static nsresult EvaluateString(JSContext* aCx,
+                                 JS::SourceBufferHolder& aSrcBuf,
+                                 JS::Handle<JSObject*> aScopeObject,
+                                 JS::CompileOptions &aCompileOptions,
+                                 const EvaluateOptions& aEvaluateOptions,
+                                 JS::MutableHandle<JS::Value> aRetValue,
+                                 void **aOffThreadToken = nullptr);
+
+
+  static nsresult EvaluateString(JSContext* aCx,
+                                 const nsAString& aScript,
+                                 JS::Handle<JSObject*> aScopeObject,
+                                 JS::CompileOptions &aCompileOptions,
+                                 void **aOffThreadToken = nullptr);
+
+  static nsresult EvaluateString(JSContext* aCx,
+                                 JS::SourceBufferHolder& aSrcBuf,
+                                 JS::Handle<JSObject*> aScopeObject,
+                                 JS::CompileOptions &aCompileOptions,
                                  void **aOffThreadToken = nullptr);
 
 };
@@ -157,7 +185,7 @@ public:
 
   bool init(JSContext* aContext, const JS::Value &v)
   {
-      return init(aContext, JSVAL_TO_STRING(v));
+      return init(aContext, v.toString());
   }
 
   void init(JSFlatString* fstr)

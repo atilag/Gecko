@@ -6,6 +6,8 @@
 #include "CacheEntry.h"
 #include "CacheStorageService.h"
 #include "CacheObserver.h"
+#include "CacheFileUtils.h"
+#include "CacheIndex.h"
 
 #include "nsIInputStream.h"
 #include "nsIOutputStream.h"
@@ -39,7 +41,7 @@ static uint32_t const ENTRY_NEEDS_REVALIDATION =
 static uint32_t const ENTRY_NOT_WANTED =
   nsICacheEntryOpenCallback::ENTRY_NOT_WANTED;
 
-NS_IMPL_ISUPPORTS1(CacheEntryHandle, nsICacheEntry)
+NS_IMPL_ISUPPORTS(CacheEntryHandle, nsICacheEntry)
 
 // CacheEntryHandle
 
@@ -49,22 +51,22 @@ CacheEntryHandle::CacheEntryHandle(CacheEntry* aEntry)
   MOZ_COUNT_CTOR(CacheEntryHandle);
 
 #ifdef DEBUG
-  if (!mEntry->mHandlersCount) {
-    // CacheEntry.mHandlersCount must go from zero to one only under
+  if (!mEntry->HandlesCount()) {
+    // CacheEntry.mHandlesCount must go from zero to one only under
     // the service lock. Can access CacheStorageService::Self() w/o a check
     // since CacheEntry hrefs it.
     CacheStorageService::Self()->Lock().AssertCurrentThreadOwns();
   }
 #endif
 
-  ++mEntry->mHandlersCount;
+  mEntry->AddHandleRef();
 
   LOG(("New CacheEntryHandle %p for entry %p", this, aEntry));
 }
 
 CacheEntryHandle::~CacheEntryHandle()
 {
-  --mEntry->mHandlersCount;
+  mEntry->ReleaseHandleRef();
   mEntry->OnHandleClosed(this);
 
   MOZ_COUNT_DTOR(CacheEntryHandle);
@@ -87,8 +89,8 @@ CacheEntry::Callback::Callback(CacheEntry* aEntry,
 
   // The counter may go from zero to non-null only under the service lock
   // but here we expect it to be already positive.
-  MOZ_ASSERT(mEntry->mHandlersCount);
-  ++mEntry->mHandlersCount;
+  MOZ_ASSERT(mEntry->HandlesCount());
+  mEntry->AddHandleRef();
 }
 
 CacheEntry::Callback::Callback(CacheEntry::Callback const &aThat)
@@ -104,13 +106,15 @@ CacheEntry::Callback::Callback(CacheEntry::Callback const &aThat)
 
   // The counter may go from zero to non-null only under the service lock
   // but here we expect it to be already positive.
-  MOZ_ASSERT(mEntry->mHandlersCount);
-  ++mEntry->mHandlersCount;
+  MOZ_ASSERT(mEntry->HandlesCount());
+  mEntry->AddHandleRef();
 }
 
 CacheEntry::Callback::~Callback()
 {
-  --mEntry->mHandlersCount;
+  ProxyRelease(mCallback, mTargetThread);
+
+  mEntry->ReleaseHandleRef();
   MOZ_COUNT_DTOR(CacheEntry::Callback);
 }
 
@@ -121,9 +125,9 @@ void CacheEntry::Callback::ExchangeEntry(CacheEntry* aEntry)
 
   // The counter may go from zero to non-null only under the service lock
   // but here we expect it to be already positive.
-  MOZ_ASSERT(aEntry->mHandlersCount);
-  ++aEntry->mHandlersCount;
-  --mEntry->mHandlersCount;
+  MOZ_ASSERT(aEntry->HandlesCount());
+  aEntry->AddHandleRef();
+  mEntry->ReleaseHandleRef();
   mEntry = aEntry;
 }
 
@@ -146,10 +150,10 @@ nsresult CacheEntry::Callback::OnAvailThread(bool *aOnAvailThread) const
 
 // CacheEntry
 
-NS_IMPL_ISUPPORTS3(CacheEntry,
-                   nsICacheEntry,
-                   nsIRunnable,
-                   CacheFileListener)
+NS_IMPL_ISUPPORTS(CacheEntry,
+                  nsICacheEntry,
+                  nsIRunnable,
+                  CacheFileListener)
 
 CacheEntry::CacheEntry(const nsACString& aStorageID,
                        nsIURI* aURI,
@@ -171,7 +175,6 @@ CacheEntry::CacheEntry(const nsACString& aStorageID,
 , mRegistration(NEVERREGISTERED)
 , mWriter(nullptr)
 , mPredictedDataSize(0)
-, mDataSize(0)
 , mReleaseThread(NS_GetCurrentThread())
 {
   MOZ_COUNT_CTOR(CacheEntry);
@@ -224,26 +227,33 @@ nsresult CacheEntry::HashingKey(nsCSubstring const& aStorageID,
                                 nsIURI* aURI,
                                 nsACString &aResult)
 {
+  nsAutoCString spec;
+  nsresult rv = aURI->GetAsciiSpec(spec);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  return HashingKey(aStorageID, aEnhanceID, spec, aResult);
+}
+
+// static
+nsresult CacheEntry::HashingKey(nsCSubstring const& aStorageID,
+                                nsCSubstring const& aEnhanceID,
+                                nsCSubstring const& aURISpec,
+                                nsACString &aResult)
+{
   /**
    * This key is used to salt hash that is a base for disk file name.
    * Changing it will cause we will not be able to find files on disk.
    */
 
-  if (aStorageID.Length()) {
-    aResult.Append(aStorageID);
-    aResult.Append(':');
+  aResult.Append(aStorageID);
+
+  if (!aEnhanceID.IsEmpty()) {
+    CacheFileUtils::AppendTagWithValue(aResult, '~', aEnhanceID);
   }
 
-  if (aEnhanceID.Length()) {
-    aResult.Append(aEnhanceID);
-    aResult.Append(':');
-  }
-
-  nsAutoCString spec;
-  nsresult rv = aURI->GetAsciiSpec(spec);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  aResult.Append(spec);
+  // Appending directly
+  aResult.Append(':');
+  aResult.Append(aURISpec);
 
   return NS_OK;
 }
@@ -296,23 +306,34 @@ bool CacheEntry::Load(bool aTruncate, bool aPriority)
 
   MOZ_ASSERT(!mFile);
 
+  nsresult rv;
+
+  nsAutoCString fileKey;
+  rv = HashingKeyWithStorage(fileKey);
+
+  if (!aTruncate && NS_SUCCEEDED(rv)) {
+    // Check the index right now to know we have or have not the entry
+    // as soon as possible.
+    CacheIndex::EntryStatus status;
+    if (NS_SUCCEEDED(CacheIndex::HasEntry(fileKey, &status)) &&
+        status == CacheIndex::DOES_NOT_EXIST) {
+      LOG(("  entry doesn't exist according information from the index, truncating"));
+      aTruncate = true;
+    }
+  }
+
+  mFile = new CacheFile();
+
+  BackgroundOp(Ops::REGISTER);
+
   bool directLoad = aTruncate || !mUseDisk;
   if (directLoad)
     mFileStatus = NS_OK;
   else
     mLoadStart = TimeStamp::Now();
 
-  mFile = new CacheFile();
-
-  BackgroundOp(Ops::REGISTER);
-
   {
     mozilla::MutexAutoUnlock unlock(mLock);
-
-    nsresult rv;
-
-    nsAutoCString fileKey;
-    rv = HashingKeyWithStorage(fileKey);
 
     LOG(("  performing load, file=%p", mFile.get()));
     if (NS_SUCCEEDED(rv)) {
@@ -803,11 +824,11 @@ void CacheEntry::OnOutputClosed()
   InvokeCallbacks();
 }
 
-bool CacheEntry::UsingDisk() const
+bool CacheEntry::IsUsingDiskLocked() const
 {
   CacheStorageService::Self()->Lock().AssertCurrentThreadOwns();
 
-  return mUseDisk;
+  return IsUsingDisk();
 }
 
 bool CacheEntry::SetUsingDisk(bool aUsingDisk)
@@ -833,13 +854,11 @@ bool CacheEntry::IsReferenced() const
 
   // Increasing this counter from 0 to non-null and this check both happen only
   // under the service lock.
-  return mHandlersCount > 0;
+  return mHandlesCount > 0;
 }
 
 bool CacheEntry::IsFileDoomed()
 {
-  mozilla::MutexAutoLock lock(mLock);
-
   if (NS_SUCCEEDED(mFileStatus)) {
     return mFile->IsDoomed();
   }
@@ -1156,6 +1175,13 @@ NS_IMETHODIMP CacheEntry::SetMetaDataElement(const char * aKey, const char * aVa
   return mFile->SetElement(aKey, aValue);
 }
 
+NS_IMETHODIMP CacheEntry::VisitMetaData(nsICacheEntryMetaDataVisitor *aVisitor)
+{
+  NS_ENSURE_SUCCESS(mFileStatus, NS_ERROR_NOT_AVAILABLE);
+
+  return mFile->VisitMetaData(aVisitor);
+}
+
 NS_IMETHODIMP CacheEntry::MetaDataReady()
 {
   mozilla::MutexAutoLock lock(mLock);
@@ -1216,13 +1242,6 @@ NS_IMETHODIMP CacheEntry::Recreate(bool aMemoryOnly,
   return NS_OK;
 }
 
-NS_IMETHODIMP CacheEntry::SetDataSize(uint32_t size)
-{
-  // ?
-  mDataSize = size;
-  return NS_OK;
-}
-
 NS_IMETHODIMP CacheEntry::GetDataSize(int64_t *aDataSize)
 {
   LOG(("CacheEntry::GetDataSize [this=%p]", this));
@@ -1268,17 +1287,6 @@ NS_IMETHODIMP CacheEntry::HasWriteAccess(bool aWriteAllowed, bool *aWriteAccess)
 }
 
 NS_IMETHODIMP CacheEntry::Close()
-{
-  // NOT IMPLEMENTED ACTUALLY
-  return NS_OK;
-}
-
-NS_IMETHODIMP CacheEntry::GetStoragePolicy(nsCacheStoragePolicy *aStoragePolicy)
-{
-  // NOT IMPLEMENTED ACTUALLY
-  return NS_OK;
-}
-NS_IMETHODIMP CacheEntry::SetStoragePolicy(nsCacheStoragePolicy aStoragePolicy)
 {
   // NOT IMPLEMENTED ACTUALLY
   return NS_OK;
@@ -1359,6 +1367,15 @@ bool CacheEntry::Purge(uint32_t aWhat)
     // are actually very fresh and should not go just because frecency had not been set
     // so far.
     LOG(("  state=%s, frecency=%1.10f", StateString(mState), mFrecency));
+    return false;
+  }
+
+  if (NS_SUCCEEDED(mFileStatus) && mFile->IsWriteInProgress()) {
+    // The file is used when there are open streams or chunks/metadata still waiting for
+    // write.  In this case, this entry cannot be purged, otherwise reopenned entry
+    // would may not even find the data on disk - CacheFile is not shared and cannot be
+    // left orphan when its job is not done, hence keep the whole entry.
+    LOG(("  file still under use"));
     return false;
   }
 
@@ -1467,7 +1484,7 @@ void CacheEntry::BackgroundOp(uint32_t aOperations, bool aForceAsync)
     #endif
 
     // Half-life is dynamic, in seconds.
-     static double half_life = CacheObserver::HalfLifeSeconds();
+    static double half_life = CacheObserver::HalfLifeSeconds();
     // Must convert from seconds to milliseconds since PR_Now() gives usecs.
     static double const decay = (M_LN2 / half_life) / static_cast<double>(PR_USEC_PER_SEC);
 

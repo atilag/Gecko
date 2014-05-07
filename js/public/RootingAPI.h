@@ -15,6 +15,7 @@
 
 #include "jspubtd.h"
 
+#include "js/HeapAPI.h"
 #include "js/TypeDecls.h"
 #include "js/Utility.h"
 
@@ -245,6 +246,18 @@ class Heap : public js::HeapBase<T>
         }
     }
 
+    /*
+     * Set the pointer to a value which will cause a crash if it is
+     * dereferenced.
+     */
+    void setToCrashOnTouch() {
+        ptr = reinterpret_cast<T>(crashOnTouchPointer);
+    }
+
+    bool isSetToCrashOnTouch() {
+        return ptr == crashOnTouchPointer;
+    }
+
   private:
     void init(T newPtr) {
         MOZ_ASSERT(!js::GCMethods<T>::poisoned(newPtr));
@@ -265,6 +278,10 @@ class Heap : public js::HeapBase<T>
         js::GCMethods<T>::relocate(&ptr);
 #endif
     }
+
+    enum {
+        crashOnTouchPointer = 1
+    };
 
     T ptr;
 };
@@ -363,23 +380,10 @@ class TenuredHeap : public js::HeapBase<T>
         return *this;
     }
 
-    /*
-     * Set the pointer to a value which will cause a crash if it is
-     * dereferenced.
-     */
-    void setToCrashOnTouch() {
-        bits = (bits & flagsMask) | crashOnTouchPointer;
-    }
-
-    bool isSetToCrashOnTouch() {
-        return (bits & ~flagsMask) == crashOnTouchPointer;
-    }
-
   private:
     enum {
         maskBits = 3,
         flagsMask = (1 << maskBits) - 1,
-        crashOnTouchPointer = 1 << maskBits
     };
 
     uintptr_t bits;
@@ -649,12 +653,27 @@ struct GCMethods<T *>
     static T *initial() { return nullptr; }
     static ThingRootKind kind() { return RootKind<T *>::rootKind(); }
     static bool poisoned(T *v) { return JS::IsPoisonedPtr(v); }
-    static bool needsPostBarrier(T *v) { return v; }
+    static bool needsPostBarrier(T *v) { return false; }
 #ifdef JSGC_GENERATIONAL
-    static void postBarrier(T **vp) {
+    static void postBarrier(T **vp) {}
+    static void relocate(T **vp) {}
+#endif
+};
+
+template <>
+struct GCMethods<JSObject *>
+{
+    static JSObject *initial() { return nullptr; }
+    static ThingRootKind kind() { return RootKind<JSObject *>::rootKind(); }
+    static bool poisoned(JSObject *v) { return JS::IsPoisonedPtr(v); }
+    static bool needsPostBarrier(JSObject *v) {
+        return v != nullptr && gc::IsInsideNursery(reinterpret_cast<gc::Cell *>(v));
+    }
+#ifdef JSGC_GENERATIONAL
+    static void postBarrier(JSObject **vp) {
         JS::HeapCellPostBarrier(reinterpret_cast<js::gc::Cell **>(vp));
     }
-    static void relocate(T **vp) {
+    static void relocate(JSObject **vp) {
         JS::HeapCellRelocate(reinterpret_cast<js::gc::Cell **>(vp));
     }
 #endif

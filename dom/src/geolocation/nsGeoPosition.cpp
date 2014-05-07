@@ -146,7 +146,7 @@ namespace mozilla {
 namespace dom {
 
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(Position, mParent, mCoordinates)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Position, mParent, mCoordinates)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(Position)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(Position)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Position)
@@ -172,9 +172,9 @@ Position::GetParentObject() const
 }
 
 JSObject*
-Position::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+Position::WrapObject(JSContext* aCx)
 {
-  return PositionBinding::Wrap(aCx, aScope, this);
+  return PositionBinding::Wrap(aCx, this);
 }
 
 Coordinates*
@@ -200,7 +200,7 @@ Position::Timestamp() const
   return rv;
 }
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(Coordinates, mPosition)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Coordinates, mPosition)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(Coordinates)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(Coordinates)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Coordinates)
@@ -226,9 +226,9 @@ Coordinates::GetParentObject() const
 }
 
 JSObject*
-Coordinates::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+Coordinates::WrapObject(JSContext* aCx)
 {
-  return CoordinatesBinding::Wrap(aCx, aScope, this);
+  return CoordinatesBinding::Wrap(aCx, this);
 }
 
 #define GENERATE_COORDS_WRAPPED_GETTER(name) \

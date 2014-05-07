@@ -1,27 +1,25 @@
 package org.mozilla.gecko.tests;
 
-import org.mozilla.gecko.*;
+import org.mozilla.gecko.tests.helpers.JavascriptBridge;
 import org.mozilla.gecko.tests.helpers.JavascriptMessageParser;
 
 import android.util.Log;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.json.JSONObject;
-
+import org.mozilla.gecko.Actions;
+import org.mozilla.gecko.Assert;
 
 public class JavascriptTest extends BaseTest {
     private static final String LOGTAG = "JavascriptTest";
-    private static final String EVENT_TYPE = "Robocop:JS";
+    private static final String EVENT_TYPE = JavascriptBridge.EVENT_TYPE;
 
     private final String javascriptUrl;
 
     public JavascriptTest(String javascriptUrl) {
         super();
         this.javascriptUrl = javascriptUrl;
-    }
-
-    @Override
-    protected int getTestType() {
-        return TEST_MOCHITEST;
     }
 
     public void testJavascript() throws Exception {
@@ -39,7 +37,8 @@ public class JavascriptTest extends BaseTest {
         mAsserter.dumpLog("Loading JavaScript test from " + url);
         loadUrl(url);
 
-        final JavascriptMessageParser testMessageParser = new JavascriptMessageParser(mAsserter);
+        final JavascriptMessageParser testMessageParser =
+                new JavascriptMessageParser(mAsserter, false);
         try {
             while (!testMessageParser.isTestFinished()) {
                 if (Log.isLoggable(LOGTAG, Log.VERBOSE)) {

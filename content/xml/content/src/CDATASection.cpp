@@ -14,14 +14,14 @@ CDATASection::~CDATASection()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED4(CDATASection, nsGenericDOMDataNode, nsIDOMNode,
-                             nsIDOMCharacterData, nsIDOMText,
-                             nsIDOMCDATASection)
+NS_IMPL_ISUPPORTS_INHERITED(CDATASection, nsGenericDOMDataNode, nsIDOMNode,
+                            nsIDOMCharacterData, nsIDOMText,
+                            nsIDOMCDATASection)
 
 JSObject*
-CDATASection::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+CDATASection::WrapNode(JSContext *aCx)
 {
-  return CDATASectionBinding::Wrap(aCx, aScope, this);
+  return CDATASectionBinding::Wrap(aCx, this);
 }
 
 bool

@@ -38,12 +38,13 @@ struct RangeData
   mozilla::TextRangeStyle mTextRangeStyle;
 };
 
-// Note, the ownership of mozilla::Selection depends on which way the object is
-// created. When nsFrameSelection has created Selection, addreffing/releasing
-// the Selection object is aggregated to nsFrameSelection. Otherwise normal
-// addref/release is used.  This ensures that nsFrameSelection is never deleted
-// before its Selections.
+// Note, the ownership of mozilla::dom::Selection depends on which way the
+// object is created. When nsFrameSelection has created Selection,
+// addreffing/releasing the Selection object is aggregated to nsFrameSelection.
+// Otherwise normal addref/release is used.  This ensures that nsFrameSelection
+// is never deleted before its Selections.
 namespace mozilla {
+namespace dom {
 
 class Selection : public nsISelectionPrivate,
                   public nsWrapperCache,
@@ -131,7 +132,7 @@ public:
 
   nsresult     StopAutoScrollTimer();
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   // WebIDL methods
   nsINode*     GetAnchorNode();
@@ -280,6 +281,7 @@ private:
   SelectionType mType;
 };
 
+} // namespace dom
 } // namespace mozilla
 
 #endif // mozilla_Selection_h__

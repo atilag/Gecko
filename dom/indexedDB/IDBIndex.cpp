@@ -821,9 +821,9 @@ NS_IMPL_CYCLE_COLLECTING_ADDREF(IDBIndex)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(IDBIndex)
 
 JSObject*
-IDBIndex::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+IDBIndex::WrapObject(JSContext* aCx)
 {
-  return IDBIndexBinding::Wrap(aCx, aScope, this);
+  return IDBIndexBinding::Wrap(aCx, this);
 }
 
 JS::Value
@@ -831,14 +831,14 @@ IDBIndex::GetKeyPath(JSContext* aCx, ErrorResult& aRv)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  if (!JSVAL_IS_VOID(mCachedKeyPath)) {
+  if (!mCachedKeyPath.isUndefined()) {
     return mCachedKeyPath;
   }
 
   aRv = GetKeyPath().ToJSVal(aCx, mCachedKeyPath);
   ENSURE_SUCCESS(aRv, JSVAL_VOID);
 
-  if (JSVAL_IS_GCTHING(mCachedKeyPath)) {
+  if (mCachedKeyPath.isGCThing()) {
     mozilla::HoldJSObjects(this);
     mRooted = true;
   }

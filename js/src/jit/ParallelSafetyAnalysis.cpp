@@ -136,8 +136,10 @@ class ParallelSafetyVisitor : public MInstructionVisitor
     UNSAFE_OP(GetArgumentsObjectArg)
     UNSAFE_OP(SetArgumentsObjectArg)
     UNSAFE_OP(ComputeThis)
+    UNSAFE_OP(LoadArrowThis)
     CUSTOM_OP(Call)
     UNSAFE_OP(ApplyArgs)
+    UNSAFE_OP(ArraySplice)
     UNSAFE_OP(Bail)
     UNSAFE_OP(AssertFloat32)
     UNSAFE_OP(GetDynamicName)
@@ -195,6 +197,7 @@ class ParallelSafetyVisitor : public MInstructionVisitor
     SAFE_OP(Nop)
     UNSAFE_OP(RegExp)
     CUSTOM_OP(Lambda)
+    UNSAFE_OP(LambdaArrow)
     UNSAFE_OP(ImplicitThis)
     SAFE_OP(Slots)
     SAFE_OP(Elements)
@@ -213,6 +216,7 @@ class ParallelSafetyVisitor : public MInstructionVisitor
     WRITE_GUARDED_OP(SetElementCache, object)
     UNSAFE_OP(BindNameCache)
     SAFE_OP(GuardShape)
+    SAFE_OP(GuardShapePolymorphic)
     SAFE_OP(GuardObjectType)
     SAFE_OP(GuardObjectIdentity)
     SAFE_OP(GuardClass)
@@ -222,6 +226,7 @@ class ParallelSafetyVisitor : public MInstructionVisitor
     SAFE_OP(TypedArrayLength)
     SAFE_OP(TypedArrayElements)
     SAFE_OP(TypedObjectElements)
+    SAFE_OP(SetTypedObjectOffset)
     SAFE_OP(InitializedLength)
     WRITE_GUARDED_OP(SetInitializedLength, elements)
     SAFE_OP(Not)
@@ -289,7 +294,7 @@ class ParallelSafetyVisitor : public MInstructionVisitor
     UNSAFE_OP(RegExpReplace)
     UNSAFE_OP(StringReplace)
     UNSAFE_OP(CallInstanceOf)
-    UNSAFE_OP(FunctionBoundary)
+    UNSAFE_OP(ProfilerStackOp)
     UNSAFE_OP(GuardString)
     UNSAFE_OP(NewDeclEnvObject)
     UNSAFE_OP(In)
@@ -317,7 +322,6 @@ class ParallelSafetyVisitor : public MInstructionVisitor
     UNSAFE_OP(AsmJSPassStackArg)
     UNSAFE_OP(AsmJSParameter)
     UNSAFE_OP(AsmJSCall)
-    UNSAFE_OP(AsmJSCheckOverRecursed)
     DROP_OP(RecompileCheck)
 
     // It looks like this could easily be made safe:
@@ -486,8 +490,9 @@ ParallelSafetyVisitor::convertToBailout(MBasicBlock *block, MInstruction *ins)
 
         // create bailout block to insert on this edge
         MBasicBlock *bailBlock = MBasicBlock::NewAbortPar(graph_, block->info(), pred,
-                                                               block->pc(),
-                                                               block->entryResumePoint());
+                                                          BytecodeSite(block->trackedTree(),
+                                                                       block->pc()),
+                                                          block->entryResumePoint());
         if (!bailBlock)
             return false;
 

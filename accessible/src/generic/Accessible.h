@@ -521,6 +521,8 @@ public:
   bool IsAutoCompletePopup() const
     { return HasGenericType(eAutoCompletePopup); }
 
+  bool IsButton() const { return HasGenericType(eButton); }
+
   bool IsCombobox() const { return HasGenericType(eCombobox); }
 
   bool IsDoc() const { return HasGenericType(eDocument); }
@@ -873,7 +875,7 @@ protected:
     eGroupInfoDirty = 1 << 5, // accessible needs to update group info
     eIgnoreDOMUIEvent = 1 << 6, // don't process DOM UI events for a11y events
 
-    eLastStateFlag = eGroupInfoDirty
+    eLastStateFlag = eIgnoreDOMUIEvent
   };
 
   /**
@@ -987,10 +989,10 @@ protected:
   int32_t mIndexInParent;
 
   static const uint8_t kChildrenFlagsBits = 2;
-  static const uint8_t kStateFlagsBits = 6;
+  static const uint8_t kStateFlagsBits = 7;
   static const uint8_t kContextFlagsBits = 1;
   static const uint8_t kTypeBits = 6;
-  static const uint8_t kGenericTypesBits = 12;
+  static const uint8_t kGenericTypesBits = 13;
 
   /**
    * Keep in sync with ChildrenFlags, StateFlags, ContextFlags, and AccTypes.

@@ -12,7 +12,7 @@ using namespace mozilla;
 
 extern nsIGeolocationUpdate *gLocationCallback;
 
-NS_IMPL_ISUPPORTS1(AndroidLocationProvider, nsIGeolocationProvider)
+NS_IMPL_ISUPPORTS(AndroidLocationProvider, nsIGeolocationProvider)
 
 AndroidLocationProvider::AndroidLocationProvider()
 {
@@ -26,7 +26,7 @@ AndroidLocationProvider::~AndroidLocationProvider()
 NS_IMETHODIMP
 AndroidLocationProvider::Startup()
 {
-    GeckoAppShell::EnableLocation(true);
+    mozilla::widget::android::GeckoAppShell::EnableLocation(true);
     return NS_OK;
 }
 
@@ -42,13 +42,13 @@ AndroidLocationProvider::Watch(nsIGeolocationUpdate* aCallback)
 NS_IMETHODIMP
 AndroidLocationProvider::Shutdown()
 {
-    GeckoAppShell::EnableLocation(false);
+    mozilla::widget::android::GeckoAppShell::EnableLocation(false);
     return NS_OK;
 }
 
 NS_IMETHODIMP
 AndroidLocationProvider::SetHighAccuracy(bool enable)
 {
-    GeckoAppShell::EnableLocationHighAccuracy(enable);
+    mozilla::widget::android::GeckoAppShell::EnableLocationHighAccuracy(enable);
     return NS_OK;
 }

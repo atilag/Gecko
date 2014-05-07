@@ -20,10 +20,10 @@ extern PRLogModuleInfo* gPIPNSSLog;
 
 /* nsNSSCertificateFakeTransport */
 
-NS_IMPL_ISUPPORTS3(nsNSSCertificateFakeTransport,
-                   nsIX509Cert,
-                   nsISerializable,
-                   nsIClassInfo)
+NS_IMPL_ISUPPORTS(nsNSSCertificateFakeTransport,
+                  nsIX509Cert,
+                  nsISerializable,
+                  nsIClassInfo)
 
 nsNSSCertificateFakeTransport::nsNSSCertificateFakeTransport() :
   mCertSerialization(nullptr)
@@ -225,6 +225,13 @@ nsNSSCertificateFakeTransport::GetASN1Structure(nsIASN1Object * *aASN1Structure)
 
 NS_IMETHODIMP
 nsNSSCertificateFakeTransport::Equals(nsIX509Cert *other, bool *result)
+{
+  NS_NOTREACHED("Unimplemented on content process");
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+nsNSSCertificateFakeTransport::GetSha256SubjectPublicKeyInfoDigest(nsACString_internal&)
 {
   NS_NOTREACHED("Unimplemented on content process");
   return NS_ERROR_NOT_IMPLEMENTED;

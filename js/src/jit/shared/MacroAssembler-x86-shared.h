@@ -30,6 +30,8 @@ class MacroAssemblerX86Shared : public Assembler
     uint32_t framePushed_;
 
   public:
+    using Assembler::call;
+
     MacroAssemblerX86Shared()
       : framePushed_(0)
     { }
@@ -90,6 +92,9 @@ class MacroAssemblerX86Shared : public Assembler
         j(ConditionFromDoubleCondition(cond), label);
     }
 
+    void branchNegativeZero(const FloatRegister &reg, const Register &scratch, Label *label);
+    void branchNegativeZeroFloat32(const FloatRegister &reg, const Register &scratch, Label *label);
+
     void move32(const Imm32 &imm, const Register &dest) {
         // Use the ImmWord version of mov to register, which has special
         // optimizations. Casting to uint32_t here ensures that the value
@@ -123,14 +128,17 @@ class MacroAssemblerX86Shared : public Assembler
     void neg32(const Register &reg) {
         negl(reg);
     }
-    void cmp32(const Register &lhs, const Imm32 &rhs) {
-        cmpl(lhs, rhs);
-    }
     void test32(const Register &lhs, const Register &rhs) {
         testl(lhs, rhs);
     }
     void test32(const Address &addr, Imm32 imm) {
         testl(Operand(addr), imm);
+    }
+    void test32(const Register &lhs, const Imm32 &rhs) {
+        testl(lhs, rhs);
+    }
+    void cmp32(const Register &lhs, const Imm32 &rhs) {
+        cmpl(lhs, rhs);
     }
     void cmp32(Register a, Register b) {
         cmpl(a, b);
@@ -155,6 +163,16 @@ class MacroAssemblerX86Shared : public Assembler
     }
     void sub32(Register src, Register dest) {
         subl(src, dest);
+    }
+    template <typename T>
+    void branchAdd32(Condition cond, T src, Register dest, Label *label) {
+        add32(src, dest);
+        j(cond, label);
+    }
+    template <typename T>
+    void branchSub32(Condition cond, T src, Register dest, Label *label) {
+        sub32(src, dest);
+        j(cond, label);
     }
     void xor32(Imm32 imm, Register dest) {
         xorl(imm, dest);
@@ -314,6 +332,10 @@ class MacroAssemblerX86Shared : public Assembler
         zeroDouble(ScratchFloatReg);
         ucomisd(ScratchFloatReg, reg);
         return truthy ? NonZero : Zero;
+    }
+    void branchTestDoubleTruthy(bool truthy, const FloatRegister &reg, Label *label) {
+        Condition cond = testDoubleTruthy(truthy, reg);
+        j(cond, label);
     }
     void load8ZeroExtend(const Address &src, const Register &dest) {
         movzbl(Operand(src), dest);
@@ -502,31 +524,16 @@ class MacroAssemblerX86Shared : public Assembler
     void convertDoubleToInt32(FloatRegister src, Register dest, Label *fail,
                               bool negativeZeroCheck = true)
     {
+        // Check for -0.0
+        if (negativeZeroCheck)
+            branchNegativeZero(src, dest, fail);
+
         cvttsd2si(src, dest);
         cvtsi2sd(dest, ScratchFloatReg);
         ucomisd(src, ScratchFloatReg);
         j(Assembler::Parity, fail);
         j(Assembler::NotEqual, fail);
 
-        // Check for -0
-        if (negativeZeroCheck) {
-            Label notZero;
-            testl(dest, dest);
-            j(Assembler::NonZero, &notZero);
-
-            if (Assembler::HasSSE41()) {
-                ptest(src, src);
-                j(Assembler::NonZero, fail);
-            } else {
-                // bit 0 = sign of low double
-                // bit 1 = sign of high double
-                movmskpd(src, dest);
-                andl(Imm32(1), dest);
-                j(Assembler::NonZero, fail);
-            }
-
-            bind(&notZero);
-        }
     }
 
     // Checks whether a float32 is representable as a 32-bit integer. If so, the
@@ -535,30 +542,15 @@ class MacroAssemblerX86Shared : public Assembler
     void convertFloat32ToInt32(FloatRegister src, Register dest, Label *fail,
                                bool negativeZeroCheck = true)
     {
+        // Check for -0.0
+        if (negativeZeroCheck)
+            branchNegativeZeroFloat32(src, dest, fail);
+
         cvttss2si(src, dest);
         convertInt32ToFloat32(dest, ScratchFloatReg);
         ucomiss(src, ScratchFloatReg);
         j(Assembler::Parity, fail);
         j(Assembler::NotEqual, fail);
-
-        // Check for -0
-        if (negativeZeroCheck) {
-            Label notZero;
-            branchTest32(Assembler::NonZero, dest, dest, &notZero);
-
-            if (Assembler::HasSSE41()) {
-                ptest(src, src);
-                j(Assembler::NonZero, fail);
-            } else {
-                // bit 0 = sign of low float
-                // bits 1 to 3 = signs of higher floats
-                movmskps(src, dest);
-                andl(Imm32(1), dest);
-                j(Assembler::NonZero, fail);
-            }
-
-            bind(&notZero);
-        }
     }
 
     void clampIntToUint8(Register reg) {
@@ -644,6 +636,13 @@ class MacroAssemblerX86Shared : public Assembler
         }
     }
 
+    template <typename T1, typename T2>
+    void cmp32Set(Assembler::Condition cond, T1 lhs, T2 rhs, const Register &dest)
+    {
+        cmp32(lhs, rhs);
+        emitSet(cond, dest);
+    }
+
     // Emit a JMP that can be toggled to a CMP. See ToggleToJmp(), ToggleToCmp().
     CodeOffsetLabel toggledJump(Label *label) {
         CodeOffsetLabel offset(size());
@@ -658,30 +657,29 @@ class MacroAssemblerX86Shared : public Assembler
 
     // Builds an exit frame on the stack, with a return address to an internal
     // non-function. Returns offset to be passed to markSafepointAt().
-    bool buildFakeExitFrame(const Register &scratch, uint32_t *offset) {
-        mozilla::DebugOnly<uint32_t> initialDepth = framePushed();
+    bool buildFakeExitFrame(const Register &scratch, uint32_t *offset);
+    void callWithExitFrame(JitCode *target);
 
-        CodeLabel cl;
-        mov(cl.dest(), scratch);
-
-        uint32_t descriptor = MakeFrameDescriptor(framePushed(), JitFrame_IonJS);
-        Push(Imm32(descriptor));
-        Push(scratch);
-
-        bind(cl.src());
-        *offset = currentOffset();
-
-        JS_ASSERT(framePushed() == initialDepth + IonExitFrameLayout::Size());
-        return addCodeLabel(cl);
-    }
-
-    void callWithExitFrame(JitCode *target) {
-        uint32_t descriptor = MakeFrameDescriptor(framePushed(), JitFrame_IonJS);
-        Push(Imm32(descriptor));
-        call(target);
-    }
     void callIon(const Register &callee) {
         call(callee);
+    }
+
+    void appendCallSite(const CallSiteDesc &desc) {
+        // Add an extra sizeof(void*) to include the return address that was
+        // pushed by the call instruction (see CallSite::stackDepth).
+        enoughMemory_ &= append(CallSite(desc, currentOffset(), framePushed_ + sizeof(void*)));
+    }
+
+    void call(const CallSiteDesc &desc, Label *label) {
+        call(label);
+        appendCallSite(desc);
+    }
+    void call(const CallSiteDesc &desc, const Register &reg) {
+        call(reg);
+        appendCallSite(desc);
+    }
+    void callIonFromAsmJS(const Register &reg) {
+        call(CallSiteDesc::Exit(), reg);
     }
 
     void checkStackAlignment() {
@@ -697,12 +695,7 @@ class MacroAssemblerX86Shared : public Assembler
     }
 
   protected:
-    bool buildOOLFakeExitFrame(void *fakeReturnAddr) {
-        uint32_t descriptor = MakeFrameDescriptor(framePushed(), JitFrame_IonJS);
-        Push(Imm32(descriptor));
-        Push(ImmPtr(fakeReturnAddr));
-        return true;
-    }
+    bool buildOOLFakeExitFrame(void *fakeReturnAddr);
 };
 
 } // namespace jit

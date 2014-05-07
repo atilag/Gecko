@@ -40,8 +40,7 @@ TextureClientX11::IsAllocated() const
 bool
 TextureClientX11::Lock(OpenMode aMode)
 {
-  // XXX - Turn this into a fatal assertion as soon as Bug 952507 is fixed
-  NS_WARN_IF_FALSE(!mLocked, "The TextureClient is already Locked!");
+  MOZ_ASSERT(!mLocked, "The TextureClient is already Locked!");
   mLocked = IsValid() && IsAllocated();
   return mLocked;
 }
@@ -49,8 +48,7 @@ TextureClientX11::Lock(OpenMode aMode)
 void
 TextureClientX11::Unlock()
 {
-  // XXX - Turn this into a fatal assertion as soon as Bug 952507 is fixed
-  NS_WARN_IF_FALSE(mLocked, "The TextureClient is already Unlocked!");
+  MOZ_ASSERT(mLocked, "The TextureClient is already Unlocked!");
   mLocked = false;
 
   if (mSurface) {
@@ -73,36 +71,8 @@ TextureClientX11::ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor)
 TextureClientData*
 TextureClientX11::DropTextureData()
 {
-  MOZ_ASSERT(!(mFlags & TEXTURE_DEALLOCATE_CLIENT));
+  MOZ_ASSERT(!(mFlags & TextureFlags::DEALLOCATE_CLIENT));
   return nullptr;
-}
-
-bool
-TextureClientX11::UpdateSurface(gfxASurface* aSurface)
-{
-  MOZ_ASSERT(IsValid());
-
-  RefPtr<DrawTarget> dt = GetAsDrawTarget();
-  if (!dt) {
-    return false;
-  }
-
-  RefPtr<SourceSurface> source = gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(dt, aSurface);
-  dt->CopySurface(source, IntRect(IntPoint(), GetSize()), IntPoint());
-
-  return true;
-}
-
-already_AddRefed<gfxASurface>
-TextureClientX11::GetAsSurface()
-{
-  MOZ_ASSERT(IsValid());
-  if (!mSurface) {
-    return nullptr;
-  }
-
-  nsRefPtr<gfxASurface> temp = mSurface.get();
-  return temp.forget();
 }
 
 bool

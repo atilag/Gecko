@@ -383,7 +383,7 @@ public:
     return NS_OK;
   }
 };
-NS_IMPL_ISUPPORTS1(LowEventsReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(LowEventsReporter, nsIMemoryReporter)
 
 #endif // defined(XP_WIN)
 
@@ -400,7 +400,7 @@ public:
   NS_DECL_NSIRUNNABLE
 };
 
-NS_IMPL_ISUPPORTS1(nsJemallocFreeDirtyPagesRunnable, nsIRunnable)
+NS_IMPL_ISUPPORTS(nsJemallocFreeDirtyPagesRunnable, nsIRunnable)
 
 NS_IMETHODIMP
 nsJemallocFreeDirtyPagesRunnable::Run()
@@ -431,7 +431,7 @@ private:
   static bool sFreeDirtyPages;
 };
 
-NS_IMPL_ISUPPORTS1(nsMemoryPressureWatcher, nsIObserver)
+NS_IMPL_ISUPPORTS(nsMemoryPressureWatcher, nsIObserver)
 
 bool nsMemoryPressureWatcher::sFreeDirtyPages = false;
 
@@ -490,15 +490,15 @@ void Activate()
   }
   else {
     Preferences::AddUintVarCache(&sLowVirtualMemoryThreshold,
-        "memory.low_virtual_mem_threshold_mb", 128);
+                                 "memory.low_virtual_mem_threshold_mb", 128);
   }
 
   Preferences::AddUintVarCache(&sLowPhysicalMemoryThreshold,
-      "memory.low_physical_memory_threshold_mb", 0);
+                               "memory.low_physical_memory_threshold_mb", 0);
   Preferences::AddUintVarCache(&sLowCommitSpaceThreshold,
-      "memory.low_commit_space_threshold_mb", 128);
+                               "memory.low_commit_space_threshold_mb", 128);
   Preferences::AddUintVarCache(&sLowMemoryNotificationIntervalMS,
-      "memory.low_memory_notification_interval_ms", 10000);
+                               "memory.low_memory_notification_interval_ms", 10000);
 
   RegisterStrongMemoryReporter(new LowEventsReporter());
   RegisterLowMemoryEventsVirtualDistinguishedAmount(LowMemoryEventsVirtualDistinguishedAmount);
@@ -530,16 +530,16 @@ void Init()
   if (!PR_GetEnv("MOZ_PGO_INSTRUMENTED")) {
     sKernel32Intercept.Init("Kernel32.dll");
     sKernel32Intercept.AddHook("VirtualAlloc",
-      reinterpret_cast<intptr_t>(VirtualAllocHook),
-      (void**) &sVirtualAllocOrig);
+                               reinterpret_cast<intptr_t>(VirtualAllocHook),
+                               (void**) &sVirtualAllocOrig);
     sKernel32Intercept.AddHook("MapViewOfFile",
-      reinterpret_cast<intptr_t>(MapViewOfFileHook),
-      (void**) &sMapViewOfFileOrig);
+                               reinterpret_cast<intptr_t>(MapViewOfFileHook),
+                               (void**) &sMapViewOfFileOrig);
 
     sGdi32Intercept.Init("Gdi32.dll");
     sGdi32Intercept.AddHook("CreateDIBSection",
-      reinterpret_cast<intptr_t>(CreateDIBSectionHook),
-      (void**) &sCreateDIBSectionOrig);
+                            reinterpret_cast<intptr_t>(CreateDIBSectionHook),
+                            (void**) &sCreateDIBSectionOrig);
   }
 
   sInitialized = true;

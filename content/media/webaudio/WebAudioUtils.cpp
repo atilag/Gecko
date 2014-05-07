@@ -14,6 +14,10 @@ namespace mozilla {
 
 namespace dom {
 
+// 32 is the minimum required by the spec and matches what is used by blink.
+// The limit protects against large memory allocations.
+const uint32_t WebAudioUtils::MaxChannelCount = 32;
+
 struct ConvertTimeToTickHelper
 {
   AudioNodeStream* mSourceStream;
@@ -82,6 +86,26 @@ WebAudioUtils::SpeexResamplerProcess(SpeexResamplerState* aResampler,
   tmp.SetLength(*aInLen);
   ConvertAudioSamples(aIn, tmp.Elements(), *aInLen);
   int result = speex_resampler_process_float(aResampler, aChannel, tmp.Elements(), aInLen, aOut, aOutLen);
+  return result;
+#endif
+}
+
+int
+WebAudioUtils::SpeexResamplerProcess(SpeexResamplerState* aResampler,
+                                     uint32_t aChannel,
+                                     const int16_t* aIn, uint32_t* aInLen,
+                                     int16_t* aOut, uint32_t* aOutLen)
+{
+#ifdef MOZ_SAMPLE_TYPE_S16
+  return speex_resampler_process_int(aResampler, aChannel, aIn, aInLen, aOut, aOutLen);
+#else
+  nsAutoTArray<AudioDataValue, WEBAUDIO_BLOCK_SIZE*4> tmp1;
+  nsAutoTArray<AudioDataValue, WEBAUDIO_BLOCK_SIZE*4> tmp2;
+  tmp1.SetLength(*aInLen);
+  tmp2.SetLength(*aOutLen);
+  ConvertAudioSamples(aIn, tmp1.Elements(), *aInLen);
+  int result = speex_resampler_process_float(aResampler, aChannel, tmp1.Elements(), aInLen, tmp2.Elements(), aOutLen);
+  ConvertAudioSamples(tmp2.Elements(), aOut, *aOutLen);
   return result;
 #endif
 }

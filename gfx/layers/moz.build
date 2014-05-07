@@ -97,6 +97,16 @@ EXPORTS.gfxipc += [
 ]
 
 EXPORTS.mozilla.layers += [
+    'apz/public/GeckoContentController.h',
+    # exporting things from apz/src is temporary until we extract a
+    # proper interface for the code there
+    'apz/src/APZCTreeManager.h',
+    'apz/src/AsyncPanZoomController.h',
+    'apz/src/Axis.h',
+    'apz/src/GestureEventListener.h',
+    'apz/src/TaskThrottler.h',
+    'apz/util/ActiveElementManager.h',
+    'apz/util/APZCCallbackHelper.h',
     'AtomicRefCountedWithFinalize.h',
     'basic/BasicCompositor.h',
     'basic/MacIOSurfaceTextureHostBasic.h',
@@ -110,7 +120,6 @@ EXPORTS.mozilla.layers += [
     'client/TextureClient.h',
     'client/TextureClientPool.h',
     'client/TiledContentClient.h',
-    'composite/APZCTreeManager.h',
     'composite/AsyncCompositionManager.h',
     'composite/CanvasLayerComposite.h',
     'composite/ColorLayerComposite.h',
@@ -126,15 +135,12 @@ EXPORTS.mozilla.layers += [
     'D3D9SurfaceImage.h',
     'Effects.h',
     'ImageDataSerializer.h',
-    'ipc/AsyncPanZoomController.h',
-    'ipc/Axis.h',
+    'ipc/AsyncTransactionTracker.h',
     'ipc/CompositableForwarder.h',
     'ipc/CompositableTransactionParent.h',
     'ipc/CompositorChild.h',
     'ipc/CompositorParent.h',
     'ipc/FenceUtils.h',
-    'ipc/GeckoContentController.h',
-    'ipc/GestureEventListener.h',
     'ipc/ImageBridgeChild.h',
     'ipc/ImageBridgeParent.h',
     'ipc/ISurfaceAllocator.h',
@@ -142,9 +148,10 @@ EXPORTS.mozilla.layers += [
     'ipc/LayerTransactionParent.h',
     'ipc/ShadowLayers.h',
     'ipc/ShadowLayersManager.h',
+    'ipc/SharedBufferManagerChild.h',
+    'ipc/SharedBufferManagerParent.h',
     'ipc/SharedPlanarYCbCrImage.h',
     'ipc/SharedRGBImage.h',
-    'ipc/TaskThrottler.h',
     'LayersTypes.h',
     'opengl/CompositingRenderTargetOGL.h',
     'opengl/CompositorOGL.h',
@@ -216,6 +223,13 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
         ]
 
 UNIFIED_SOURCES += [
+    'apz/src/APZCTreeManager.cpp',
+    'apz/src/AsyncPanZoomController.cpp',
+    'apz/src/Axis.cpp',
+    'apz/src/GestureEventListener.cpp',
+    'apz/src/TaskThrottler.cpp',
+    'apz/util/ActiveElementManager.cpp',
+    'apz/util/APZCCallbackHelper.cpp',
     'basic/BasicCanvasLayer.cpp',
     'basic/BasicColorLayer.cpp',
     'basic/BasicCompositor.cpp',
@@ -242,7 +256,6 @@ UNIFIED_SOURCES += [
     'client/TextureClient.cpp',
     'client/TextureClientPool.cpp',
     'client/TiledContentClient.cpp',
-    'composite/APZCTreeManager.cpp',
     'composite/AsyncCompositionManager.cpp',
     'composite/CanvasLayerComposite.cpp',
     'composite/ColorLayerComposite.cpp',
@@ -261,12 +274,10 @@ UNIFIED_SOURCES += [
     'Effects.cpp',
     'ImageDataSerializer.cpp',
     'ImageLayers.cpp',
-    'ipc/AsyncPanZoomController.cpp',
-    'ipc/Axis.cpp',
+    'ipc/AsyncTransactionTracker.cpp',
     'ipc/CompositableTransactionParent.cpp',
     'ipc/CompositorChild.cpp',
     'ipc/CompositorParent.cpp',
-    'ipc/GestureEventListener.cpp',
     'ipc/ImageBridgeChild.cpp',
     'ipc/ImageBridgeParent.cpp',
     'ipc/ISurfaceAllocator.cpp',
@@ -275,9 +286,10 @@ UNIFIED_SOURCES += [
     'ipc/ShadowLayerChild.cpp',
     'ipc/ShadowLayerParent.cpp',
     'ipc/ShadowLayers.cpp',
+    'ipc/SharedBufferManagerChild.cpp',
+    'ipc/SharedBufferManagerParent.cpp',
     'ipc/SharedPlanarYCbCrImage.cpp',
     'ipc/SharedRGBImage.cpp',
-    'ipc/TaskThrottler.cpp',
     'LayerScope.cpp',
     'LayersLogging.cpp',
     'LayerSorter.cpp',
@@ -321,10 +333,10 @@ IPDL_SOURCES = [
     'ipc/LayersSurfaces.ipdlh',
     'ipc/PCompositable.ipdl',
     'ipc/PCompositor.ipdl',
-    'ipc/PGrallocBuffer.ipdl',
     'ipc/PImageBridge.ipdl',
     'ipc/PLayer.ipdl',
     'ipc/PLayerTransaction.ipdl',
+    'ipc/PSharedBufferManager.ipdl',
     'ipc/PTexture.ipdl',
 ]
 
@@ -335,10 +347,6 @@ MSVC_ENABLE_PGO = True
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'thebes'
-
-LOCAL_INCLUDES += [
-    '/dom/events',
-]
 
 if CONFIG['MOZ_DEBUG']:
     DEFINES['D3D_DEBUG_INFO'] = True

@@ -137,18 +137,12 @@ enum SurfaceInitMode
 /**
  * A base class for a platform-dependent helper for use by TextureHost.
  */
-class CompositorBackendSpecificData : public RefCounted<CompositorBackendSpecificData>
+class CompositorBackendSpecificData
 {
-public:
-  MOZ_DECLARE_REFCOUNTED_TYPENAME(CompositorBackendSpecificData)
-  CompositorBackendSpecificData()
-  {
-    MOZ_COUNT_CTOR(CompositorBackendSpecificData);
-  }
-  virtual ~CompositorBackendSpecificData()
-  {
-    MOZ_COUNT_DTOR(CompositorBackendSpecificData);
-  }
+  NS_INLINE_DECL_REFCOUNTING(CompositorBackendSpecificData)
+
+protected:
+  virtual ~CompositorBackendSpecificData() {}
 };
 
 /**
@@ -195,24 +189,23 @@ public:
  * The target and viewport methods can be called before any DrawQuad call and
  * affect any subsequent DrawQuad calls.
  */
-class Compositor : public RefCounted<Compositor>
+class Compositor
 {
+protected:
+  virtual ~Compositor() {}
+
 public:
-  MOZ_DECLARE_REFCOUNTED_TYPENAME(Compositor)
+  NS_INLINE_DECL_REFCOUNTING(Compositor)
+
   Compositor(PCompositorParent* aParent = nullptr)
     : mCompositorID(0)
-    , mDiagnosticTypes(DIAGNOSTIC_NONE)
+    , mDiagnosticTypes(DiagnosticTypes::NO_DIAGNOSTIC)
     , mParent(aParent)
     , mScreenRotation(ROTATION_0)
   {
-    MOZ_COUNT_CTOR(Compositor);
-  }
-  virtual ~Compositor()
-  {
-    MOZ_COUNT_DTOR(Compositor);
   }
 
-  virtual TemporaryRef<DataTextureSource> CreateDataTextureSource(TextureFlags aFlags = 0) = 0;
+  virtual TemporaryRef<DataTextureSource> CreateDataTextureSource(TextureFlags aFlags = TextureFlags::NO_FLAGS) = 0;
   virtual bool Initialize() = 0;
   virtual void Destroy() = 0;
 
@@ -291,7 +284,7 @@ public:
    * Returns the current target for rendering. Will return null if we are
    * rendering to the screen.
    */
-  virtual CompositingRenderTarget* GetCurrentRenderTarget() = 0;
+  virtual CompositingRenderTarget* GetCurrentRenderTarget() const = 0;
 
   /**
    * Mostly the compositor will pull the size from a widget and this method will
@@ -504,17 +497,10 @@ public:
   // on the other hand, depends on the screen orientation.
   // This only applies to b2g as with other platforms, orientation is handled
   // at the OS level rather than in Gecko.
-  gfx::Rect ClipRectInLayersCoordinates(gfx::Rect aClip) const {
-    switch (mScreenRotation) {
-      case ROTATION_90:
-      case ROTATION_270:
-        return gfx::Rect(aClip.y, aClip.x, aClip.height, aClip.width);
-      case ROTATION_0:
-      case ROTATION_180:
-      default:
-        return aClip;
-    }
-  }
+  // In addition, the clip rect needs to be offset by the rendering origin.
+  // This becomes important if intermediate surfaces are used.
+  gfx::Rect ClipRectInLayersCoordinates(gfx::Rect aClip) const;
+
 protected:
   void DrawDiagnosticsInternal(DiagnosticFlags aFlags,
                                const gfx::Rect& aVisibleRect,
@@ -542,6 +528,8 @@ protected:
   size_t mPixelsFilled;
 
   ScreenRotation mScreenRotation;
+
+  virtual gfx::IntSize GetWidgetSize() const = 0;
 
 private:
   static LayersBackend sBackend;

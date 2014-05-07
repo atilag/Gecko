@@ -45,8 +45,8 @@ static bool SplitLastSquareBracket(nsACString& string, nsCString& bracketPart)
 }
 
 JSObject*
-WebGLProgram::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope) {
-    return dom::WebGLProgramBinding::Wrap(cx, scope, this);
+WebGLProgram::WrapObject(JSContext *cx) {
+    return dom::WebGLProgramBinding::Wrap(cx, this);
 }
 
 WebGLProgram::WebGLProgram(WebGLContext *context)
@@ -237,7 +237,7 @@ WebGLProgram::GetUniformInfoForMappedIdentifier(const nsACString& name) {
     return info;
 }
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(WebGLProgram, mAttachedShaders)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(WebGLProgram, mAttachedShaders)
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(WebGLProgram, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(WebGLProgram, Release)

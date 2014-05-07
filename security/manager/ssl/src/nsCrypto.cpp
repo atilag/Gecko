@@ -232,10 +232,10 @@ NS_IMPL_RELEASE(nsPkcs11)
 #ifndef MOZ_DISABLE_CRYPTOLEGACY
 
 // ISupports implementation for nsCryptoRunnable
-NS_IMPL_ISUPPORTS1(nsCryptoRunnable, nsIRunnable)
+NS_IMPL_ISUPPORTS(nsCryptoRunnable, nsIRunnable)
 
 // ISupports implementation for nsP12Runnable
-NS_IMPL_ISUPPORTS1(nsP12Runnable, nsIRunnable)
+NS_IMPL_ISUPPORTS(nsP12Runnable, nsIRunnable)
 
 // ISupports implementation for nsCryptoRunArgs
 NS_IMPL_ISUPPORTS0(nsCryptoRunArgs)
@@ -940,13 +940,13 @@ cryptojs_ReadArgsAndGenerateKey(JSContext *cx,
   int    keySize;
   nsresult  rv;
 
-  if (!JSVAL_IS_INT(argv[0])) {
+  if (!argv[0].isInt32()) {
     JS_ReportError(cx, "%s%s", JS_ERROR,
                    "passed in non-integer for key size");
     return NS_ERROR_FAILURE;
   }
-  keySize = JSVAL_TO_INT(argv[0]);
-  if (!JSVAL_IS_NULL(argv[1])) {
+  keySize = argv[0].toInt32();
+  if (!argv[1].isNull()) {
     JS::Rooted<JS::Value> v(cx, argv[1]);
     jsString = JS::ToString(cx, v);
     NS_ENSURE_TRUE(jsString, NS_ERROR_OUT_OF_MEMORY);
@@ -955,7 +955,7 @@ cryptojs_ReadArgsAndGenerateKey(JSContext *cx,
     NS_ENSURE_TRUE(!!params, NS_ERROR_OUT_OF_MEMORY);
   }
 
-  if (JSVAL_IS_NULL(argv[2])) {
+  if (argv[2].isNull()) {
     JS_ReportError(cx,"%s%s", JS_ERROR,
              "key generation type not specified");
     return NS_ERROR_FAILURE;
@@ -2200,7 +2200,7 @@ nsCryptoRunnable::Run()
 
   bool ok =
     JS_EvaluateScript(cx, scope, m_args->m_jsCallback,
-                      strlen(m_args->m_jsCallback), nullptr, 0, nullptr);
+                      strlen(m_args->m_jsCallback), nullptr, 0);
   return ok ? NS_OK : NS_ERROR_FAILURE;
 }
 
@@ -2443,20 +2443,6 @@ nsCrypto::ImportUserCertificates(const nsAString& aNickname,
   if (NS_FAILED(rv)) {
     aRv.Throw(rv);
   }
-}
-
-void
-nsCrypto::PopChallengeResponse(const nsAString& aChallenge,
-                               nsAString& aReturn,
-                               ErrorResult& aRv)
-{
-  aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
-}
-
-void
-nsCrypto::Random(int32_t aNumBytes, nsAString& aReturn, ErrorResult& aRv)
-{
-  aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
 }
 
 static void
@@ -2831,12 +2817,6 @@ nsCrypto::Logout(ErrorResult& aRv)
   }
 }
 
-void
-nsCrypto::DisableRightClick(ErrorResult& aRv)
-{
-  aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
-}
-
 CRMFObject::CRMFObject()
 {
   MOZ_COUNT_CTOR(CRMFObject);
@@ -2848,10 +2828,9 @@ CRMFObject::~CRMFObject()
 }
 
 JSObject*
-CRMFObject::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aScope,
-                       bool* aTookOwnership)
+CRMFObject::WrapObject(JSContext *aCx, bool* aTookOwnership)
 {
-  return CRMFObjectBinding::Wrap(aCx, aScope, this, aTookOwnership);
+  return CRMFObjectBinding::Wrap(aCx, this, aTookOwnership);
 }
 
 void

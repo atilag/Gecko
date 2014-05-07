@@ -96,13 +96,13 @@ nsTextNode::~nsTextNode()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED3(nsTextNode, nsGenericDOMDataNode, nsIDOMNode,
-                             nsIDOMText, nsIDOMCharacterData)
+NS_IMPL_ISUPPORTS_INHERITED(nsTextNode, nsGenericDOMDataNode, nsIDOMNode,
+                            nsIDOMText, nsIDOMCharacterData)
 
 JSObject*
-nsTextNode::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+nsTextNode::WrapNode(JSContext *aCx)
 {
-  return TextBinding::Wrap(aCx, aScope, this);
+  return TextBinding::Wrap(aCx, this);
 }
 
 bool
@@ -222,8 +222,8 @@ NS_NewAttributeContent(nsNodeInfoManager *aNodeInfoManager,
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS_INHERITED1(nsAttributeTextNode, nsTextNode,
-                             nsIMutationObserver)
+NS_IMPL_ISUPPORTS_INHERITED(nsAttributeTextNode, nsTextNode,
+                            nsIMutationObserver)
 
 nsresult
 nsAttributeTextNode::BindToTree(nsIDocument* aDocument, nsIContent* aParent,

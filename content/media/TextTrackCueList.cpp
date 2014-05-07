@@ -24,7 +24,7 @@ public:
   }
 };
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(TextTrackCueList, mParent, mList)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(TextTrackCueList, mParent, mList)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(TextTrackCueList)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(TextTrackCueList)
@@ -39,9 +39,9 @@ TextTrackCueList::TextTrackCueList(nsISupports* aParent) : mParent(aParent)
 }
 
 JSObject*
-TextTrackCueList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+TextTrackCueList::WrapObject(JSContext* aCx)
 {
-  return TextTrackCueListBinding::Wrap(aCx, aScope, this);
+  return TextTrackCueListBinding::Wrap(aCx, this);
 }
 
 TextTrackCue*

@@ -8,10 +8,13 @@
 
 #include "mozilla/MemoryReporting.h"
 
+#include "jsstr.h"
+
 #include "frontend/TokenStream.h"
 #include "vm/MatchPairs.h"
 #include "vm/RegExpStatics.h"
 #include "vm/StringBuffer.h"
+#include "vm/TraceLogging.h"
 #include "vm/Xdr.h"
 #include "yarr/YarrSyntaxChecker.h"
 
@@ -105,7 +108,10 @@ RegExpObjectBuilder::clone(Handle<RegExpObject *> other)
      * the clone -- if the |RegExpStatics| provides more flags we'll
      * need a different |RegExpShared|.
      */
-    RegExpStatics *res = other->getProto()->getParent()->as<GlobalObject>().getRegExpStatics();
+    RegExpStatics *res = other->getProto()->getParent()->as<GlobalObject>().getRegExpStatics(cx);
+    if (!res)
+        return nullptr;
+
     RegExpFlag origFlags = other->getFlags();
     RegExpFlag staticsFlags = res->getFlags();
     if ((origFlags & staticsFlags) != staticsFlags) {
@@ -212,7 +218,7 @@ regexp_trace(JSTracer *trc, JSObject *obj)
       *   1. During TraceRuntime, isHeapBusy() is true
       *   2. When a write barrier executes, IS_GC_MARKING_TRACER is true.
       */
-    if (trc->runtime->isHeapBusy() && IS_GC_MARKING_TRACER(trc))
+    if (trc->runtime()->isHeapBusy() && IS_GC_MARKING_TRACER(trc))
         obj->setPrivate(nullptr);
 }
 
@@ -373,7 +379,7 @@ RegExpObject::toString(JSContext *cx) const
 /* RegExpShared */
 
 RegExpShared::RegExpShared(JSAtom *source, RegExpFlag flags, uint64_t gcNumber)
-  : source(source), flags(flags), parenCount(0),
+  : source(source), flags(flags), parenCount(0), canStringMatch(false),
 #if ENABLE_YARR_JIT
     codeBlock(),
 #endif
@@ -434,6 +440,9 @@ RegExpShared::checkSyntax(ExclusiveContext *cx, TokenStream *tokenStream, JSLine
 bool
 RegExpShared::compile(JSContext *cx, bool matchOnly)
 {
+    TraceLogger *logger = TraceLoggerForMainThread(cx->runtime());
+    AutoTraceLog logCompile(logger, TraceLogger::YarrCompile);
+
     if (!sticky())
         return compile(cx, *source, matchOnly);
 
@@ -462,6 +471,12 @@ RegExpShared::compile(JSContext *cx, bool matchOnly)
 bool
 RegExpShared::compile(JSContext *cx, JSLinearString &pattern, bool matchOnly)
 {
+    if (!ignoreCase() && !StringHasRegExpMetaChars(pattern.chars(), pattern.length())) {
+        canStringMatch = true;
+        parenCount = 0;
+        return true;
+    }
+
     /* Parse the pattern. */
     ErrorCode yarrError;
     YarrPattern yarrPattern(pattern, ignoreCase(), multiline(), &yarrError);
@@ -503,7 +518,7 @@ RegExpShared::compile(JSContext *cx, JSLinearString &pattern, bool matchOnly)
 bool
 RegExpShared::compileIfNecessary(JSContext *cx)
 {
-    if (hasCode() || hasBytecode())
+    if (hasCode() || hasBytecode() || canStringMatch)
         return true;
     return compile(cx, false);
 }
@@ -511,7 +526,7 @@ RegExpShared::compileIfNecessary(JSContext *cx)
 bool
 RegExpShared::compileMatchOnlyIfNecessary(JSContext *cx)
 {
-    if (hasMatchOnlyCode() || hasBytecode())
+    if (hasMatchOnlyCode() || hasBytecode() || canStringMatch)
         return true;
     return compile(cx, true);
 }
@@ -520,6 +535,8 @@ RegExpRunStatus
 RegExpShared::execute(JSContext *cx, const jschar *chars, size_t length,
                       size_t *lastIndex, MatchPairs &matches)
 {
+    TraceLogger *logger = TraceLoggerForMainThread(cx->runtime());
+
     /* Compile the code at point-of-use. */
     if (!compileIfNecessary(cx))
         return RegExpRunStatus_Error;
@@ -546,13 +563,33 @@ RegExpShared::execute(JSContext *cx, const jschar *chars, size_t length,
     unsigned *outputBuf = matches.rawBuf();
     unsigned result;
 
+    if (canStringMatch) {
+        int res = StringFindPattern(chars+start, length-start, source->chars(), source->length());
+        if (res == -1)
+            return RegExpRunStatus_Success_NotFound;
+
+        outputBuf[0] = res + start;
+        outputBuf[1] = outputBuf[0] + source->length();
+
+        matches.displace(displacement);
+        matches.checkAgainst(origLength);
+        *lastIndex = matches[0].limit;
+        return RegExpRunStatus_Success;
+    }
+
 #if ENABLE_YARR_JIT
-    if (codeBlock.isFallBack())
+    if (codeBlock.isFallBack()) {
+        AutoTraceLog logInterpret(logger, TraceLogger::YarrInterpret);
         result = JSC::Yarr::interpret(cx, bytecode, chars, length, start, outputBuf);
-    else
+    } else {
+        AutoTraceLog logJIT(logger, TraceLogger::YarrJIT);
         result = codeBlock.execute(chars, start, length, (int *)outputBuf).start;
+    }
 #else
-    result = JSC::Yarr::interpret(cx, bytecode, chars, length, start, outputBuf);
+    {
+        AutoTraceLog logInterpret(logger, TraceLogger::YarrInterpret);
+        result = JSC::Yarr::interpret(cx, bytecode, chars, length, start, outputBuf);
+    }
 #endif
 
     if (result == JSC::Yarr::offsetError) {
@@ -573,6 +610,8 @@ RegExpRunStatus
 RegExpShared::executeMatchOnly(JSContext *cx, const jschar *chars, size_t length,
                                size_t *lastIndex, MatchPair &match)
 {
+    TraceLogger *logger = js::TraceLoggerForMainThread(cx->runtime());
+
     /* Compile the code at point-of-use. */
     if (!compileMatchOnlyIfNecessary(cx))
         return RegExpRunStatus_Error;
@@ -590,8 +629,20 @@ RegExpShared::executeMatchOnly(JSContext *cx, const jschar *chars, size_t length
         start = 0;
     }
 
+    if (canStringMatch) {
+        int res = StringFindPattern(chars+start, length-start, source->chars(), source->length());
+        if (res == -1)
+            return RegExpRunStatus_Success_NotFound;
+
+        match = MatchPair(res + start, res + start + source->length());
+        match.displace(displacement);
+        *lastIndex = match.limit;
+        return RegExpRunStatus_Success;
+    }
+
 #if ENABLE_YARR_JIT
     if (!codeBlock.isFallBack()) {
+        AutoTraceLog logJIT(logger, TraceLogger::YarrJIT);
         MatchResult result = codeBlock.execute(chars, start, length);
         if (!result)
             return RegExpRunStatus_Success_NotFound;
@@ -613,8 +664,11 @@ RegExpShared::executeMatchOnly(JSContext *cx, const jschar *chars, size_t length
     if (!matches.initArray(pairCount()))
         return RegExpRunStatus_Error;
 
-    unsigned result =
-        JSC::Yarr::interpret(cx, bytecode, chars, length, start, matches.rawBuf());
+    unsigned result;
+    {
+        AutoTraceLog logInterpret(logger, TraceLogger::YarrInterpret);
+        result = JSC::Yarr::interpret(cx, bytecode, chars, length, start, matches.rawBuf());
+    }
 
     if (result == JSC::Yarr::offsetError) {
         reportYarrError(cx, nullptr, JSC::Yarr::RuntimeError);
@@ -707,7 +761,7 @@ RegExpCompartment::sweep(JSRuntime *rt)
 
     for (PendingSet::Enum e(inUse_); !e.empty(); e.popFront()) {
         RegExpShared *shared = e.front();
-        if (shared->activeUseCount == 0 && shared->gcNumberWhenUsed < rt->gcStartNumber) {
+        if (shared->activeUseCount == 0 && shared->gcNumberWhenUsed < rt->gc.startNumber) {
             js_delete(shared);
             e.removeFront();
         }

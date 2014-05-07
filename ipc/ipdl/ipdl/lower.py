@@ -277,13 +277,13 @@ def _putInNamespaces(cxxthing, namespaces):
 
 def _sendPrefix(msgtype):
     """Prefix of the name of the C++ method that sends |msgtype|."""
-    if msgtype.isInterrupt() or msgtype.isUrgent() or msgtype.isRpc():
+    if msgtype.isInterrupt() or msgtype.isRpc():
         return 'Call'
     return 'Send'
 
 def _recvPrefix(msgtype):
     """Prefix of the name of the C++ method that handles |msgtype|."""
-    if msgtype.isInterrupt() or msgtype.isUrgent() or msgtype.isRpc():
+    if msgtype.isInterrupt() or msgtype.isRpc():
         return 'Answer'
     return 'Recv'
 
@@ -2814,7 +2814,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
 
             self.cls.addstmt(StmtDecl(MethodDecl(
                 _deallocMethod(managed, self.side).name,
-                params=[ Decl(actortype, 'actor') ],
+                params=[ Decl(actortype, 'aActor') ],
                 ret=Type.BOOL,
                 virtual=1, pure=1)))
 
@@ -2824,18 +2824,19 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
             actortype = _cxxBareType(actor.asType(), actor.side)
             self.cls.addstmt(StmtDecl(MethodDecl(
                 _allocMethod(actor.ptype, actor.side).name,
-                params=[ Decl(Type('Transport', ptr=1), 'transport'),
-                         Decl(Type('ProcessId'), 'otherProcess') ],
+                params=[ Decl(Type('Transport', ptr=1), 'aTransport'),
+                         Decl(Type('ProcessId'), 'aOtherProcess') ],
                 ret=actortype,
                 virtual=1, pure=1)))
 
-        # optional ActorDestroy() method; default is no-op
+        # ActorDestroy() method; default is no-op
         self.cls.addstmts([
             Whitespace.NL,
             MethodDefn(MethodDecl(
                 _destroyMethod().name,
-                params=[ Decl(_DestroyReason.Type(), 'why') ],
-                virtual=1)),
+                params=[ Decl(_DestroyReason.Type(), 'aWhy') ],
+                ret=Type.VOID,
+                virtual=1, pure=(self.side == 'parent'))),
             Whitespace.NL
         ])
 
@@ -2843,7 +2844,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
             # void ProcessingError(code); default to no-op
             processingerror = MethodDefn(
                 MethodDecl(p.processingErrorVar().name,
-                           params=[ Param(_Result.Type(), 'code') ],
+                           params=[ Param(_Result.Type(), 'aCode') ],
                            virtual=1))
 
             # bool ShouldContinueFromReplyTimeout(); default to |true|
@@ -3161,7 +3162,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
         deallocshmemvar = ExprVar('DeallocShmems')
 
         # OnProcesingError(code)
-        codevar = ExprVar('code')
+        codevar = ExprVar('aCode')
         onprocessingerror = MethodDefn(
             MethodDecl('OnProcessingError',
                        params=[ Param(_Result.Type(), codevar.name) ]))
@@ -3258,7 +3259,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
 
         # OnChannelConnected()
         onconnected = MethodDefn(MethodDecl('OnChannelConnected',
-                                            params=[ Decl(Type.INT32, 'pid') ]))
+                                            params=[ Decl(Type.INT32, 'aPid') ]))
         if not ptype.isToplevel():
             onconnected.addstmt(
                 _runtimeAbort("'OnConnected' called on non-toplevel actor"))
@@ -4776,7 +4777,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
                 self.asyncSwitch.addcase(lbl, case)
             elif sems is ipdl.ast.SYNC:
                 self.syncSwitch.addcase(lbl, case)
-            elif sems is ipdl.ast.INTR or sems is ipdl.ast.URGENT or sems is ipdl.ast.RPC:
+            elif sems is ipdl.ast.INTR or sems is ipdl.ast.RPC:
                 self.interruptSwitch.addcase(lbl, case)
             else: assert 0
 
@@ -5171,15 +5172,20 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
         if md.decl.type.isSync():
             stmts.append(StmtExpr(ExprCall(
                 ExprSelect(var, '->', 'set_sync'))))
-        elif md.decl.type.isUrgent():
-            stmts.append(StmtExpr(ExprCall(
-                ExprSelect(var, '->', 'set_urgent'))))
+        elif md.decl.type.isRpc():
+            # We use urgent messages from the parent to the child and
+            # RPC messages from the child to the parent. However,
+            # replies should always be sent using the same semantics
+            # as the original message, so we need to flip.
+            if (self.side == 'parent') ^ reply:
+                stmts.append(StmtExpr(ExprCall(
+                    ExprSelect(var, '->', 'set_urgent'))))
+            else:
+                stmts.append(StmtExpr(ExprCall(
+                    ExprSelect(var, '->', 'set_rpc'))))
         elif md.decl.type.isInterrupt():
             stmts.append(StmtExpr(ExprCall(
                 ExprSelect(var, '->', 'set_interrupt'))))
-        elif md.decl.type.isRpc():
-            stmts.append(StmtExpr(ExprCall(
-                ExprSelect(var, '->', 'set_rpc'))))
 
         if reply:
             stmts.append(StmtExpr(ExprCall(
@@ -5454,6 +5460,7 @@ def _splitMethodDefn(md, clsname):
     md.decl.static = 0
     md.decl.warn_unused = 0
     md.decl.never_inline = 0
+    md.decl.pure = 0
     md.decl.only_for_definition = True
     for param in md.decl.params:
         if isinstance(param, Param):
@@ -5510,7 +5517,7 @@ class _GenerateSkeletonImpl(Visitor):
                                              ret=md.ret))
         if md.ret.ptr:
             impl.addstmt(StmtReturn(ExprLiteral.ZERO))
-        else:
+        elif md.ret == Type.BOOL:
             impl.addstmt(StmtReturn(ExprVar('false')))
 
         self.cls.addstmts([ StmtDecl(decl), Whitespace.NL ])

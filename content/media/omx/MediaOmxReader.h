@@ -9,7 +9,9 @@
 #include "MediaResource.h"
 #include "MediaDecoderReader.h"
 #include "nsRect.h"
+#include "mozilla/dom/AudioChannelBinding.h"
 #include <ui/GraphicBuffer.h>
+#include <stagefright/MediaSource.h>
 
 namespace android {
 class OmxDecoder;
@@ -34,10 +36,11 @@ class MediaOmxReader : public MediaDecoderReader
   int64_t mVideoSeekTimeUs;
   int64_t mAudioSeekTimeUs;
   int32_t mSkipCount;
+  dom::AudioChannel mAudioChannel;
+  android::sp<android::MediaSource> mAudioOffloadTrack;
 
 protected:
   android::sp<android::OmxDecoder> mOmxDecoder;
-
   android::sp<android::MediaExtractor> mExtractor;
 
   // Called by ReadMetadata() during MediaDecoderStateMachine::DecodeMetadata()
@@ -82,6 +85,26 @@ public:
   virtual void SetIdle() MOZ_OVERRIDE;
   virtual void SetActive() MOZ_OVERRIDE;
 
+  void SetAudioChannel(dom::AudioChannel aAudioChannel) {
+    mAudioChannel = aAudioChannel;
+  }
+
+  android::sp<android::MediaSource> GetAudioOffloadTrack() {
+    return mAudioOffloadTrack;
+  }
+
+#ifdef MOZ_AUDIO_OFFLOAD
+  // Check whether it is possible to offload current audio track. This access
+  // canOffloadStream() from libStageFright Utils.cpp, which is not there in
+  // ANDROID_VERSION < 19
+  void CheckAudioOffload();
+#endif
+
+private:
+  // This flag is true when SetActive() has been called without a matching
+  // SetIdle(). This is used to sanity check the SetIdle/SetActive calls, to
+  // ensure SetActive has been called before a decode call.
+  DebugOnly<bool> mIsActive;
 };
 
 } // namespace mozilla

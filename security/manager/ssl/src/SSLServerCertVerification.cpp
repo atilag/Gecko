@@ -299,7 +299,6 @@ MapCertErrorToProbeValue(PRErrorCode errorCode)
   switch (errorCode)
   {
     case SEC_ERROR_UNKNOWN_ISSUER:                     return  2;
-    case SEC_ERROR_CA_CERT_INVALID:                    return  3;
     case SEC_ERROR_UNTRUSTED_ISSUER:                   return  4;
     case SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE:         return  5;
     case SEC_ERROR_UNTRUSTED_CERT:                     return  6;
@@ -563,7 +562,6 @@ PRErrorCodeToOverrideType(PRErrorCode errorCode)
   switch (errorCode)
   {
     case SEC_ERROR_UNKNOWN_ISSUER:
-    case SEC_ERROR_CA_CERT_INVALID:
     case SEC_ERROR_UNTRUSTED_ISSUER:
     case SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE:
     case SEC_ERROR_UNTRUSTED_CERT:
@@ -636,8 +634,9 @@ NSSDetermineCertOverrideErrors(CertVerifier& certVerifier,
   //                     possible failure.
   // XXX TODO: convert to VerifySSLServerCert
   // XXX TODO: get rid of error log
-  certVerifier.VerifyCert(cert, stapledOCSPResponse, certificateUsageSSLServer,
-                          now, infoObject, 0, nullptr, nullptr, verify_log);
+  certVerifier.VerifyCert(cert, certificateUsageSSLServer,
+                          now, infoObject, infoObject->GetHostNameRaw(),
+                          0, stapledOCSPResponse, nullptr, nullptr, verify_log);
 
   // Check the name field against the desired hostname.
   if (CERT_VerifyCertName(cert, infoObject->GetHostNameRaw()) != SECSuccess) {

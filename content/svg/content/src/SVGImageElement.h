@@ -31,8 +31,7 @@ class SVGImageElement : public SVGImageElementBase,
 protected:
   SVGImageElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
   virtual ~SVGImageElement();
-  virtual JSObject* WrapNode(JSContext *aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
   friend nsresult (::NS_NewSVGImageElement(nsIContent **aResult,
                                            already_AddRefed<nsINodeInfo>&& aNodeInfo));
 
@@ -49,7 +48,7 @@ public:
                               bool aCompileEventHandlers) MOZ_OVERRIDE;
   virtual void UnbindFromTree(bool aDeep, bool aNullParent) MOZ_OVERRIDE;
 
-  virtual nsEventStates IntrinsicState() const MOZ_OVERRIDE;
+  virtual EventStates IntrinsicState() const MOZ_OVERRIDE;
 
   NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* name) const MOZ_OVERRIDE;
 

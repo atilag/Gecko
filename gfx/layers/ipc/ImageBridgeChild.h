@@ -13,7 +13,6 @@
 #include "mozilla/ipc/SharedMemory.h"   // for SharedMemory, etc
 #include "mozilla/layers/CompositableForwarder.h"
 #include "mozilla/layers/CompositorTypes.h"  // for TextureIdentifier, etc
-#include "mozilla/layers/LayersSurfaces.h"  // for PGrallocBufferChild
 #include "mozilla/layers/PImageBridgeChild.h"
 #include "nsDebug.h"                    // for NS_RUNTIMEABORT
 #include "nsRegion.h"                   // for nsIntRegion
@@ -187,18 +186,14 @@ public:
    */
   ~ImageBridgeChild();
 
-  virtual PGrallocBufferChild*
-  AllocPGrallocBufferChild(const gfx::IntSize&, const uint32_t&, const uint32_t&,
-                           MaybeMagicGrallocBufferHandle*) MOZ_OVERRIDE;
-
-  virtual bool
-  DeallocPGrallocBufferChild(PGrallocBufferChild* actor) MOZ_OVERRIDE;
-
   virtual PTextureChild*
   AllocPTextureChild(const SurfaceDescriptor& aSharedData, const TextureFlags& aFlags) MOZ_OVERRIDE;
 
   virtual bool
   DeallocPTextureChild(PTextureChild* actor) MOZ_OVERRIDE;
+
+  virtual bool
+  RecvParentAsyncMessage(const mozilla::layers::AsyncParentMessageData& aMessage) MOZ_OVERRIDE;
 
   TemporaryRef<ImageClient> CreateImageClient(CompositableType aType);
   TemporaryRef<ImageClient> CreateImageClientNow(CompositableType aType);
@@ -248,17 +243,6 @@ public:
     NS_RUNTIMEABORT("should not be called");
   }
 
-  /**
-   * Communicate to the compositor that the texture identified by aCompositable
-   * and aTextureId has been updated to aDescriptor.
-   */
-  virtual void UpdateTexture(CompositableClient* aCompositable,
-                             TextureIdentifier aTextureId,
-                             SurfaceDescriptor* aDescriptor) MOZ_OVERRIDE;
-
-  virtual void UpdateTextureNoSwap(CompositableClient* aCompositable,
-                                   TextureIdentifier aTextureId,
-                                   SurfaceDescriptor* aDescriptor) MOZ_OVERRIDE;
   virtual void UpdateTextureIncremental(CompositableClient* aCompositable,
                                         TextureIdentifier aTextureId,
                                         SurfaceDescriptor& aDescriptor,
@@ -276,29 +260,10 @@ public:
                                  const nsIntRect& aRect) MOZ_OVERRIDE;
 
 
-  // at the moment we don't need to implement these. They are only used for
-  // thebes layers which don't support async updates.
-  virtual void CreatedSingleBuffer(CompositableClient* aCompositable,
-                                   const SurfaceDescriptor& aDescriptor,
-                                   const TextureInfo& aTextureInfo,
-                                   const SurfaceDescriptor* aDescriptorOnWhite = nullptr) MOZ_OVERRIDE {
-    NS_RUNTIMEABORT("should not be called");
-  }
   virtual void CreatedIncrementalBuffer(CompositableClient* aCompositable,
                                         const TextureInfo& aTextureInfo,
                                         const nsIntRect& aBufferRect) MOZ_OVERRIDE
   {
-    NS_RUNTIMEABORT("should not be called");
-  }
-  virtual void CreatedDoubleBuffer(CompositableClient* aCompositable,
-                                   const SurfaceDescriptor& aFrontDescriptor,
-                                   const SurfaceDescriptor& aBackDescriptor,
-                                   const TextureInfo& aTextureInfo,
-                                   const SurfaceDescriptor* aFrontDescriptorOnWhite = nullptr,
-                                   const SurfaceDescriptor* aBackDescriptorOnWhite = nullptr) MOZ_OVERRIDE {
-    NS_RUNTIMEABORT("should not be called");
-  }
-  virtual void DestroyThebesBuffer(CompositableClient* aCompositable) MOZ_OVERRIDE {
     NS_RUNTIMEABORT("should not be called");
   }
   virtual void UpdateTextureRegion(CompositableClient* aCompositable,
@@ -306,11 +271,6 @@ public:
                                    const nsIntRegion& aUpdatedRegion) MOZ_OVERRIDE {
     NS_RUNTIMEABORT("should not be called");
   }
-  virtual void DestroyedThebesBuffer(const SurfaceDescriptor& aBackBufferToDestroy) MOZ_OVERRIDE
-  {
-    NS_RUNTIMEABORT("should not be called");
-  }
-
 
   // ISurfaceAllocator
 
@@ -345,10 +305,8 @@ public:
 
   virtual bool IsSameProcess() const MOZ_OVERRIDE;
 
-  void AllocGrallocBufferNow(const gfx::IntSize& aSize,
-                             uint32_t aFormat, uint32_t aUsage,
-                             MaybeMagicGrallocBufferHandle* aHandle,
-                             PGrallocBufferChild** aChild);
+  void SendPendingAsyncMessge();
+
 protected:
   ImageBridgeChild();
   bool DispatchAllocShmemInternal(size_t aSize,
@@ -357,13 +315,6 @@ protected:
                                   bool aUnsafe);
 
   CompositableTransaction* mTxn;
-
-  // ISurfaceAllocator
-  virtual PGrallocBufferChild* AllocGrallocBuffer(const gfx::IntSize& aSize,
-                                                  uint32_t aFormat, uint32_t aUsage,
-                                                  MaybeMagicGrallocBufferHandle* aHandle) MOZ_OVERRIDE;
-
-  virtual void DeallocGrallocBuffer(PGrallocBufferChild* aChild) MOZ_OVERRIDE;
 };
 
 } // layers

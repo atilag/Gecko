@@ -236,7 +236,7 @@ nsImageBoxFrame::UpdateImage()
                                             mContent->NodePrincipal())) {
       nsContentUtils::LoadImage(uri, doc, mContent->NodePrincipal(),
                                 doc->GetDocumentURI(), mListener, mLoadFlags,
-                                getter_AddRefs(mImageRequest));
+                                EmptyString(), getter_AddRefs(mImageRequest));
 
       if (mImageRequest) {
         nsLayoutUtils::RegisterImageRequestIfAnimated(presContext,
@@ -729,7 +729,7 @@ nsresult nsImageBoxFrame::FrameChanged(imgIRequest *aRequest)
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS2(nsImageBoxListener, imgINotificationObserver, imgIOnloadBlocker)
+NS_IMPL_ISUPPORTS(nsImageBoxListener, imgINotificationObserver, imgIOnloadBlocker)
 
 nsImageBoxListener::nsImageBoxListener()
 {

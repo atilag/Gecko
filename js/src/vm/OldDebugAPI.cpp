@@ -173,7 +173,7 @@ JS_FRIEND_API(bool)
 JS_SetDebugModeForAllCompartments(JSContext *cx, bool debug)
 {
     for (ZonesIter zone(cx->runtime(), SkipAtoms); !zone.done(); zone.next()) {
-        // Invalidate a zone at a time to avoid doing a zone-wide CellIter
+        // Invalidate a zone at a time to avoid doing a ZoneCellIter
         // per compartment.
         AutoDebugModeInvalidation invalidate(zone);
         for (CompartmentsInZoneIter c(zone); !c.done(); c.next()) {
@@ -211,9 +211,8 @@ CheckDebugMode(JSContext *cx)
 }
 
 JS_PUBLIC_API(bool)
-JS_SetSingleStepMode(JSContext *cx, JSScript *scriptArg, bool singleStep)
+JS_SetSingleStepMode(JSContext *cx, HandleScript script, bool singleStep)
 {
-    RootedScript script(cx, scriptArg);
     assertSameCompartment(cx, script);
 
     if (!CheckDebugMode(cx))
@@ -271,8 +270,8 @@ JS_SetInterrupt(JSRuntime *rt, JSInterruptHook hook, void *closure)
     rt->debugHooks.interruptHookData = closure;
 
     for (ActivationIterator iter(rt); !iter.done(); ++iter) {
-        if (iter.activation()->isInterpreter())
-            iter.activation()->asInterpreter()->enableInterruptsUnconditionally();
+        if (iter->isInterpreter())
+            iter->asInterpreter()->enableInterruptsUnconditionally();
     }
 
     return true;
@@ -678,7 +677,7 @@ JS_GetPropertyDescArray(JSContext *cx, JS::HandleObject obj, JSPropertyDescArray
             pd[i].id = IdToValue(props[i]);
             if (!AddValueRoot(cx, &pd[i].value, nullptr))
                 goto bad;
-            if (!Proxy::get(cx, obj, obj, props.handleAt(i), MutableHandleValue::fromMarkedLocation(&pd[i].value)))
+            if (!Proxy::get(cx, obj, obj, props[i], MutableHandleValue::fromMarkedLocation(&pd[i].value)))
                 goto bad;
         }
 
@@ -819,9 +818,8 @@ JS_GetGlobalDebugHooks(JSRuntime *rt)
 /************************************************************************/
 
 extern JS_PUBLIC_API(void)
-JS_DumpPCCounts(JSContext *cx, JSScript *scriptArg)
+JS_DumpPCCounts(JSContext *cx, HandleScript script)
 {
-    Rooted<JSScript*> script(cx, scriptArg);
     JS_ASSERT(script->hasScriptCounts());
 
     Sprinter sprinter(cx);
@@ -837,42 +835,14 @@ JS_DumpPCCounts(JSContext *cx, JSScript *scriptArg)
 JS_PUBLIC_API(void)
 JS_DumpCompartmentPCCounts(JSContext *cx)
 {
-    for (CellIter i(cx->zone(), gc::FINALIZE_SCRIPT); !i.done(); i.next()) {
-        JSScript *script = i.get<JSScript>();
+    for (ZoneCellIter i(cx->zone(), gc::FINALIZE_SCRIPT); !i.done(); i.next()) {
+        RootedScript script(cx, i.get<JSScript>());
         if (script->compartment() != cx->compartment())
             continue;
 
         if (script->hasScriptCounts())
             JS_DumpPCCounts(cx, script);
     }
-
-#if defined(JS_ION)
-    for (unsigned thingKind = FINALIZE_OBJECT0; thingKind < FINALIZE_OBJECT_LIMIT; thingKind++) {
-        for (CellIter i(cx->zone(), (AllocKind) thingKind); !i.done(); i.next()) {
-            JSObject *obj = i.get<JSObject>();
-            if (obj->compartment() != cx->compartment())
-                continue;
-
-            if (obj->is<AsmJSModuleObject>()) {
-                AsmJSModule &module = obj->as<AsmJSModuleObject>().module();
-
-                Sprinter sprinter(cx);
-                if (!sprinter.init())
-                    return;
-
-                fprintf(stdout, "--- Asm.js Module ---\n");
-
-                for (size_t i = 0; i < module.numFunctionCounts(); i++) {
-                    jit::IonScriptCounts *counts = module.functionCounts(i);
-                    DumpIonScriptCounts(&sprinter, counts);
-                }
-
-                fputs(sprinter.string(), stdout);
-                fprintf(stdout, "--- END Asm.js Module ---\n");
-            }
-        }
-    }
-#endif
 }
 
 JS_FRIEND_API(bool)
@@ -1052,8 +1022,8 @@ FormatFrame(JSContext *cx, const NonBuiltinScriptFrameIter &iter, char *buf, int
     RootedValue thisVal(cx);
     AutoPropertyDescArray thisProps(cx);
     if (iter.computeThis(cx)) {
-        thisVal = iter.thisv();
-        if (showThisProps && !thisVal.isPrimitive()) {
+        thisVal = iter.computedThisValue();
+        if (showThisProps && thisVal.isObject()) {
             RootedObject thisObj(cx, &thisVal.toObject());
             thisProps.fetch(thisObj);
         }

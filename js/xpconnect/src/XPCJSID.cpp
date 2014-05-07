@@ -18,7 +18,8 @@ using namespace JS;
 /***************************************************************************/
 // nsJSID
 
-NS_IMPL_ISUPPORTS1(nsJSID, nsIJSID)
+NS_IMPL_CLASSINFO(nsJSID, nullptr, 0, NS_JS_ID_CID)
+NS_IMPL_ISUPPORTS_CI(nsJSID, nsIJSID)
 
 char nsJSID::gNoString[] = "";
 
@@ -286,7 +287,7 @@ NS_INTERFACE_MAP_END
 
 NS_IMPL_ADDREF(nsJSIID)
 NS_IMPL_RELEASE(nsJSIID)
-NS_IMPL_CI_INTERFACE_GETTER2(nsJSIID, nsIJSID, nsIJSIID)
+NS_IMPL_CI_INTERFACE_GETTER(nsJSIID, nsIJSID, nsIJSIID)
 
 // The nsIXPCScriptable map declaration that will generate stubs for us...
 #define XPC_MAP_CLASSNAME           nsJSIID
@@ -382,8 +383,8 @@ nsJSIID::NewID(nsIInterfaceInfo* aInfo)
 NS_IMETHODIMP
 nsJSIID::NewResolve(nsIXPConnectWrappedNative *wrapper,
                     JSContext * cx, JSObject * objArg,
-                    jsid idArg, uint32_t flags,
-                    JSObject * *objp, bool *_retval)
+                    jsid idArg, JSObject * *objp,
+                    bool *_retval)
 {
     RootedObject obj(cx, objArg);
     RootedId id(cx, idArg);
@@ -406,7 +407,7 @@ nsJSIID::NewResolve(nsIXPConnectWrappedNative *wrapper,
             return NS_ERROR_OUT_OF_MEMORY;
 
         *objp = obj;
-        *_retval = JS_DefinePropertyById(cx, obj, id, val, nullptr, nullptr,
+        *_retval = JS_DefinePropertyById(cx, obj, id, val,
                                          JSPROP_ENUMERATE | JSPROP_READONLY |
                                          JSPROP_PERMANENT);
     }
@@ -492,45 +493,24 @@ xpc::HasInstance(JSContext *cx, HandleObject objArg, const nsID *iid, bool *bp)
     if (!obj)
         return NS_OK;
 
-    if (IsDOMObject(obj)) {
-        // Not all DOM objects implement nsISupports. But if they don't,
-        // there's nothing to do in this HasInstance hook.
-        nsISupports *identity = UnwrapDOMObjectToISupports(obj);
-        if (!identity)
-            return NS_OK;;
-        nsCOMPtr<nsISupports> supp;
-        identity->QueryInterface(*iid, getter_AddRefs(supp));
-        *bp = supp;
-        return NS_OK;
-    }
-
     if (mozilla::jsipc::JavaScriptParent::IsCPOW(obj))
         return mozilla::jsipc::JavaScriptParent::InstanceOf(obj, iid, bp);
 
-    MOZ_ASSERT(IS_WN_REFLECTOR(obj));
-    XPCWrappedNative* other_wrapper = XPCWrappedNative::Get(obj);
-    if (!other_wrapper)
+    nsISupports *identity = UnwrapReflectorToISupports(obj);
+    if (!identity)
         return NS_OK;
 
-    // We'll trust the interface set of the wrapper if this is known
-    // to be an interface that the objects *expects* to be able to
-    // handle.
-    if (other_wrapper->HasInterfaceNoQI(*iid)) {
-        *bp = true;
-        return NS_OK;
-    }
+    nsCOMPtr<nsISupports> supp;
+    identity->QueryInterface(*iid, getter_AddRefs(supp));
+    *bp = supp;
 
-    // Otherwise, we'll end up Querying the native object to be sure.
-    XPCCallContext ccx(JS_CALLER, cx);
-
-    AutoMarkingNativeInterfacePtr iface(ccx);
-    iface = XPCNativeInterface::GetNewOrUsed(iid);
-
-    nsresult findResult = NS_OK;
-    if (iface && other_wrapper->FindTearOff(iface, false, &findResult))
-        *bp = true;
-    if (NS_FAILED(findResult) && findResult != NS_ERROR_NO_INTERFACE)
-        return findResult;
+    // Our old HasInstance implementation operated by invoking FindTearOff on
+    // XPCWrappedNatives, and various bits of chrome JS came to depend on
+    // |instanceof| doing an implicit QI if it succeeds. Do a drive-by QI to
+    // preserve that behavior. This is just a compatibility hack, so we don't
+    // really care if it fails.
+    if (IS_WN_REFLECTOR(obj))
+        (void) XPCWrappedNative::Get(obj)->FindTearOff(*iid);
 
     return NS_OK;
 }
@@ -566,7 +546,7 @@ NS_INTERFACE_MAP_END
 
 NS_IMPL_ADDREF(nsJSCID)
 NS_IMPL_RELEASE(nsJSCID)
-NS_IMPL_CI_INTERFACE_GETTER2(nsJSCID, nsIJSID, nsIJSCID)
+NS_IMPL_CI_INTERFACE_GETTER(nsJSCID, nsIJSID, nsIJSCID)
 
 // The nsIXPCScriptable map declaration that will generate stubs for us...
 #define XPC_MAP_CLASSNAME           nsJSCID
@@ -643,8 +623,8 @@ GetIIDArg(uint32_t argc, const JS::Value& val, JSContext* cx)
     // If an IID was passed in then use it
     if (argc) {
         JSObject* iidobj;
-        if (JSVAL_IS_PRIMITIVE(val) ||
-            !(iidobj = JSVAL_TO_OBJECT(val)) ||
+        if (val.isPrimitive() ||
+            !(iidobj = val.toObjectOrNull()) ||
             !(iid = xpc_JSObjectToID(cx, iidobj))) {
             return nullptr;
         }

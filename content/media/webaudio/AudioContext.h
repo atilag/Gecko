@@ -10,16 +10,16 @@
 #include "mozilla/dom/AudioChannelBinding.h"
 #include "MediaBufferDecoder.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/TypedArray.h"
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsDOMEventTargetHelper.h"
 #include "nsHashKeys.h"
 #include "nsTHashtable.h"
 #include "js/TypeDecls.h"
 #include "nsIMemoryReporter.h"
-#include "mozilla/MemoryReporting.h"
 
 // X11 has a #define for CurrentTime. Unbelievable :-(.
 // See content/media/DOMMediaStream.h for more fun!
@@ -62,11 +62,12 @@ class ScriptProcessorNode;
 class WaveShaperNode;
 class PeriodicWave;
 
-class AudioContext MOZ_FINAL : public nsDOMEventTargetHelper,
+class AudioContext MOZ_FINAL : public DOMEventTargetHelper,
                                public nsIMemoryReporter
 {
   AudioContext(nsPIDOMWindow* aParentWindow,
                bool aIsOffline,
+               AudioChannel aChannel = AudioChannel::Normal,
                uint32_t aNumberOfChannels = 0,
                uint32_t aLength = 0,
                float aSampleRate = 0.0f);
@@ -75,7 +76,7 @@ class AudioContext MOZ_FINAL : public nsDOMEventTargetHelper,
 public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(AudioContext,
-                                           nsDOMEventTargetHelper)
+                                           DOMEventTargetHelper)
   MOZ_DEFINE_MALLOC_SIZE_OF(MallocSizeOf)
 
   nsPIDOMWindow* GetParentObject() const
@@ -87,14 +88,19 @@ public:
   void Suspend();
   void Resume();
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
-  using nsDOMEventTargetHelper::DispatchTrustedEvent;
+  using DOMEventTargetHelper::DispatchTrustedEvent;
 
   // Constructor for regular AudioContext
   static already_AddRefed<AudioContext>
   Constructor(const GlobalObject& aGlobal, ErrorResult& aRv);
+
+  // Constructor for regular AudioContext. A default audio channel is needed.
+  static already_AddRefed<AudioContext>
+  Constructor(const GlobalObject& aGlobal,
+              AudioChannel aChannel,
+              ErrorResult& aRv);
 
   // Constructor for offline AudioContext
   static already_AddRefed<AudioContext>
@@ -127,10 +133,6 @@ public:
                uint32_t aLength, float aSampleRate,
                ErrorResult& aRv);
 
-  already_AddRefed<AudioBuffer>
-  CreateBuffer(JSContext* aJSContext, const ArrayBuffer& aBuffer,
-               bool aMixToMono, ErrorResult& aRv);
-
   already_AddRefed<MediaStreamAudioDestinationNode>
   CreateMediaStreamDestination(ErrorResult& aRv);
 
@@ -139,16 +141,6 @@ public:
                         uint32_t aNumberOfInputChannels,
                         uint32_t aNumberOfOutputChannels,
                         ErrorResult& aRv);
-
-  already_AddRefed<ScriptProcessorNode>
-  CreateJavaScriptNode(uint32_t aBufferSize,
-                       uint32_t aNumberOfInputChannels,
-                       uint32_t aNumberOfOutputChannels,
-                       ErrorResult& aRv)
-  {
-    return CreateScriptProcessor(aBufferSize, aNumberOfInputChannels,
-                                 aNumberOfOutputChannels, aRv);
-  }
 
   already_AddRefed<AnalyserNode>
   CreateAnalyser();
@@ -159,12 +151,6 @@ public:
   already_AddRefed<WaveShaperNode>
   CreateWaveShaper();
 
-  already_AddRefed<GainNode>
-  CreateGainNode()
-  {
-    return CreateGain();
-  }
-
   already_AddRefed<MediaElementAudioSourceNode>
   CreateMediaElementSource(HTMLMediaElement& aMediaElement, ErrorResult& aRv);
   already_AddRefed<MediaStreamAudioSourceNode>
@@ -172,12 +158,6 @@ public:
 
   already_AddRefed<DelayNode>
   CreateDelay(double aMaxDelayTime, ErrorResult& aRv);
-
-  already_AddRefed<DelayNode>
-  CreateDelayNode(double aMaxDelayTime, ErrorResult& aRv)
-  {
-    return CreateDelay(aMaxDelayTime, aRv);
-  }
 
   already_AddRefed<PannerNode>
   CreatePanner();

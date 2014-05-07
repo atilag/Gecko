@@ -27,6 +27,7 @@
 #include "nsSVGEffects.h"
 #include "mozilla/dom/SVGAnimatedLength.h"
 #include "nsMimeTypes.h"
+#include "DOMSVGLength.h"
 
 // undef the GetCurrentTime macro defined in WinBase.h from the MS Platform SDK
 #undef GetCurrentTime
@@ -36,11 +37,11 @@ using namespace mozilla::dom;
 namespace mozilla {
 namespace image {
 
-NS_IMPL_ISUPPORTS4(SVGDocumentWrapper,
-                   nsIStreamListener,
-                   nsIRequestObserver,
-                   nsIObserver,
-                   nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(SVGDocumentWrapper,
+                  nsIStreamListener,
+                  nsIRequestObserver,
+                  nsIObserver,
+                  nsISupportsWeakReference)
 
 SVGDocumentWrapper::SVGDocumentWrapper()
   : mIgnoreInvalidation(false),
@@ -85,7 +86,7 @@ SVGDocumentWrapper::GetWidthOrHeight(Dimension aDimension,
   NS_ENSURE_TRUE(domAnimLength, false);
 
   // Get the animated value from the object
-  nsRefPtr<nsIDOMSVGLength> domLength = domAnimLength->AnimVal();
+  nsRefPtr<DOMSVGLength> domLength = domAnimLength->AnimVal();
   NS_ENSURE_TRUE(domLength, false);
 
   // Check if it's a percent value (and fail if so)
@@ -214,6 +215,19 @@ SVGDocumentWrapper::SetCurrentTime(float aTime)
   SVGSVGElement* svgElem = GetRootSVGElem();
   if (svgElem && svgElem->GetCurrentTime() != aTime) {
     svgElem->SetCurrentTime(aTime);
+  }
+}
+
+void
+SVGDocumentWrapper::TickRefreshDriver()
+{
+  nsCOMPtr<nsIPresShell> presShell;
+  mViewer->GetPresShell(getter_AddRefs(presShell));
+  if (presShell) {
+    nsPresContext* presContext = presShell->GetPresContext();
+    if (presContext) {
+      presContext->RefreshDriver()->DoTick();
+    }
   }
 }
 

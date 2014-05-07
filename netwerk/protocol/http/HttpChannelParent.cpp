@@ -103,13 +103,13 @@ HttpChannelParent::Init(const HttpChannelCreationArgs& aArgs)
 // HttpChannelParent::nsISupports
 //-----------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS6(HttpChannelParent,
-                   nsIInterfaceRequestor,
-                   nsIProgressEventSink,
-                   nsIRequestObserver,
-                   nsIStreamListener,
-                   nsIParentChannel,
-                   nsIParentRedirectingChannel)
+NS_IMPL_ISUPPORTS(HttpChannelParent,
+                  nsIInterfaceRequestor,
+                  nsIProgressEventSink,
+                  nsIRequestObserver,
+                  nsIStreamListener,
+                  nsIParentChannel,
+                  nsIParentRedirectingChannel)
 
 //-----------------------------------------------------------------------------
 // HttpChannelParent::nsIInterfaceRequestor
@@ -601,6 +601,8 @@ HttpChannelParent::OnStartRequest(nsIRequest *aRequest, nsISupports *aContext)
       NS_SerializeToString(secInfoSer, secInfoSerialization);
   }
 
+  uint16_t redirectCount = 0;
+  mChannel->GetRedirectCount(&redirectCount);
   if (mIPCClosed ||
       !SendOnStartRequest(channelStatus,
                           responseHead ? *responseHead : nsHttpResponseHead(),
@@ -609,7 +611,8 @@ HttpChannelParent::OnStartRequest(nsIRequest *aRequest, nsISupports *aContext)
                           isFromCache,
                           mCacheEntry ? true : false,
                           expirationTime, cachedCharset, secInfoSerialization,
-                          mChannel->GetSelfAddr(), mChannel->GetPeerAddr()))
+                          mChannel->GetSelfAddr(), mChannel->GetPeerAddr(),
+                          redirectCount))
   {
     return NS_ERROR_UNEXPECTED;
   }

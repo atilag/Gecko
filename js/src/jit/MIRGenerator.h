@@ -105,31 +105,26 @@ class MIRGenerator
         JS_ASSERT(compilingAsmJS());
         maxAsmJSStackArgBytes_ = n;
     }
+    void setPerformsCall() {
+        performsCall_ = true;
+    }
+    bool performsCall() const {
+        return performsCall_;
+    }
     void setPerformsAsmJSCall() {
         JS_ASSERT(compilingAsmJS());
+        setPerformsCall();
         performsAsmJSCall_ = true;
     }
     bool performsAsmJSCall() const {
         JS_ASSERT(compilingAsmJS());
         return performsAsmJSCall_;
     }
-    bool noteHeapAccess(AsmJSHeapAccess heapAccess) {
-        return asmJSHeapAccesses_.append(heapAccess);
-    }
-    const Vector<AsmJSHeapAccess, 0, IonAllocPolicy> &heapAccesses() const {
-        return asmJSHeapAccesses_;
-    }
     void noteMinAsmJSHeapLength(uint32_t len) {
         minAsmJSHeapLength_ = len;
     }
     uint32_t minAsmJSHeapLength() const {
         return minAsmJSHeapLength_;
-    }
-    bool noteGlobalAccess(unsigned offset, unsigned globalDataOffset) {
-        return asmJSGlobalAccesses_.append(AsmJSGlobalAccess(offset, globalDataOffset));
-    }
-    const Vector<AsmJSGlobalAccess, 0, IonAllocPolicy> &globalAccesses() const {
-        return asmJSGlobalAccesses_;
     }
 
     bool modifiesFrameArguments() const {
@@ -150,9 +145,8 @@ class MIRGenerator
     mozilla::Atomic<bool, mozilla::Relaxed> cancelBuild_;
 
     uint32_t maxAsmJSStackArgBytes_;
+    bool performsCall_;
     bool performsAsmJSCall_;
-    AsmJSHeapAccessVector asmJSHeapAccesses_;
-    AsmJSGlobalAccessVector asmJSGlobalAccesses_;
     uint32_t minAsmJSHeapLength_;
 
     // Keep track of whether frame arguments are modified during execution.

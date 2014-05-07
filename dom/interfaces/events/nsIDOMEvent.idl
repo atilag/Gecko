@@ -262,7 +262,11 @@ NS_NewDOMClipboardEvent(nsIDOMEvent** aInstancePtrResult,
                         mozilla::dom::EventTarget* aOwner,
                         nsPresContext* aPresContext,
                         mozilla::InternalClipboardEvent* aEvent);
-
+nsresult
+NS_NewDOMInputEvent(nsIDOMEvent** aInstancePtrResult,
+                    mozilla::dom::EventTarget* aOwner,
+                    nsPresContext* aPresContext,
+                    mozilla::InternalEditorInputEvent* aEvent);
 nsresult
 NS_NewDOMKeyboardEvent(nsIDOMEvent** aInstancePtrResult,
                        mozilla::dom::EventTarget* aOwner,
@@ -336,15 +340,6 @@ NS_NewDOMNotifyPaintEvent(nsIDOMEvent** aResult,
                           mozilla::WidgetEvent* aEvent,
                           uint32_t aEventType = 0,
                           nsInvalidateRequestList* aInvalidateRequests = nullptr);
-nsresult
-NS_NewDOMAudioAvailableEvent(nsIDOMEvent** aResult,
-                             mozilla::dom::EventTarget* aOwner,
-                             nsPresContext* aPresContext,
-                             mozilla::WidgetEvent* aEvent,
-                             uint32_t aEventType = 0,
-                             float* aFrameBuffer = nullptr,
-                             uint32_t aFrameBufferLength = 0,
-                             float aTime = 0);
 nsresult
 NS_NewDOMSimpleGestureEvent(nsIDOMEvent** aInstancePtrResult,
                             mozilla::dom::EventTarget* aOwner,

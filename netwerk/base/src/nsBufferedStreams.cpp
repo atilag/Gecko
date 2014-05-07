@@ -59,7 +59,7 @@ nsBufferedStream::~nsBufferedStream()
     Close();
 }
 
-NS_IMPL_ISUPPORTS1(nsBufferedStream, nsISeekableStream)
+NS_IMPL_ISUPPORTS(nsBufferedStream, nsISeekableStream)
 
 nsresult
 nsBufferedStream::Init(nsISupports* stream, uint32_t bufferSize)
@@ -258,11 +258,11 @@ NS_INTERFACE_MAP_BEGIN(nsBufferedInputStream)
     NS_IMPL_QUERY_CLASSINFO(nsBufferedInputStream)
 NS_INTERFACE_MAP_END_INHERITING(nsBufferedStream)
 
-NS_IMPL_CI_INTERFACE_GETTER4(nsBufferedInputStream,
-                             nsIInputStream,
-                             nsIBufferedInputStream,
-                             nsISeekableStream,
-                             nsIStreamBufferAccess)
+NS_IMPL_CI_INTERFACE_GETTER(nsBufferedInputStream,
+                            nsIInputStream,
+                            nsIBufferedInputStream,
+                            nsISeekableStream,
+                            nsIStreamBufferAccess)
 
 nsresult
 nsBufferedInputStream::Create(nsISupports *aOuter, REFNSIID aIID, void **aResult)
@@ -643,7 +643,7 @@ nsBufferedOutputStream::Flush()
     // |<-------------->|<---|----->|
     // b                a    c      s
     uint32_t rem = mFillPoint - amt;
-    memcpy(mBuffer, mBuffer + amt, rem);
+    memmove(mBuffer, mBuffer + amt, rem);
     mFillPoint = mCursor = rem;
     return NS_ERROR_FAILURE;        // didn't flush all
 }
@@ -698,7 +698,7 @@ nsBufferedOutputStream::WriteSegments(nsReadSegmentFun reader, void * closure, u
         if (left == 0) {
             rv = Flush();
             if (NS_FAILED(rv))
-              return rv;
+                return (*_retval > 0) ? NS_OK : rv;
 
             continue;
         }

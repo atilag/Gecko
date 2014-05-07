@@ -23,7 +23,7 @@
 #include "nsStyleChangeList.h"
 
 
-using namespace mozilla::layers;
+using mozilla::layers::Layer;
 
 namespace mozilla {
 namespace css {
@@ -78,7 +78,7 @@ CommonAnimationManager::RemoveAllElementData()
  * nsISupports implementation
  */
 
-NS_IMPL_ISUPPORTS1(CommonAnimationManager, nsIStyleRuleProcessor)
+NS_IMPL_ISUPPORTS(CommonAnimationManager, nsIStyleRuleProcessor)
 
 nsRestyleHint
 CommonAnimationManager::HasStateDependentStyle(StateRuleProcessorData* aData)
@@ -271,7 +271,7 @@ CommonAnimationManager::UpdateThrottledStyle(dom::Element* aElement,
   return newStyle;
 }
 
-NS_IMPL_ISUPPORTS1(AnimValuesStyleRule, nsIStyleRule)
+NS_IMPL_ISUPPORTS(AnimValuesStyleRule, nsIStyleRule)
 
 /* virtual */ void
 AnimValuesStyleRule::MapRuleInfoInto(nsRuleData* aRuleData)
@@ -359,6 +359,34 @@ ComputedTimingFunction::GetValue(double aPortion) const
       return StepEnd(mSteps, aPortion);
   }
 }
+
+} /* end sub-namespace css */
+
+bool
+StyleAnimation::IsRunningAt(TimeStamp aTime) const
+{
+  if (IsPaused() || mIterationDuration.ToMilliseconds() <= 0.0 ||
+      mStartTime.IsNull()) {
+    return false;
+  }
+
+  double iterationsElapsed = ElapsedDurationAt(aTime) / mIterationDuration;
+  return 0.0 <= iterationsElapsed && iterationsElapsed < mIterationCount;
+}
+
+bool
+StyleAnimation::HasAnimationOfProperty(nsCSSProperty aProperty) const
+{
+  for (uint32_t propIdx = 0, propEnd = mProperties.Length();
+       propIdx != propEnd; ++propIdx) {
+    if (aProperty == mProperties[propIdx].mProperty) {
+      return true;
+    }
+  }
+  return false;
+}
+
+namespace css {
 
 bool
 CommonElementAnimationData::CanAnimatePropertyOnCompositor(const dom::Element *aElement,

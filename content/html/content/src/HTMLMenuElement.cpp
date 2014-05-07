@@ -54,8 +54,8 @@ HTMLMenuElement::~HTMLMenuElement()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED2(HTMLMenuElement, nsGenericHTMLElement,
-                             nsIDOMHTMLMenuElement, nsIHTMLMenu)
+NS_IMPL_ISUPPORTS_INHERITED(HTMLMenuElement, nsGenericHTMLElement,
+                            nsIDOMHTMLMenuElement, nsIHTMLMenu)
 
 NS_IMPL_ELEMENT_CLONE(HTMLMenuElement)
 
@@ -259,9 +259,9 @@ HTMLMenuElement::AddSeparator(nsIMenuBuilder* aBuilder, int8_t& aSeparator)
 }
 
 JSObject*
-HTMLMenuElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+HTMLMenuElement::WrapNode(JSContext* aCx)
 {
-  return HTMLMenuElementBinding::Wrap(aCx, aScope, this);
+  return HTMLMenuElementBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

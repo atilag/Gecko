@@ -23,6 +23,7 @@
 #include "nsStyleSet.h"
 #include "nsCSSStyleSheet.h"
 #include "nsIFrame.h"
+#include "nsIWritablePropertyBag2.h"
 #include "nsSubDocumentFrame.h"
 
 #include "nsILinkHandler.h"
@@ -559,10 +560,6 @@ nsDocumentViewer::LoadStart(nsIDocument* aDocument)
 
   if (!mDocument) {
     mDocument = aDocument;
-  } else if (mDocument == aDocument) {
-    // Reset the document viewer's state back to what it was
-    // when the document load started.
-    PrepareToStartLoad();
   }
 }
 
@@ -1158,6 +1155,14 @@ nsDocumentViewer::PermitUnloadInternal(bool aCallerClosesWindow,
     nsCOMPtr<nsIPrompt> prompt = do_GetInterface(docShell);
 
     if (prompt) {
+      nsCOMPtr<nsIWritablePropertyBag2> promptBag = do_QueryInterface(prompt);
+      if (promptBag) {
+        bool isTabModalPromptAllowed;
+        GetIsTabModalPromptAllowed(&isTabModalPromptAllowed);
+        promptBag->SetPropertyAsBool(NS_LITERAL_STRING("allowTabModal"),
+                                     isTabModalPromptAllowed);
+      }
+
       nsXPIDLString title, message, stayLabel, leaveLabel;
       rv  = nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
                                                "OnBeforeUnloadTitle",
@@ -1200,7 +1205,19 @@ nsDocumentViewer::PermitUnloadInternal(bool aCallerClosesWindow,
                              leaveLabel, stayLabel, nullptr, nullptr,
                              &dummy, &buttonPressed);
       mInPermitUnloadPrompt = false;
-      NS_ENSURE_SUCCESS(rv, rv);
+
+      // If the prompt aborted, we tell our consumer that it is not allowed
+      // to unload the page. One reason that prompts abort is that the user
+      // performed some action that caused the page to unload while our prompt
+      // was active. In those cases we don't want our consumer to also unload
+      // the page.
+      //
+      // XXX: Are there other cases where prompts can abort? Is it ok to
+      //      prevent unloading the page in those cases?
+      if (NS_FAILED(rv)) {
+        *aPermitUnload = false;
+        return NS_OK;
+      }
 
       // Button 0 == leave, button 1 == stay
       *aPermitUnload = (buttonPressed == 0);
@@ -1244,6 +1261,13 @@ NS_IMETHODIMP
 nsDocumentViewer::GetBeforeUnloadFiring(bool* aInEvent)
 {
   *aInEvent = mInPermitUnload;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocumentViewer::GetInPermitUnload(bool* aInEvent)
+{
+  *aInEvent = mInPermitUnloadPrompt;
   return NS_OK;
 }
 
@@ -3257,8 +3281,7 @@ nsDocumentViewer::GetContentSize(int32_t* aWidth, int32_t* aHeight)
   nscoord prefWidth;
   {
     nsRefPtr<nsRenderingContext> rcx =
-      presShell->GetReferenceRenderingContext();
-    NS_ENSURE_TRUE(rcx, NS_ERROR_FAILURE);
+      presShell->CreateReferenceRenderingContext();
     prefWidth = root->GetPrefWidth(rcx);
   }
 
@@ -3283,7 +3306,7 @@ nsDocumentViewer::GetContentSize(int32_t* aWidth, int32_t* aHeight)
 }
 
 
-NS_IMPL_ISUPPORTS1(nsDocViewerSelectionListener, nsISelectionListener)
+NS_IMPL_ISUPPORTS(nsDocViewerSelectionListener, nsISelectionListener)
 
 nsresult nsDocViewerSelectionListener::Init(nsDocumentViewer *aDocViewer)
 {
@@ -3483,8 +3506,8 @@ NS_IMETHODIMP nsDocViewerSelectionListener::NotifySelectionChanged(nsIDOMDocumen
 }
 
 //nsDocViewerFocusListener
-NS_IMPL_ISUPPORTS1(nsDocViewerFocusListener,
-                   nsIDOMEventListener)
+NS_IMPL_ISUPPORTS(nsDocViewerFocusListener,
+                  nsIDOMEventListener)
 
 nsDocViewerFocusListener::nsDocViewerFocusListener()
 :mDocViewer(nullptr)
@@ -4313,7 +4336,7 @@ nsDocumentViewer::GetHistoryEntry(nsISHEntry **aHistoryEntry)
 NS_IMETHODIMP
 nsDocumentViewer::GetIsTabModalPromptAllowed(bool *aAllowed)
 {
-  *aAllowed = !(mInPermitUnload || mHidden);
+  *aAllowed = !mHidden;
   return NS_OK;
 }
 

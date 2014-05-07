@@ -11,8 +11,8 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_1(OfflineAudioCompletionEvent, Event,
-                                     mRenderedBuffer)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(OfflineAudioCompletionEvent, Event,
+                                   mRenderedBuffer)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(OfflineAudioCompletionEvent)
 NS_INTERFACE_MAP_END_INHERITING(Event)
@@ -29,9 +29,9 @@ OfflineAudioCompletionEvent::OfflineAudioCompletionEvent(AudioContext* aOwner,
 }
 
 JSObject*
-OfflineAudioCompletionEvent::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+OfflineAudioCompletionEvent::WrapObject(JSContext* aCx)
 {
-  return OfflineAudioCompletionEventBinding::Wrap(aCx, aScope, this);
+  return OfflineAudioCompletionEventBinding::Wrap(aCx, this);
 }
 
 }

@@ -370,6 +370,9 @@ GetScopeNameForTypeOf(JSContext *cx, HandleObject obj, HandlePropertyName name,
 JSObject *
 Lambda(JSContext *cx, HandleFunction fun, HandleObject parent);
 
+JSObject *
+LambdaArrow(JSContext *cx, HandleFunction fun, HandleObject parent, HandleValue thisv);
+
 bool
 GetElement(JSContext *cx, MutableHandleValue lref, HandleValue rref, MutableHandleValue res);
 
@@ -458,6 +461,10 @@ EnterWithOperation(JSContext *cx, AbstractFramePtr frame, HandleValue val, Handl
 bool
 InitGetterSetterOperation(JSContext *cx, jsbytecode *pc, HandleObject obj, HandleValue idval,
                           HandleObject val);
+
+bool
+SpreadOperation(JSContext *cx, HandleObject arr, HandleValue countVal,
+                HandleValue iterable, MutableHandleValue resultCountVal);
 
 inline bool
 SetConstOperation(JSContext *cx, HandleObject varobj, HandlePropertyName name, HandleValue rval)

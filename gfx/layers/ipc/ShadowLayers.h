@@ -23,7 +23,6 @@
  
 struct nsIntPoint;
 struct nsIntRect;
-class gfxASurface;
 
 namespace mozilla {
 namespace layers {
@@ -48,7 +47,6 @@ class PLayerTransactionParent;
 class LayerTransactionChild;
 class RefLayerComposite;
 class ShadowableLayer;
-class Shmem;
 class ShmemTextureClient;
 class SurfaceDescriptor;
 class TextureClient;
@@ -134,8 +132,6 @@ class Transaction;
 
 class ShadowLayerForwarder : public CompositableForwarder
 {
-  friend class AutoOpenSurface;
-  friend class DeprecatedTextureClientShmem;
   friend class ContentClientIncremental;
   friend class ClientLayerManager;
 
@@ -151,20 +147,9 @@ public:
   virtual PTextureChild* CreateTexture(const SurfaceDescriptor& aSharedData,
                                        TextureFlags aFlags) MOZ_OVERRIDE;
 
-  virtual void CreatedSingleBuffer(CompositableClient* aCompositable,
-                                   const SurfaceDescriptor& aDescriptor,
-                                   const TextureInfo& aTextureInfo,
-                                   const SurfaceDescriptor* aDescriptorOnWhite = nullptr) MOZ_OVERRIDE;
   virtual void CreatedIncrementalBuffer(CompositableClient* aCompositable,
                                         const TextureInfo& aTextureInfo,
                                         const nsIntRect& aBufferRect) MOZ_OVERRIDE;
-  virtual void CreatedDoubleBuffer(CompositableClient* aCompositable,
-                                   const SurfaceDescriptor& aFrontDescriptor,
-                                   const SurfaceDescriptor& aBackDescriptor,
-                                   const TextureInfo& aTextureInfo,
-                                   const SurfaceDescriptor* aFrontDescriptorOnWhite = nullptr,
-                                   const SurfaceDescriptor* aBackDescriptorOnWhite = nullptr) MOZ_OVERRIDE;
-  virtual void DestroyThebesBuffer(CompositableClient* aCompositable) MOZ_OVERRIDE;
 
   /**
    * Adds an edit in the layers transaction in order to attach
@@ -213,16 +198,6 @@ public:
   void CreatedRefLayer(ShadowableLayer* aRef);
 
   /**
-   * The specified layer is destroying its buffers.
-   * |aBackBufferToDestroy| is deallocated when this transaction is
-   * posted to the parent.  During the parent-side transaction, the
-   * shadow is told to destroy its front buffer.  This can happen when
-   * a new front/back buffer pair have been created because of a layer
-   * resize, e.g.
-   */
-  virtual void DestroyedThebesBuffer(const SurfaceDescriptor& aBackBufferToDestroy) MOZ_OVERRIDE;
-
-  /**
    * At least one attribute of |aMutant| has changed, and |aMutant|
    * needs to sync to its shadow layer.  This initial implementation
    * forwards all attributes when any is mutated.
@@ -267,25 +242,10 @@ public:
    */
   void AttachAsyncCompositable(PLayerTransactionChild* aLayer, uint64_t aID);
 
-  /**
-   * Communicate to the compositor that the texture identified by aLayer
-   * and aIdentifier has been updated to aImage.
-   */
-  virtual void UpdateTexture(CompositableClient* aCompositable,
-                             TextureIdentifier aTextureId,
-                             SurfaceDescriptor* aDescriptor) MOZ_OVERRIDE;
-
   virtual void RemoveTextureFromCompositable(CompositableClient* aCompositable,
                                              TextureClient* aTexture) MOZ_OVERRIDE;
 
   virtual void RemoveTexture(TextureClient* aTexture) MOZ_OVERRIDE;
-
-  /**
-   * Same as above, but performs an asynchronous layer transaction
-   */
-  virtual void UpdateTextureNoSwap(CompositableClient* aCompositable,
-                                   TextureIdentifier aTextureId,
-                                   SurfaceDescriptor* aDescriptor) MOZ_OVERRIDE;
 
   /**
    * Communicate to the compositor that aRegion in the texture identified by aLayer
@@ -338,6 +298,14 @@ public:
    * Set an actor through which layer updates will be pushed.
    */
   void SetShadowManager(PLayerTransactionChild* aShadowManager);
+
+  void StopReceiveAsyncParentMessge();
+
+  void ClearCachedResources();
+
+  void Composite();
+
+  void SendPendingAsyncMessge();
 
   /**
    * True if this is forwarding to a LayerManagerComposite.
@@ -405,9 +373,6 @@ public:
 
   static void PlatformSyncBeforeUpdate();
 
-  static already_AddRefed<gfxASurface>
-  OpenDescriptor(OpenMode aMode, const SurfaceDescriptor& aSurface);
-
 protected:
   ShadowLayerForwarder();
 
@@ -419,72 +384,7 @@ protected:
 
   RefPtr<LayerTransactionChild> mShadowManager;
 
-#ifdef MOZ_HAVE_SURFACEDESCRIPTORGRALLOC
-  // from ISurfaceAllocator
-  virtual PGrallocBufferChild* AllocGrallocBuffer(const gfx::IntSize& aSize,
-                                                  uint32_t aFormat,
-                                                  uint32_t aUsage,
-                                                  MaybeMagicGrallocBufferHandle* aHandle) MOZ_OVERRIDE;
-
-  virtual void DeallocGrallocBuffer(PGrallocBufferChild* aChild) MOZ_OVERRIDE;
-#endif
-
 private:
-  /**
-   * Try to query the content type efficiently, but at worst map the
-   * surface and return it in *aSurface.
-   */
-  static gfxContentType
-  GetDescriptorSurfaceContentType(const SurfaceDescriptor& aDescriptor,
-                                  OpenMode aMode,
-                                  gfxASurface** aSurface);
-  /**
-   * It can be expensive to open a descriptor just to query its
-   * content type.  If the platform impl can do this cheaply, it will
-   * set *aContent and return true.
-   */
-  static bool
-  PlatformGetDescriptorSurfaceContentType(const SurfaceDescriptor& aDescriptor,
-                                          OpenMode aMode,
-                                          gfxContentType* aContent,
-                                          gfxASurface** aSurface);
-  // (Same as above, but for surface size.)
-  static gfx::IntSize
-  GetDescriptorSurfaceSize(const SurfaceDescriptor& aDescriptor,
-                           OpenMode aMode,
-                           gfxASurface** aSurface);
-  static bool
-  PlatformGetDescriptorSurfaceSize(const SurfaceDescriptor& aDescriptor,
-                                   OpenMode aMode,
-                                   gfx::IntSize* aSize,
-                                   gfxASurface** aSurface);
-  // And again, for the image format.
-  // This function will return gfxImageFormat::Unknown only if |aDescriptor|
-  // describes a non-ImageSurface.
-  static gfxImageFormat
-  GetDescriptorSurfaceImageFormat(const SurfaceDescriptor& aDescriptor,
-                                  OpenMode aMode,
-                                  gfxASurface** aSurface);
-  static bool
-  PlatformGetDescriptorSurfaceImageFormat(const SurfaceDescriptor& aDescriptor,
-                                          OpenMode aMode,
-                                          gfxImageFormat* aContent,
-                                          gfxASurface** aSurface);
-
-  static already_AddRefed<gfxASurface>
-  PlatformOpenDescriptor(OpenMode aMode, const SurfaceDescriptor& aDescriptor);
-
-  /**
-   * Make this descriptor unusable for gfxASurface clients. A
-   * private interface with AutoOpenSurface.
-   */
-  static void
-  CloseDescriptor(const SurfaceDescriptor& aDescriptor);
-
-  static bool
-  PlatformCloseDescriptor(const SurfaceDescriptor& aDescriptor);
-
-  bool PlatformDestroySharedSurface(SurfaceDescriptor* aSurface);
 
   Transaction* mTxn;
   DiagnosticTypes mDiagnosticTypes;

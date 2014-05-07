@@ -42,6 +42,20 @@ MIRType MIRTypeFromValue(const js::Value &vp)
 {
     if (vp.isDouble())
         return MIRType_Double;
+    if (vp.isMagic()) {
+        switch (vp.whyMagic()) {
+          case JS_OPTIMIZED_ARGUMENTS:
+            return MIRType_MagicOptimizedArguments;
+          case JS_OPTIMIZED_OUT:
+            return MIRType_MagicOptimizedOut;
+          case JS_ELEMENTS_HOLE:
+            return MIRType_MagicHole;
+          case JS_IS_CONSTRUCTING:
+            return MIRType_MagicIsConstructing;
+          default:
+            MOZ_ASSERT(!"Unexpected magic constant");
+        }
+    }
     return MIRTypeFromValueType(vp.extractNonDoubleType());
 }
 
@@ -75,7 +89,14 @@ MIRType MIRTypeFromValue(const js::Value &vp)
      * Truncate Doubles. So every time removeUse is called, UseRemoved needs
      * to get set.
      */                                                                         \
-    _(UseRemoved)
+    _(UseRemoved)                                                               \
+                                                                                \
+    /* Marks if the current instruction should go to the bailout paths instead
+     * of producing code as part of the control flow.  This flag can only be set
+     * on instructions which are only used by ResumePoint or by other flagged
+     * instructions.
+     */                                                                         \
+    _(RecoveredOnBailout)
 
 class MDefinition;
 class MInstruction;
@@ -194,6 +215,8 @@ class MNode : public TempObject
     inline MDefinition *toDefinition();
     inline MResumePoint *toResumePoint();
 
+    virtual bool writeRecoverData(CompactBufferWriter &writer) const;
+
   protected:
     // Sets an unset operand, updating use information.
     virtual void setOperand(size_t index, MDefinition *operand) = 0;
@@ -294,7 +317,7 @@ class MDefinition : public MNode
 
     // Track bailouts by storing the current pc in MIR instruction. Also used
     // for profiling and keeping track of what the last known pc was.
-    jsbytecode *trackedPc_;
+    BytecodeSite trackedSite_;
 
   private:
     enum Flag {
@@ -329,7 +352,7 @@ class MDefinition : public MNode
         resultTypeSet_(nullptr),
         flags_(0),
         dependency_(nullptr),
-        trackedPc_(nullptr)
+        trackedSite_()
     { }
 
     virtual Opcode op() const = 0;
@@ -349,12 +372,17 @@ class MDefinition : public MNode
     // be worthwhile.
     virtual bool possiblyCalls() const { return false; }
 
-    void setTrackedPc(jsbytecode *pc) {
-        trackedPc_ = pc;
+    void setTrackedSite(const BytecodeSite &site) {
+        trackedSite_ = site;
     }
-
+    const BytecodeSite &trackedSite() const {
+        return trackedSite_;
+    }
     jsbytecode *trackedPc() {
-        return trackedPc_;
+        return trackedSite_.pc();
+    }
+    InlineScriptTree *trackedTree() {
+        return trackedSite_.tree();
     }
 
     // Return the range of this value, *before* any bailout checks. Contrast
@@ -376,16 +404,52 @@ class MDefinition : public MNode
     }
 
     virtual HashNumber valueHash() const;
-    virtual bool congruentTo(MDefinition *ins) const {
+    virtual bool congruentTo(const MDefinition *ins) const {
         return false;
     }
-    bool congruentIfOperandsEqual(MDefinition *ins) const;
+    bool congruentIfOperandsEqual(const MDefinition *ins) const;
     virtual MDefinition *foldsTo(TempAllocator &alloc, bool useValueNumbers);
     virtual void analyzeEdgeCasesForward();
     virtual void analyzeEdgeCasesBackward();
 
-    virtual bool truncate();
-    virtual bool isOperandTruncated(size_t index) const;
+    // When a floating-point value is used by nodes which would prefer to
+    // recieve integer inputs, we may be able to help by computing our result
+    // into an integer directly.
+    //
+    // A value can be truncated in 4 differents ways:
+    //   1. Ignore Infinities (x / 0 --> 0).
+    //   2. Ignore overflow (INT_MIN / -1 == (INT_MAX + 1) --> INT_MIN)
+    //   3. Ignore negative zeros. (-0 --> 0)
+    //   4. Ignore remainder. (3 / 4 --> 0)
+    //
+    // Indirect truncation is used to represent that we are interested in the
+    // truncated result, but only if it can safely flow into operations which
+    // are computed modulo 2^32, such as (2) and (3). Infinities are not safe,
+    // as they would have absorbed other math operations. Remainders are not
+    // safe, as fractions can be scaled up by multiplication.
+    //
+    // Division is a particularly interesting node here because it covers all 4
+    // cases even when its own operands are integers.
+    //
+    // Note that these enum values are ordered from least value-modifying to
+    // most value-modifying, and code relies on this ordering.
+    enum TruncateKind {
+        // No correction.
+        NoTruncate = 0,
+        // An integer is desired, but we can't skip bailout checks.
+        TruncateAfterBailouts = 1,
+        // The value will be truncated after some arithmetic (see above).
+        IndirectTruncate = 2,
+        // Direct and infallible truncation to int32.
+        Truncate = 3
+    };
+
+    // Apply the given truncate to this node itself.
+    virtual bool truncate(TruncateKind kind);
+
+    // Determine what kind of truncate this node prefers for the operand at the
+    // given index.
+    virtual TruncateKind operandTruncateKind(size_t index) const;
 
     // Compute an absolute or symbolic range for the value of this node.
     virtual void computeRange(TempAllocator &alloc) {
@@ -455,7 +519,7 @@ class MDefinition : public MNode
     bool emptyResultTypeSet() const;
 
     bool mightBeType(MIRType type) const {
-        JS_ASSERT(type != MIRType_Value);
+        MOZ_ASSERT(type != MIRType_Value);
 
         if (type == this->type())
             return true;
@@ -463,7 +527,7 @@ class MDefinition : public MNode
         if (MIRType_Value != this->type())
             return false;
 
-        return !resultTypeSet() || resultTypeSet()->mightBeType(ValueTypeFromMIRType(type));
+        return !resultTypeSet() || resultTypeSet()->mightBeMIRType(type);
     }
 
     // Float32 specialization operations (see big comment in IonAnalysis before the Float32
@@ -516,6 +580,10 @@ class MDefinition : public MNode
     // Test whether this MDefinition has at least one use.
     // (only counting MDefinitions, ignoring MResumePoints)
     bool hasDefUses() const;
+
+    // Test whether this MDefinition has at least one non-recovered use.
+    // (only counting MDefinitions, ignoring MResumePoints)
+    bool hasLiveDefUses() const;
 
     bool hasUses() const {
         return !uses_.empty();
@@ -584,13 +652,17 @@ class MDefinition : public MNode
     bool isEffectful() const {
         return getAliasSet().isStore();
     }
-    virtual bool mightAlias(MDefinition *store) {
+    virtual bool mightAlias(const MDefinition *store) const {
         // Return whether this load may depend on the specified store, given
         // that the alias sets intersect. This may be refined to exclude
         // possible aliasing in cases where alias set flags are too imprecise.
         JS_ASSERT(!isEffectful() && store->isEffectful());
         JS_ASSERT(getAliasSet().flags() & store->getAliasSet().flags());
         return true;
+    }
+
+    virtual bool canRecoverOnBailout() const {
+        return false;
     }
 };
 
@@ -745,7 +817,7 @@ class MBinaryInstruction : public MAryInstruction<2>
         replaceOperand(1, temp);
     }
 
-    bool binaryCongruentTo(MDefinition *ins) const
+    bool binaryCongruentTo(const MDefinition *ins) const
     {
         if (op() != ins->op())
             return false;
@@ -756,9 +828,9 @@ class MBinaryInstruction : public MAryInstruction<2>
         if (isEffectful() || ins->isEffectful())
             return false;
 
-        MDefinition *left = getOperand(0);
-        MDefinition *right = getOperand(1);
-        MDefinition *tmp;
+        const MDefinition *left = getOperand(0);
+        const MDefinition *right = getOperand(1);
+        const MDefinition *tmp;
 
         if (isCommutative() && left->valueNumber() > right->valueNumber()) {
             tmp = right;
@@ -766,9 +838,9 @@ class MBinaryInstruction : public MAryInstruction<2>
             left = tmp;
         }
 
-        MBinaryInstruction *bi = static_cast<MBinaryInstruction *>(ins);
-        MDefinition *insLeft = bi->getOperand(0);
-        MDefinition *insRight = bi->getOperand(1);
+        const MBinaryInstruction *bi = static_cast<const MBinaryInstruction *>(ins);
+        const MDefinition *insLeft = bi->getOperand(0);
+        const MDefinition *insRight = bi->getOperand(1);
         if (isCommutative() && insLeft->valueNumber() > insRight->valueNumber()) {
             tmp = insRight;
             insRight = insLeft;
@@ -923,7 +995,7 @@ class MConstant : public MNullaryInstruction
     void printOpcode(FILE *fp) const;
 
     HashNumber valueHash() const;
-    bool congruentTo(MDefinition *ins) const;
+    bool congruentTo(const MDefinition *ins) const;
 
     AliasSet getAliasSet() const {
         return AliasSet::None();
@@ -941,7 +1013,7 @@ class MConstant : public MNullaryInstruction
     }
 
     void computeRange(TempAllocator &alloc);
-    bool truncate();
+    bool truncate(TruncateKind kind);
 
     bool canProduceFloat32() const;
 };
@@ -991,7 +1063,7 @@ class MParameter : public MNullaryInstruction
     void printOpcode(FILE *fp) const;
 
     HashNumber valueHash() const;
-    bool congruentTo(MDefinition *ins) const;
+    bool congruentTo(const MDefinition *ins) const;
 };
 
 class MCallee : public MNullaryInstruction
@@ -1006,7 +1078,7 @@ class MCallee : public MNullaryInstruction
   public:
     INSTRUCTION_HEADER(Callee)
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
 
@@ -1268,7 +1340,13 @@ class MTest
     AliasSet getAliasSet() const {
         return AliasSet::None();
     }
-    void infer();
+
+    // We cache whether our operand might emulate undefined, but we don't want
+    // to do that from New() or the constructor, since those can be called on
+    // background threads.  So make callers explicitly call it if they want us
+    // to check whether the operand might do this.  If this method is never
+    // called, we'll assume our operand can emulate undefined.
+    void cacheOperandMightEmulateUndefined();
     MDefinition *foldsTo(TempAllocator &alloc, bool useValueNumbers);
     void filtersUndefinedOrNull(bool trueBranch, MDefinition **subject, bool *filtersUndefined,
                                 bool *filtersNull);
@@ -1341,7 +1419,7 @@ class MThrow
 types::TemporaryTypeSet *
 MakeSingletonTypeSet(types::CompilerConstraintList *constraints, JSObject *obj);
 
-void
+bool
 MergeTypes(MIRType *ptype, types::TemporaryTypeSet **ptypeSet,
            MIRType newType, types::TemporaryTypeSet *newTypeSet);
 
@@ -1553,6 +1631,11 @@ class MNewDerivedTypedObject
     virtual AliasSet getAliasSet() const {
         return AliasSet::None();
     }
+
+    bool writeRecoverData(CompactBufferWriter &writer) const;
+    bool canRecoverOnBailout() const {
+        return true;
+    }
 };
 
 // Abort parallel execution.
@@ -1561,7 +1644,7 @@ class MAbortPar : public MAryControlInstruction<0, 0>
     MAbortPar()
       : MAryControlInstruction<0, 0>()
     {
-        setResultType(MIRType_Undefined);
+        setResultType(MIRType_None);
         setGuard();
     }
 
@@ -1920,13 +2003,53 @@ class MCallDOMNative : public MCall
   public:
     virtual AliasSet getAliasSet() const MOZ_OVERRIDE;
 
-    virtual bool congruentTo(MDefinition *ins) const MOZ_OVERRIDE;
+    virtual bool congruentTo(const MDefinition *ins) const MOZ_OVERRIDE;
 
     virtual bool isCallDOMNative() const MOZ_OVERRIDE {
         return true;
     }
 
     virtual void computeMovable() MOZ_OVERRIDE;
+};
+
+// arr.splice(start, deleteCount) with unused return value.
+class MArraySplice
+  : public MTernaryInstruction,
+    public Mix3Policy<ObjectPolicy<0>, IntPolicy<1>, IntPolicy<2> >
+{
+  private:
+
+    MArraySplice(MDefinition *object, MDefinition *start, MDefinition *deleteCount)
+      : MTernaryInstruction(object, start, deleteCount)
+    { }
+
+  public:
+    INSTRUCTION_HEADER(ArraySplice)
+    static MArraySplice *New(TempAllocator &alloc, MDefinition *object,
+                             MDefinition *start, MDefinition *deleteCount)
+    {
+        return new(alloc) MArraySplice(object, start, deleteCount);
+    }
+
+    MDefinition *object() const {
+        return getOperand(0);
+    }
+
+    MDefinition *start() const {
+        return getOperand(1);
+    }
+
+    MDefinition *deleteCount() const {
+        return getOperand(2);
+    }
+
+    bool possiblyCalls() const {
+        return true;
+    }
+
+    TypePolicy *typePolicy() {
+        return this;
+    }
 };
 
 // fun.apply(self, arguments)
@@ -1992,6 +2115,9 @@ class MBail : public MNullaryInstruction
         return new(alloc) MBail();
     }
 
+    AliasSet getAliasSet() const {
+        return AliasSet::None();
+    }
 };
 
 class MAssertFloat32 : public MUnaryInstruction
@@ -2285,8 +2411,8 @@ class MCompare
 
     void trySpecializeFloat32(TempAllocator &alloc);
     bool isFloat32Commutative() const { return true; }
-    bool truncate();
-    bool isOperandTruncated(size_t index) const;
+    bool truncate(TruncateKind kind);
+    TruncateKind operandTruncateKind(size_t index) const;
 
 # ifdef DEBUG
     bool isConsistentFloat32Use(MUse *use) const {
@@ -2296,7 +2422,7 @@ class MCompare
 # endif
 
   protected:
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!binaryCongruentTo(ins))
             return false;
         return compareType() == ins->toCompare()->compareType() &&
@@ -2332,7 +2458,7 @@ class MBox : public MUnaryInstruction
         return new(alloc) MBox(alloc, ins);
     }
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -2414,7 +2540,7 @@ class MUnbox : public MUnaryInstruction, public BoxInputsPolicy
     bool fallible() const {
         return mode() != Infallible;
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!ins->isUnbox() || ins->toUnbox()->mode() != mode())
             return false;
         return congruentIfOperandsEqual(ins);
@@ -2815,11 +2941,17 @@ class MToDouble
   private:
     ConversionKind conversion_;
 
+    TruncateKind implicitTruncate_;
+
     MToDouble(MDefinition *def, ConversionKind conversion = NonStringPrimitives)
-      : MUnaryInstruction(def), conversion_(conversion)
+      : MUnaryInstruction(def), conversion_(conversion), implicitTruncate_(NoTruncate)
     {
         setResultType(MIRType_Double);
         setMovable();
+
+        // An object might have "valueOf", which means it is effectful.
+        if (def->mightBeType(MIRType_Object))
+            setGuard();
     }
 
   public:
@@ -2842,7 +2974,7 @@ class MToDouble
     }
 
     MDefinition *foldsTo(TempAllocator &alloc, bool useValueNumbers);
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!ins->isToDouble() || ins->toToDouble()->conversion() != conversion())
             return false;
         return congruentIfOperandsEqual(ins);
@@ -2852,12 +2984,19 @@ class MToDouble
     }
 
     void computeRange(TempAllocator &alloc);
-    bool truncate();
-    bool isOperandTruncated(size_t index) const;
+    bool truncate(TruncateKind kind);
+    TruncateKind operandTruncateKind(size_t index) const;
 
 #ifdef DEBUG
     bool isConsistentFloat32Use(MUse *use) const { return true; }
 #endif
+
+    TruncateKind truncateKind() const {
+        return implicitTruncate_;
+    }
+    void setTruncateKind(TruncateKind kind) {
+        implicitTruncate_ = Max(implicitTruncate_, kind);
+    }
 };
 
 // Converts a primitive (either typed or untyped) to a float32. If the input is
@@ -2882,6 +3021,10 @@ class MToFloat32
     {
         setResultType(MIRType_Float32);
         setMovable();
+
+        // An object might have "valueOf", which means it is effectful.
+        if (def->mightBeType(MIRType_Object))
+            setGuard();
     }
 
   public:
@@ -2904,7 +3047,7 @@ class MToFloat32
     }
 
     virtual MDefinition *foldsTo(TempAllocator &alloc, bool useValueNumbers);
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!ins->isToFloat32() || ins->toToFloat32()->conversion() != conversion())
             return false;
         return congruentIfOperandsEqual(ins);
@@ -2937,7 +3080,7 @@ class MAsmJSUnsignedToDouble
     }
 
     MDefinition *foldsTo(TempAllocator &alloc, bool useValueNumbers);
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -2963,7 +3106,7 @@ class MAsmJSUnsignedToFloat32
     }
 
     MDefinition *foldsTo(TempAllocator &alloc, bool useValueNumbers);
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -2990,6 +3133,10 @@ class MToInt32
     {
         setResultType(MIRType_Int32);
         setMovable();
+
+        // An object might have "valueOf", which means it is effectful.
+        if (def->mightBeType(MIRType_Object))
+            setGuard();
     }
 
   public:
@@ -3021,7 +3168,7 @@ class MToInt32
         return conversion_;
     }
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
 
@@ -3044,6 +3191,10 @@ class MTruncateToInt32 : public MUnaryInstruction
     {
         setResultType(MIRType_Int32);
         setMovable();
+
+        // An object might have "valueOf", which means it is effectful.
+        if (def->mightBeType(MIRType_Object))
+            setGuard();
     }
 
   public:
@@ -3057,7 +3208,7 @@ class MTruncateToInt32 : public MUnaryInstruction
 
     MDefinition *foldsTo(TempAllocator &alloc, bool useValueNumbers);
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -3065,7 +3216,7 @@ class MTruncateToInt32 : public MUnaryInstruction
     }
 
     void computeRange(TempAllocator &alloc);
-    bool isOperandTruncated(size_t index) const;
+    TruncateKind operandTruncateKind(size_t index) const;
 # ifdef DEBUG
     bool isConsistentFloat32Use(MUse *use) const {
         return true;
@@ -3098,7 +3249,7 @@ class MToString : public MUnaryInstruction
 
     MDefinition *foldsTo(TempAllocator &alloc, bool useValueNumbers);
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -3131,7 +3282,7 @@ class MBitNot
     MDefinition *foldsTo(TempAllocator &alloc, bool useValueNumbers);
     void infer();
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -3172,7 +3323,7 @@ class MTypeOf
     }
 
     MDefinition *foldsTo(TempAllocator &alloc, bool useValueNumbers);
-    void infer();
+    void cacheInputMaybeCallableOrEmulatesUndefined();
 
     bool inputMaybeCallableOrEmulatesUndefined() const {
         return inputMaybeCallableOrEmulatesUndefined_;
@@ -3234,7 +3385,7 @@ class MBinaryBitwiseInstruction
     virtual MDefinition *foldIfEqual()  = 0;
     virtual void infer(BaselineInspector *inspector, jsbytecode *pc);
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return binaryCongruentTo(ins);
     }
     AliasSet getAliasSet() const {
@@ -3243,7 +3394,7 @@ class MBinaryBitwiseInstruction
         return AliasSet::None();
     }
 
-    bool isOperandTruncated(size_t index) const;
+    TruncateKind operandTruncateKind(size_t index) const;
 };
 
 class MBitAnd : public MBinaryBitwiseInstruction
@@ -3418,14 +3569,14 @@ class MBinaryArithInstruction
     // This optimization happens when the multiplication cannot be truncated
     // even if all uses are truncating its result, such as when the range
     // analysis detect a precision loss in the multiplication.
-    bool implicitTruncate_;
+    TruncateKind implicitTruncate_;
 
     void inferFallback(BaselineInspector *inspector, jsbytecode *pc);
 
   public:
     MBinaryArithInstruction(MDefinition *left, MDefinition *right)
       : MBinaryInstruction(left, right),
-        implicitTruncate_(false)
+        implicitTruncate_(NoTruncate)
     {
         setMovable();
     }
@@ -3450,7 +3601,7 @@ class MBinaryArithInstruction
 
     virtual void trySpecializeFloat32(TempAllocator &alloc);
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return binaryCongruentTo(ins);
     }
     AliasSet getAliasSet() const {
@@ -3460,10 +3611,13 @@ class MBinaryArithInstruction
     }
 
     bool isTruncated() const {
+        return implicitTruncate_ == Truncate;
+    }
+    TruncateKind truncateKind() const {
         return implicitTruncate_;
     }
-    void setTruncated(bool truncate) {
-        implicitTruncate_ = truncate;
+    void setTruncateKind(TruncateKind kind) {
+        implicitTruncate_ = Max(implicitTruncate_, kind);
     }
 };
 
@@ -3501,7 +3655,7 @@ class MMinMax
     TypePolicy *typePolicy() {
         return this;
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!ins->isMinMax())
             return false;
         if (isMax() != ins->toMinMax()->isMax())
@@ -3548,7 +3702,7 @@ class MAbs
     TypePolicy *typePolicy() {
         return this;
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     bool fallible() const;
@@ -3589,7 +3743,7 @@ class MSqrt
     TypePolicy *typePolicy() {
         return this;
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
 
@@ -3632,7 +3786,7 @@ class MAtan2
         return this;
     }
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
 
@@ -3675,7 +3829,7 @@ class MHypot
         return this;
     }
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
 
@@ -3716,7 +3870,7 @@ class MPow
     MDefinition *power() const {
         return rhs();
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     TypePolicy *typePolicy() {
@@ -3754,7 +3908,7 @@ class MPowHalf
     static MPowHalf *New(TempAllocator &alloc, MDefinition *input) {
         return new(alloc) MPowHalf(input);
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     bool operandIsNeverNegativeInfinity() const {
@@ -3862,7 +4016,7 @@ class MMathFunction
     TypePolicy *typePolicy() {
         return this;
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!ins->isMathFunction())
             return false;
         if (ins->toMathFunction()->function() != function())
@@ -3911,7 +4065,7 @@ class MAdd : public MBinaryArithInstruction
         add->specialization_ = type;
         add->setResultType(type);
         if (type == MIRType_Int32) {
-            add->setTruncated(true);
+            add->setTruncateKind(Truncate);
             add->setCommutative();
         }
         return add;
@@ -3925,8 +4079,13 @@ class MAdd : public MBinaryArithInstruction
 
     bool fallible() const;
     void computeRange(TempAllocator &alloc);
-    bool truncate();
-    bool isOperandTruncated(size_t index) const;
+    bool truncate(TruncateKind kind);
+    TruncateKind operandTruncateKind(size_t index) const;
+
+    bool writeRecoverData(CompactBufferWriter &writer) const;
+    bool canRecoverOnBailout() const {
+        return specialization_ < MIRType_Object;
+    }
 };
 
 class MSub : public MBinaryArithInstruction
@@ -3949,7 +4108,7 @@ class MSub : public MBinaryArithInstruction
         sub->specialization_ = type;
         sub->setResultType(type);
         if (type == MIRType_Int32)
-            sub->setTruncated(true);
+            sub->setTruncateKind(Truncate);
         return sub;
     }
 
@@ -3961,8 +4120,8 @@ class MSub : public MBinaryArithInstruction
 
     bool fallible() const;
     void computeRange(TempAllocator &alloc);
-    bool truncate();
-    bool isOperandTruncated(size_t index) const;
+    bool truncate(TruncateKind kind);
+    TruncateKind operandTruncateKind(size_t index) const;
 };
 
 class MMul : public MBinaryArithInstruction
@@ -3989,7 +4148,7 @@ class MMul : public MBinaryArithInstruction
             // This implements the required behavior for Math.imul, which
             // can never fail and always truncates its output to int32.
             canBeNegativeZero_ = false;
-            setTruncated(true);
+            setTruncateKind(Truncate);
             setCommutative();
         }
         JS_ASSERT_IF(mode != Integer, mode == Normal);
@@ -4018,11 +4177,11 @@ class MMul : public MBinaryArithInstruction
         return 1;
     }
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!ins->isMul())
             return false;
 
-        MMul *mul = ins->toMul();
+        const MMul *mul = ins->toMul();
         if (canBeNegativeZero_ != mul->canBeNegativeZero())
             return false;
 
@@ -4054,10 +4213,10 @@ class MMul : public MBinaryArithInstruction
     bool isFloat32Commutative() const { return true; }
 
     void computeRange(TempAllocator &alloc);
-    bool truncate();
-    bool isOperandTruncated(size_t index) const;
+    bool truncate(TruncateKind kind);
+    TruncateKind operandTruncateKind(size_t index) const;
 
-    Mode mode() { return mode_; }
+    Mode mode() const { return mode_; }
 };
 
 class MDiv : public MBinaryArithInstruction
@@ -4095,7 +4254,7 @@ class MDiv : public MBinaryArithInstruction
         MDiv *div = new(alloc) MDiv(left, right, type);
         div->unsigned_ = unsignd;
         if (type == MIRType_Int32)
-            div->setTruncated(true);
+            div->setTruncateKind(Truncate);
         return div;
     }
 
@@ -4130,11 +4289,28 @@ class MDiv : public MBinaryArithInstruction
         return unsigned_;
     }
 
+    bool isTruncatedIndirectly() const {
+        return truncateKind() >= IndirectTruncate;
+    }
+
+    bool canTruncateInfinities() const {
+        return isTruncated();
+    }
+    bool canTruncateRemainder() const {
+        return isTruncated();
+    }
+    bool canTruncateOverflow() const {
+        return isTruncated() || isTruncatedIndirectly();
+    }
+    bool canTruncateNegativeZero() const {
+        return isTruncated() || isTruncatedIndirectly();
+    }
+
     bool isFloat32Commutative() const { return true; }
 
     void computeRange(TempAllocator &alloc);
     bool fallible() const;
-    bool truncate();
+    bool truncate(TruncateKind kind);
     void collectRangeInfoPreTrunc();
 };
 
@@ -4164,7 +4340,7 @@ class MMod : public MBinaryArithInstruction
         MMod *mod = new(alloc) MMod(left, right, type);
         mod->unsigned_ = unsignd;
         if (type == MIRType_Int32)
-            mod->setTruncated(true);
+            mod->setTruncateKind(Truncate);
         return mod;
     }
 
@@ -4188,7 +4364,7 @@ class MMod : public MBinaryArithInstruction
     bool fallible() const;
 
     void computeRange(TempAllocator &alloc);
-    bool truncate();
+    bool truncate(TruncateKind kind);
     void collectRangeInfoPreTrunc();
 };
 
@@ -4215,7 +4391,7 @@ class MConcat
     TypePolicy *typePolicy() {
         return this;
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -4254,7 +4430,7 @@ class MConcatPar
         return getOperand(2);
     }
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -4284,7 +4460,7 @@ class MCharCodeAt
         return this;
     }
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
 
@@ -4398,6 +4574,39 @@ class MComputeThis
     // effectful.
 };
 
+// Load an arrow function's |this| value.
+class MLoadArrowThis
+  : public MUnaryInstruction,
+    public SingleObjectPolicy
+{
+    MLoadArrowThis(MDefinition *callee)
+      : MUnaryInstruction(callee)
+    {
+        setResultType(MIRType_Value);
+        setMovable();
+    }
+
+  public:
+    INSTRUCTION_HEADER(LoadArrowThis)
+
+    static MLoadArrowThis *New(TempAllocator &alloc, MDefinition *callee) {
+        return new(alloc) MLoadArrowThis(callee);
+    }
+    MDefinition *callee() const {
+        return getOperand(0);
+    }
+    TypePolicy *typePolicy() {
+        return this;
+    }
+    bool congruentTo(const MDefinition *ins) const {
+        return congruentIfOperandsEqual(ins);
+    }
+    AliasSet getAliasSet() const {
+        // An arrow function's lexical |this| value is immutable.
+        return AliasSet::None();
+    }
+};
+
 class MPhi MOZ_FINAL : public MDefinition, public InlineForwardListNode<MPhi>
 {
     js::Vector<MUse, 2, IonAllocPolicy> inputs_;
@@ -4473,14 +4682,14 @@ class MPhi MOZ_FINAL : public MDefinition, public InlineForwardListNode<MPhi>
         triedToSpecialize_ = true;
         setResultType(type);
     }
-    void specializeType();
+    bool specializeType();
 
     // Whether this phi's type already includes information for def.
     bool typeIncludes(MDefinition *def);
 
     // Add types for this phi which speculate about new inputs that may come in
     // via a loop backedge.
-    void addBackedgeType(MIRType type, types::TemporaryTypeSet *typeSet);
+    bool addBackedgeType(MIRType type, types::TemporaryTypeSet *typeSet);
 
     // Initializes the operands vector to the given capacity,
     // permitting use of addInput() instead of addInputSlow().
@@ -4495,7 +4704,7 @@ class MPhi MOZ_FINAL : public MDefinition, public InlineForwardListNode<MPhi>
 
     MDefinition *foldsTo(TempAllocator &alloc, bool useValueNumbers);
 
-    bool congruentTo(MDefinition *ins) const;
+    bool congruentTo(const MDefinition *ins) const;
 
     bool isIterator() const {
         return isIterator_;
@@ -4980,7 +5189,7 @@ class MStringReplace
         return new(alloc) MStringReplace(string, pattern, replacement);
     }
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -5040,6 +5249,44 @@ class MLambda
     }
     MDefinition *scopeChain() const {
         return getOperand(0);
+    }
+    const LambdaFunctionInfo &info() const {
+        return info_;
+    }
+    TypePolicy *typePolicy() {
+        return this;
+    }
+};
+
+class MLambdaArrow
+  : public MBinaryInstruction,
+    public MixPolicy<ObjectPolicy<0>, BoxPolicy<1> >
+{
+    LambdaFunctionInfo info_;
+
+    MLambdaArrow(types::CompilerConstraintList *constraints, MDefinition *scopeChain,
+                 MDefinition *this_, JSFunction *fun)
+      : MBinaryInstruction(scopeChain, this_), info_(fun)
+    {
+        setResultType(MIRType_Object);
+        MOZ_ASSERT(!types::UseNewTypeForClone(fun));
+        if (!fun->hasSingletonType())
+            setResultTypeSet(MakeSingletonTypeSet(constraints, fun));
+    }
+
+  public:
+    INSTRUCTION_HEADER(LambdaArrow)
+
+    static MLambdaArrow *New(TempAllocator &alloc, types::CompilerConstraintList *constraints,
+                             MDefinition *scopeChain, MDefinition *this_, JSFunction *fun)
+    {
+        return new(alloc) MLambdaArrow(constraints, scopeChain, this_, fun);
+    }
+    MDefinition *scopeChain() const {
+        return getOperand(0);
+    }
+    MDefinition *thisDef() const {
+        return getOperand(1);
     }
     const LambdaFunctionInfo &info() const {
         return info_;
@@ -5141,7 +5388,7 @@ class MSlots
     MDefinition *object() const {
         return getOperand(0);
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -5174,7 +5421,7 @@ class MElements
     MDefinition *object() const {
         return getOperand(0);
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -5211,7 +5458,7 @@ class MConstantElements : public MNullaryInstruction
         return (HashNumber)(size_t) value_;
     }
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return ins->isConstantElements() && ins->toConstantElements()->value() == value();
     }
 
@@ -5242,7 +5489,7 @@ class MConvertElementsToDoubles
     MDefinition *elements() const {
         return getOperand(0);
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -5290,7 +5537,7 @@ class MMaybeToDoubleElement
     MDefinition *value() const {
         return getOperand(1);
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -5319,7 +5566,7 @@ class MInitializedLength
     MDefinition *elements() const {
         return getOperand(0);
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -5378,7 +5625,7 @@ class MArrayLength
     MDefinition *elements() const {
         return getOperand(0);
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -5441,7 +5688,7 @@ class MTypedArrayLength
     MDefinition *object() const {
         return getOperand(0);
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -5478,7 +5725,7 @@ class MTypedArrayElements
     MDefinition *object() const {
         return getOperand(0);
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -5512,7 +5759,7 @@ class MNeuterCheck
         return getOperand(0);
     }
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
 
@@ -5549,11 +5796,49 @@ class MTypedObjectElements
     MDefinition *object() const {
         return getOperand(0);
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
         return AliasSet::Load(AliasSet::ObjectFields);
+    }
+};
+
+// Inlined version of the js::SetTypedObjectOffset() intrinsic.
+class MSetTypedObjectOffset
+  : public MBinaryInstruction
+{
+  private:
+    MSetTypedObjectOffset(MDefinition *object, MDefinition *offset)
+      : MBinaryInstruction(object, offset)
+    {
+        JS_ASSERT(object->type() == MIRType_Object);
+        JS_ASSERT(offset->type() == MIRType_Int32);
+        setResultType(MIRType_None);
+    }
+
+  public:
+    INSTRUCTION_HEADER(SetTypedObjectOffset)
+
+    static MSetTypedObjectOffset *New(TempAllocator &alloc,
+                                      MDefinition *object,
+                                      MDefinition *offset)
+    {
+        return new(alloc) MSetTypedObjectOffset(object, offset);
+    }
+
+    MDefinition *object() const {
+        return getOperand(0);
+    }
+
+    MDefinition *offset() const {
+        return getOperand(1);
+    }
+
+    AliasSet getAliasSet() const {
+        // This affects the result of MTypedObjectElements,
+        // which is described as a load of ObjectFields.
+        return AliasSet::Store(AliasSet::ObjectFields);
     }
 };
 
@@ -5586,7 +5871,7 @@ class MNot
 
     INSTRUCTION_HEADER(Not);
 
-    void infer();
+    void cacheOperandMightEmulateUndefined();
     MDefinition *foldsTo(TempAllocator &alloc, bool useValueNumbers);
 
     void markOperandCantEmulateUndefined() {
@@ -5666,10 +5951,10 @@ class MBoundsCheck
     void setMaximum(int32_t n) {
         maximum_ = n;
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!ins->isBoundsCheck())
             return false;
-        MBoundsCheck *other = ins->toBoundsCheck();
+        const MBoundsCheck *other = ins->toBoundsCheck();
         if (minimum() != other->minimum() || maximum() != other->maximum())
             return false;
         return congruentIfOperandsEqual(other);
@@ -5734,6 +6019,12 @@ class MLoadElement
         needsHoleCheck_(needsHoleCheck),
         loadDoubles_(loadDoubles)
     {
+        if (needsHoleCheck) {
+            // Uses may be optimized away based on this instruction's result
+            // type. This means it's invalid to DCE this instruction, as we
+            // have to invalidate when we read a hole.
+            setGuard();
+        }
         setResultType(MIRType_Value);
         setMovable();
         JS_ASSERT(elements->type() == MIRType_Elements);
@@ -5766,10 +6057,10 @@ class MLoadElement
     bool fallible() const {
         return needsHoleCheck();
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!ins->isLoadElement())
             return false;
-        MLoadElement *other = ins->toLoadElement();
+        const MLoadElement *other = ins->toLoadElement();
         if (needsHoleCheck() != other->needsHoleCheck())
             return false;
         if (loadDoubles() != other->loadDoubles())
@@ -5829,10 +6120,10 @@ class MLoadElementHole
     bool needsHoleCheck() const {
         return needsHoleCheck_;
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!ins->isLoadElementHole())
             return false;
-        MLoadElementHole *other = ins->toLoadElementHole();
+        const MLoadElementHole *other = ins->toLoadElementHole();
         if (needsHoleCheck() != other->needsHoleCheck())
             return false;
         if (needsNegativeIntCheck() != other->needsNegativeIntCheck())
@@ -6148,10 +6439,10 @@ class MLoadTypedArrayElement
         return AliasSet::Load(AliasSet::TypedArrayElement);
     }
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!ins->isLoadTypedArrayElement())
             return false;
-        MLoadTypedArrayElement *other = ins->toLoadTypedArrayElement();
+        const MLoadTypedArrayElement *other = ins->toLoadTypedArrayElement();
         if (arrayType_ != other->arrayType_)
             return false;
         return congruentIfOperandsEqual(other);
@@ -6209,10 +6500,10 @@ class MLoadTypedArrayElementHole
     MDefinition *index() const {
         return getOperand(1);
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!ins->isLoadTypedArrayElementHole())
             return false;
-        MLoadTypedArrayElementHole *other = ins->toLoadTypedArrayElementHole();
+        const MLoadTypedArrayElementHole *other = ins->toLoadTypedArrayElementHole();
         if (arrayType() != other->arrayType())
             return false;
         if (allowDouble() != other->allowDouble())
@@ -6278,7 +6569,7 @@ class MLoadTypedArrayElementStatic
     }
 
     void computeRange(TempAllocator &alloc);
-    bool truncate();
+    bool truncate(TruncateKind kind);
     bool canProduceFloat32() const { return typedArray_->type() == ScalarTypeDescr::TYPE_FLOAT32; }
 };
 
@@ -6343,7 +6634,7 @@ class MStoreTypedArrayElement
     void setRacy() {
         racy_ = true;
     }
-    bool isOperandTruncated(size_t index) const;
+    TruncateKind operandTruncateKind(size_t index) const;
 
     bool canConsumeFloat32(MUse *use) const {
         return use->index() == 2 && arrayType_ == ScalarTypeDescr::TYPE_FLOAT32;
@@ -6411,7 +6702,7 @@ class MStoreTypedArrayElementHole
     AliasSet getAliasSet() const {
         return AliasSet::Store(AliasSet::TypedArrayElement);
     }
-    bool isOperandTruncated(size_t index) const;
+    TruncateKind operandTruncateKind(size_t index) const;
 
     bool canConsumeFloat32(MUse *use) const {
         return use->index() == 3 && arrayType_ == ScalarTypeDescr::TYPE_FLOAT32;
@@ -6458,7 +6749,7 @@ class MStoreTypedArrayElementStatic :
     AliasSet getAliasSet() const {
         return AliasSet::Store(AliasSet::TypedArrayElement);
     }
-    bool isOperandTruncated(size_t index) const;
+    TruncateKind operandTruncateKind(size_t index) const;
 
     bool canConsumeFloat32(MUse *use) const {
         return use->index() == 1 && typedArray_->type() == ScalarTypeDescr::TYPE_FLOAT32;
@@ -6527,7 +6818,7 @@ class MClampToUint8
     TypePolicy *typePolicy() {
         return this;
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -6567,7 +6858,7 @@ class MLoadFixedSlot
     size_t slot() const {
         return slot_;
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!ins->isLoadFixedSlot())
             return false;
         if (slot() != ins->toLoadFixedSlot()->slot())
@@ -6579,7 +6870,7 @@ class MLoadFixedSlot
         return AliasSet::Load(AliasSet::FixedSlot);
     }
 
-    bool mightAlias(MDefinition *store);
+    bool mightAlias(const MDefinition *store) const;
 };
 
 class MStoreFixedSlot
@@ -6781,7 +7072,7 @@ class MGetPropertyCache
     }
     TypePolicy *typePolicy() { return this; }
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!idempotent_)
             return false;
         if (!ins->isGetPropertyCache())
@@ -6841,7 +7132,7 @@ class MGetPropertyPolymorphic
         return new(alloc) MGetPropertyPolymorphic(alloc, obj, name);
     }
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!ins->isGetPropertyPolymorphic())
             return false;
         if (name() != ins->toGetPropertyPolymorphic()->name())
@@ -6874,7 +7165,7 @@ class MGetPropertyPolymorphic
         return AliasSet::Load(AliasSet::ObjectFields | AliasSet::FixedSlot | AliasSet::DynamicSlot);
     }
 
-    bool mightAlias(MDefinition *store);
+    bool mightAlias(const MDefinition *store) const;
 };
 
 // Emit code to store a value to an object's slots if its shape matches
@@ -7205,7 +7496,7 @@ class MGuardShape
     BailoutKind bailoutKind() const {
         return bailoutKind_;
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!ins->isGuardShape())
             return false;
         if (shape() != ins->toGuardShape()->shape())
@@ -7214,6 +7505,52 @@ class MGuardShape
             return false;
         return congruentIfOperandsEqual(ins);
     }
+    AliasSet getAliasSet() const {
+        return AliasSet::Load(AliasSet::ObjectFields);
+    }
+};
+
+// Bail if the object's shape is not one of the shapes in shapes_.
+class MGuardShapePolymorphic
+  : public MUnaryInstruction,
+    public SingleObjectPolicy
+{
+    Vector<Shape *, 4, IonAllocPolicy> shapes_;
+
+    MGuardShapePolymorphic(TempAllocator &alloc, MDefinition *obj)
+      : MUnaryInstruction(obj),
+        shapes_(alloc)
+    {
+        setGuard();
+        setMovable();
+        setResultType(MIRType_Object);
+    }
+
+  public:
+    INSTRUCTION_HEADER(GuardShapePolymorphic)
+
+    static MGuardShapePolymorphic *New(TempAllocator &alloc, MDefinition *obj) {
+        return new(alloc) MGuardShapePolymorphic(alloc, obj);
+    }
+
+    TypePolicy *typePolicy() {
+        return this;
+    }
+    MDefinition *obj() const {
+        return getOperand(0);
+    }
+    bool addShape(Shape *shape) {
+        return shapes_.append(shape);
+    }
+    size_t numShapes() const {
+        return shapes_.length();
+    }
+    Shape *getShape(size_t i) const {
+        return shapes_[i];
+    }
+
+    bool congruentTo(const MDefinition *ins) const;
+
     AliasSet getAliasSet() const {
         return AliasSet::Load(AliasSet::ObjectFields);
     }
@@ -7257,7 +7594,7 @@ class MGuardObjectType
     bool bailOnEquality() const {
         return bailOnEquality_;
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!ins->isGuardObjectType())
             return false;
         if (typeObject() != ins->toGuardObjectType()->typeObject())
@@ -7309,7 +7646,7 @@ class MGuardObjectIdentity
     bool bailOnEquality() const {
         return bailOnEquality_;
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!ins->isGuardObjectIdentity())
             return false;
         if (singleObject() != ins->toGuardObjectIdentity()->singleObject())
@@ -7354,7 +7691,7 @@ class MGuardClass
     const Class *getClass() const {
         return class_;
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!ins->isGuardClass())
             return false;
         if (getClass() != ins->toGuardClass()->getClass())
@@ -7399,7 +7736,7 @@ class MLoadSlot
         return slot_;
     }
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!ins->isLoadSlot())
             return false;
         if (slot() != ins->toLoadSlot()->slot())
@@ -7410,7 +7747,7 @@ class MLoadSlot
         JS_ASSERT(slots()->type() == MIRType_Slots);
         return AliasSet::Load(AliasSet::DynamicSlot);
     }
-    bool mightAlias(MDefinition *store);
+    bool mightAlias(const MDefinition *store) const;
 };
 
 // Inline call to access a function's environment (scope chain).
@@ -8140,7 +8477,7 @@ class MGetDOMProperty
         return this;
     }
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!isDomMovable())
             return false;
 
@@ -8217,7 +8554,7 @@ class MStringLength
     MDefinition *string() const {
         return getOperand(0);
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -8494,10 +8831,10 @@ class MInArray
     AliasSet getAliasSet() const {
         return AliasSet::Load(AliasSet::Element);
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         if (!ins->isInArray())
             return false;
-        MInArray *other = ins->toInArray();
+        const MInArray *other = ins->toInArray();
         if (needsHoleCheck() != other->needsHoleCheck())
             return false;
         if (needsNegativeIntCheck() != other->needsNegativeIntCheck())
@@ -8578,7 +8915,7 @@ class MArgumentsLength : public MNullaryInstruction
         return new(alloc) MArgumentsLength();
     }
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -8618,7 +8955,7 @@ class MGetFrameArgument
     TypePolicy *typePolicy() {
         return this;
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -8659,7 +8996,7 @@ class MSetFrameArgument
         return getOperand(0);
     }
 
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return false;
     }
     AliasSet getAliasSet() const {
@@ -8797,7 +9134,7 @@ class MGuardThreadExclusive
     BailoutKind bailoutKind() const {
         return Bailout_Normal;
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -8815,9 +9152,7 @@ class MFilterTypeSet
       : MUnaryInstruction(def)
     {
         JS_ASSERT(!types->unknown());
-
-        MIRType type = MIRTypeFromValueType(types->getKnownTypeTag());
-        setResultType(type);
+        setResultType(types->getKnownMIRType());
         setResultTypeSet(types);
     }
 
@@ -8828,7 +9163,7 @@ class MFilterTypeSet
         return new(alloc) MFilterTypeSet(def, types);
     }
 
-    bool congruentTo(MDefinition *def) const {
+    bool congruentTo(const MDefinition *def) const {
         return false;
     }
     AliasSet getAliasSet() const {
@@ -8845,13 +9180,16 @@ class MTypeBarrier
   : public MUnaryInstruction,
     public TypeBarrierPolicy
 {
-    MTypeBarrier(MDefinition *def, types::TemporaryTypeSet *types)
-      : MUnaryInstruction(def)
-    {
-        JS_ASSERT(!types->unknown());
+    BarrierKind barrierKind_;
 
-        MIRType type = MIRTypeFromValueType(types->getKnownTypeTag());
-        setResultType(type);
+    MTypeBarrier(MDefinition *def, types::TemporaryTypeSet *types, BarrierKind kind)
+      : MUnaryInstruction(def),
+        barrierKind_(kind)
+    {
+        MOZ_ASSERT(kind == BarrierKind::TypeTagOnly || kind == BarrierKind::TypeSet);
+
+        MOZ_ASSERT(!types->unknown());
+        setResultType(types->getKnownMIRType());
         setResultTypeSet(types);
 
         setGuard();
@@ -8861,8 +9199,9 @@ class MTypeBarrier
   public:
     INSTRUCTION_HEADER(TypeBarrier)
 
-    static MTypeBarrier *New(TempAllocator &alloc, MDefinition *def, types::TemporaryTypeSet *types) {
-        return new(alloc) MTypeBarrier(def, types);
+    static MTypeBarrier *New(TempAllocator &alloc, MDefinition *def, types::TemporaryTypeSet *types,
+                             BarrierKind kind = BarrierKind::TypeSet) {
+        return new(alloc) MTypeBarrier(def, types, kind);
     }
 
     void printOpcode(FILE *fp) const;
@@ -8871,7 +9210,7 @@ class MTypeBarrier
         return this;
     }
 
-    bool congruentTo(MDefinition *def) const {
+    bool congruentTo(const MDefinition *def) const {
         return false;
     }
     AliasSet getAliasSet() const {
@@ -8880,11 +9219,14 @@ class MTypeBarrier
     virtual bool neverHoist() const {
         return resultTypeSet()->empty();
     }
+    BarrierKind barrierKind() const {
+        return barrierKind_;
+    }
 
     bool alwaysBails() const {
         // If mirtype of input doesn't agree with mirtype of barrier,
         // we will definitely bail.
-        MIRType type = MIRTypeFromValueType(resultTypeSet()->getKnownTypeTag());
+        MIRType type = resultTypeSet()->getKnownMIRType();
         if (type == MIRType_Value)
             return false;
         if (input()->type() == MIRType_Value)
@@ -8899,20 +9241,25 @@ class MTypeBarrier
 class MMonitorTypes : public MUnaryInstruction, public BoxInputsPolicy
 {
     const types::TemporaryTypeSet *typeSet_;
+    BarrierKind barrierKind_;
 
-    MMonitorTypes(MDefinition *def, const types::TemporaryTypeSet *types)
+    MMonitorTypes(MDefinition *def, const types::TemporaryTypeSet *types, BarrierKind kind)
       : MUnaryInstruction(def),
-        typeSet_(types)
+        typeSet_(types),
+        barrierKind_(kind)
     {
+        MOZ_ASSERT(kind == BarrierKind::TypeTagOnly || kind == BarrierKind::TypeSet);
+
         setGuard();
-        JS_ASSERT(!types->unknown());
+        MOZ_ASSERT(!types->unknown());
     }
 
   public:
     INSTRUCTION_HEADER(MonitorTypes)
 
-    static MMonitorTypes *New(TempAllocator &alloc, MDefinition *def, const types::TemporaryTypeSet *types) {
-        return new(alloc) MMonitorTypes(def, types);
+    static MMonitorTypes *New(TempAllocator &alloc, MDefinition *def, const types::TemporaryTypeSet *types,
+                              BarrierKind kind) {
+        return new(alloc) MMonitorTypes(def, types, kind);
     }
 
     TypePolicy *typePolicy() {
@@ -8922,6 +9269,10 @@ class MMonitorTypes : public MUnaryInstruction, public BoxInputsPolicy
     const types::TemporaryTypeSet *typeSet() const {
         return typeSet_;
     }
+    BarrierKind barrierKind() const {
+        return barrierKind_;
+    }
+
     AliasSet getAliasSet() const {
         return AliasSet::None();
     }
@@ -8954,6 +9305,10 @@ class MPostWriteBarrier : public MBinaryInstruction, public ObjectPolicy<0>
 
     MDefinition *value() const {
         return getOperand(1);
+    }
+
+    AliasSet getAliasSet() const {
+        return AliasSet::None();
     }
 
 #ifdef DEBUG
@@ -9139,15 +9494,15 @@ class MNewStringObject :
 // Node that represents that a script has begun executing. This comes at the
 // start of the function and is called once per function (including inline
 // ones)
-class MFunctionBoundary : public MNullaryInstruction
+class MProfilerStackOp : public MNullaryInstruction
 {
   public:
     enum Type {
         Enter,        // a function has begun executing and it is not inline
         Exit,         // any function has exited (inlined or normal)
-        Inline_Enter, // an inline function has begun executing
+        InlineEnter,  // an inline function has begun executing
 
-        Inline_Exit   // all instructions of an inline function are done, a
+        InlineExit    // all instructions of an inline function are done, a
                       // return from the inline function could have occurred
                       // before this boundary
     };
@@ -9157,20 +9512,20 @@ class MFunctionBoundary : public MNullaryInstruction
     Type type_;
     unsigned inlineLevel_;
 
-    MFunctionBoundary(JSScript *script, Type type, unsigned inlineLevel)
+    MProfilerStackOp(JSScript *script, Type type, unsigned inlineLevel)
       : script_(script), type_(type), inlineLevel_(inlineLevel)
     {
-        JS_ASSERT_IF(type != Inline_Exit, script != nullptr);
-        JS_ASSERT_IF(type == Inline_Enter, inlineLevel != 0);
+        JS_ASSERT_IF(type != InlineExit, script != nullptr);
+        JS_ASSERT_IF(type == InlineEnter, inlineLevel != 0);
         setGuard();
     }
 
   public:
-    INSTRUCTION_HEADER(FunctionBoundary)
+    INSTRUCTION_HEADER(ProfilerStackOp)
 
-    static MFunctionBoundary *New(TempAllocator &alloc, JSScript *script, Type type,
+    static MProfilerStackOp *New(TempAllocator &alloc, JSScript *script, Type type,
                                   unsigned inlineLevel = 0) {
-        return new(alloc) MFunctionBoundary(script, type, inlineLevel);
+        return new(alloc) MProfilerStackOp(script, type, inlineLevel);
     }
 
     JSScript *script() {
@@ -9347,44 +9702,8 @@ class MResumePoint MOZ_FINAL : public MNode, public InlineForwardListNode<MResum
                 operands_[i].producer()->removeUse(&operands_[i]);
         }
     }
-};
 
-/*
- * Facade for a chain of MResumePoints that cross frame boundaries (due to
- * function inlining). Operands are ordered from oldest frame to newest.
- */
-class FlattenedMResumePointIter
-{
-    Vector<MResumePoint *, 8, SystemAllocPolicy> resumePoints;
-    MResumePoint *newest;
-    size_t numOperands_;
-
-  public:
-    explicit FlattenedMResumePointIter(MResumePoint *newest)
-      : newest(newest), numOperands_(0)
-    {}
-
-    bool init() {
-        MResumePoint *it = newest;
-        do {
-            if (!resumePoints.append(it))
-                return false;
-            it = it->caller();
-        } while (it);
-        Reverse(resumePoints.begin(), resumePoints.end());
-        return true;
-    }
-
-    MResumePoint **begin() {
-        return resumePoints.begin();
-    }
-    MResumePoint **end() {
-        return resumePoints.end();
-    }
-
-    size_t numOperands() const {
-        return numOperands_;
-    }
+    bool writeRecoverData(CompactBufferWriter &writer) const;
 };
 
 class MIsCallable
@@ -9434,7 +9753,7 @@ class MHaveSameClass
     TypePolicy *typePolicy() {
         return this;
     }
-    bool congruentTo(MDefinition *ins) const {
+    bool congruentTo(const MDefinition *ins) const {
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
@@ -9564,11 +9883,11 @@ class MAsmJSLoadHeap : public MUnaryInstruction, public MAsmJSHeapAccess
 
     MDefinition *ptr() const { return getOperand(0); }
 
-    bool congruentTo(MDefinition *ins) const;
+    bool congruentTo(const MDefinition *ins) const;
     AliasSet getAliasSet() const {
         return AliasSet::Load(AliasSet::AsmJSHeap);
     }
-    bool mightAlias(MDefinition *def);
+    bool mightAlias(const MDefinition *def) const;
 };
 
 class MAsmJSStoreHeap : public MBinaryInstruction, public MAsmJSHeapAccess
@@ -9618,13 +9937,13 @@ class MAsmJSLoadGlobalVar : public MNullaryInstruction
 
     unsigned globalDataOffset() const { return globalDataOffset_; }
 
-    bool congruentTo(MDefinition *ins) const;
+    bool congruentTo(const MDefinition *ins) const;
 
     AliasSet getAliasSet() const {
         return isConstant_ ? AliasSet::None() : AliasSet::Load(AliasSet::AsmJSGlobalVar);
     }
 
-    bool mightAlias(MDefinition *def);
+    bool mightAlias(const MDefinition *def) const;
 };
 
 class MAsmJSStoreGlobalVar : public MUnaryInstruction
@@ -9791,10 +10110,15 @@ class MAsmJSCall MOZ_FINAL : public MInstruction
         MUse use;
     };
 
+    CallSiteDesc desc_;
     Callee callee_;
     FixedList<MUse> operands_;
     FixedList<AnyRegister> argRegs_;
     size_t spIncrement_;
+
+    MAsmJSCall(const CallSiteDesc &desc, Callee callee, size_t spIncrement)
+     : desc_(desc), callee_(callee), spIncrement_(spIncrement)
+    { }
 
   protected:
     void setOperand(size_t index, MDefinition *operand) {
@@ -9815,8 +10139,8 @@ class MAsmJSCall MOZ_FINAL : public MInstruction
     };
     typedef Vector<Arg, 8> Args;
 
-    static MAsmJSCall *New(TempAllocator &alloc, Callee callee, const Args &args,
-                           MIRType resultType, size_t spIncrement);
+    static MAsmJSCall *New(TempAllocator &alloc, const CallSiteDesc &desc, Callee callee,
+                           const Args &args, MIRType resultType, size_t spIncrement);
 
     size_t numOperands() const {
         return operands_.length();
@@ -9831,6 +10155,9 @@ class MAsmJSCall MOZ_FINAL : public MInstruction
     AnyRegister registerForArg(size_t index) const {
         JS_ASSERT(index < numArgs());
         return argRegs_[index];
+    }
+    const CallSiteDesc &desc() const {
+        return desc_;
     }
     Callee callee() const {
         return callee_;
@@ -9847,20 +10174,6 @@ class MAsmJSCall MOZ_FINAL : public MInstruction
     bool possiblyCalls() const {
         return true;
     }
-};
-
-// The asm.js version doesn't use the bail mechanism: instead it throws and
-// exception by jumping to the given label.
-class MAsmJSCheckOverRecursed : public MNullaryInstruction
-{
-    Label *onError_;
-    MAsmJSCheckOverRecursed(Label *onError) : onError_(onError) {}
-  public:
-    INSTRUCTION_HEADER(AsmJSCheckOverRecursed);
-    static MAsmJSCheckOverRecursed *New(TempAllocator &alloc, Label *onError) {
-        return new(alloc) MAsmJSCheckOverRecursed(onError);
-    }
-    Label *onError() const { return onError_; }
 };
 
 #undef INSTRUCTION_HEADER
@@ -9909,17 +10222,17 @@ bool ElementAccessIsPacked(types::CompilerConstraintList *constraints, MDefiniti
 bool ElementAccessHasExtraIndexedProperty(types::CompilerConstraintList *constraints,
                                           MDefinition *obj);
 MIRType DenseNativeElementType(types::CompilerConstraintList *constraints, MDefinition *obj);
-bool PropertyReadNeedsTypeBarrier(JSContext *propertycx,
-                                  types::CompilerConstraintList *constraints,
-                                  types::TypeObjectKey *object, PropertyName *name,
-                                  types::TemporaryTypeSet *observed, bool updateObserved);
-bool PropertyReadNeedsTypeBarrier(JSContext *propertycx,
-                                  types::CompilerConstraintList *constraints,
-                                  MDefinition *obj, PropertyName *name,
-                                  types::TemporaryTypeSet *observed);
-bool PropertyReadOnPrototypeNeedsTypeBarrier(types::CompilerConstraintList *constraints,
-                                             MDefinition *obj, PropertyName *name,
-                                             types::TemporaryTypeSet *observed);
+BarrierKind PropertyReadNeedsTypeBarrier(JSContext *propertycx,
+                                         types::CompilerConstraintList *constraints,
+                                         types::TypeObjectKey *object, PropertyName *name,
+                                         types::TemporaryTypeSet *observed, bool updateObserved);
+BarrierKind PropertyReadNeedsTypeBarrier(JSContext *propertycx,
+                                         types::CompilerConstraintList *constraints,
+                                         MDefinition *obj, PropertyName *name,
+                                         types::TemporaryTypeSet *observed);
+BarrierKind PropertyReadOnPrototypeNeedsTypeBarrier(types::CompilerConstraintList *constraints,
+                                                    MDefinition *obj, PropertyName *name,
+                                                    types::TemporaryTypeSet *observed);
 bool PropertyReadIsIdempotent(types::CompilerConstraintList *constraints,
                               MDefinition *obj, PropertyName *name);
 void AddObjectsForPropertyRead(MDefinition *obj, PropertyName *name,

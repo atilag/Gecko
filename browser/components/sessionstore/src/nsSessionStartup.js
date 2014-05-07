@@ -81,6 +81,8 @@ SessionStartup.prototype = {
    * Initialize the component
    */
   init: function sss_init() {
+    Services.obs.notifyObservers(null, "sessionstore-init-started", null);
+
     // do not need to initialize anything in auto-started private browsing sessions
     if (PrivateBrowsingUtils.permanentPrivateBrowsing) {
       this._initialized = true;
@@ -124,15 +126,16 @@ SessionStartup.prototype = {
       return;
     }
 
-    this._initialState =  this._parseStateString(stateString);
+    this._initialState = this._parseStateString(stateString);
 
     let shouldResumeSessionOnce = Services.prefs.getBoolPref("browser.sessionstore.resume_session_once");
     let shouldResumeSession = shouldResumeSessionOnce ||
           Services.prefs.getIntPref("browser.startup.page") == BROWSER_STARTUP_RESUME_SESSION;
 
     // If this is a normal restore then throw away any previous session
-    if (!shouldResumeSessionOnce)
+    if (!shouldResumeSessionOnce && this._initialState) {
       delete this._initialState.lastSessionState;
+    }
 
     let resumeFromCrash = Services.prefs.getBoolPref("browser.sessionstore.resume_from_crash");
 

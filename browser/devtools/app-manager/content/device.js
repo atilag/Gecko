@@ -17,7 +17,7 @@ const {getTargetForApp, launchApp, closeApp}
   = require("devtools/app-actor-front");
 const DeviceStore = require("devtools/app-manager/device-store");
 const WebappsStore = require("devtools/app-manager/webapps-store");
-const promise = require("sdk/core/promise");
+const promise = require("devtools/toolkit/deprecated-sync-thenables");
 const DEFAULT_APP_ICON = "chrome://browser/skin/devtools/app-manager/default-app-icon.png";
 
 window.addEventListener("message", function(event) {
@@ -122,6 +122,14 @@ let UI = {
               this.setWallpaper(dataURL);
             });
           });
+          if (Services.prefs.getBoolPref("devtools.chrome.enabled")) {
+            let rootButton = document.getElementById("root-actor-debug");
+            if (response.consoleActor) {
+              rootButton.removeAttribute("hidden");
+            } else {
+              rootButton.setAttribute("hidden", "true");
+            }
+          }
         }
       );
     }
@@ -141,6 +149,21 @@ let UI = {
 
     if (tab) tab.classList.add("selected");
     if (panel) panel.classList.add("selected");
+  },
+
+  openToolboxForRootActor: function() {
+    if (!this.connected) {
+      return;
+    }
+
+    let options = {
+      form: this.listTabsResponse,
+      client: this.connection.client,
+      chrome: true
+    };
+    devtools.TargetFactory.forRemoteTab(options).then((target) => {
+      top.UI.openAndShowToolboxForTarget(target, "Main process", null);
+    });
   },
 
   openToolboxForApp: function(manifest) {

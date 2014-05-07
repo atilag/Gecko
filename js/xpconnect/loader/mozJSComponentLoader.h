@@ -1,6 +1,6 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -73,8 +73,8 @@ class mozJSComponentLoader : public mozilla::ModuleLoader,
 
     nsresult ObjectForLocation(nsIFile* aComponentFile,
                                nsIURI *aComponent,
-                               JSObject **aObject,
-                               JSScript **aTableScript,
+                               JS::MutableHandleObject aObject,
+                               JS::MutableHandleScript aTableScript,
                                char **location,
                                bool aCatchException,
                                JS::MutableHandleValue aException);
@@ -94,7 +94,9 @@ class mozJSComponentLoader : public mozilla::ModuleLoader,
     class ModuleEntry : public mozilla::Module
     {
     public:
-        ModuleEntry() : mozilla::Module() {
+        ModuleEntry(JSContext* aCx)
+          : mozilla::Module(), obj(aCx, nullptr), thisObjectKey(aCx, nullptr)
+        {
             mVersion = mozilla::Module::kVersion;
             mCIDs = nullptr;
             mContractIDs = nullptr;
@@ -103,8 +105,6 @@ class mozJSComponentLoader : public mozilla::ModuleLoader,
             loadProc = nullptr;
             unloadProc = nullptr;
 
-            obj = nullptr;
-            thisObjectKey = nullptr;
             location = nullptr;
         }
 
@@ -120,9 +120,8 @@ class mozJSComponentLoader : public mozilla::ModuleLoader,
                 JSAutoCompartment ac(cx, obj);
 
                 JS_SetAllNonReservedSlotsToUndefined(cx, obj);
-                JS_RemoveObjectRoot(cx, &obj);
-                if (thisObjectKey)
-                    JS_RemoveScriptRoot(cx, &thisObjectKey);
+                obj = nullptr;
+                thisObjectKey = nullptr;
             }
 
             if (location)
@@ -139,8 +138,8 @@ class mozJSComponentLoader : public mozilla::ModuleLoader,
                                                        const mozilla::Module::CIDEntry& entry);
 
         nsCOMPtr<xpcIJSGetFactory> getfactoryobj;
-        JSObject            *obj;
-        JSScript            *thisObjectKey;
+        JS::PersistentRootedObject obj;
+        JS::PersistentRootedScript thisObjectKey;
         char                *location;
     };
 

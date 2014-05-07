@@ -10,11 +10,13 @@
 #include "nsCOMPtr.h"
 #include "nsICacheEntryOpenCallback.h"
 #include "nsICacheEntryDescriptor.h"
+#include "nsICacheStorageVisitor.h"
 #include "nsThreadUtils.h"
 #include "mozilla/TimeStamp.h"
 
 class nsIURI;
 class nsICacheEntryOpenCallback;
+class nsICacheStorageConsumptionObserver;
 class nsIApplicationCache;
 class nsILoadContextInfo;
 
@@ -39,6 +41,7 @@ public:
   NS_IMETHOD OpenOutputStream(int64_t offset, nsIOutputStream * *_retval);
   NS_IMETHOD MaybeMarkValid();
   NS_IMETHOD HasWriteAccess(bool aWriteOnly, bool *aWriteAccess);
+  NS_IMETHOD VisitMetaData(nsICacheEntryMetaDataVisitor*);
 
   _OldCacheEntryWrapper(nsICacheEntryDescriptor* desc);
   _OldCacheEntryWrapper(nsICacheEntryInfo* info);
@@ -119,6 +122,50 @@ private:
   bool const mWriteToDisk : 1;
   bool const mLookupAppCache : 1;
   bool const mOfflineStorage : 1;
+};
+
+class _OldVisitCallbackWrapper : public nsICacheVisitor
+{
+  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_NSICACHEVISITOR
+
+  _OldVisitCallbackWrapper(char const * deviceID,
+                           nsICacheStorageVisitor * cb,
+                           bool visitEntries,
+                           nsILoadContextInfo * aInfo)
+  : mCB(cb)
+  , mVisitEntries(visitEntries)
+  , mDeviceID(deviceID)
+  , mLoadInfo(aInfo)
+  , mHit(false)
+  {
+    MOZ_COUNT_CTOR(_OldVisitCallbackWrapper);
+  }
+
+private:
+  virtual ~_OldVisitCallbackWrapper();
+  nsCOMPtr<nsICacheStorageVisitor> mCB;
+  bool mVisitEntries;
+  char const * mDeviceID;
+  nsCOMPtr<nsILoadContextInfo> mLoadInfo;
+  bool mHit; // set to true when the device was found
+};
+
+class _OldGetDiskConsumption : public nsRunnable,
+                               public nsICacheVisitor
+{
+public:
+  static nsresult Get(nsICacheStorageConsumptionObserver* aCallback);
+
+private:
+  _OldGetDiskConsumption(nsICacheStorageConsumptionObserver* aCallback);
+  virtual ~_OldGetDiskConsumption() {}
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_NSICACHEVISITOR
+  NS_DECL_NSIRUNNABLE
+
+  nsCOMPtr<nsICacheStorageConsumptionObserver> mCallback;
+  int64_t mSize;
 };
 
 }}

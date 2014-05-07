@@ -12,8 +12,12 @@
 
 namespace mozilla {
 
-bool IsGLDepthFormat(GLenum internalFormat);
-bool IsGLDepthStencilFormat(GLenum internalFormat);
+bool IsGLDepthFormat(GLenum webGLFormat);
+bool IsGLDepthStencilFormat(GLenum webGLFormat);
+bool FormatHasAlpha(GLenum webGLFormat);
+void DriverFormatsFromFormatAndType(gl::GLContext* gl, GLenum webGLFormat, GLenum webGLType,
+                                    GLenum* out_driverInternalFormat, GLenum* out_driverFormat);
+GLenum DriverTypeFromType(gl::GLContext* gl, GLenum webGLType);
 
 template <typename WebGLObjectType>
 JS::Value
@@ -26,7 +30,7 @@ WebGLContext::WebGLObjectAsJSValue(JSContext *cx, const WebGLObjectType *object,
     JS::Rooted<JS::Value> v(cx);
     JS::Rooted<JSObject*> wrapper(cx, GetWrapper());
     JSAutoCompartment ac(cx, wrapper);
-    if (!dom::WrapNewBindingObject(cx, wrapper, const_cast<WebGLObjectType*>(object), &v)) {
+    if (!dom::WrapNewBindingObject(cx, const_cast<WebGLObjectType*>(object), &v)) {
         rv.Throw(NS_ERROR_FAILURE);
         return JS::NullValue();
     }

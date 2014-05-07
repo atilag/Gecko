@@ -8,9 +8,10 @@
  * Implementation of selection: nsISelection,nsISelectionPrivate and nsFrameSelection
  */
 
-#include "mozilla/Selection.h"
+#include "mozilla/dom/Selection.h"
 
 #include "mozilla/Attributes.h"
+#include "mozilla/EventStates.h"
 
 #include "nsCOMPtr.h"
 #include "nsString.h"
@@ -33,7 +34,6 @@
 #include "nsTextFragment.h"
 #include <algorithm>
 
-// for IBMBIDI
 #include "nsGkAtoms.h"
 #include "nsIFrameTraversal.h"
 #include "nsLayoutUtils.h"
@@ -69,9 +69,7 @@ static NS_DEFINE_CID(kFrameTraversalCID, NS_FRAMETRAVERSAL_CID);
 #include "nsIClipboard.h"
 #include "nsIFrameInlines.h"
 
-#ifdef IBMBIDI
 #include "nsIBidiKeyboard.h"
-#endif // IBMBIDI
 
 #include "nsError.h"
 #include "mozilla/dom/Element.h"
@@ -80,6 +78,7 @@ static NS_DEFINE_CID(kFrameTraversalCID, NS_FRAMETRAVERSAL_CID);
 #include "mozilla/dom/SelectionBinding.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 //#define DEBUG_TABLE 1
 
@@ -232,7 +231,7 @@ private:
   uint32_t mDelay;
 };
 
-NS_IMPL_ISUPPORTS1(nsAutoScrollTimer, nsITimerCallback)
+NS_IMPL_ISUPPORTS(nsAutoScrollTimer, nsITimerCallback)
 
 nsresult NS_NewDomSelection(nsISelection **aDomSelection)
 {
@@ -330,9 +329,7 @@ nsFrameSelection::nsFrameSelection()
   mMouseDoubleDownState = false;
   
   mHint = HINTLEFT;
-#ifdef IBMBIDI
   mCaretBidiLevel = BIDI_LEVEL_UNDEFINED;
-#endif
   mDragSelectingCells = false;
   mSelectingTableCellMode = 0;
   mSelectedCellIndex = 0;
@@ -597,7 +594,6 @@ nsFrameSelection::ConstrainFrameAndPointToAnchorSubtree(nsIFrame  *aFrame,
   return NS_OK;
 }
 
-#ifdef IBMBIDI
 void
 nsFrameSelection::SetCaretBidiLevel(uint8_t aLevel)
 {
@@ -618,8 +614,6 @@ nsFrameSelection::UndefineCaretBidiLevel()
 {
   mCaretBidiLevel |= BIDI_LEVEL_UNDEFINED;
 }
-#endif
-
 
 #ifdef PRINT_RANGE
 void printRange(nsRange *aDomRange)
@@ -2979,7 +2973,7 @@ nsFrameSelection::DeleteFromDocument()
     return NS_OK;
   }
 
-  nsRefPtr<mozilla::Selection> selection = mDomSelections[index];
+  nsRefPtr<Selection> selection = mDomSelections[index];
   for (int32_t rangeIdx = 0; rangeIdx < selection->GetRangeCount(); ++rangeIdx) {
     nsRefPtr<nsRange> range = selection->GetRangeAt(rangeIdx);
     res = range->DeleteContents();
@@ -3030,7 +3024,7 @@ nsFrameSelection::DisconnectFromPresShell()
 #pragma mark -
 #endif
 
-// mozilla::Selection implementation
+// mozilla::dom::Selection implementation
 
 // note: this can return a nil anchor node
 
@@ -3874,8 +3868,6 @@ Selection::GetPrimaryFrameForFocusNode(nsIFrame** aReturnFrame,
   if (!content || !mFrameSelection)
     return NS_ERROR_FAILURE;
   
-  nsIPresShell *presShell = mFrameSelection->GetShell();
-
   int32_t frameOffset = 0;
   *aReturnFrame = 0;
   if (!aOffsetUsed)
@@ -3884,6 +3876,10 @@ Selection::GetPrimaryFrameForFocusNode(nsIFrame** aReturnFrame,
   nsFrameSelection::HINT hint = mFrameSelection->GetHint();
 
   if (aVisual) {
+    nsIPresShell *presShell = mFrameSelection->GetShell();
+    if (!presShell)
+      return NS_ERROR_FAILURE;
+
     nsRefPtr<nsCaret> caret = presShell->GetCaret();
     if (!caret)
       return NS_ERROR_FAILURE;
@@ -5825,16 +5821,16 @@ Selection::SetSelectionDirection(nsDirection aDirection) {
 }
 
 JSObject*
-Selection::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+Selection::WrapObject(JSContext* aCx)
 {
-  return mozilla::dom::SelectionBinding::Wrap(aCx, aScope, this);
+  return mozilla::dom::SelectionBinding::Wrap(aCx, this);
 }
 
 // nsAutoCopyListener
 
 nsAutoCopyListener* nsAutoCopyListener::sInstance = nullptr;
 
-NS_IMPL_ISUPPORTS1(nsAutoCopyListener, nsISelectionListener)
+NS_IMPL_ISUPPORTS(nsAutoCopyListener, nsISelectionListener)
 
 /*
  * What we do now:

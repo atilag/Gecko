@@ -36,6 +36,8 @@
 #include "VideoSegment.h"
 #include "nsNSSShutDown.h"
 #include "mozilla/dom/RTCStatsReportBinding.h"
+#include "nsIPrincipal.h"
+#include "mozilla/PeerIdentity.h"
 #endif
 
 namespace test {
@@ -48,6 +50,7 @@ class AFakePCObserver;
 class Fake_DOMMediaStream;
 #endif
 
+class nsGlobalWindow;
 class nsIDOMMediaStream;
 class nsDOMDataChannel;
 
@@ -113,6 +116,9 @@ using mozilla::DtlsIdentity;
 using mozilla::ErrorResult;
 using mozilla::NrIceStunServer;
 using mozilla::NrIceTurnServer;
+#ifdef MOZILLA_INTERNAL_API
+using mozilla::PeerIdentity;
+#endif
 
 class PeerConnectionWrapper;
 class PeerConnectionMedia;
@@ -217,7 +223,7 @@ public:
   NS_DECL_THREADSAFE_ISUPPORTS
 
 #ifdef MOZILLA_INTERNAL_API
-  virtual JSObject* WrapObject(JSContext* cx, JS::Handle<JSObject*> scope);
+  virtual JSObject* WrapObject(JSContext* cx);
 #endif
 
   static already_AddRefed<PeerConnectionImpl>
@@ -225,8 +231,7 @@ public:
   static PeerConnectionImpl* CreatePeerConnection();
   static nsresult ConvertRTCConfiguration(const RTCConfiguration& aSrc,
                                           IceConfiguration *aDst);
-  static already_AddRefed<DOMMediaStream> MakeMediaStream(nsPIDOMWindow* aWindow,
-                                                          uint32_t aHint);
+  already_AddRefed<DOMMediaStream> MakeMediaStream(uint32_t aHint);
 
   nsresult CreateRemoteSourceStreamInfo(nsRefPtr<RemoteSourceStreamInfo>* aInfo);
 
@@ -276,7 +281,7 @@ public:
     return mSTSThread;
   }
 
-  // Get the DTLS identity
+  // Get the DTLS identity (local side)
   mozilla::RefPtr<DtlsIdentity> const GetIdentity() const;
   std::string GetFingerprint() const;
   std::string GetFingerprintAlgorithm() const;
@@ -370,14 +375,36 @@ public:
     rv = AddStream(aMediaStream, aConstraints);
   }
 
-  NS_IMETHODIMP AddStream(DOMMediaStream & aMediaStream,
-                          const MediaConstraintsExternal& aConstraints);
+  nsresult AddStream(DOMMediaStream &aMediaStream,
+                     const MediaConstraintsExternal& aConstraints);
 
   NS_IMETHODIMP_TO_ERRORRESULT(RemoveStream, ErrorResult &rv,
                                DOMMediaStream& aMediaStream)
   {
     rv = RemoveStream(aMediaStream);
   }
+
+
+  nsresult GetPeerIdentity(nsAString& peerIdentity)
+  {
+#ifdef MOZILLA_INTERNAL_API
+    if (mPeerIdentity) {
+      peerIdentity = mPeerIdentity->ToString();
+      return NS_OK;
+    }
+#endif
+
+    peerIdentity.SetIsVoid(true);
+    return NS_OK;
+  }
+
+#ifdef MOZILLA_INTERNAL_API
+  const PeerIdentity* GetPeerIdentity() const { return mPeerIdentity; }
+  nsresult SetPeerIdentity(const nsAString& peerIdentity);
+#endif
+
+  // this method checks to see if we've made a promise to protect media.
+  bool PrivacyRequested() const { return mPrivacyRequested; }
 
   NS_IMETHODIMP GetFingerprint(char** fingerprint);
   void GetFingerprint(nsAString& fingerprint)
@@ -512,6 +539,10 @@ public:
   void SetSignalingState_m(mozilla::dom::PCImplSignalingState aSignalingState);
 
   bool IsClosed() const;
+  // called when DTLS connects; we only need this once
+  nsresult SetDtlsConnected(bool aPrivacyRequested);
+
+  bool HasMedia() const;
 
 #ifdef MOZILLA_INTERNAL_API
   // initialize telemetry for when calls start
@@ -584,6 +615,13 @@ private:
       nsAutoPtr<RTCStatsQuery> query);
 #endif
 
+  // When ICE completes, we record a bunch of statistics that outlive the
+  // PeerConnection. This is just telemetry right now, but this can also
+  // include things like dumping the RLogRingbuffer somewhere, saving away
+  // an RTCStatsReport somewhere so it can be inspected after the call is over,
+  // or other things.
+  void RecordLongtermICEStatistics();
+
   // Timecard used to measure processing time. This should be the first class
   // attribute so that we accurately measure the time required to instantiate
   // any other attributes of this class.
@@ -597,6 +635,10 @@ private:
   // ICE State
   mozilla::dom::PCImplIceConnectionState mIceConnectionState;
   mozilla::dom::PCImplIceGatheringState mIceGatheringState;
+
+  // DTLS
+  // this is true if we have been connected ever, see SetDtlsConnected
+  bool mDtlsConnected;
 
   nsCOMPtr<nsIThread> mThread;
   // TODO: Remove if we ever properly wire PeerConnection for cycle-collection.
@@ -615,8 +657,20 @@ private:
   std::string mFingerprint;
   std::string mRemoteFingerprint;
 
-  // The DTLS identity
+  // identity-related fields
   mozilla::RefPtr<DtlsIdentity> mIdentity;
+#ifdef MOZILLA_INTERNAL_API
+  // The entity on the other end of the peer-to-peer connection;
+  // void if they are not yet identified, and no constraint has been set
+  nsAutoPtr<PeerIdentity> mPeerIdentity;
+#endif
+  // Whether an app should be prevented from accessing media produced by the PC
+  // If this is true, then media will not be sent until mPeerIdentity matches
+  // local streams PeerIdentity; and remote streams are protected from content
+  //
+  // This can be false if mPeerIdentity is set, in the case where identity is
+  // provided, but the media is not protected from the app on either side
+  bool mPrivacyRequested;
 
   // A handle to refer to this PC with
   std::string mHandle;
@@ -632,12 +686,14 @@ private:
 
 #ifdef MOZILLA_INTERNAL_API
   // DataConnection that's used to get all the DataChannels
-	nsRefPtr<mozilla::DataChannelConnection> mDataConnection;
+  nsRefPtr<mozilla::DataChannelConnection> mDataConnection;
 #endif
 
   nsRefPtr<PeerConnectionMedia> mMedia;
 
 #ifdef MOZILLA_INTERNAL_API
+  // Start time of ICE, used for telemetry
+  mozilla::TimeStamp mIceStartTime;
   // Start time of call used for Telemetry
   mozilla::TimeStamp mStartTime;
 #endif

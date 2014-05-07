@@ -1,9 +1,15 @@
+import argparse
 import os
 import time
 import unittest
 import StringIO
+import json
 
-from mozlog.structured import structuredlog
+from mozlog.structured import (
+    commandline,
+    reader,
+    structuredlog,
+)
 
 
 class TestHandler(object):
@@ -37,7 +43,6 @@ class BaseStructuredTest(unittest.TestCase):
         for key, value in all_expected.iteritems():
             self.assertEqual(actual[key], value)
 
-        self.assertAlmostEqual(actual["time"], time.time()*1000, delta=100)
         self.assertEquals(set(all_expected.keys()) | specials, set(actual.keys()))
 
 
@@ -180,6 +185,91 @@ class TestStructuredLog(BaseStructuredTest):
         self.assert_log_equals({"action": "log",
                                 "level": "INFO",
                                 "message": "line 4"})
+
+class TestCommandline(unittest.TestCase):
+    def test_setup_logging(self):
+        parser = argparse.ArgumentParser()
+        commandline.add_logging_group(parser)
+        args = parser.parse_args(["--log-raw=/tmp/foo"])
+        logger = commandline.setup_logging("test", args, {})
+        self.assertEqual(len(logger.handlers), 1)
+
+class TestReader(unittest.TestCase):
+    def to_file_like(self, obj):
+        data_str = "\n".join(json.dumps(item) for item in obj)
+        return StringIO.StringIO(data_str)
+
+    def test_read(self):
+        data = [{"action": "action_0", "data": "data_0"},
+                {"action": "action_1", "data": "data_1"}]
+
+        f = self.to_file_like(data)
+        self.assertEquals(data, list(reader.read(f)))
+
+    def test_imap_log(self):
+        data = [{"action": "action_0", "data": "data_0"},
+                {"action": "action_1", "data": "data_1"}]
+
+        f = self.to_file_like(data)
+
+        def f_action_0(item):
+            return ("action_0", item["data"])
+
+        def f_action_1(item):
+            return ("action_1", item["data"])
+
+        res_iter = reader.imap_log(reader.read(f),
+                                   {"action_0": f_action_0,
+                                    "action_1": f_action_1})
+        self.assertEquals([("action_0", "data_0"), ("action_1", "data_1")],
+                          list(res_iter))
+
+    def test_each_log(self):
+        data = [{"action": "action_0", "data": "data_0"},
+                {"action": "action_1", "data": "data_1"}]
+
+        f = self.to_file_like(data)
+
+        count = {"action_0":0,
+                 "action_1":0}
+
+        def f_action_0(item):
+            count[item["action"]] += 1
+
+        def f_action_1(item):
+            count[item["action"]] += 2
+
+        reader.each_log(reader.read(f),
+                        {"action_0": f_action_0,
+                         "action_1": f_action_1})
+
+        self.assertEquals({"action_0":1, "action_1":2}, count)
+
+    def test_handler(self):
+        data = [{"action": "action_0", "data": "data_0"},
+                {"action": "action_1", "data": "data_1"}]
+
+        f = self.to_file_like(data)
+
+        test = self
+        class ReaderTestHandler(reader.LogHandler):
+            def __init__(self):
+                self.action_0_count = 0
+                self.action_1_count = 0
+
+            def action_0(self, item):
+                test.assertEquals(item["action"], "action_0")
+                self.action_0_count += 1
+
+            def action_1(self, item):
+                test.assertEquals(item["action"], "action_1")
+                self.action_1_count += 1
+
+        handler = ReaderTestHandler()
+        reader.handle_log(reader.read(f), handler)
+
+        self.assertEquals(handler.action_0_count, 1)
+        self.assertEquals(handler.action_1_count, 1)
 
 if __name__ == "__main__":
     unittest.main()

@@ -148,8 +148,7 @@ nsXBLPrototypeBinding::Traverse(nsCycleCollectionTraversalCallback &cb) const
   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "proto mBinding");
   cb.NoteXPCOMChild(mBinding);
   if (mResources) {
-    NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "proto mResources mLoader");
-    cb.NoteXPCOMChild(mResources->mLoader);
+    mResources->Traverse(cb);
   }
   ImplCycleCollectionTraverse(cb, mInterfaceTable, "proto mInterfaceTable");
 }
@@ -179,7 +178,6 @@ nsXBLPrototypeBinding::Initialize()
 
 nsXBLPrototypeBinding::~nsXBLPrototypeBinding(void)
 {
-  delete mResources;
   delete mImplementation;
   MOZ_COUNT_DTOR(nsXBLPrototypeBinding);
 }
@@ -234,8 +232,6 @@ nsXBLPrototypeBinding::AddResource(nsIAtom* aResourceType, const nsAString& aSrc
 {
   if (!mResources) {
     mResources = new nsXBLPrototypeResources(this);
-    if (!mResources)
-      return NS_ERROR_OUT_OF_MEMORY;
   }
 
   mResources->AddResource(aResourceType, aSrc);
@@ -923,7 +919,7 @@ nsXBLPrototypeBinding::Read(nsIObjectInputStream* aStream,
   }
 
   AutoSafeJSContext cx;
-  JS::Rooted<JSObject*> compilationGlobal(cx, aDocInfo->GetCompilationGlobal());
+  JS::Rooted<JSObject*> compilationGlobal(cx, xpc::GetCompilationScope());
   NS_ENSURE_TRUE(compilationGlobal, NS_ERROR_UNEXPECTED);
   JSAutoCompartment ac(cx, compilationGlobal);
 
@@ -1076,7 +1072,7 @@ nsXBLPrototypeBinding::Write(nsIObjectOutputStream* aStream)
   // computed on demand.
 
   AutoSafeJSContext cx;
-  JS::Rooted<JSObject*> compilationGlobal(cx, mXBLDocInfoWeak->GetCompilationGlobal());
+  JS::Rooted<JSObject*> compilationGlobal(cx, xpc::GetCompilationScope());
   NS_ENSURE_TRUE(compilationGlobal, NS_ERROR_UNEXPECTED);
   JSAutoCompartment ac(cx, compilationGlobal);
 

@@ -4,10 +4,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
-#include "ipc/AutoOpenSurface.h"
 #include "mozilla/layers/PLayerTransaction.h"
 
-#include "gfxImageSurface.h"
 #include "gfxWindowsSurface.h"
 #include "gfxWindowsPlatform.h"
 #include "SurfaceStream.h"
@@ -99,9 +97,10 @@ CanvasLayerD3D9::UpdateSurface()
   }
 
   D3DLOCKED_RECT rect = textureLock.GetLockRect();
+  IntSize boundsSize(mBounds.width, mBounds.height);
   RefPtr<DrawTarget> rectDt = Factory::CreateDrawTargetForData(BackendType::CAIRO,
                                                                (uint8_t*)rect.pBits,
-                                                               surface->GetSize(),
+                                                               boundsSize,
                                                                rect.Pitch,
                                                                SurfaceFormat::B8G8R8A8);
 

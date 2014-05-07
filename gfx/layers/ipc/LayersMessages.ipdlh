@@ -8,7 +8,6 @@
 include LayersSurfaces;
 include protocol PCompositable;
 include protocol PCompositor;
-include protocol PGrallocBuffer;
 include protocol PLayer;
 include protocol PRenderFrame;
 include protocol PTexture;
@@ -39,7 +38,9 @@ using mozilla::layers::ScaleMode from "mozilla/layers/LayersTypes.h";
 using mozilla::layers::EventRegions from "mozilla/layers/LayersTypes.h";
 using mozilla::layers::DiagnosticTypes from "mozilla/layers/CompositorTypes.h";
 using struct mozilla::layers::FrameMetrics from "FrameMetrics.h";
+using mozilla::layers::FrameMetrics::ViewID from "FrameMetrics.h";
 using struct mozilla::layers::FenceHandle from "mozilla/layers/FenceUtils.h";
+using mozilla::layers::TextureIdentifier from "mozilla/layers/CompositorTypes.h";
 
 namespace mozilla {
 namespace layers {
@@ -216,6 +217,7 @@ struct ThebesLayerAttributes {
 };
 struct ContainerLayerAttributes {
   FrameMetrics metrics;
+  ViewID scrollParentId;
   float preXScale;
   float preYScale;
   float inheritedXScale;
@@ -295,27 +297,10 @@ struct OpUseTiledLayerBuffer {
   SurfaceDescriptorTiles tileLayerDescriptor;
 };
 
-struct OpCreatedTexture {
-  PCompositable compositable;
-  uint32_t textureId;
-  SurfaceDescriptor descriptor;
-  TextureInfo textureInfo;
-};
-
 struct OpCreatedIncrementalTexture {
   PCompositable compositable;
   TextureInfo textureInfo;
   nsIntRect bufferRect;
-};
-
-struct OpDestroyThebesBuffer {
-  PCompositable compositable;
-};
-
-struct OpPaintTexture {
-  PCompositable compositable;
-  uint32_t textureId;
-  SurfaceDescriptor image;
 };
 
 struct OpPaintTextureRegion {
@@ -326,7 +311,7 @@ struct OpPaintTextureRegion {
 
 struct OpPaintTextureIncremental {
   PCompositable compositable;
-  uint32_t textureId;
+  TextureIdentifier textureId;
   SurfaceDescriptor image;
   nsIntRegion updatedRegion;
   nsIntRect bufferRect;
@@ -372,14 +357,21 @@ struct OpUpdateTexture {
   MaybeRegion region;
 };
 
+struct OpDeliverFence {
+  uint64_t transactionId;
+  PTexture texture;
+  FenceHandle fence;
+};
+
+struct OpReplyDeliverFence {
+  uint64_t transactionId;
+};
+
 union CompositableOperation {
   OpUpdatePictureRect;
 
-  OpCreatedTexture;
   OpCreatedIncrementalTexture;
-  OpDestroyThebesBuffer;
 
-  OpPaintTexture;
   OpPaintTextureRegion;
   OpPaintTextureIncremental;
 
@@ -427,7 +419,7 @@ struct OpContentBufferSwap {
 
 struct OpTextureSwap {
   PCompositable compositable;
-  uint32_t textureId;
+  TextureIdentifier textureId;
   SurfaceDescriptor image;
 };
 
@@ -444,6 +436,14 @@ union EditReply {
   OpTextureSwap;
 
   ReturnReleaseFence;
+};
+
+union AsyncParentMessageData {
+  OpDeliverFence;
+};
+
+union AsyncChildMessageData {
+  OpReplyDeliverFence;
 };
 
 } // namespace

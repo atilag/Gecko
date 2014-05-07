@@ -78,7 +78,7 @@ findbar[hidden] {
 .findbar-find-next {
   -moz-margin-start: 0;
   -moz-appearance: none;
-  background: -moz-linear-gradient(rgba(255,255,255,.9), rgba(255,255,255,.2));
+  background: linear-gradient(rgba(255,255,255,.9), rgba(255,255,255,.2));
   border: 1px solid ThreeDShadow;
   box-shadow: 0 1px #fff inset;
   list-style-image: url("chrome://global/skin/icons/find-arrows.png");
@@ -143,7 +143,8 @@ findbar[hidden] {
   display: none;
 }
 
-.findbar-find-status {
+.findbar-find-status,
+.found-matches {
   color: GrayText;
   margin: 0 !important;
   -moz-margin-start: 12px !important;

@@ -14,8 +14,8 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_3(OscillatorNode, AudioNode,
-                                     mPeriodicWave, mFrequency, mDetune)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(OscillatorNode, AudioNode,
+                                   mPeriodicWave, mFrequency, mDetune)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(OscillatorNode)
 NS_INTERFACE_MAP_END_INHERITING(AudioNode)
@@ -386,9 +386,7 @@ public:
                                                      tableInterpolationFactor);
       // mPhase runs 0..periodicWaveSize here instead of 0..2*M_PI.
       mPhase += periodicWaveSize * mFinalFrequency * rate;
-      if (mPhase >= periodicWaveSize) {
-        mPhase -= periodicWaveSize;
-      }
+      mPhase = fmod(mPhase, periodicWaveSize);
       // Bilinear interpolation between adjacent samples in each table.
       uint32_t j1 = floor(mPhase);
       uint32_t j2 = j1 + 1;
@@ -465,6 +463,32 @@ public:
 
   }
 
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    size_t amount = AudioNodeEngine::SizeOfExcludingThis(aMallocSizeOf);
+
+    // Not owned:
+    // - mSource
+    // - mDestination
+    // - mFrequency (internal ref owned by node)
+    // - mDetune (internal ref owned by node)
+
+    if (mCustom) {
+      amount += mCustom->SizeOfIncludingThis(aMallocSizeOf);
+    }
+
+    if (mPeriodicWave) {
+      amount += mPeriodicWave->sizeOfIncludingThis(aMallocSizeOf);
+    }
+
+    return amount;
+  }
+
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
+
   DCBlocker mDCBlocker;
   AudioNodeStream* mSource;
   AudioNodeStream* mDestination;
@@ -512,10 +536,28 @@ OscillatorNode::~OscillatorNode()
 {
 }
 
-JSObject*
-OscillatorNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+size_t
+OscillatorNode::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
-  return OscillatorNodeBinding::Wrap(aCx, aScope, this);
+  size_t amount = AudioNode::SizeOfExcludingThis(aMallocSizeOf);
+
+  // For now only report if we know for sure that it's not shared.
+  amount += mPeriodicWave->SizeOfIncludingThisIfNotShared(aMallocSizeOf);
+  amount += mFrequency->SizeOfIncludingThis(aMallocSizeOf);
+  amount += mDetune->SizeOfIncludingThis(aMallocSizeOf);
+  return amount;
+}
+
+size_t
+OscillatorNode::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
+{
+  return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+}
+
+JSObject*
+OscillatorNode::WrapObject(JSContext* aCx)
+{
+  return OscillatorNodeBinding::Wrap(aCx, this);
 }
 
 void

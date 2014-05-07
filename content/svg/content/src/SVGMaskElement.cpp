@@ -16,9 +16,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGMaskElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+SVGMaskElement::WrapNode(JSContext *aCx)
 {
-  return SVGMaskElementBinding::Wrap(aCx, aScope, this);
+  return SVGMaskElementBinding::Wrap(aCx, this);
 }
 
 //--------------------- Masks ------------------------
@@ -127,7 +127,9 @@ NS_IMETHODIMP_(bool)
 SVGMaskElement::IsAttributeMapped(const nsIAtom* name) const
 {
   static const MappedAttributeEntry* const map[] = {
+    sColorMap,
     sFEFloodMap,
+    sFillStrokeMap,
     sFiltersMap,
     sFontSpecificationMap,
     sGradientStopMap,

@@ -22,7 +22,7 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef yarr_YarrJIT_h
@@ -41,10 +41,6 @@
 #define YARR_CALL __attribute__ ((regparm (3)))
 #else
 #define YARR_CALL
-#endif
-
-#if JS_TRACE_LOGGING
-#include "TraceLogging.h"
 #endif
 
 #include "jit/JitCommon.h"
@@ -99,24 +95,12 @@ public:
     {
         ASSERT(has8BitCode());
 
-#if JS_TRACE_LOGGING
-        js::AutoTraceLog logger(js::TraceLogging::defaultLogger(),
-                                js::TraceLogging::YARR_JIT_START,
-                                js::TraceLogging::YARR_JIT_STOP);
-#endif
-
         return MatchResult(reinterpret_cast<YarrJITCode8>(m_ref8.code().executableAddress())(input, start, length, output));
     }
 
     MatchResult execute(const LChar* input, unsigned start, unsigned length)
     {
         ASSERT(has8BitCodeMatchOnly());
-
-#if JS_TRACE_LOGGING
-        js::AutoTraceLog logger(js::TraceLogging::defaultLogger(),
-                                js::TraceLogging::YARR_JIT_START,
-                                js::TraceLogging::YARR_JIT_STOP);
-#endif
 
         return MatchResult(reinterpret_cast<YarrJITCodeMatchOnly8>(m_matchOnly8.code().executableAddress())(input, start, length));
     }
@@ -126,12 +110,6 @@ public:
     {
         ASSERT(has16BitCode());
 
-#if JS_TRACE_LOGGING
-        js::AutoTraceLog logger(js::TraceLogging::defaultLogger(),
-                                js::TraceLogging::YARR_JIT_START,
-                                js::TraceLogging::YARR_JIT_STOP);
-#endif
-
         YarrJITCode16 fn = JS_FUNC_TO_DATA_PTR(YarrJITCode16, m_ref16.code().executableAddress());
         return MatchResult(CALL_GENERATED_YARR_CODE4(fn, input, start, length, output));
     }
@@ -139,12 +117,6 @@ public:
     MatchResult execute(const UChar* input, unsigned start, unsigned length)
     {
         ASSERT(has16BitCodeMatchOnly());
-
-#if JS_TRACE_LOGGING
-        js::AutoTraceLog logger(js::TraceLogging::defaultLogger(),
-                                js::TraceLogging::YARR_JIT_START,
-                                js::TraceLogging::YARR_JIT_STOP);
-#endif
 
         YarrJITCodeMatchOnly16 fn = JS_FUNC_TO_DATA_PTR(YarrJITCodeMatchOnly16, m_matchOnly16.code().executableAddress());
         return MatchResult(CALL_GENERATED_YARR_CODE3(fn, input, start, length));

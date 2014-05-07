@@ -45,6 +45,11 @@ public:
       }
     }
   }
+
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
 };
 
 ChannelSplitterNode::ChannelSplitterNode(AudioContext* aContext,
@@ -60,9 +65,9 @@ ChannelSplitterNode::ChannelSplitterNode(AudioContext* aContext,
 }
 
 JSObject*
-ChannelSplitterNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+ChannelSplitterNode::WrapObject(JSContext* aCx)
 {
-  return ChannelSplitterNodeBinding::Wrap(aCx, aScope, this);
+  return ChannelSplitterNodeBinding::Wrap(aCx, this);
 }
 
 }

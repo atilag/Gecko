@@ -339,11 +339,11 @@ nsScriptSecurityManager::GetCxSubjectPrincipal(JSContext *cx)
 ////////////////////////////////////
 // Methods implementing ISupports //
 ////////////////////////////////////
-NS_IMPL_ISUPPORTS4(nsScriptSecurityManager,
-                   nsIScriptSecurityManager,
-                   nsIXPCSecurityManager,
-                   nsIChannelEventSink,
-                   nsIObserver)
+NS_IMPL_ISUPPORTS(nsScriptSecurityManager,
+                  nsIScriptSecurityManager,
+                  nsIXPCSecurityManager,
+                  nsIChannelEventSink,
+                  nsIObserver)
 
 ///////////////////////////////////////////////////
 // Methods implementing nsIScriptSecurityManager //
@@ -1116,18 +1116,6 @@ nsScriptSecurityManager::GetSubjectPrincipal(JSContext *cx,
 
     JSPrincipals *principals = JS_GetCompartmentPrincipals(compartment);
     return nsJSPrincipals::get(principals);
-}
-
-NS_IMETHODIMP
-nsScriptSecurityManager::GetObjectPrincipal(JS::Handle<JS::Value> aObjectVal,
-                                            JSContext *aCx,
-                                            nsIPrincipal **result)
-{
-    NS_ENSURE_TRUE(aObjectVal.isObject(), NS_ERROR_FAILURE);
-    JS::RootedObject obj(aCx, &aObjectVal.toObject());
-    nsCOMPtr<nsIPrincipal> principal = doGetObjectPrincipal(obj);
-    principal.forget(result);
-    return NS_OK;
 }
 
 // static

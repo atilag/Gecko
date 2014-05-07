@@ -112,7 +112,7 @@ end:
 #define NS_NET_PREF_ESCAPEUTF8         "network.standard-url.escape-utf8"
 #define NS_NET_PREF_ALWAYSENCODEINUTF8 "network.standard-url.encode-utf8"
 
-NS_IMPL_ISUPPORTS1(nsStandardURL::nsPrefObserver, nsIObserver)
+NS_IMPL_ISUPPORTS(nsStandardURL::nsPrefObserver, nsIObserver)
 
 NS_IMETHODIMP nsStandardURL::
 nsPrefObserver::Observe(nsISupports *subject,
@@ -1464,6 +1464,12 @@ nsStandardURL::SetHost(const nsACString &input)
             return NS_OK;
         NS_WARNING("cannot set host on no-auth url");
         return NS_ERROR_UNEXPECTED;
+    } else {
+        if (flat.IsEmpty()) {
+            // Setting an empty hostname is not allowed for
+            // URLTYPE_STANDARD and URLTYPE_AUTHORITY.
+            return NS_ERROR_UNEXPECTED;
+        }
     }
 
     if (strlen(host) < flat.Length())
@@ -1507,7 +1513,14 @@ nsStandardURL::SetHost(const nsACString &input)
         len = flat.Length();
 
     if (mHost.mLen < 0) {
-        mHost.mPos = mAuthority.mPos;
+        int port_length = 0;
+        if (mPort != -1) {
+            nsAutoCString buf;
+            buf.Assign(':');
+            buf.AppendInt(mPort);
+            port_length = buf.Length();
+        }
+        mHost.mPos = mAuthority.mPos + mAuthority.mLen - port_length;
         mHost.mLen = 0;
     }
 
@@ -1551,7 +1564,7 @@ nsStandardURL::SetPort(int32_t port)
         nsAutoCString buf;
         buf.Assign(':');
         buf.AppendInt(port);
-        mSpec.Insert(buf, mHost.mPos + mHost.mLen);
+        mSpec.Insert(buf, mAuthority.mPos + mAuthority.mLen);
         mAuthority.mLen += buf.Length();
         ShiftFromPath(buf.Length());
     }
@@ -1559,9 +1572,14 @@ nsStandardURL::SetPort(int32_t port)
         // Don't allow mPort == mDefaultPort
         port = -1;
 
+        // compute length of the current port
+        nsAutoCString buf;
+        buf.Assign(':');
+        buf.AppendInt(mPort);
+
         // need to remove the port number from the URL spec
-        uint32_t start = mHost.mPos + mHost.mLen;
-        int32_t lengthToCut = mPath.mPos - start;
+        uint32_t start = mAuthority.mPos + mAuthority.mLen - buf.Length();
+        int32_t lengthToCut = buf.Length();
         mSpec.Cut(start, lengthToCut);
         mAuthority.mLen -= lengthToCut;
         ShiftFromPath(-lengthToCut);
@@ -1569,9 +1587,13 @@ nsStandardURL::SetPort(int32_t port)
     else {
         // need to replace the existing port
         nsAutoCString buf;
+        buf.Assign(':');
+        buf.AppendInt(mPort);
+        uint32_t start = mAuthority.mPos + mAuthority.mLen - buf.Length();
+        uint32_t length = buf.Length();
+
+        buf.Assign(':');
         buf.AppendInt(port);
-        uint32_t start = mHost.mPos + mHost.mLen + 1;
-        uint32_t length = mPath.mPos - start;
         mSpec.Replace(start, length, buf);
         if (buf.Length() != length) {
             mAuthority.mLen += buf.Length() - length;

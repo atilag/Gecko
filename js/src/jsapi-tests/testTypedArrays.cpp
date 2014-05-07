@@ -109,7 +109,7 @@ TestArrayFromBuffer(JSContext *cx)
     CHECK_EQUAL(JS_GetTypedArrayLength(array), elts);
     CHECK_EQUAL(JS_GetTypedArrayByteOffset(array), 0);
     CHECK_EQUAL(JS_GetTypedArrayByteLength(array), nbytes);
-    CHECK_EQUAL(JS_GetArrayBufferViewBuffer(array), (JSObject*) buffer);
+    CHECK_EQUAL(JS_GetArrayBufferViewBuffer(cx, array), (JSObject*) buffer);
 
     Element *data;
     CHECK(data = GetData(array));
@@ -137,7 +137,7 @@ TestArrayFromBuffer(JSContext *cx)
     CHECK_SAME(v, v2);
     CHECK(JS_GetElement(cx, shortArray, 0, &v2));
     CHECK_SAME(v, v2);
-    CHECK_EQUAL(long(JSVAL_TO_INT(v)), long(reinterpret_cast<Element*>(data)[0]));
+    CHECK_EQUAL(long(v.toInt32()), long(reinterpret_cast<Element*>(data)[0]));
 
     v = INT_TO_JSVAL(40);
     JS_SetElement(cx, array, elts / 2, v);
@@ -145,7 +145,7 @@ TestArrayFromBuffer(JSContext *cx)
     CHECK_SAME(v, v2);
     CHECK(JS_GetElement(cx, ofsArray, 0, &v2));
     CHECK_SAME(v, v2);
-    CHECK_EQUAL(long(JSVAL_TO_INT(v)), long(reinterpret_cast<Element*>(data)[elts / 2]));
+    CHECK_EQUAL(long(v.toInt32()), long(reinterpret_cast<Element*>(data)[elts / 2]));
 
     v = INT_TO_JSVAL(41);
     JS_SetElement(cx, array, elts - 1, v);
@@ -153,7 +153,7 @@ TestArrayFromBuffer(JSContext *cx)
     CHECK_SAME(v, v2);
     CHECK(JS_GetElement(cx, ofsArray, elts / 2 - 1, &v2));
     CHECK_SAME(v, v2);
-    CHECK_EQUAL(long(JSVAL_TO_INT(v)), long(reinterpret_cast<Element*>(data)[elts - 1]));
+    CHECK_EQUAL(long(v.toInt32()), long(reinterpret_cast<Element*>(data)[elts - 1]));
 
     JS::RootedObject copy(cx, CreateFromArray(cx, array));
     CHECK(JS_GetElement(cx, array, 0, &v));

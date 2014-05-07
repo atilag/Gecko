@@ -15,7 +15,7 @@
 # include <sys/resource.h>
 #endif
 
-#ifdef XP_UNIX
+#ifdef MOZ_WIDGET_GONK
 #include <sys/types.h>
 #include <sys/wait.h>
 #endif
@@ -54,6 +54,7 @@
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/layers/CompositorParent.h"
 #include "mozilla/layers/ImageBridgeParent.h"
+#include "mozilla/layers/SharedBufferManagerParent.h"
 #include "mozilla/net/NeckoParent.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
@@ -150,6 +151,7 @@ using namespace mozilla::system;
 #endif
 
 #ifdef ENABLE_TESTS
+#include "BackgroundChildImpl.h"
 #include "mozilla/ipc/PBackgroundChild.h"
 #include "nsIIPCBackgroundChildCreateCallback.h"
 #endif
@@ -241,6 +243,10 @@ private:
                 bool ok = BackgroundChild::GetOrCreateForCurrentThread(this);
                 MOZ_RELEASE_ASSERT(ok);
 
+                BackgroundChildImpl::ThreadLocal* threadLocal =
+                  BackgroundChildImpl::GetThreadLocalForCurrentThread();
+                MOZ_RELEASE_ASSERT(threadLocal);
+
                 // Callback 2.
                 ok = BackgroundChild::GetOrCreateForCurrentThread(this);
                 MOZ_RELEASE_ASSERT(ok);
@@ -264,8 +270,8 @@ public:
 
 uint32_t BackgroundTester::sCallbackCount = 0;
 
-NS_IMPL_ISUPPORTS2(BackgroundTester, nsIIPCBackgroundChildCreateCallback,
-                                     nsIObserver)
+NS_IMPL_ISUPPORTS(BackgroundTester, nsIIPCBackgroundChildCreateCallback,
+                  nsIObserver)
 
 #endif // ENABLE_TESTS
 
@@ -303,6 +309,8 @@ public:
     MemoryReportRequestParent();
     virtual ~MemoryReportRequestParent();
 
+    virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+
     virtual bool Recv__delete__(const uint32_t& generation, const InfallibleTArray<MemoryReport>& report);
 private:
     ContentParent* Owner()
@@ -314,6 +322,12 @@ private:
 MemoryReportRequestParent::MemoryReportRequestParent()
 {
     MOZ_COUNT_CTOR(MemoryReportRequestParent);
+}
+
+void
+MemoryReportRequestParent::ActorDestroy(ActorDestroyReason aWhy)
+{
+  // Implement me! Bug 1005154
 }
 
 bool
@@ -340,7 +354,7 @@ public:
     NS_DECL_NSIMEMORYREPORTER
 };
 
-NS_IMPL_ISUPPORTS1(ContentParentsMemoryReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(ContentParentsMemoryReporter, nsIMemoryReporter)
 
 NS_IMETHODIMP
 ContentParentsMemoryReporter::CollectReports(nsIMemoryReporterCallback* cb,
@@ -593,9 +607,9 @@ ContentParent::GetNewOrUsed(bool aForBrowserElement)
                               aForBrowserElement,
                               /* isForPreallocated = */ false,
                               PROCESS_PRIORITY_FOREGROUND);
+        p->Init();
     }
 
-    p->Init();
     sNonAppContentParents->AppendElement(p);
     return p.forget();
 }
@@ -928,8 +942,8 @@ private:
 StaticAutoPtr<LinkedList<SystemMessageHandledListener> >
     SystemMessageHandledListener::sListeners;
 
-NS_IMPL_ISUPPORTS1(SystemMessageHandledListener,
-                   nsITimerCallback)
+NS_IMPL_ISUPPORTS(SystemMessageHandledListener,
+                  nsITimerCallback)
 
 } // anonymous namespace
 
@@ -972,7 +986,7 @@ ContentParent::SetPriorityAndCheckIsAlive(ProcessPriority aPriority)
     // direct child because of Nuwa this will fail with ECHILD, and we
     // need to assume the child is alive in that case rather than
     // assuming it's dead (as is otherwise a reasonable fallback).
-#ifdef XP_UNIX
+#ifdef MOZ_WIDGET_GONK
     siginfo_t info;
     info.si_pid = 0;
     if (waitid(P_PID, Pid(), &info, WNOWAIT | WNOHANG | WEXITED) == 0
@@ -1143,10 +1157,6 @@ ContentParent::OnChannelConnected(int32_t pid)
         }
 #endif
     }
-
-    // Set a reply timeout. The only time the parent process will actually
-    // timeout is through urgent messages (which are used by CPOWs).
-    SetReplyTimeoutMs(Preferences::GetInt("dom.ipc.cpow.timeout", 3000));
 }
 
 void
@@ -1590,6 +1600,10 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority,
             }
         }
     }
+#ifdef MOZ_WIDGET_GONK
+    DebugOnly<bool> opened = PSharedBufferManager::Open(this);
+    MOZ_ASSERT(opened);
+#endif
 
     if (aSendRegisteredChrome) {
         nsCOMPtr<nsIChromeRegistry> registrySvc = nsChromeRegistry::GetService();
@@ -1700,7 +1714,7 @@ ContentParent::RecvReadPermissions(InfallibleTArray<IPC::Permission>* aPermissio
 {
 #ifdef MOZ_PERMISSIONS
     nsCOMPtr<nsIPermissionManager> permissionManagerIface =
-        do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
+        services::GetPermissionManager();
     nsPermissionManager* permissionManager =
         static_cast<nsPermissionManager*>(permissionManagerIface.get());
     NS_ABORT_IF_FALSE(permissionManager,
@@ -1877,7 +1891,7 @@ ContentParent::RecvGetShowPasswordSetting(bool* showPassword)
 #ifdef MOZ_WIDGET_ANDROID
     NS_ASSERTION(AndroidBridge::Bridge() != nullptr, "AndroidBridge is not available");
 
-    *showPassword = GeckoAppShell::GetShowPasswordSetting();
+    *showPassword = mozilla::widget::android::GeckoAppShell::GetShowPasswordSetting();
 #endif
     return true;
 }
@@ -1894,7 +1908,7 @@ ContentParent::RecvFirstIdle()
 }
 
 bool
-ContentParent::RecvAudioChannelGetState(const AudioChannelType& aType,
+ContentParent::RecvAudioChannelGetState(const AudioChannel& aChannel,
                                         const bool& aElementHidden,
                                         const bool& aElementWasHidden,
                                         AudioChannelState* aState)
@@ -1903,33 +1917,33 @@ ContentParent::RecvAudioChannelGetState(const AudioChannelType& aType,
         AudioChannelService::GetAudioChannelService();
     *aState = AUDIO_CHANNEL_STATE_NORMAL;
     if (service) {
-        *aState = service->GetStateInternal(aType, mChildID,
+        *aState = service->GetStateInternal(aChannel, mChildID,
                                             aElementHidden, aElementWasHidden);
     }
     return true;
 }
 
 bool
-ContentParent::RecvAudioChannelRegisterType(const AudioChannelType& aType,
+ContentParent::RecvAudioChannelRegisterType(const AudioChannel& aChannel,
                                             const bool& aWithVideo)
 {
     nsRefPtr<AudioChannelService> service =
         AudioChannelService::GetAudioChannelService();
     if (service) {
-        service->RegisterType(aType, mChildID, aWithVideo);
+        service->RegisterType(aChannel, mChildID, aWithVideo);
     }
     return true;
 }
 
 bool
-ContentParent::RecvAudioChannelUnregisterType(const AudioChannelType& aType,
+ContentParent::RecvAudioChannelUnregisterType(const AudioChannel& aChannel,
                                               const bool& aElementHidden,
                                               const bool& aWithVideo)
 {
     nsRefPtr<AudioChannelService> service =
         AudioChannelService::GetAudioChannelService();
     if (service) {
-        service->UnregisterType(aType, aElementHidden, mChildID, aWithVideo);
+        service->UnregisterType(aChannel, aElementHidden, mChildID, aWithVideo);
     }
     return true;
 }
@@ -1946,13 +1960,13 @@ ContentParent::RecvAudioChannelChangedNotification()
 }
 
 bool
-ContentParent::RecvAudioChannelChangeDefVolChannel(
-  const AudioChannelType& aType, const bool& aHidden)
+ContentParent::RecvAudioChannelChangeDefVolChannel(const int32_t& aChannel,
+                                                   const bool& aHidden)
 {
     nsRefPtr<AudioChannelService> service =
         AudioChannelService::GetAudioChannelService();
     if (service) {
-       service->SetDefaultVolumeControlChannelInternal(aType,
+       service->SetDefaultVolumeControlChannelInternal(aChannel,
                                                        aHidden, mChildID);
     }
     return true;
@@ -1979,8 +1993,11 @@ ContentParent::RecvNuwaReady()
 {
 #ifdef MOZ_NUWA_PROCESS
     if (!IsNuwaProcess()) {
-        printf_stderr("Terminating child process %d for unauthorized IPC message: "
-                      "NuwaReady", Pid());
+        NS_ERROR(
+            nsPrintfCString(
+                "Terminating child process %d for unauthorized IPC message: NuwaReady",
+                Pid()).get());
+
         KillHard();
         return false;
     }
@@ -1998,8 +2015,11 @@ ContentParent::RecvAddNewProcess(const uint32_t& aPid,
 {
 #ifdef MOZ_NUWA_PROCESS
     if (!IsNuwaProcess()) {
-        printf_stderr("Terminating child process %d for unauthorized IPC message: "
-                      "AddNewProcess(%d)", Pid(), aPid);
+        NS_ERROR(
+            nsPrintfCString(
+                "Terminating child process %d for unauthorized IPC message: "
+                "AddNewProcess(%d)", Pid(), aPid).get());
+
         KillHard();
         return false;
     }
@@ -2181,6 +2201,13 @@ ContentParent::AllocPBackgroundParent(Transport* aTransport,
     return BackgroundParent::Alloc(this, aTransport, aOtherProcess);
 }
 
+PSharedBufferManagerParent*
+ContentParent::AllocPSharedBufferManagerParent(mozilla::ipc::Transport* aTransport,
+                                                base::ProcessId aOtherProcess)
+{
+    return SharedBufferManagerParent::Create(aTransport, aOtherProcess);
+}
+
 bool
 ContentParent::RecvGetProcessAttributes(uint64_t* aId,
                                         bool* aIsForApp, bool* aIsForBrowser)
@@ -2343,52 +2370,17 @@ ContentParent::GetOrCreateActorForBlob(nsIDOMBlob* aBlob)
     }
   }
 
-  // XXX This is only safe so long as all blob implementations in our tree
-  //     inherit nsDOMFileBase. If that ever changes then this will need to grow
-  //     a real interface or something.
-  const nsDOMFileBase* blob = static_cast<nsDOMFileBase*>(aBlob);
-
-  // We often pass blobs that are multipart but that only contain one sub-blob
-  // (WebActivities does this a bunch). Unwrap to reduce the number of actors
-  // that we have to maintain.
-  const nsTArray<nsCOMPtr<nsIDOMBlob> >* subBlobs = blob->GetSubBlobs();
-  if (subBlobs && subBlobs->Length() == 1) {
-    const nsCOMPtr<nsIDOMBlob>& subBlob = subBlobs->ElementAt(0);
-    MOZ_ASSERT(subBlob);
-
-    // We can only take this shortcut if the multipart and the sub-blob are both
-    // Blob objects or both File objects.
-    nsCOMPtr<nsIDOMFile> multipartBlobAsFile = do_QueryInterface(aBlob);
-    nsCOMPtr<nsIDOMFile> subBlobAsFile = do_QueryInterface(subBlob);
-    if (!multipartBlobAsFile == !subBlobAsFile) {
-      // The wrapping might have been unnecessary, see if we can simply pass an
-      // existing remote blob for this ContentParent.
-      if (nsCOMPtr<nsIRemoteBlob> remoteSubBlob = do_QueryInterface(subBlob)) {
-        BlobParent* actor =
-          static_cast<BlobParent*>(
-            static_cast<PBlobParent*>(remoteSubBlob->GetPBlob()));
-        MOZ_ASSERT(actor);
-
-        if (static_cast<ContentParent*>(actor->Manager()) == this) {
-          return actor;
-        }
-      }
-
-      // No need to add a reference here since the original blob must have a
-      // strong reference in the caller and it must also have a strong reference
-      // to this sub-blob.
-      aBlob = subBlob;
-      blob = static_cast<nsDOMFileBase*>(aBlob);
-      subBlobs = blob->GetSubBlobs();
-    }
-  }
-
   // All blobs shared between processes must be immutable.
   nsCOMPtr<nsIMutable> mutableBlob = do_QueryInterface(aBlob);
   if (!mutableBlob || NS_FAILED(mutableBlob->SetMutable(false))) {
     NS_WARNING("Failed to make blob immutable!");
     return nullptr;
   }
+
+  // XXX This is only safe so long as all blob implementations in our tree
+  //     inherit nsDOMFileBase. If that ever changes then this will need to grow
+  //     a real interface or something.
+  const auto* blob = static_cast<nsDOMFileBase*>(aBlob);
 
   ChildBlobConstructorParams params;
 
@@ -3427,7 +3419,7 @@ ContentParent::DeallocPFileDescriptorSetParent(PFileDescriptorSetParent* aActor)
 } // namespace dom
 } // namespace mozilla
 
-NS_IMPL_ISUPPORTS1(ParentIdleListener, nsIObserver)
+NS_IMPL_ISUPPORTS(ParentIdleListener, nsIObserver)
 
 NS_IMETHODIMP
 ParentIdleListener::Observe(nsISupports*, const char* aTopic, const char16_t* aData) {

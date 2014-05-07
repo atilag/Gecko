@@ -12,11 +12,11 @@
 #include "nsPIDOMWindow.h"
 
 #include "mozilla/CondVar.h"
+#include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsDataHashtable.h"
-#include "nsDOMEventTargetHelper.h"
 #include "nsHashKeys.h"
 #include "nsRefPtrHashtable.h"
 #include "nsString.h"
@@ -112,7 +112,7 @@ public:
 };
 
 template <class Derived>
-class WorkerPrivateParent : public nsDOMEventTargetHelper
+class WorkerPrivateParent : public DOMEventTargetHelper
 {
   class SynchronizeAndResumeRunnable;
 
@@ -241,6 +241,7 @@ private:
   bool mIsChromeWorker;
   bool mMainThreadObjectsForgotten;
   WorkerType mWorkerType;
+  TimeStamp mCreationTimeStamp;
 
 protected:
   // The worker is owned by its thread, which is represented here.  This is set
@@ -285,11 +286,11 @@ private:
 
 public:
   virtual JSObject*
-  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(WorkerPrivateParent,
-                                                         nsDOMEventTargetHelper)
+                                                         DOMEventTargetHelper)
 
   void
   ClearSelfRef()
@@ -506,6 +507,11 @@ public:
   {
     AssertIsOnMainThread();
     return mLoadInfo.mResolvedScriptURI;
+  }
+
+  TimeStamp CreationTimeStamp() const
+  {
+    return mCreationTimeStamp;
   }
 
   nsIPrincipal*

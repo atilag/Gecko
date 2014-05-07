@@ -4,7 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "TypeInState.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/Selection.h"
+#include "mozilla/dom/Selection.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/mozalloc.h"
 #include "nsAString.h"
@@ -52,6 +52,7 @@
 class nsISupports;
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 static bool
 IsEmptyTextNode(nsHTMLEditor* aThis, nsINode* aNode)
@@ -311,11 +312,10 @@ nsHTMLEditor::IsSimpleModifiableNode(nsIContent* aContent,
   // "text-decoration: underline", which decomposes into four different text-*
   // properties.  So for now, we just create a span, add the desired style, and
   // see if it matches.
-  nsCOMPtr<dom::Element> newSpan;
-  nsresult res = CreateHTMLContent(NS_LITERAL_STRING("span"),
-                                   getter_AddRefs(newSpan));
-  NS_ASSERTION(NS_SUCCEEDED(res), "CreateHTMLContent failed");
-  NS_ENSURE_SUCCESS(res, false);
+  ErrorResult rv;
+  nsCOMPtr<Element> newSpan = CreateHTMLContent(NS_LITERAL_STRING("span"), rv);
+  NS_ASSERTION(!rv.Failed(), "CreateHTMLContent failed");
+  NS_ENSURE_SUCCESS(rv.ErrorCode(), false);
   mHTMLCSSUtils->SetCSSEquivalentToHTMLStyle(newSpan, aProperty,
                                              aAttribute, aValue,
                                              /*suppress transaction*/ true);

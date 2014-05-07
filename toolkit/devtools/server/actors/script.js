@@ -3,7 +3,20 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 "use strict";
+
+const Debugger = require("Debugger");
+const Services = require("Services");
+const { Cc, Ci, Cu, components } = require("chrome");
+const { ActorPool } = require("devtools/server/actors/common");
+const { DebuggerServer } = require("devtools/server/main");
+const DevToolsUtils = require("devtools/toolkit/DevToolsUtils");
+const { dbg_assert, dumpn, update } = DevToolsUtils;
+const { SourceMapConsumer, SourceMapGenerator } = require("source-map");
+const { all, defer, resolve } = promise;
+
+Cu.import("resource://gre/modules/NetUtil.jsm");
 
 let B2G_ID = "{3c2e2abc-06d4-11e1-ac3b-374f68613e61}";
 
@@ -24,8 +37,9 @@ let addonManager = null;
  * about them.
  */
 function mapURIToAddonID(uri, id) {
-  if (Services.appinfo.ID == B2G_ID)
+  if (Services.appinfo.ID == B2G_ID) {
     return false;
+  }
 
   if (!addonManager) {
     addonManager = Cc["@mozilla.org/addons/integration;1"].
@@ -36,7 +50,7 @@ function mapURIToAddonID(uri, id) {
     return addonManager.mapURIToAddonID(uri, id);
   }
   catch (e) {
-    DevtoolsUtils.reportException("mapURIToAddonID", e);
+    DevToolsUtils.reportException("mapURIToAddonID", e);
     return false;
   }
 }
@@ -91,6 +105,7 @@ BreakpointStore.prototype = {
    */
   addBreakpoint: function (aBreakpoint) {
     let { url, line, column } = aBreakpoint;
+    let updating = false;
 
     if (column != null) {
       if (!this._breakpoints[url]) {
@@ -99,16 +114,24 @@ BreakpointStore.prototype = {
       if (!this._breakpoints[url][line]) {
         this._breakpoints[url][line] = [];
       }
+      if(this._breakpoints[url][line][column]) {
+        updating = true;
+      }
       this._breakpoints[url][line][column] = aBreakpoint;
     } else {
       // Add a breakpoint that breaks on the whole line.
       if (!this._wholeLineBreakpoints[url]) {
         this._wholeLineBreakpoints[url] = [];
       }
+      if(this._wholeLineBreakpoints[url][line]) {
+        updating = true;
+      }
       this._wholeLineBreakpoints[url][line] = aBreakpoint;
     }
 
-    this._size++;
+    if (!updating) {
+      this._size++;
+    }
   },
 
   /**
@@ -301,6 +324,8 @@ BreakpointStore.prototype = {
     }
   },
 };
+
+exports.BreakpointStore = BreakpointStore;
 
 /**
  * Manages pushing event loops and automatically pops and exits them in the
@@ -544,7 +569,7 @@ ThreadActor.prototype = {
       this._prettyPrintWorker.addEventListener(
         "error", this._onPrettyPrintError, false);
 
-      if (wantLogging) {
+      if (dumpn.wantLogging) {
         this._prettyPrintWorker.addEventListener("message", this._onPrettyPrintMsg, false);
 
         const postMsg = this._prettyPrintWorker.postMessage;
@@ -2387,6 +2412,7 @@ ThreadActor.prototype.requestTypes = {
   "prototypesAndProperties": ThreadActor.prototype.onPrototypesAndProperties
 };
 
+exports.ThreadActor = ThreadActor;
 
 /**
  * Creates a PauseActor.
@@ -3450,6 +3476,7 @@ ObjectActor.prototype.requestTypes = {
   "scope": ObjectActor.prototype.onScope,
 };
 
+exports.ObjectActor = ObjectActor;
 
 /**
  * Functions for adding information to ObjectActor grips for the purpose of
@@ -4225,6 +4252,7 @@ LongStringActor.prototype.requestTypes = {
   "release": LongStringActor.prototype.onRelease
 };
 
+exports.LongStringActor = LongStringActor;
 
 /**
  * Creates an actor for the specified stack frame.
@@ -4377,6 +4405,13 @@ BreakpointActor.prototype = {
     this.scripts = [];
   },
 
+  /**
+   * Check if this breakpoint has a condition that doesn't error and
+   * evaluates to true in aFrame
+   *
+   * @param aFrame Debugger.Frame
+   *        The frame to evaluate the condition in
+   */
   isValidCondition: function(aFrame) {
     if(!this.condition) {
       return true;
@@ -4629,6 +4664,8 @@ EnvironmentActor.prototype.requestTypes = {
   "bindings": EnvironmentActor.prototype.onBindings
 };
 
+exports.EnvironmentActor = EnvironmentActor;
+
 /**
  * Override the toString method in order to get more meaningful script output
  * for debugging the debugger.
@@ -4730,6 +4767,8 @@ update(ChromeDebuggerActor.prototype, {
   }
 });
 
+exports.ChromeDebuggerActor = ChromeDebuggerActor;
+
 /**
  * Creates an actor for handling add-on debugging. AddonThreadActor is
  * a thin wrapper over ThreadActor.
@@ -4761,6 +4800,33 @@ update(AddonThreadActor.prototype, {
   // A constant prefix that will be used to form the actor ID by the server.
   actorPrefix: "addonThread",
 
+  onAttach: function(aRequest) {
+    if (!this.attached) {
+      Services.obs.addObserver(this, "chrome-document-global-created", false);
+      Services.obs.addObserver(this, "content-document-global-created", false);
+    }
+    return ThreadActor.prototype.onAttach.call(this, aRequest);
+  },
+
+  disconnect: function() {
+    if (this.attached) {
+      Services.obs.removeObserver(this, "content-document-global-created");
+      Services.obs.removeObserver(this, "chrome-document-global-created");
+    }
+    return ThreadActor.prototype.disconnect.call(this);
+  },
+
+  /**
+   * Called when a new DOM document global is created. Check if the DOM was
+   * loaded from an add-on and if so make the window a debuggee.
+   */
+  observe: function(aSubject, aTopic, aData) {
+    let id = {};
+    if (mapURIToAddonID(aSubject.location, id) && id.value === this.addonID) {
+      this.dbg.addDebuggee(aSubject.defaultView);
+    }
+  },
+
   /**
    * Override the eligibility check for scripts and sources to make
    * sure every script and source with a URL is stored when debugging
@@ -4768,12 +4834,14 @@ update(AddonThreadActor.prototype, {
    */
   _allowSource: function(aSourceURL) {
     // Hide eval scripts
-    if (!aSourceURL)
+    if (!aSourceURL) {
       return false;
+    }
 
     // XPIProvider.jsm evals some code in every add-on's bootstrap.js. Hide it
-    if (aSourceURL == "resource://gre/modules/addons/XPIProvider.jsm")
+    if (aSourceURL == "resource://gre/modules/addons/XPIProvider.jsm") {
       return false;
+    }
 
     return true;
   },
@@ -4820,33 +4888,63 @@ update(AddonThreadActor.prototype, {
    * @param aGlobal Debugger.Object
    */
   _checkGlobal: function ADA_checkGlobal(aGlobal) {
+    let obj = null;
+    try {
+      obj = aGlobal.unsafeDereference();
+    }
+    catch (e) {
+      // Because of bug 991399 we sometimes get bad objects here. If we can't
+      // dereference them then they won't be useful to us
+      return false;
+    }
+
     try {
       // This will fail for non-Sandbox objects, hence the try-catch block.
-      let metadata = Cu.getSandboxMetadata(aGlobal.unsafeDereference());
-      if (metadata)
+      let metadata = Cu.getSandboxMetadata(obj);
+      if (metadata) {
         return metadata.addonID === this.addonID;
+      }
     } catch (e) {
+    }
+
+    if (obj instanceof Ci.nsIDOMWindow) {
+      let id = {};
+      if (mapURIToAddonID(obj.document.documentURIObject, id)) {
+        return id.value === this.addonID;
+      }
+      return false;
     }
 
     // Check the global for a __URI__ property and then try to map that to an
     // add-on
     let uridescriptor = aGlobal.getOwnPropertyDescriptor("__URI__");
-    if (uridescriptor && "value" in uridescriptor) {
+    if (uridescriptor && "value" in uridescriptor && uridescriptor.value) {
+      let uri;
       try {
-        let uri = Services.io.newURI(uridescriptor.value, null, null);
-        let id = {};
-        if (mapURIToAddonID(uri, id)) {
-          return id.value === this.addonID;
-        }
+        uri = Services.io.newURI(uridescriptor.value, null, null);
       }
       catch (e) {
-        DevToolsUtils.reportException("AddonThreadActor.prototype._checkGlobal", e);
+        DevToolsUtils.reportException("AddonThreadActor.prototype._checkGlobal",
+                                      new Error("Invalid URI: " + uridescriptor.value));
+        return false;
+      }
+
+      let id = {};
+      if (mapURIToAddonID(uri, id)) {
+        return id.value === this.addonID;
       }
     }
 
     return false;
   }
 });
+
+AddonThreadActor.prototype.requestTypes = Object.create(ThreadActor.prototype.requestTypes);
+update(AddonThreadActor.prototype.requestTypes, {
+  "attach": AddonThreadActor.prototype.onAttach
+});
+
+exports.AddonThreadActor = AddonThreadActor;
 
 /**
  * Manages the sources for a thread. Handles source maps, locations in the
@@ -5210,6 +5308,8 @@ ThreadSources.prototype = {
   }
 };
 
+exports.ThreadSources = ThreadSources;
+
 // Utility functions.
 
 // TODO bug 863089: use Debugger.Script.prototype.getOffsetColumn when it is
@@ -5258,25 +5358,6 @@ function getFrameLocation(aFrame) {
 }
 
 /**
- * Utility function for updating an object with the properties of another
- * object.
- *
- * @param aTarget Object
- *        The object being updated.
- * @param aNewAttrs Object
- *        The new attributes being set on the target.
- */
-function update(aTarget, aNewAttrs) {
-  for (let key in aNewAttrs) {
-    let desc = Object.getOwnPropertyDescriptor(aNewAttrs, key);
-
-    if (desc) {
-      Object.defineProperty(aTarget, key, desc);
-    }
-  }
-}
-
-/**
  * Returns true if its argument is not null.
  */
 function isNotNull(aThing) {
@@ -5318,7 +5399,7 @@ function fetch(aURL, aOptions={ loadFromCache: true }) {
     case "resource":
       try {
         NetUtil.asyncFetch(url, function onFetch(aStream, aStatus, aRequest) {
-          if (!Components.isSuccessCode(aStatus)) {
+          if (!components.isSuccessCode(aStatus)) {
             deferred.reject(new Error("Request failed with status code = "
                                       + aStatus
                                       + " after NetUtil.asyncFetch for url = "
@@ -5349,7 +5430,7 @@ function fetch(aURL, aOptions={ loadFromCache: true }) {
       let chunks = [];
       let streamListener = {
         onStartRequest: function(aRequest, aContext, aStatusCode) {
-          if (!Components.isSuccessCode(aStatusCode)) {
+          if (!components.isSuccessCode(aStatusCode)) {
             deferred.reject(new Error("Request failed with status code = "
                                       + aStatusCode
                                       + " in onStartRequest handler for url = "
@@ -5360,7 +5441,7 @@ function fetch(aURL, aOptions={ loadFromCache: true }) {
           chunks.push(NetUtil.readInputStreamToString(aStream, aCount));
         },
         onStopRequest: function(aRequest, aContext, aStatusCode) {
-          if (!Components.isSuccessCode(aStatusCode)) {
+          if (!components.isSuccessCode(aStatusCode)) {
             deferred.reject(new Error("Request failed with status code = "
                                       + aStatusCode
                                       + " in onStopRequest handler for url = "
@@ -5524,4 +5605,16 @@ function makeDebuggeeValueIfNeeded(obj, value) {
 function getInnerId(window) {
   return window.QueryInterface(Ci.nsIInterfaceRequestor).
                 getInterface(Ci.nsIDOMWindowUtils).currentInnerWindowID;
+};
+
+exports.register = function(handle) {
+  ThreadActor.breakpointStore = new BreakpointStore();
+  ThreadSources._blackBoxedSources = new Set(["self-hosted"]);
+  ThreadSources._prettyPrintedSources = new Map();
+};
+
+exports.unregister = function(handle) {
+  ThreadActor.breakpointStore = null;
+  ThreadSources._blackBoxedSources.clear();
+  ThreadSources._prettyPrintedSources.clear();
 };

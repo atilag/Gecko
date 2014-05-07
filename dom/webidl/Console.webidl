@@ -17,13 +17,10 @@ interface Console {
   void group(any... data);
   void groupCollapsed(any... data);
   void groupEnd(any... data);
-  void time(any time);
-  void timeEnd(any time);
+  void time(optional any time);
+  void timeEnd(optional any time);
 
-  [Throws]
   void profile(any... data);
-
-  [Throws]
   void profileEnd(any... data);
 
   void assert(boolean condition, any... data);
@@ -42,8 +39,17 @@ dictionary ConsoleEvent {
   DOMString functionName = "";
   double timeStamp = 0;
   sequence<any> arguments;
+
+  // This array will only hold strings or null elements.
+  sequence<any> styles;
+
   boolean private = false;
-  sequence<ConsoleStackEntry> stacktrace;
+  // stacktrace is handled via a getter in some cases so we can construct it
+  // lazily.  Note that we're not making this whole thing an interface because
+  // consumers expect to see own properties on it, which would mean making the
+  // props unforgeable, which means lots of JSFunction allocations.  Maybe we
+  // should fix those consumers, of course....
+  // sequence<ConsoleStackEntry> stacktrace;
   DOMString groupName = "";
   any timer = null;
   any counter = null;

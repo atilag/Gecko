@@ -101,7 +101,7 @@ nsInProcessTabChildGlobal::nsInProcessTabChildGlobal(nsIDocShell* aShell,
                                                      nsIContent* aOwner,
                                                      nsFrameMessageManager* aChrome)
 : mDocShell(aShell), mInitialized(false), mLoadingScript(false),
-  mDelayedDisconnect(false), mOwner(aOwner), mChromeMessageManager(aChrome)
+  mOwner(aOwner), mChromeMessageManager(aChrome)
 {
 
   // If owner corresponds to an <iframe mozbrowser> or <iframe mozapp>, we'll
@@ -143,10 +143,10 @@ nsInProcessTabChildGlobal::Init()
   return NS_OK;
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_2(nsInProcessTabChildGlobal,
-                                     nsDOMEventTargetHelper,
-                                     mMessageManager,
-                                     mGlobal)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(nsInProcessTabChildGlobal,
+                                   DOMEventTargetHelper,
+                                   mMessageManager,
+                                   mGlobal)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(nsInProcessTabChildGlobal)
   NS_INTERFACE_MAP_ENTRY(nsIMessageListenerManager)
@@ -158,10 +158,10 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(nsInProcessTabChildGlobal)
   NS_INTERFACE_MAP_ENTRY(nsIGlobalObject)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(ContentFrameMessageManager)
-NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
+NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
-NS_IMPL_ADDREF_INHERITED(nsInProcessTabChildGlobal, nsDOMEventTargetHelper)
-NS_IMPL_RELEASE_INHERITED(nsInProcessTabChildGlobal, nsDOMEventTargetHelper)
+NS_IMPL_ADDREF_INHERITED(nsInProcessTabChildGlobal, DOMEventTargetHelper)
+NS_IMPL_RELEASE_INHERITED(nsInProcessTabChildGlobal, DOMEventTargetHelper)
 
 NS_IMETHODIMP
 nsInProcessTabChildGlobal::GetContent(nsIDOMWindow** aContent)
@@ -217,7 +217,7 @@ nsInProcessTabChildGlobal::DelayedDisconnect()
   mOwner = nullptr;
 
   // Fire the "unload" event
-  nsDOMEventTargetHelper::DispatchTrustedEvent(NS_LITERAL_STRING("unload"));
+  DOMEventTargetHelper::DispatchTrustedEvent(NS_LITERAL_STRING("unload"));
 
   // Continue with the Disconnect cleanup
   nsCOMPtr<nsPIDOMWindow> win = do_GetInterface(mDocShell);
@@ -233,13 +233,6 @@ nsInProcessTabChildGlobal::DelayedDisconnect()
   }
   if (mListenerManager) {
     mListenerManager->Disconnect();
-  }
-
-  if (!mLoadingScript) {
-    ReleaseWrapper(static_cast<EventTarget*>(this));
-    mGlobal = nullptr;
-  } else {
-    mDelayedDisconnect = true;
   }
 }
 
@@ -331,8 +324,4 @@ nsInProcessTabChildGlobal::LoadFrameScript(const nsAString& aURL, bool aRunInGlo
   mLoadingScript = true;
   LoadFrameScriptInternal(aURL, aRunInGlobalScope);
   mLoadingScript = tmp;
-  if (!mLoadingScript && mDelayedDisconnect) {
-    mDelayedDisconnect = false;
-    Disconnect();
-  }
 }

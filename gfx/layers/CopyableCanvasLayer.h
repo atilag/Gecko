@@ -9,7 +9,6 @@
 #include <stdint.h>                     // for uint32_t
 #include "GLContextTypes.h"             // for GLContext
 #include "Layers.h"                     // for CanvasLayer, etc
-#include "gfxASurface.h"                // for gfxASurface
 #include "gfxContext.h"                 // for gfxContext, etc
 #include "gfxTypes.h"
 #include "gfxPlatform.h"                // for gfxImageFormat
@@ -48,16 +47,9 @@ public:
   virtual bool IsDataValid(const Data& aData);
 
 protected:
-  void PaintWithOpacity(gfx::DrawTarget* aTarget,
-                        float aOpacity,
-                        gfx::SourceSurface* aMaskSurface,
-                        gfx::CompositionOp aOperator = gfx::CompositionOp::OP_OVER);
-
-  void UpdateTarget(gfx::DrawTarget* aDestTarget = nullptr,
-                    gfx::SourceSurface* aMaskSurface = nullptr);
+  void UpdateTarget(gfx::DrawTarget* aDestTarget = nullptr);
 
   RefPtr<gfx::SourceSurface> mSurface;
-  nsRefPtr<gfxASurface> mDeprecatedSurface;
   nsRefPtr<mozilla::gl::GLContext> mGLContext;
   mozilla::RefPtr<mozilla::gfx::DrawTarget> mDrawTarget;
 
@@ -69,29 +61,11 @@ protected:
   bool mNeedsYFlip;
 
   RefPtr<gfx::DataSourceSurface> mCachedTempSurface;
-  nsRefPtr<gfxImageSurface> mDeprecatedCachedTempSurface;
-  gfx::IntSize mCachedSize;
-  gfx::SurfaceFormat mCachedFormat;
-  gfxImageFormat mDeprecatedCachedFormat;
 
   gfx::DataSourceSurface* GetTempSurface(const gfx::IntSize& aSize,
                                          const gfx::SurfaceFormat aFormat);
 
   void DiscardTempSurface();
-
-  /* Deprecated thebes methods */
-protected:
-  void DeprecatedPaintWithOpacity(gfxContext* aContext,
-                                  float aOpacity,
-                                  Layer* aMaskLayer,
-                                  gfxContext::GraphicsOperator aOperator = gfxContext::OPERATOR_OVER);
-
-  void DeprecatedUpdateSurface(gfxASurface* aDestSurface = nullptr,
-                               Layer* aMaskLayer = nullptr);
-
-  gfxImageSurface* DeprecatedGetTempSurface(const gfx::IntSize& aSize,
-                                            const gfxImageFormat aFormat);
-
 };
 
 }

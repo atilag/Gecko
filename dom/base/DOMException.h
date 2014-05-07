@@ -58,7 +58,7 @@ public:
   void StowJSVal(JS::Value& aVp);
 
   // WebIDL API
-  virtual JSObject* WrapObject(JSContext* cx, JS::Handle<JSObject*> scope)
+  virtual JSObject* WrapObject(JSContext* cx)
     MOZ_OVERRIDE;
 
   nsISupports* GetParentObject() const { return nullptr; }
@@ -69,7 +69,7 @@ public:
 
   void GetName(nsString& retval);
 
-  void GetFilename(nsString& retval);
+  // The XPCOM GetFilename does the right thing.
 
   uint32_t LineNumber() const;
 
@@ -100,7 +100,7 @@ protected:
   nsCString       mName;
   nsCOMPtr<nsIStackFrame> mLocation;
   nsCOMPtr<nsISupports> mData;
-  nsCString       mFilename;
+  nsString        mFilename;
   int             mLineNumber;
   nsCOMPtr<nsIException> mInner;
   bool            mInitialized;
@@ -128,7 +128,7 @@ public:
   NS_IMETHOD ToString(nsACString& aReturn) MOZ_OVERRIDE;
 
   // nsWrapperCache overrides
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+  virtual JSObject* WrapObject(JSContext* aCx)
     MOZ_OVERRIDE;
 
   uint16_t Code() const {

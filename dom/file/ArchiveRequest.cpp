@@ -76,9 +76,9 @@ ArchiveRequest::PreHandleEvent(EventChainPreVisitor& aVisitor)
 }
 
 /* virtual */ JSObject*
-ArchiveRequest::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+ArchiveRequest::WrapObject(JSContext* aCx)
 {
-  return ArchiveRequestBinding::Wrap(aCx, aScope, this);
+  return ArchiveRequestBinding::Wrap(aCx, this);
 }
 
 ArchiveReader*
@@ -194,7 +194,8 @@ ArchiveRequest::GetFilenamesResult(JSContext* aCx,
     str = JS_NewUCStringCopyZ(aCx, filename.get());
     NS_ENSURE_TRUE(str, NS_ERROR_OUT_OF_MEMORY);
 
-    if (NS_FAILED(rv) || !JS_SetElement(aCx, array, i, str)) {
+    if (NS_FAILED(rv) ||
+        !JS_DefineElement(aCx, array, i, str, JSPROP_ENUMERATE)) {
       return NS_ERROR_FAILURE;
     }
   }
@@ -220,9 +221,8 @@ ArchiveRequest::GetFileResult(JSContext* aCx,
     NS_ENSURE_SUCCESS(rv, rv);
 
     if (filename == mFilename) {
-      JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
-      return nsContentUtils::WrapNative(aCx, global, file,
-                                        &NS_GET_IID(nsIDOMFile), aValue);
+      return nsContentUtils::WrapNative(aCx, file, &NS_GET_IID(nsIDOMFile),
+                                        aValue);
     }
   }
 
@@ -243,11 +243,10 @@ ArchiveRequest::GetFilesResult(JSContext* aCx,
     nsCOMPtr<nsIDOMFile> file = aFileList[i];
 
     JS::Rooted<JS::Value> value(aCx);
-    JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
-    nsresult rv = nsContentUtils::WrapNative(aCx, global, file,
-                                             &NS_GET_IID(nsIDOMFile),
+    nsresult rv = nsContentUtils::WrapNative(aCx, file, &NS_GET_IID(nsIDOMFile),
                                              &value);
-    if (NS_FAILED(rv) || !JS_SetElement(aCx, array, i, value)) {
+    if (NS_FAILED(rv) ||
+        !JS_DefineElement(aCx, array, i, value, JSPROP_ENUMERATE)) {
       return NS_ERROR_FAILURE;
     }
   }
@@ -268,8 +267,8 @@ ArchiveRequest::Create(nsPIDOMWindow* aOwner,
   return request.forget();
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_1(ArchiveRequest, DOMRequest,
-                                     mArchiveReader)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(ArchiveRequest, DOMRequest,
+                                   mArchiveReader)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(ArchiveRequest)
 NS_INTERFACE_MAP_END_INHERITING(DOMRequest)

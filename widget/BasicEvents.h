@@ -35,6 +35,7 @@ enum nsEventStructType
   NS_TEXT_EVENT,                     // WidgetTextEvent
   NS_QUERY_CONTENT_EVENT,            // WidgetQueryContentEvent
   NS_SELECTION_EVENT,                // WidgetSelectionEvent
+  NS_EDITOR_INPUT_EVENT,             // InternalEditorInputEvent
 
   // MouseEvents.h
   NS_MOUSE_EVENT,                    // WidgetMouseEvent
@@ -166,8 +167,7 @@ enum nsEventStructType
 #define NS_FORM_RESET                   (NS_FORM_EVENT_START + 1)
 #define NS_FORM_CHANGE                  (NS_FORM_EVENT_START + 2)
 #define NS_FORM_SELECTED                (NS_FORM_EVENT_START + 3)
-#define NS_FORM_INPUT                   (NS_FORM_EVENT_START + 4)
-#define NS_FORM_INVALID                 (NS_FORM_EVENT_START + 5)
+#define NS_FORM_INVALID                 (NS_FORM_EVENT_START + 4)
 
 //Need separate focus/blur notifications for non-native widgets
 #define NS_FOCUS_EVENT_START            1300
@@ -318,7 +318,6 @@ enum nsEventStructType
 #define NS_RATECHANGE          (NS_MEDIA_EVENT_START+17)
 #define NS_DURATIONCHANGE      (NS_MEDIA_EVENT_START+18)
 #define NS_VOLUMECHANGE        (NS_MEDIA_EVENT_START+19)
-#define NS_MOZAUDIOAVAILABLE   (NS_MEDIA_EVENT_START+20)
 
 // paint notification events
 #define NS_NOTIFYPAINT_START    3400
@@ -473,6 +472,10 @@ enum nsEventStructType
 // Keep this defined to the same value as the event above
 #define NS_GAMEPAD_END           (NS_GAMEPAD_START+4)
 #endif
+
+// input and beforeinput events.
+#define NS_EDITOR_EVENT_START    6100
+#define NS_EDITOR_INPUT          (NS_EDITOR_EVENT_START)
 
 namespace mozilla {
 
@@ -1058,6 +1061,18 @@ public:
 class InternalUIEvent : public WidgetGUIEvent
 {
 protected:
+  InternalUIEvent()
+    : detail(0)
+  {
+  }
+
+  InternalUIEvent(bool aIsTrusted, uint32_t aMessage, nsIWidget* aWidget,
+                  nsEventStructType aStructType)
+    : WidgetGUIEvent(aIsTrusted, aMessage, aWidget, aStructType)
+    , detail(0)
+  {
+  }
+
   InternalUIEvent(bool aIsTrusted, uint32_t aMessage,
                   nsEventStructType aStructType)
     : WidgetGUIEvent(aIsTrusted, aMessage, nullptr, aStructType)

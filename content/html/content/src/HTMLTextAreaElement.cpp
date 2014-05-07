@@ -11,6 +11,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/HTMLTextAreaElementBinding.h"
 #include "mozilla/EventDispatcher.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/MouseEvents.h"
 #include "nsAttrValueInlines.h"
 #include "nsContentCID.h"
@@ -74,11 +75,11 @@ HTMLTextAreaElement::HTMLTextAreaElement(already_AddRefed<nsINodeInfo>& aNodeInf
 }
 
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_3(HTMLTextAreaElement,
-                                     nsGenericHTMLFormElementWithState,
-                                     mValidity,
-                                     mControllers,
-                                     mState)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(HTMLTextAreaElement,
+                                   nsGenericHTMLFormElementWithState,
+                                   mValidity,
+                                   mControllers,
+                                   mState)
 
 NS_IMPL_ADDREF_INHERITED(HTMLTextAreaElement, Element)
 NS_IMPL_RELEASE_INHERITED(HTMLTextAreaElement, Element)
@@ -86,12 +87,12 @@ NS_IMPL_RELEASE_INHERITED(HTMLTextAreaElement, Element)
 
 // QueryInterface implementation for HTMLTextAreaElement
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLTextAreaElement)
-  NS_INTERFACE_TABLE_INHERITED5(HTMLTextAreaElement,
-                                nsIDOMHTMLTextAreaElement,
-                                nsITextControlElement,
-                                nsIDOMNSEditableElement,
-                                nsIMutationObserver,
-                                nsIConstraintValidation)
+  NS_INTERFACE_TABLE_INHERITED(HTMLTextAreaElement,
+                               nsIDOMHTMLTextAreaElement,
+                               nsITextControlElement,
+                               nsIDOMNSEditableElement,
+                               nsIMutationObserver,
+                               nsIConstraintValidation)
 NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLFormElementWithState)
 
 
@@ -1098,10 +1099,10 @@ HTMLTextAreaElement::RestoreState(nsPresState* aState)
   return false;
 }
 
-nsEventStates
+EventStates
 HTMLTextAreaElement::IntrinsicState() const
 {
-  nsEventStates state = nsGenericHTMLFormElementWithState::IntrinsicState();
+  EventStates state = nsGenericHTMLFormElementWithState::IntrinsicState();
 
   if (HasAttr(kNameSpaceID_None, nsGkAtoms::required)) {
     state |= NS_EVENT_STATE_REQUIRED;
@@ -1524,9 +1525,9 @@ HTMLTextAreaElement::FieldSetDisabledChanged(bool aNotify)
 }
 
 JSObject*
-HTMLTextAreaElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+HTMLTextAreaElement::WrapNode(JSContext* aCx)
 {
-  return HTMLTextAreaElementBinding::Wrap(aCx, aScope, this);
+  return HTMLTextAreaElementBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

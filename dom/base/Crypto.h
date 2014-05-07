@@ -66,12 +66,6 @@ public:
                                       nsAString& aReturn,
                                       ErrorResult& aRv);
 
-  virtual void PopChallengeResponse(const nsAString& aChallenge,
-                                    nsAString& aReturn,
-                                    ErrorResult& aRv);
-
-  virtual void Random(int32_t aNumBytes, nsAString& aReturn, ErrorResult& aRv);
-
   virtual void SignText(JSContext* aContext,
                         const nsAString& aStringToSign,
                         const nsAString& aCaOption,
@@ -80,7 +74,6 @@ public:
 
   virtual void Logout(ErrorResult& aRv);
 
-  virtual void DisableRightClick(ErrorResult& aRv);
 #endif
 
   // WebIDL
@@ -92,7 +85,7 @@ public:
   }
 
   virtual JSObject*
-  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   static uint8_t*
   GetRandomValues(uint32_t aLength);

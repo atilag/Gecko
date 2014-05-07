@@ -47,7 +47,7 @@
   },
   "APPLICATION_REPUTATION_COUNT": {
     "expires_in_version": "never",
-    "kind": "flag",
+    "kind": "boolean",
     "description": "Application reputation query count (both local and remote)"
   },
   "BACKGROUNDFILESAVER_THREAD_COUNT": {
@@ -295,6 +295,18 @@
     "high": "500",
     "n_buckets": 50,
     "description": "Time spent sweeping slowest compartment SCC (ms)"
+  },
+  "GEOLOCATION_ACCURACY": {
+    "expires_in_version": "never",
+    "kind": "linear",
+    "high": "18000",
+    "n_buckets": 200,  
+    "description": "Location accuracy"
+  },
+  "GEOLOCATION_ERROR": {
+    "expires_in_version": "never",
+    "kind": "flag",
+    "description": "Has seen location error"
   },
   "TELEMETRY_PING": {
     "expires_in_version": "never",
@@ -2229,6 +2241,34 @@
       "kind": "boolean",
       "description": "Whether or not we actually try the cleanup method when we think about it"
   },
+  "SEER_LOAD_COUNT_IS_ZERO": {
+      "expires_in_version": "never",
+      "kind": "linear",
+      "high": "100",
+      "n_buckets": 50,
+      "description": "Number of times load count is zero"
+  },
+  "SEER_LOAD_COUNT_OVERFLOWS": {
+      "expires_in_version": "never",
+      "kind": "linear",
+      "high": "100",
+      "n_buckets": 50,
+      "description": "Number of times load count overflowed"
+  },
+  "SEER_STARTUP_COUNT_IS_ZERO": {
+      "expires_in_version": "never",
+      "kind": "linear",
+      "high": "100",
+      "n_buckets": 50,
+      "description": "Number of times startup count is zero"
+  },
+  "SEER_STARTUP_COUNT_OVERFLOWS": {
+      "expires_in_version": "never",
+      "kind": "linear",
+      "high": "100",
+      "n_buckets": 50,
+      "description": "Number of times startup count overflowed"
+  },
   "FIND_PLUGINS": {
     "expires_in_version": "never",
     "kind": "exponential",
@@ -3254,6 +3294,11 @@
     "n_buckets": 20,
     "extended_statistics_ok": true,
     "description": "Firefox: Time taken to load a page (ms)"
+  },
+  "FX_TOTAL_TOP_VISITS": {
+    "expires_in_version": "never",
+    "kind": "boolean",
+    "description": "Count the number of times a new top page was starting to load"
   },
   "FX_THUMBNAILS_CAPTURE_TIME_MS": {
     "expires_in_version": "never",
@@ -5010,10 +5055,56 @@
     "n_buckets": "1000",
     "description": "The time (in milliseconds) that it took a 'reconfigure thread' request to go round trip."
   },
+  "WEBRTC_ICE_FINAL_CONNECTION_STATE": {
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 7,
+    "description": "The ICE connection state when the PC was closed"
+  },
+  "WEBRTC_ICE_ON_TIME_TRICKLE_ARRIVAL_TIME": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "20",
+    "description": "The length of time (in milliseconds) that a trickle candidate took to arrive after the start of ICE, given that it arrived when ICE was not in a failure state (ie; a candidate that we could do something with, hence 'on time')"
+  },
+  "WEBRTC_ICE_LATE_TRICKLE_ARRIVAL_TIME": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "20",
+    "description": "The length of time (in milliseconds) that a trickle candidate took to arrive after the start of ICE, given that it arrived after ICE failed."
+  },
+  "WEBRTC_ICE_SUCCESS_TIME": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "20",
+    "description": "The length of time (in milliseconds) it took for ICE to complete, given that ICE succeeded."
+  },
+  "WEBRTC_ICE_FAILURE_TIME": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "20",
+    "description": "The length of time (in milliseconds) it took for ICE to complete, given that it failed."
+  },
   "WEBRTC_ICE_SUCCESS_RATE": {
     "expires_in_version": "never",
     "kind": "boolean",
     "description": "The number of failed ICE Connections (0) vs. number of successful ICE connections (1)."
+  },
+  "WEBRTC_CANDIDATE_TYPES_GIVEN_SUCCESS": {
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 128,
+    "description": "A bitpattern indicating what types of candidates were present. Bit 0: Remote server reflexive. Bit 1: Remote relayed. Bit 2: Local server reflexive. Bits 3-6: Local UDP, TCP, TLS, and HTTPS relay respectively."
+  },
+  "WEBRTC_CANDIDATE_TYPES_GIVEN_FAILURE": {
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 128,
+    "description": "Identical to WEBRTC_CANDIDATE_TYPES_GIVEN_SUCCEESS, except recorded only when ICE fails on the stream in question."
   },
   "WEBRTC_AVSYNC_WHEN_AUDIO_LAGS_VIDEO_MS": {
     "expires_in_version": "never",
@@ -5825,5 +5916,11 @@
     "high": "5000",
     "n_buckets": 10,
     "extended_statistics_ok": true
+  },
+  "CERT_PINNING_EVALUATION_RESULTS": {
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 4,
+    "description": "Certificate pinning evalutation results(pinned host)(0 = failure, 1 = success)"
   }
 }

@@ -16,7 +16,7 @@
 // Note that the OS will return the path to the newest binary, if there is more than one.
 // The determination of 'newest' is complex and beyond the scope of this comment.
 
-NS_IMPL_ISUPPORTS1(nsMacWebAppUtils, nsIMacWebAppUtils)
+NS_IMPL_ISUPPORTS(nsMacWebAppUtils, nsIMacWebAppUtils)
 
 NS_IMETHODIMP nsMacWebAppUtils::PathForAppWithIdentifier(const nsAString& bundleIdentifier, nsAString& outPath) {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
@@ -54,6 +54,29 @@ NS_IMETHODIMP nsMacWebAppUtils::LaunchAppWithIdentifier(const nsAString& bundleI
                         launchIdentifier: NULL];
 
   return success ? NS_OK : NS_ERROR_FAILURE;
+
+  NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
+}
+
+NS_IMETHODIMP nsMacWebAppUtils::TrashApp(const nsAString& path, nsITrashAppCallback* aCallback) {
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
+
+  if (NS_WARN_IF(!aCallback)) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  nsCOMPtr<nsITrashAppCallback> callback = aCallback;
+
+  NSString* tempString = [NSString stringWithCharacters:reinterpret_cast<const unichar*>(((nsString)path).get())
+                                   length:path.Length()];
+
+  [[NSWorkspace sharedWorkspace] recycleURLs: [NSArray arrayWithObject:[NSURL fileURLWithPath:tempString]]
+    completionHandler: ^(NSDictionary *newURLs, NSError *error) {
+      nsresult rv = (error == nil) ? NS_OK : NS_ERROR_FAILURE;
+      callback->TrashAppFinished(rv);
+    }];
+
+  return NS_OK;
 
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }

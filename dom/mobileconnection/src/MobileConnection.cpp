@@ -7,6 +7,7 @@
 #include "GeneratedEvents.h"
 #include "mozilla/dom/CFStateChangeEvent.h"
 #include "mozilla/dom/DataErrorEvent.h"
+#include "mozilla/dom/MozClirModeEvent.h"
 #include "mozilla/dom/MozEmergencyCbModeEvent.h"
 #include "mozilla/dom/MozOtaStatusEvent.h"
 #include "mozilla/dom/USSDReceivedEvent.h"
@@ -45,30 +46,30 @@ public:
   }
 };
 
-NS_IMPL_ISUPPORTS1(MobileConnection::Listener, nsIMobileConnectionListener)
+NS_IMPL_ISUPPORTS(MobileConnection::Listener, nsIMobileConnectionListener)
 
 DOMCI_DATA(MozMobileConnection, MobileConnection)
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(MobileConnection)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(MobileConnection,
-                                                  nsDOMEventTargetHelper)
+                                                  DOMEventTargetHelper)
   // Don't traverse mListener because it doesn't keep any reference to
   // MobileConnection but a raw pointer instead. Neither does mProvider because
   // it's an xpcom service and is only released at shutting down.
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(MobileConnection,
-                                                nsDOMEventTargetHelper)
+                                                DOMEventTargetHelper)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(MobileConnection)
   NS_INTERFACE_MAP_ENTRY(nsIDOMMozMobileConnection)
   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(MozMobileConnection)
-NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
+NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
-NS_IMPL_ADDREF_INHERITED(MobileConnection, nsDOMEventTargetHelper)
-NS_IMPL_RELEASE_INHERITED(MobileConnection, nsDOMEventTargetHelper)
+NS_IMPL_ADDREF_INHERITED(MobileConnection, DOMEventTargetHelper)
+NS_IMPL_RELEASE_INHERITED(MobileConnection, DOMEventTargetHelper)
 
 NS_IMPL_EVENT_HANDLER(MobileConnection, voicechange)
 NS_IMPL_EVENT_HANDLER(MobileConnection, datachange)
@@ -79,6 +80,7 @@ NS_IMPL_EVENT_HANDLER(MobileConnection, emergencycbmodechange)
 NS_IMPL_EVENT_HANDLER(MobileConnection, otastatuschange)
 NS_IMPL_EVENT_HANDLER(MobileConnection, iccchange)
 NS_IMPL_EVENT_HANDLER(MobileConnection, radiostatechange)
+NS_IMPL_EVENT_HANDLER(MobileConnection, clirmodechange)
 
 MobileConnection::MobileConnection(uint32_t aClientId)
 : mClientId(aClientId)
@@ -155,7 +157,7 @@ MobileConnection::CheckPermission(const char* aType)
   NS_ENSURE_TRUE(window, false);
 
   nsCOMPtr<nsIPermissionManager> permMgr =
-    do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
+    mozilla::services::GetPermissionManager();
   NS_ENSURE_TRUE(permMgr, false);
 
   uint32_t permission = nsIPermissionManager::DENY_ACTION;
@@ -732,4 +734,22 @@ MobileConnection::NotifyRadioStateChanged()
   }
 
   return DispatchTrustedEvent(NS_LITERAL_STRING("radiostatechange"));
+}
+
+NS_IMETHODIMP
+MobileConnection::NotifyClirModeChanged(uint32_t aMode)
+{
+  if (!CheckPermission("mobileconnection")) {
+    return NS_OK;
+  }
+
+  MozClirModeEventInit init;
+  init.mBubbles = false;
+  init.mCancelable = false;
+  init.mMode = aMode;
+
+  nsRefPtr<MozClirModeEvent> event =
+    MozClirModeEvent::Constructor(this, NS_LITERAL_STRING("clirmodechange"), init);
+
+  return DispatchTrustedEvent(event);
 }

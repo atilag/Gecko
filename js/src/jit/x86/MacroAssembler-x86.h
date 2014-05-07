@@ -71,6 +71,7 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     using MacroAssemblerX86Shared::branch32;
     using MacroAssemblerX86Shared::load32;
     using MacroAssemblerX86Shared::store32;
+    using MacroAssemblerX86Shared::call;
 
     MacroAssemblerX86()
       : inCall_(false),
@@ -473,6 +474,15 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         }
     }
 
+    void testNullSet(Condition cond, const ValueOperand &value, Register dest) {
+        cond = testNull(cond, value);
+        emitSet(cond, dest);
+    }
+    void testUndefinedSet(Condition cond, const ValueOperand &value, Register dest) {
+        cond = testUndefined(cond, value);
+        emitSet(cond, dest);
+    }
+
     void cmpPtr(Register lhs, const ImmWord rhs) {
         cmpl(lhs, Imm32(rhs.value));
     }
@@ -480,6 +490,9 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         cmpPtr(lhs, ImmWord(uintptr_t(imm.value)));
     }
     void cmpPtr(Register lhs, const ImmGCPtr rhs) {
+        cmpl(lhs, rhs);
+    }
+    void cmpPtr(Register lhs, const Imm32 rhs) {
         cmpl(lhs, rhs);
     }
     void cmpPtr(const Operand &lhs, const ImmWord rhs) {
@@ -510,8 +523,12 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         testl(lhs, rhs);
     }
 
-    Condition testNegativeZero(const FloatRegister &reg, const Register &scratch);
-    Condition testNegativeZeroFloat32(const FloatRegister &reg, const Register &scratch);
+    template <typename T1, typename T2>
+    void cmpPtrSet(Assembler::Condition cond, T1 lhs, T2 rhs, const Register &dest)
+    {
+        cmpPtr(lhs, rhs);
+        emitSet(cond, dest);
+    }
 
     /////////////////////////////////////////////////////////////////
     // Common interface.
@@ -560,6 +577,9 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     }
     void subPtr(const Address &addr, const Register &dest) {
         subl(Operand(addr), dest);
+    }
+    void subPtr(const Register &src, const Address &dest) {
+        subl(src, Operand(dest));
     }
 
     void branch32(Condition cond, const AbsoluteAddress &lhs, Imm32 rhs, Label *label) {
@@ -920,6 +940,10 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         testl(operand.payloadReg(), operand.payloadReg());
         return truthy ? NonZero : Zero;
     }
+    void branchTestInt32Truthy(bool truthy, const ValueOperand &operand, Label *label) {
+        Condition cond = testInt32Truthy(truthy, operand);
+        j(cond, label);
+    }
     void branchTestBooleanTruthy(bool truthy, const ValueOperand &operand, Label *label) {
         testl(operand.payloadReg(), operand.payloadReg());
         j(truthy ? NonZero : Zero, label);
@@ -932,7 +956,10 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         testl(lengthAndFlags, Imm32(mask));
         return truthy ? Assembler::NonZero : Assembler::Zero;
     }
-
+    void branchTestStringTruthy(bool truthy, const ValueOperand &value, Label *label) {
+        Condition cond = testStringTruthy(truthy, value);
+        j(cond, label);
+    }
 
     void loadInt32OrDouble(const Operand &operand, const FloatRegister &dest) {
         Label notInt32, end;
@@ -1008,6 +1035,9 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         bind(&noOverflow);
     }
 
+    void incrementInt32Value(const Address &addr) {
+        addl(Imm32(1), payloadOf(addr));
+    }
 
     // If source is a double, load it into dest. If source is int32,
     // convert it to double. Else, branch to failure.
@@ -1068,9 +1098,9 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     }
 
     // Save an exit frame (which must be aligned to the stack pointer) to
-    // ThreadData::ionTop of the main thread.
+    // PerThreadData::jitTop of the main thread.
     void linkExitFrame() {
-        movl(StackPointer, Operand(AbsoluteAddress(GetIonContext()->runtime->addressOfIonTop())));
+        movl(StackPointer, Operand(AbsoluteAddress(GetIonContext()->runtime->addressOfJitTop())));
     }
 
     void callWithExitFrame(JitCode *target, Register dynStack) {
@@ -1079,12 +1109,24 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         Push(dynStack);
         call(target);
     }
+    void call(const CallSiteDesc &desc, AsmJSImmPtr target) {
+        call(target);
+        appendCallSite(desc);
+    }
+    void callExit(AsmJSImmPtr target, uint32_t stackArgBytes) {
+        call(CallSiteDesc::Exit(), target);
+    }
 
     // Save an exit frame to the thread data of the current thread, given a
     // register that holds a PerThreadData *.
     void linkParallelExitFrame(const Register &pt) {
-        movl(StackPointer, Operand(pt, offsetof(PerThreadData, ionTop)));
+        movl(StackPointer, Operand(pt, offsetof(PerThreadData, jitTop)));
     }
+
+#ifdef JSGC_GENERATIONAL
+    void branchPtrInNurseryRange(Condition cond, Register ptr, Register temp, Label *label);
+    void branchValueIsNurseryObject(Condition cond, ValueOperand value, Register temp, Label *label);
+#endif
 };
 
 typedef MacroAssemblerX86 MacroAssemblerSpecific;

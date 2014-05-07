@@ -179,8 +179,8 @@ function summarizeObject(obj) {
   return obj;
 }
 
-let worker = null;
 let Scheduler = {
+
   /**
    * |true| once we have sent at least one message to the worker.
    * This field is unaffected by resetting the worker.
@@ -237,6 +237,28 @@ let Scheduler = {
    */
   resetTimer: null,
 
+  /**
+   * The worker to which to send requests.
+   *
+   * If the worker has never been created or has been reset, this is a
+   * fresh worker, initialized with osfile_async_worker.js.
+   *
+   * @type {PromiseWorker}
+   */
+  get worker() {
+    if (!this._worker) {
+      // Either the worker has never been created or it has been reset
+      this._worker = new PromiseWorker(
+	"resource://gre/modules/osfile/osfile_async_worker.js", LOG);
+    }
+    return this._worker;
+  },
+
+  _worker: null,
+
+  /**
+   * Prepare to kill the OS.File worker after a few seconds.
+   */
   restartTimer: function(arg) {
     let delay;
     try {
@@ -249,7 +271,105 @@ let Scheduler = {
     if (this.resetTimer) {
       clearTimeout(this.resetTimer);
     }
-    this.resetTimer = setTimeout(File.resetWorker, delay);
+    this.resetTimer = setTimeout(
+      () => Scheduler.kill({reset: true, shutdown: false}),
+      delay
+    );
+  },
+
+  /**
+   * Shutdown OS.File.
+   *
+   * @param {*} options
+   * - {boolean} shutdown If |true|, reject any further request. Otherwise,
+   *   further requests will resurrect the worker.
+   * - {boolean} reset If |true|, instruct the worker to shutdown if this
+   *   would not cause leaks. Otherwise, assume that the worker will be shutdown
+   *   through some other mean.
+   */
+  kill: function({shutdown, reset}) {
+    return Task.spawn(function*() {
+
+      yield this.queue;
+
+      // Enter critical section: no yield in this block
+      // (we want to make sure that we remain the only
+      // request in the queue).
+
+      if (!this.launched || this.shutdown || !this._worker) {
+        // Nothing to kill
+        this.shutdown = this.shutdown || shutdown;
+        this._worker = null;
+        return null;
+      }
+
+      // Deactivate the queue, to ensure that no message is sent
+      // to an obsolete worker (we reactivate it in the |finally|).
+      let deferred = Promise.defer();
+      this.queue = deferred.promise;
+
+
+      // Exit critical section
+
+      let message = ["Meta_shutdown", [reset]];
+
+      try {
+        Scheduler.latestReceived = [];
+        Scheduler.latestSent = [Date.now(), ...message];
+        let promise = this._worker.post(...message);
+
+        // Wait for result
+        let resources;
+        try {
+          resources = (yield promise).ok;
+
+          Scheduler.latestReceived = [Date.now(), message];
+        } catch (ex) {
+          LOG("Could not dispatch Meta_reset", ex);
+          // It's most likely a programmer error, but we'll assume that
+          // the worker has been shutdown, as it's less risky than the
+          // opposite stance.
+          resources = {openedFiles: [], openedDirectoryIterators: [], killed: true};
+
+          Scheduler.latestReceived = [Date.now(), message, ex];
+        }
+
+        let {openedFiles, openedDirectoryIterators, killed} = resources;
+        if (!reset
+          && (openedFiles && openedFiles.length
+            || ( openedDirectoryIterators && openedDirectoryIterators.length))) {
+          // The worker still holds resources. Report them.
+
+          let msg = "";
+          if (openedFiles.length > 0) {
+            msg += "The following files are still open:\n" +
+              openedFiles.join("\n");
+          }
+          if (openedDirectoryIterators.length > 0) {
+            msg += "The following directory iterators are still open:\n" +
+              openedDirectoryIterators.join("\n");
+          }
+
+          LOG("WARNING: File descriptors leaks detected.\n" + msg);
+        }
+
+        // Make sure that we do not leave an invalid |worker| around.
+        if (killed || shutdown) {
+          this._worker = null;
+        }
+
+        this.shutdown = shutdown;
+
+        return resources;
+
+      } finally {
+        // Resume accepting messages. If we have set |shutdown| to |true|,
+        // any pending/future request will be rejected. Otherwise, any
+        // pending/future request will spawn a new worker if necessary.
+        deferred.resolve();
+      }
+
+    }.bind(this));
   },
 
   /**
@@ -282,19 +402,14 @@ let Scheduler = {
     if (this.shutdown) {
       LOG("OS.File is not available anymore. The following request has been rejected.",
         method, args);
-      return Promise.reject(new Error("OS.File has been shut down."));
-    }
-    if (!worker) {
-      // Either the worker has never been created or it has been reset
-      worker = new PromiseWorker(
-        "resource://gre/modules/osfile/osfile_async_worker.js", LOG);
+      return Promise.reject(new Error("OS.File has been shut down. Rejecting post to " + method));
     }
     let firstLaunch = !this.launched;
     this.launched = true;
 
     if (firstLaunch && SharedAll.Config.DEBUG) {
       // If we have delayed sending SET_DEBUG, do it now.
-      worker.post("SET_DEBUG", [true]);
+      this.worker.post("SET_DEBUG", [true]);
       Scheduler.Debugging.messagesSent++;
     }
 
@@ -305,17 +420,28 @@ let Scheduler = {
       options = methodArgs[methodArgs.length - 1];
     }
     Scheduler.Debugging.messagesQueued++;
-    return this.push(() => Task.spawn(function*() {
+    return this.push(Task.async(function*() {
+      if (this.shutdown) {
+	LOG("OS.File is not available anymore. The following request has been rejected.",
+	  method, args);
+	throw new Error("OS.File has been shut down. Rejecting request to " + method);
+      }
+
       // Update debugging information. As |args| may be quite
       // expensive, we only keep a shortened version of it.
       Scheduler.Debugging.latestReceived = null;
       Scheduler.Debugging.latestSent = [Date.now(), method, summarizeObject(methodArgs)];
+
+      // Don't kill the worker just yet
+      Scheduler.restartTimer();
+
+
       let data;
       let reply;
       let isError = false;
       try {
         try {
-          data = yield worker.post(method, ...args);
+          data = yield this.worker.post(method, ...args);
         } finally {
           Scheduler.Debugging.messagesReceived++;
         }
@@ -346,11 +472,7 @@ let Scheduler = {
           Scheduler._updateTelemetry();
         }
 
-        // Don't restart the timer when reseting the worker, since that will
-        // lead to an endless "resetWorker()" loop.
-        if (method != "Meta_reset") {
-          Scheduler.restartTimer();
-        }
+        Scheduler.restartTimer();
       }
 
       // Check for duration and return result.
@@ -379,7 +501,7 @@ let Scheduler = {
         options.outExecutionDuration = durationMs;
       }
       return data.ok;
-    }));
+    }.bind(this)));
   },
 
   /**
@@ -388,6 +510,7 @@ let Scheduler = {
    * This is only useful on first launch.
    */
   _updateTelemetry: function() {
+    let worker = this.worker;
     let workerTimeStamps = worker.workerTimeStamps;
     if (!workerTimeStamps) {
       // If the first call to OS.File results in an uncaught errors,
@@ -470,54 +593,9 @@ const WEB_WORKERS_SHUTDOWN_TOPIC = "web-workers-shutdown";
 const PREF_OSFILE_TEST_SHUTDOWN_OBSERVER =
   "toolkit.osfile.test.shutdown.observer";
 
-/**
- * A condition function meant to be used during phase
- * webWorkersShutdown, to warn about unclosed files and directories
- * and reconfigure the Scheduler to reject further requests.
- *
- * @param {bool=} shutdown If true or unspecified, reconfigure
- * the scheduler to reject further requests. Can be set to |false|
- * for testing purposes.
- * @return {promise} A promise satisfied once all pending messages
- * (including the shutdown warning message) have been answered.
- */
-function warnAboutUnclosedFiles(shutdown = true) {
-  if (!Scheduler.launched || !worker) {
-    // Don't launch the scheduler on our behalf. If no message has been
-    // sent to the worker, we can't have any leaking file/directory
-    // descriptor.
-    return null;
-  }
-  let promise = Scheduler.post("Meta_getUnclosedResources");
-
-  // Configure the worker to reject any further message.
-  if (shutdown) {
-    Scheduler.shutdown = true;
-  }
-
-  return promise.then(function onSuccess(opened) {
-    let msg = "";
-    if (opened.openedFiles.length > 0) {
-      msg += "The following files are still open:\n" +
-        opened.openedFiles.join("\n");
-    }
-    if (msg) {
-      msg += "\n";
-    }
-    if (opened.openedDirectoryIterators.length > 0) {
-      msg += "The following directory iterators are still open:\n" +
-        opened.openedDirectoryIterators.join("\n");
-    }
-    // Only log if file descriptors leaks detected.
-    if (msg) {
-      LOG("WARNING: File descriptors leaks detected.\n" + msg);
-    }
-  });
-};
-
 AsyncShutdown.webWorkersShutdown.addBlocker(
   "OS.File: flush pending requests, warn about unclosed files, shut down service.",
-  () => warnAboutUnclosedFiles(true)
+  () => Scheduler.kill({reset: false, shutdown: true})
 );
 
 
@@ -542,7 +620,7 @@ Services.prefs.addObserver(PREF_OSFILE_TEST_SHUTDOWN_OBSERVER,
       let phase = AsyncShutdown._getPhase(TOPIC);
       phase.addBlocker(
         "(for testing purposes) OS.File: warn about unclosed files",
-        () => warnAboutUnclosedFiles(false)
+        () => Scheduler.kill({shutdown: false, reset: false})
       );
     }
   }, false);
@@ -1366,43 +1444,14 @@ DirectoryIterator.Entry.fromMsg = function fromMsg(value) {
   return new DirectoryIterator.Entry(value);
 };
 
-/**
- * Flush all operations currently queued, then kill the underlying
- * worker to save memory.
- *
- * @return {Promise}
- * @reject {Error} If at least one file or directory iterator instance
- * is still open and the worker cannot be killed safely.
- */
 File.resetWorker = function() {
-  if (!Scheduler.launched || Scheduler.shutdown) {
-    // No need to reset
-    return Promise.resolve();
-  }
-  return Scheduler.post("Meta_reset").then(
-    function(wouldLeak) {
-      if (!wouldLeak) {
-        // No resource would leak, the worker was stopped.
-        worker = null;
-        return;
-      }
-      // Otherwise, resetting would be unsafe and has been canceled.
-      // Turn this into an error
-      let msg = "Cannot reset worker: ";
-      let {openedFiles, openedDirectoryIterators} = wouldLeak;
-      if (openedFiles.length > 0) {
-        msg += "The following files are still open:\n" +
-          openedFiles.join("\n");
-      }
-      if (openedDirectoryIterators.length > 0) {
-        msg += "The following directory iterators are still open:\n" +
-          openedDirectoryIterators.join("\n");
-      }
-      throw new Error(msg);
+  return Task.spawn(function*() {
+    let resources = yield Scheduler.kill({shutdown: false, reset: true});
+    if (resources && !resources.killed) {
+        throw new Error("Could not reset worker, this would leak file descriptors: " + JSON.stringify(resources));
     }
-  );
+  });
 };
-
 
 // Constants
 File.POS_START = SysAll.POS_START;
@@ -1429,6 +1478,12 @@ this.OS.Shared = {
 Object.freeze(this.OS.Shared);
 this.OS.Path = Path;
 
+// Returns a resolved promise when all the queued operation have been completed.
+Object.defineProperty(OS.File, "queue", {
+  get: function() {
+    return Scheduler.queue;
+  }
+});
 
 // Auto-flush OS.File during profile-before-change. This ensures that any I/O
 // that has been queued *before* profile-before-change is properly completed.
@@ -1455,7 +1510,7 @@ AsyncShutdown.profileBeforeChange.addBlocker(
     let result = {
       launched: Scheduler.launched,
       shutdown: Scheduler.shutdown,
-      worker: !!worker,
+      worker: !!Scheduler._worker,
       pendingReset: !!Scheduler.resetTimer,
       latestSent: Scheduler.Debugging.latestSent,
       latestReceived: Scheduler.Debugging.latestReceived,

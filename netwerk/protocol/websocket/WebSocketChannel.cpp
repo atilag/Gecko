@@ -57,7 +57,7 @@
 #include <algorithm>
 
 #ifdef MOZ_WIDGET_GONK
-#include "nsINetworkStatsServiceProxy.h"
+#include "NetStatistics.h"
 #endif
 
 // rather than slurp up all of nsIWebSocket.idl, which lives outside necko, just
@@ -67,24 +67,25 @@
 extern PRThread *gSocketThread;
 
 using namespace mozilla;
+using namespace mozilla::net;
 
 namespace mozilla {
 namespace net {
 
-NS_IMPL_ISUPPORTS13(WebSocketChannel,
-                    nsIWebSocketChannel,
-                    nsIHttpUpgradeListener,
-                    nsIRequestObserver,
-                    nsIStreamListener,
-                    nsIProtocolHandler,
-                    nsIInputStreamCallback,
-                    nsIOutputStreamCallback,
-                    nsITimerCallback,
-                    nsIDNSListener,
-                    nsIProtocolProxyCallback,
-                    nsIInterfaceRequestor,
-                    nsIChannelEventSink,
-                    nsIThreadRetargetableRequest)
+NS_IMPL_ISUPPORTS(WebSocketChannel,
+                  nsIWebSocketChannel,
+                  nsIHttpUpgradeListener,
+                  nsIRequestObserver,
+                  nsIStreamListener,
+                  nsIProtocolHandler,
+                  nsIInputStreamCallback,
+                  nsIOutputStreamCallback,
+                  nsITimerCallback,
+                  nsIDNSListener,
+                  nsIProtocolProxyCallback,
+                  nsIInterfaceRequestor,
+                  nsIChannelEventSink,
+                  nsIThreadRetargetableRequest)
 
 // We implement RFC 6455, which uses Sec-WebSocket-Version: 13 on the wire.
 #define SEC_WEBSOCKET_VERSION "13"
@@ -585,7 +586,7 @@ private:
   nsCString                         mData;
   int32_t                           mLen;
 };
-NS_IMPL_ISUPPORTS1(CallOnMessageAvailable, nsIRunnable)
+NS_IMPL_ISUPPORTS(CallOnMessageAvailable, nsIRunnable)
 
 //-----------------------------------------------------------------------------
 // CallOnStop
@@ -621,7 +622,7 @@ private:
   nsRefPtr<WebSocketChannel>        mChannel;
   nsresult                          mReason;
 };
-NS_IMPL_ISUPPORTS1(CallOnStop, nsIRunnable)
+NS_IMPL_ISUPPORTS(CallOnStop, nsIRunnable)
 
 //-----------------------------------------------------------------------------
 // CallOnServerClose
@@ -654,7 +655,7 @@ private:
   uint16_t                          mCode;
   nsCString                         mReason;
 };
-NS_IMPL_ISUPPORTS1(CallOnServerClose, nsIRunnable)
+NS_IMPL_ISUPPORTS(CallOnServerClose, nsIRunnable)
 
 //-----------------------------------------------------------------------------
 // CallAcknowledge
@@ -685,7 +686,7 @@ private:
   nsRefPtr<WebSocketChannel>        mChannel;
   uint32_t                          mSize;
 };
-NS_IMPL_ISUPPORTS1(CallAcknowledge, nsIRunnable)
+NS_IMPL_ISUPPORTS(CallAcknowledge, nsIRunnable)
 
 //-----------------------------------------------------------------------------
 // CallOnTransportAvailable
@@ -719,7 +720,7 @@ private:
   nsCOMPtr<nsIAsyncInputStream>  mSocketIn;
   nsCOMPtr<nsIAsyncOutputStream> mSocketOut;
 };
-NS_IMPL_ISUPPORTS1(CallOnTransportAvailable, nsIRunnable)
+NS_IMPL_ISUPPORTS(CallOnTransportAvailable, nsIRunnable)
 
 //-----------------------------------------------------------------------------
 // OutboundMessage
@@ -855,7 +856,7 @@ private:
   nsRefPtr<WebSocketChannel>  mChannel;
   OutboundMessage            *mMessage;
 };
-NS_IMPL_ISUPPORTS1(OutboundEnqueuer, nsIRunnable)
+NS_IMPL_ISUPPORTS(OutboundEnqueuer, nsIRunnable)
 
 //-----------------------------------------------------------------------------
 // nsWSCompression
@@ -1144,7 +1145,7 @@ WebSocketChannel::BeginOpen()
 #ifdef MOZ_WIDGET_GONK
   if (mAppId != NECKO_NO_APP_ID) {
     nsCOMPtr<nsINetworkInterface> activeNetwork;
-    NS_GetActiveNetworkInterface(activeNetwork);
+    GetActiveNetworkInterface(activeNetwork);
     mActiveNetwork =
       new nsMainThreadPtrHolder<nsINetworkInterface>(activeNetwork);
   }
@@ -3364,58 +3365,6 @@ WebSocketChannel::OnDataAvailable(nsIRequest *aRequest,
   return NS_OK;
 }
 
-//-----------------------------------------------------------------------------
-// WebSocketChannel save network statistics event
-//-----------------------------------------------------------------------------
-
-#ifdef MOZ_WIDGET_GONK
-namespace {
-class SaveNetworkStatsEvent : public nsRunnable {
-public:
-    SaveNetworkStatsEvent(uint32_t aAppId,
-                          nsMainThreadPtrHandle<nsINetworkInterface> &aActiveNetwork,
-                          uint64_t aCountRecv,
-                          uint64_t aCountSent)
-        : mAppId(aAppId),
-          mActiveNetwork(aActiveNetwork),
-          mCountRecv(aCountRecv),
-          mCountSent(aCountSent)
-    {
-        MOZ_ASSERT(mAppId != NECKO_NO_APP_ID);
-        MOZ_ASSERT(mActiveNetwork);
-    }
-
-    NS_IMETHOD Run()
-    {
-        MOZ_ASSERT(NS_IsMainThread());
-
-        nsresult rv;
-        nsCOMPtr<nsINetworkStatsServiceProxy> mNetworkStatsServiceProxy =
-            do_GetService("@mozilla.org/networkstatsServiceProxy;1", &rv);
-        if (NS_FAILED(rv)) {
-            return rv;
-        }
-
-        // save the network stats through NetworkStatsServiceProxy
-        mNetworkStatsServiceProxy->SaveAppStats(mAppId,
-                                                mActiveNetwork,
-                                                PR_Now() / 1000,
-                                                mCountRecv,
-                                                mCountSent,
-                                                false,
-                                                nullptr);
-
-        return NS_OK;
-    }
-private:
-    uint32_t mAppId;
-    nsMainThreadPtrHandle<nsINetworkInterface> mActiveNetwork;
-    uint64_t mCountRecv;
-    uint64_t mCountSent;
-};
-};
-#endif
-
 nsresult
 WebSocketChannel::SaveNetworkStats(bool enforce)
 {
@@ -3442,7 +3391,7 @@ WebSocketChannel::SaveNetworkStats(bool enforce)
   // the event is then dispathed to the main thread.
   nsRefPtr<nsRunnable> event =
     new SaveNetworkStatsEvent(mAppId, mActiveNetwork,
-                              mCountRecv, mCountSent);
+                              mCountRecv, mCountSent, false);
   NS_DispatchToMainThread(event);
 
   // Reset the counters after saving.

@@ -15,7 +15,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "jsanalyze.h"
 #include "jsapi.h"
 #include "jsatom.h"
 #include "jscntxt.h"
@@ -284,19 +283,6 @@ js_DumpPCCounts(JSContext *cx, HandleScript script, js::Sprinter *sp)
 // Bytecode Parser
 /////////////////////////////////////////////////////////////////////
 
-// Ensure that script analysis reports the same stack depth.
-static void
-AssertStackDepth(JSScript *script, uint32_t offset, uint32_t stackDepth) {
-    /*
-     * If this assertion fails, run the failing test case under gdb and use the
-     * following gdb command to understand the execution path of this function.
-     *
-     *     call js_DumpScriptDepth(cx, script, pc)
-     */
-    if (script->hasAnalysis())
-        script->analysis()->assertMatchingStackDepthAtOffset(offset, stackDepth);
-}
-
 namespace {
 
 class BytecodeParser
@@ -500,7 +486,6 @@ BytecodeParser::addJump(uint32_t offset, uint32_t *currentOffset,
         code = alloc().new_<Bytecode>();
         if (!code)
             return false;
-        AssertStackDepth(script_, offset, stackDepth);
         if (!code->captureOffsetStack(alloc(), offsetStack, stackDepth)) {
             reportOOM();
             return false;
@@ -653,7 +638,6 @@ BytecodeParser::parse()
                     reportOOM();
                     return false;
                 }
-                AssertStackDepth(script_, successorOffset, stackDepth);
                 if (!nextcode->captureOffsetStack(alloc(), offsetStack, stackDepth)) {
                     reportOOM();
                     return false;
@@ -816,11 +800,11 @@ QuoteString(Sprinter *sp, JSString *str, uint32_t quote);
 static bool
 ToDisassemblySource(JSContext *cx, HandleValue v, JSAutoByteString *bytes)
 {
-    if (JSVAL_IS_STRING(v)) {
+    if (v.isString()) {
         Sprinter sprinter(cx);
         if (!sprinter.init())
             return false;
-        char *nbytes = QuoteString(&sprinter, JSVAL_TO_STRING(v), '"');
+        char *nbytes = QuoteString(&sprinter, v.toString(), '"');
         if (!nbytes)
             return false;
         nbytes = JS_sprintf_append(nullptr, "%s", nbytes);
@@ -830,7 +814,7 @@ ToDisassemblySource(JSContext *cx, HandleValue v, JSAutoByteString *bytes)
         return true;
     }
 
-    if (cx->runtime()->isHeapBusy() || cx->runtime()->noGCOrAllocationCheck) {
+    if (cx->runtime()->isHeapBusy() || cx->runtime()->gc.noGCOrAllocationCheck) {
         char *source = JS_sprintf_append(nullptr, "<value>");
         if (!source)
             return false;
@@ -838,10 +822,10 @@ ToDisassemblySource(JSContext *cx, HandleValue v, JSAutoByteString *bytes)
         return true;
     }
 
-    if (!JSVAL_IS_PRIMITIVE(v)) {
-        JSObject *obj = JSVAL_TO_OBJECT(v);
-        if (obj->is<StaticBlockObject>()) {
-            Rooted<StaticBlockObject*> block(cx, &obj->as<StaticBlockObject>());
+    if (v.isObject()) {
+        JSObject &obj = v.toObject();
+        if (obj.is<StaticBlockObject>()) {
+            Rooted<StaticBlockObject*> block(cx, &obj.as<StaticBlockObject>());
             char *source = JS_sprintf_append(nullptr, "depth %d {", block->localOffset());
             if (!source)
                 return false;
@@ -874,16 +858,16 @@ ToDisassemblySource(JSContext *cx, HandleValue v, JSAutoByteString *bytes)
             return true;
         }
 
-        if (obj->is<JSFunction>()) {
-            RootedFunction fun(cx, &obj->as<JSFunction>());
+        if (obj.is<JSFunction>()) {
+            RootedFunction fun(cx, &obj.as<JSFunction>());
             JSString *str = JS_DecompileFunction(cx, fun, JS_DONT_PRETTY_PRINT);
             if (!str)
                 return false;
             return bytes->encodeLatin1(cx, str);
         }
 
-        if (obj->is<RegExpObject>()) {
-            JSString *source = obj->as<RegExpObject>().toString(cx);
+        if (obj.is<RegExpObject>()) {
+            JSString *source = obj.as<RegExpObject>().toString(cx);
             if (!source)
                 return false;
             JS::Anchor<JSString *> anchor(source);
@@ -1498,26 +1482,20 @@ ExpressionDecompiler::decompilePC(jsbytecode *pc)
 
     switch (op) {
       case JSOP_GETGNAME:
-      case JSOP_CALLGNAME:
       case JSOP_NAME:
-      case JSOP_CALLNAME:
       case JSOP_GETINTRINSIC:
-      case JSOP_CALLINTRINSIC:
         return write(loadAtom(pc));
-      case JSOP_GETARG:
-      case JSOP_CALLARG: {
+      case JSOP_GETARG: {
         unsigned slot = GET_ARGNO(pc);
         JSAtom *atom = getArg(slot);
         return write(atom);
       }
-      case JSOP_GETLOCAL:
-      case JSOP_CALLLOCAL: {
+      case JSOP_GETLOCAL: {
         uint32_t i = GET_LOCALNO(pc);
         if (JSAtom *atom = getLocal(i, pc))
             return write(atom);
         return write("(intermediate value)");
       }
-      case JSOP_CALLALIASEDVAR:
       case JSOP_GETALIASEDVAR: {
         JSAtom *atom = ScopeCoordinateName(cx->runtime()->scopeCoordinateNameCache, script, pc);
         JS_ASSERT(atom);
@@ -1938,7 +1916,7 @@ js::CallResultEscapes(jsbytecode *pc)
     if (*pc == JSOP_NOT)
         pc += JSOP_NOT_LENGTH;
 
-    return (*pc != JSOP_IFEQ);
+    return *pc != JSOP_IFEQ;
 }
 
 extern bool
@@ -1958,10 +1936,10 @@ js::GetPCCountScriptCount(JSContext *cx)
 {
     JSRuntime *rt = cx->runtime();
 
-    if (!rt->scriptAndCountsVector)
+    if (!rt->gc.scriptAndCountsVector)
         return 0;
 
-    return rt->scriptAndCountsVector->length();
+    return rt->gc.scriptAndCountsVector->length();
 }
 
 enum MaybeComma {NO_COMMA, COMMA};
@@ -1996,12 +1974,12 @@ js::GetPCCountScriptSummary(JSContext *cx, size_t index)
 {
     JSRuntime *rt = cx->runtime();
 
-    if (!rt->scriptAndCountsVector || index >= rt->scriptAndCountsVector->length()) {
+    if (!rt->gc.scriptAndCountsVector || index >= rt->gc.scriptAndCountsVector->length()) {
         JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_BUFFER_TOO_SMALL);
         return nullptr;
     }
 
-    const ScriptAndCounts &sac = (*rt->scriptAndCountsVector)[index];
+    const ScriptAndCounts &sac = (*rt->gc.scriptAndCountsVector)[index];
     RootedScript script(cx, sac.script);
 
     /*
@@ -2256,12 +2234,12 @@ js::GetPCCountScriptContents(JSContext *cx, size_t index)
 {
     JSRuntime *rt = cx->runtime();
 
-    if (!rt->scriptAndCountsVector || index >= rt->scriptAndCountsVector->length()) {
+    if (!rt->gc.scriptAndCountsVector || index >= rt->gc.scriptAndCountsVector->length()) {
         JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_BUFFER_TOO_SMALL);
         return nullptr;
     }
 
-    const ScriptAndCounts &sac = (*rt->scriptAndCountsVector)[index];
+    const ScriptAndCounts &sac = (*rt->gc.scriptAndCountsVector)[index];
     JSScript *script = sac.script;
 
     StringBuffer buf(cx);

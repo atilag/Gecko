@@ -40,7 +40,7 @@
 #include "nsPresState.h"
 #include "nsContentList.h"
 #include "nsAttrValueInlines.h"
-#include "mozilla/Selection.h"
+#include "mozilla/dom/Selection.h"
 #include "nsContentUtils.h"
 #include "nsTextNode.h"
 #include "nsStyleSet.h"
@@ -263,7 +263,7 @@ nsTextControlFrame::EnsureEditorInitialized()
 
     // Time to mess with our security context... See comments in GetValue()
     // for why this is needed.
-    mozilla::dom::AutoSystemCaller asc;
+    mozilla::dom::AutoNoJSAPI nojsapi;
 
     // Make sure that we try to focus the content even if the method fails
     class EnsureSetFocus {
@@ -1015,7 +1015,7 @@ nsTextControlFrame::GetSelectionRange(int32_t* aSelectionStart,
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(selection, NS_ERROR_FAILURE);
 
-  Selection* sel = static_cast<Selection*>(selection.get());
+  dom::Selection* sel = static_cast<dom::Selection*>(selection.get());
   if (aDirection) {
     nsDirection direction = sel->GetSelectionDirection();
     if (direction == eDirNext) {

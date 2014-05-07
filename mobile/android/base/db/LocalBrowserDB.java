@@ -691,9 +691,9 @@ public class LocalBrowserDB implements BrowserDB.BrowserDBIface {
         // Do this now so that the items still exist!
         bumpParents(cr, Bookmarks.URL, uri);
 
-        // Toggling bookmark on an URL should not affect the items in the reading list
-        final String[] urlArgs = new String[] { uri, String.valueOf(Bookmarks.FIXED_READING_LIST_ID) };
-        final String urlEquals = Bookmarks.URL + " = ? AND " + Bookmarks.PARENT + " != ?";
+        // Toggling bookmark on an URL should not affect the items in the reading list or pinned sites.
+        final String[] urlArgs = new String[] { uri, String.valueOf(Bookmarks.FIXED_READING_LIST_ID), String.valueOf(Bookmarks.FIXED_PINNED_LIST_ID) };
+        final String urlEquals = Bookmarks.URL + " = ? AND " + Bookmarks.PARENT + " != ? AND " + Bookmarks.PARENT + " != ? ";
 
         cr.delete(contentUri, urlEquals, urlArgs);
     }
@@ -773,7 +773,7 @@ public class LocalBrowserDB implements BrowserDB.BrowserDBIface {
         try {
             c = cr.query(mFaviconsUriWithProfile,
                          new String[] { Favicons.DATA },
-                         Favicons.URL + " = ?",
+                         Favicons.URL + " = ? AND " + Favicons.DATA + " IS NOT NULL",
                          new String[] { faviconURL },
                          null);
 
@@ -838,6 +838,13 @@ public class LocalBrowserDB implements BrowserDB.BrowserDBIface {
     @Override
     public void updateThumbnailForUrl(ContentResolver cr, String uri,
             BitmapDrawable thumbnail) {
+
+        // If a null thumbnail was passed in, delete the stored thumbnail for this url.
+        if (thumbnail == null) {
+            cr.delete(mThumbnailsUriWithProfile, Thumbnails.URL + " == ?", new String[] { uri });
+            return;
+        }
+
         Bitmap bitmap = thumbnail.getBitmap();
 
         byte[] data = null;
@@ -849,8 +856,8 @@ public class LocalBrowserDB implements BrowserDB.BrowserDBIface {
         }
 
         ContentValues values = new ContentValues();
-        values.put(Thumbnails.DATA, data);
         values.put(Thumbnails.URL, uri);
+        values.put(Thumbnails.DATA, data);
 
         Uri thumbnailsUri = mThumbnailsUriWithProfile.buildUpon().
                 appendQueryParameter(BrowserContract.PARAM_INSERT_IF_NEEDED, "true").build();
@@ -866,18 +873,21 @@ public class LocalBrowserDB implements BrowserDB.BrowserDBIface {
         byte[] b = null;
         try {
             c = cr.query(mThumbnailsUriWithProfile,
-                         new String[]{Thumbnails.DATA},
-                         Thumbnails.URL + " = ?",
-                         new String[]{uri},
+                         new String[]{ Thumbnails.DATA },
+                         Thumbnails.URL + " = ? AND " + Thumbnails.DATA + " IS NOT NULL",
+                         new String[]{ uri },
                          null);
 
-            if (c.moveToFirst()) {
-                int thumbnailIndex = c.getColumnIndexOrThrow(Thumbnails.DATA);
-                b = c.getBlob(thumbnailIndex);
+            if (!c.moveToFirst()) {
+                return null;
             }
+
+            int thumbnailIndex = c.getColumnIndexOrThrow(Thumbnails.DATA);
+            b = c.getBlob(thumbnailIndex);
         } finally {
-            if (c != null)
+            if (c != null) {
                 c.close();
+            }
         }
 
         return b;

@@ -1,7 +1,6 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=78:
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -24,6 +23,7 @@
 #include "nsStringBuffer.h"
 #include "mozilla/dom/BindingDeclarations.h"
 
+class nsGlobalWindow;
 class nsIPrincipal;
 class nsScriptNameSpaceManager;
 class nsIGlobalObject;
@@ -143,12 +143,12 @@ struct RuntimeStats;
 #define XPCONNECT_GLOBAL_FLAGS XPCONNECT_GLOBAL_FLAGS_WITH_EXTRA_SLOTS(0)
 
 inline JSObject*
-xpc_FastGetCachedWrapper(nsWrapperCache *cache, JSObject *scope, JS::MutableHandleValue vp)
+xpc_FastGetCachedWrapper(JSContext *cx, nsWrapperCache *cache, JS::MutableHandleValue vp)
 {
     if (cache) {
         JSObject* wrapper = cache->GetWrapper();
         if (wrapper &&
-            js::GetObjectCompartment(wrapper) == js::GetObjectCompartment(scope))
+            js::GetObjectCompartment(wrapper) == js::GetContextCompartment(cx))
         {
             vp.setObject(*wrapper);
             return wrapper;
@@ -414,6 +414,13 @@ nsIGlobalObject *
 GetNativeForGlobal(JSObject *global);
 
 /**
+ * Returns the nsISupports native behind a given reflector (either DOM or
+ * XPCWN).
+ */
+nsISupports *
+UnwrapReflectorToISupports(JSObject *reflector);
+
+/**
  * In some cases a native object does not really belong to any compartment (XBL,
  * document created from by XHR of a worker, etc.). But when for some reason we
  * have to wrap these natives (because of an event for example) instead of just
@@ -433,6 +440,14 @@ GetJunkScope();
  */
 nsIGlobalObject *
 GetJunkScopeGlobal();
+
+/**
+ * Shared compilation scope for XUL prototype documents and XBL
+ * precompilation. This compartment has a null principal. No code may run, and
+ * it is invisible to the debugger.
+ */
+JSObject *
+GetCompilationScope();
 
 /**
  * If |aObj| is a window, returns the associated nsGlobalWindow.
@@ -468,6 +483,11 @@ RecordAdoptedNode(JSCompartment *c);
 
 void
 RecordDonatedNode(JSCompartment *c);
+
+// This function may be used off-main-thread, in which case it is benignly
+// racey.
+bool
+ShouldDiscardSystemSource();
 
 } // namespace xpc
 

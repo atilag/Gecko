@@ -29,7 +29,6 @@
 #include "nsImageFrame.h"
 
 #include "nsIPresShell.h"
-#include "nsEventStates.h"
 
 #include "nsIChannel.h"
 #include "nsIStreamListener.h"
@@ -44,6 +43,7 @@
 
 #include "mozAutoDocUpdate.h"
 #include "mozilla/AsyncEventDispatcher.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ScriptSettings.h"
 
@@ -466,20 +466,26 @@ nsImageLoadingContent::FrameDestroyed(nsIFrame* aFrame)
   mFrameCreateCalled = false;
 
   // We need to make sure that our image request is deregistered.
+  nsPresContext* presContext = GetFramePresContext();
   if (mCurrentRequest) {
-    nsLayoutUtils::DeregisterImageRequest(GetFramePresContext(),
+    nsLayoutUtils::DeregisterImageRequest(presContext,
                                           mCurrentRequest,
                                           &mCurrentRequestRegistered);
   }
 
   if (mPendingRequest) {
-    nsLayoutUtils::DeregisterImageRequest(GetFramePresContext(),
+    nsLayoutUtils::DeregisterImageRequest(presContext,
                                           mPendingRequest,
                                           &mPendingRequestRegistered);
   }
 
   UntrackImage(mCurrentRequest);
   UntrackImage(mPendingRequest);
+
+  nsIPresShell* presShell = presContext ? presContext->GetPresShell() : nullptr;
+  if (presShell) {
+    presShell->RemoveImageFromVisibleList(this);
+  }
 
   if (aFrame->HasAnyStateBits(NS_FRAME_IN_POPUP)) {
     // We assume all images in popups are visible, so this decrement balances
@@ -816,12 +822,16 @@ nsImageLoadingContent::LoadImage(nsIURI* aNewURI,
 
   // Not blocked. Do the load.
   nsRefPtr<imgRequestProxy>& req = PrepareNextRequest();
+  nsCOMPtr<nsIContent> content =
+      do_QueryInterface(static_cast<nsIImageLoadingContent*>(this));
   nsresult rv;
   rv = nsContentUtils::LoadImage(aNewURI, aDocument,
                                  aDocument->NodePrincipal(),
                                  aDocument->GetDocumentURI(),
                                  this, loadFlags,
+                                 content->LocalName(),
                                  getter_AddRefs(req));
+
   if (NS_SUCCEEDED(rv)) {
     TrackImage(req);
     ResetAnimationIfNeeded();
@@ -859,21 +869,22 @@ nsImageLoadingContent::LoadImage(nsIURI* aNewURI,
 }
 
 nsresult
-nsImageLoadingContent::ForceImageState(bool aForce, nsEventStates::InternalType aState)
+nsImageLoadingContent::ForceImageState(bool aForce,
+                                       EventStates::InternalType aState)
 {
   mIsImageStateForced = aForce;
-  mForcedImageState = nsEventStates(aState);
+  mForcedImageState = EventStates(aState);
   return NS_OK;
 }
 
-nsEventStates
+EventStates
 nsImageLoadingContent::ImageState() const
 {
   if (mIsImageStateForced) {
     return mForcedImageState;
   }
 
-  nsEventStates states;
+  EventStates states;
 
   if (mBroken) {
     states |= NS_EVENT_STATE_BROKEN;

@@ -382,6 +382,12 @@ nsSVGForeignObjectFrame::ReflowSVG()
     nsSVGEffects::UpdateEffects(this);
   }
 
+  // If we have a filter, we need to invalidate ourselves because filter
+  // output can change even if none of our descendants need repainting.
+  if (StyleSVGReset()->HasFilters()) {
+    InvalidateFrame();
+  }
+
   // TODO: once we support |overflow:visible| on foreignObject, then we will
   // need to take account of our descendants here.
   nsRect overflow = nsRect(nsPoint(0,0), mRect.Size());
@@ -540,12 +546,8 @@ nsSVGForeignObjectFrame::DoReflow()
     return;
 
   // initiate a synchronous reflow here and now:  
-  nsIPresShell* presShell = presContext->PresShell();
-  NS_ASSERTION(presShell, "null presShell");
   nsRefPtr<nsRenderingContext> renderingContext =
-    presShell->GetReferenceRenderingContext();
-  if (!renderingContext)
-    return;
+    presContext->PresShell()->CreateReferenceRenderingContext();
 
   mInReflow = true;
 

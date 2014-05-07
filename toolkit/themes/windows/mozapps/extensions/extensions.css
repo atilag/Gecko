@@ -4,8 +4,6 @@
 
 @import url("chrome://global/skin/inContentUI.css");
 
-@namespace url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
-
 
 .nav-button {
   list-style-image: url(chrome://mozapps/skin/extensions/navigation.png);
@@ -181,15 +179,22 @@
   overflow: hidden;
 }
 
-.category:-moz-locale-dir(ltr) {
-  border-top-left-radius: 5px;
-  border-bottom-left-radius: 5px;
-}
+%ifdef WINDOWS_AERO
+@media (-moz-os-version: windows-vista),
+       (-moz-os-version: windows-win7) {
+%endif
+  .category:-moz-locale-dir(ltr) {
+    border-top-left-radius: 5px;
+    border-bottom-left-radius: 5px;
+  }
 
-.category:-moz-locale-dir(rtl) {
-  border-top-right-radius: 5px;
-  border-bottom-right-radius: 5px;
+  .category:-moz-locale-dir(rtl) {
+    border-top-right-radius: 5px;
+    border-bottom-right-radius: 5px;
+  }
+%ifdef WINDOWS_AERO
 }
+%endif
 
 .category[disabled] {
   border-top: 0;
@@ -1189,4 +1194,31 @@ button.button-link:not([disabled="true"]):active:hover {
 
 .header-button > .toolbarbutton-text {
   display: none;
+}
+
+/*** telemetry experiments ***/
+
+#detail-experiment-container {
+  font-size: 80%;
+  margin-bottom: 1em;
+}
+
+#detail-experiment-bullet-container,
+#detail-experiment-state,
+#detail-experiment-time,
+.experiment-bullet-container,
+.experiment-state,
+.experiment-time {
+  vertical-align: middle;
+  display: inline-block;
+}
+
+.addon .experiment-bullet,
+#detail-experiment-bullet {
+  fill: rgb(158, 158, 158);
+}
+
+.addon[active="true"] .experiment-bullet,
+#detail-view[active="true"] #detail-experiment-bullet {
+  fill: rgb(106, 201, 20);
 }

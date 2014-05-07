@@ -8,12 +8,12 @@
 #include "nsCRT.h"
 #include <unistd.h>
 
+#include "nsAutoPtr.h"
 #include "nsIServiceManager.h"
 #include "nsIPrintOptions.h"
 #include "nsPrintSettingsX.h"
 
 #include "gfxQuartzSurface.h"
-#include "gfxImageSurface.h"
 
 // This must be the last include:
 #include "nsObjCExceptions.h"
@@ -35,7 +35,7 @@ nsDeviceContextSpecX::~nsDeviceContextSpecX()
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
-NS_IMPL_ISUPPORTS1(nsDeviceContextSpecX, nsIDeviceContextSpec)
+NS_IMPL_ISUPPORTS(nsDeviceContextSpecX, nsIDeviceContextSpec)
 
 NS_IMETHODIMP nsDeviceContextSpecX::Init(nsIWidget *aWidget,
                                          nsIPrintSettings* aPS,

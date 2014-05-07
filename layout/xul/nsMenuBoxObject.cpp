@@ -31,7 +31,7 @@ nsMenuBoxObject::~nsMenuBoxObject()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED1(nsMenuBoxObject, nsBoxObject, nsIMenuBoxObject)
+NS_IMPL_ISUPPORTS_INHERITED(nsMenuBoxObject, nsBoxObject, nsIMenuBoxObject)
 
 /* void openMenu (in boolean openFlag); */
 NS_IMETHODIMP nsMenuBoxObject::OpenMenu(bool aOpenFlag)
@@ -49,7 +49,7 @@ NS_IMETHODIMP nsMenuBoxObject::OpenMenu(bool aOpenFlag)
         if (menu) {
           nsMenuPopupFrame* popupFrame = menu->GetPopup();
           if (popupFrame)
-            pm->HidePopup(popupFrame->GetContent(), false, true, false);
+            pm->HidePopup(popupFrame->GetContent(), false, true, false, false);
         }
       }
     }

@@ -3,7 +3,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 # Definitions used by constants.js.
-weave_version := 1.33.0
+weave_version := 1.34.0
 weave_id      := {340c2bbc-ce74-4362-90b5-7c26312808ef}
 
 # Preprocess files.
@@ -62,7 +62,9 @@ sync_testing_modules := \
   fxa_utils.js \
   $(NULL)
 
-PREF_JS_EXPORTS := $(srcdir)/services-sync.js
+JS_EXPORTS_FILES := $(srcdir)/services-sync.js
+JS_EXPORTS_DEST = $(FINAL_TARGET)/$(PREF_DIR)
+INSTALL_TARGETS += JS_EXPORTS
 
 # Install JS module files.
 SYNC_MAIN_FILES := $(addprefix modules/,$(sync_modules))

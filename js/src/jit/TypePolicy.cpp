@@ -293,8 +293,10 @@ TypeBarrierPolicy::adjustInputs(TempAllocator &alloc, MInstruction *def)
     if (inputType == MIRType_Value) {
         JS_ASSERT(outputType != MIRType_Value);
 
-        // We can't unbox a value to null/undefined. So keep output also a value.
-        if (IsNullOrUndefined(outputType) || outputType == MIRType_Magic) {
+        // We can't unbox a value to null/undefined/lazyargs. So keep output
+        // also a value.
+        if (IsNullOrUndefined(outputType) || outputType == MIRType_MagicOptimizedArguments) {
+            JS_ASSERT(ins->defUseCount() == 0);
             ins->setResultType(MIRType_Value);
             return true;
         }
@@ -709,12 +711,12 @@ StoreTypedArrayPolicy::adjustValueInput(TempAllocator &alloc, MInstruction *ins,
         value = MConstant::New(alloc, Int32Value(0));
         ins->block()->insertBefore(ins, value->toInstruction());
         break;
-      case MIRType_Object:
       case MIRType_Undefined:
         value->setImplicitlyUsedUnchecked();
         value = MConstant::New(alloc, DoubleNaNValue());
         ins->block()->insertBefore(ins, value->toInstruction());
         break;
+      case MIRType_Object:
       case MIRType_String:
         value = boxAt(alloc, ins, value);
         break;
@@ -769,10 +771,9 @@ StoreTypedArrayPolicy::adjustValueInput(TempAllocator &alloc, MInstruction *ins,
         MOZ_ASSUME_UNREACHABLE("Invalid array type");
     }
 
-    if (value != curValue) {
+    if (value != curValue)
         ins->replaceOperand(valueOperand, value);
-        curValue = value;
-    }
+
     return true;
 }
 

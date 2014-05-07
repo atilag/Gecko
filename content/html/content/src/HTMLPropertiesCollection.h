@@ -58,8 +58,7 @@ public:
 
   // nsWrapperCache
   using nsWrapperCache::GetWrapperPreserveColor;
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 protected:
   virtual JSObject* GetWrapperPreserveColorInternal() MOZ_OVERRIDE
   {
@@ -87,12 +86,17 @@ public:
     aFound = IsSupportedNamedProperty(aName);
     return aFound ? NamedItem(aName) : nullptr;
   }
+  bool NameIsEnumerable(const nsAString& aName)
+  {
+    return true;
+  }
   DOMStringList* Names()
   {
     EnsureFresh();
     return mNames;
   }
-  virtual void GetSupportedNames(nsTArray<nsString>& aNames) MOZ_OVERRIDE;
+  virtual void GetSupportedNames(unsigned,
+                                 nsTArray<nsString>& aNames) MOZ_OVERRIDE;
 
   NS_DECL_NSIDOMHTMLCOLLECTION
 
@@ -149,8 +153,7 @@ public:
                    nsIContent* aRoot, const nsAString& aName);
   virtual ~PropertyNodeList();
 
-  virtual JSObject* WrapObject(JSContext *cx,
-                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx) MOZ_OVERRIDE;
 
   void SetDocument(nsIDocument* aDocument);
 

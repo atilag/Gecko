@@ -596,14 +596,14 @@ js::Int32ToString(ThreadSafeContext *cx, int32_t si)
     if (JSFlatString *str = LookupInt32ToString(cx, si))
         return str;
 
-    JSShortString *str = js_NewGCShortString<allowGC>(cx);
+    JSFatInlineString *str = js_NewGCFatInlineString<allowGC>(cx);
     if (!str)
         return nullptr;
 
-    jschar buffer[JSShortString::MAX_SHORT_LENGTH + 1];
+    jschar buffer[JSFatInlineString::MAX_FAT_INLINE_LENGTH + 1];
     size_t length;
     jschar *start = BackfillInt32InBuffer(si, buffer,
-                                          JSShortString::MAX_SHORT_LENGTH + 1, &length);
+                                          JSFatInlineString::MAX_FAT_INLINE_LENGTH + 1, &length);
 
     PodCopy(str->init(length), start, length + 1);
 
@@ -623,9 +623,9 @@ js::Int32ToAtom(ExclusiveContext *cx, int32_t si)
     if (JSFlatString *str = LookupInt32ToString(cx, si))
         return js::AtomizeString(cx, str);
 
-    char buffer[JSShortString::MAX_SHORT_LENGTH + 1];
+    char buffer[JSFatInlineString::MAX_FAT_INLINE_LENGTH + 1];
     size_t length;
-    char *start = BackfillInt32InBuffer(si, buffer, JSShortString::MAX_SHORT_LENGTH + 1, &length);
+    char *start = BackfillInt32InBuffer(si, buffer, JSFatInlineString::MAX_FAT_INLINE_LENGTH + 1, &length);
 
     JSAtom *atom = Atomize(cx, start, length);
     if (!atom)
@@ -1080,6 +1080,8 @@ enum nc_slot {
     NC_NEGATIVE_INFINITY,
     NC_MAX_VALUE,
     NC_MIN_VALUE,
+    NC_MAX_SAFE_INTEGER,
+    NC_MIN_SAFE_INTEGER,
     NC_EPSILON,
     NC_LIMIT
 };
@@ -1095,6 +1097,10 @@ static JSConstDoubleSpec number_constants[] = {
     {0,                         "NEGATIVE_INFINITY", 0,{0,0,0}},
     {1.7976931348623157E+308,   "MAX_VALUE",         0,{0,0,0}},
     {0,                         "MIN_VALUE",         0,{0,0,0}},
+    /* ES6 (April 2014 draft) 20.1.2.6 */
+    {9007199254740991,          "MAX_SAFE_INTEGER",  0,{0,0,0}},
+    /* ES6 (April 2014 draft) 20.1.2.10 */
+    {-9007199254740991,         "MIN_SAFE_INTEGER",  0,{0,0,0}},
     /* ES6 (May 2013 draft) 15.7.3.7 */
     {2.2204460492503130808472633361816e-16, "EPSILON", 0,{0,0,0}},
     {0,0,0,{0,0,0}}
@@ -1243,10 +1249,10 @@ js_InitNumberClass(JSContext *cx, HandleObject obj)
     /* ES5 15.1.1.1, 15.1.1.2 */
     if (!DefineNativeProperty(cx, global, cx->names().NaN, valueNaN,
                               JS_PropertyStub, JS_StrictPropertyStub,
-                              JSPROP_PERMANENT | JSPROP_READONLY, 0) ||
+                              JSPROP_PERMANENT | JSPROP_READONLY) ||
         !DefineNativeProperty(cx, global, cx->names().Infinity, valueInfinity,
                               JS_PropertyStub, JS_StrictPropertyStub,
-                              JSPROP_PERMANENT | JSPROP_READONLY, 0))
+                              JSPROP_PERMANENT | JSPROP_READONLY))
     {
         return nullptr;
     }
@@ -1420,13 +1426,13 @@ js::IndexToString(JSContext *cx, uint32_t index)
     if (JSFlatString *str = c->dtoaCache.lookup(10, index))
         return str;
 
-    JSShortString *str = js_NewGCShortString<CanGC>(cx);
+    JSFatInlineString *str = js_NewGCFatInlineString<CanGC>(cx);
     if (!str)
         return nullptr;
 
-    jschar buffer[JSShortString::MAX_SHORT_LENGTH + 1];
-    RangedPtr<jschar> end(buffer + JSShortString::MAX_SHORT_LENGTH,
-                          buffer, JSShortString::MAX_SHORT_LENGTH + 1);
+    jschar buffer[JSFatInlineString::MAX_FAT_INLINE_LENGTH + 1];
+    RangedPtr<jschar> end(buffer + JSFatInlineString::MAX_FAT_INLINE_LENGTH,
+                          buffer, JSFatInlineString::MAX_FAT_INLINE_LENGTH + 1);
     *end = '\0';
     RangedPtr<jschar> start = BackfillIndexInCharBuffer(index, end);
 

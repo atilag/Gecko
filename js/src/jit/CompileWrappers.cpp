@@ -27,10 +27,17 @@ CompileRuntime::onMainThread()
     return js::CurrentThreadCanAccessRuntime(runtime());
 }
 
-const void *
-CompileRuntime::addressOfIonTop()
+js::PerThreadData *
+CompileRuntime::mainThread()
 {
-    return &runtime()->mainThread.ionTop;
+    JS_ASSERT(onMainThread());
+    return &runtime()->mainThread;
+}
+
+const void *
+CompileRuntime::addressOfJitTop()
+{
+    return &runtime()->mainThread.jitTop;
 }
 
 const void *
@@ -61,7 +68,7 @@ CompileRuntime::addressOfLastCachedNativeIterator()
 const void *
 CompileRuntime::addressOfGCZeal()
 {
-    return &runtime()->gcZeal_;
+    return &runtime()->gc.zealMode;
 }
 #endif
 
@@ -163,7 +170,7 @@ CompileRuntime::maybeGetMathCache()
 const Nursery &
 CompileRuntime::gcNursery()
 {
-    return runtime()->gcNursery;
+    return runtime()->gc.nursery;
 }
 #endif
 

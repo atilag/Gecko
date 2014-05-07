@@ -163,8 +163,8 @@ let gSyncPane = {
           checkbox.checked = false;
         }
 
-        checkbox.disabled = !allowPasswordsEngine;
-        help.hidden = allowPasswordsEngine;
+        checkbox.disabled = !allowPasswordsEngine || enginesListDisabled;
+        help.hidden = allowPasswordsEngine || enginesListDisabled;
       });
     // If fxAccountEnabled is false and we are in a "not configured" state,
     // then fxAccounts is probably fully disabled rather than just unconfigured,
@@ -259,9 +259,7 @@ let gSyncPane = {
       gSyncUtils._openLink(url);
       return;
     }
-    win.switchToTabHavingURI(url, true);
-    // seeing as we are doing this in a tab we close the prefs dialog.
-    window.close();
+    win.openUILinkIn(url, "tab");
   },
 
   signUp: function() {

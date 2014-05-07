@@ -3,13 +3,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "base/process.h"
 #include "GLContext.h"
-#include "gfxImageSurface.h"
 #include "gfx2DGlue.h"
 #include <ui/GraphicBuffer.h>
 #include "GrallocImages.h"  // for GrallocImage
 #include "mozilla/layers/GrallocTextureHost.h"
 #include "mozilla/layers/CompositorOGL.h"
+#include "mozilla/layers/SharedBufferManagerParent.h"
 #include "EGLImageHelpers.h"
 #include "GLReadTexImageHelper.h"
 
@@ -20,8 +21,9 @@ using namespace android;
 
 static gfx::SurfaceFormat
 SurfaceFormatForAndroidPixelFormat(android::PixelFormat aFormat,
-                                   bool swapRB = false)
+                                   TextureFlags aFlags)
 {
+  bool swapRB = bool(aFlags & TextureFlags::RB_SWAPPED);
   switch (aFormat) {
   case android::PIXEL_FORMAT_BGRA_8888:
     return swapRB ? gfx::SurfaceFormat::R8G8B8A8 : gfx::SurfaceFormat::B8G8R8A8;
@@ -276,23 +278,18 @@ GrallocTextureHostOGL::GrallocTextureHostOGL(TextureFlags aFlags,
                                              const NewSurfaceDescriptorGralloc& aDescriptor)
   : TextureHost(aFlags)
 {
-  android::GraphicBuffer* graphicBuffer = nullptr;
-  gfx::SurfaceFormat format = gfx::SurfaceFormat::UNKNOWN;
+  mGrallocHandle = aDescriptor;
+
+  android::GraphicBuffer* graphicBuffer = GetGraphicBufferFromDesc(mGrallocHandle).get();
+  if (!graphicBuffer) {
+	  NS_RUNTIMEABORT("Invalid SurfaceDescriptor passed in");
+  }
 
   mSize = aDescriptor.size();
-  mGrallocActor =
-    static_cast<GrallocBufferActor*>(aDescriptor.bufferParent());
+  gfx::SurfaceFormat format =
+    SurfaceFormatForAndroidPixelFormat(graphicBuffer->getPixelFormat(),
+                                       aFlags & TextureFlags::RB_SWAPPED);
 
-  if (mGrallocActor) {
-    mGrallocActor->AddTextureHost(this);
-    graphicBuffer = mGrallocActor->GetGraphicBuffer();
-  }
-
-  if (graphicBuffer) {
-    format =
-      SurfaceFormatForAndroidPixelFormat(graphicBuffer->getPixelFormat(),
-                                         aFlags & TEXTURE_RB_SWAPPED);
-  }
   mTextureSource = new GrallocTextureSourceOGL(nullptr,
                                                graphicBuffer,
                                                format);
@@ -301,10 +298,6 @@ GrallocTextureHostOGL::GrallocTextureHostOGL(TextureFlags aFlags,
 GrallocTextureHostOGL::~GrallocTextureHostOGL()
 {
   mTextureSource = nullptr;
-  if (mGrallocActor) {
-    mGrallocActor->RemoveTextureHost();
-    mGrallocActor = nullptr;
-  }
 }
 
 void
@@ -347,8 +340,17 @@ GrallocTextureHostOGL::DeallocateSharedData()
   if (mTextureSource) {
     mTextureSource->ForgetBuffer();
   }
-  if (mGrallocActor) {
-    PGrallocBufferParent::Send__delete__(mGrallocActor);
+  if (mGrallocHandle.buffer().type() != SurfaceDescriptor::Tnull_t) {
+    MaybeMagicGrallocBufferHandle handle = mGrallocHandle.buffer();
+    base::ProcessId owner;
+    if (handle.type() == MaybeMagicGrallocBufferHandle::TGrallocBufferRef) {
+      owner = handle.get_GrallocBufferRef().mOwner;
+    }
+    else {
+      owner = handle.get_MagicGrallocBufferHandle().mRef.mOwner;
+    }
+
+    SharedBufferManagerParent::GetInstance(owner)->DropGrallocBuffer(mGrallocHandle);
   }
 }
 
@@ -370,12 +372,12 @@ LayerRenderState
 GrallocTextureHostOGL::GetRenderState()
 {
   if (IsValid()) {
-    uint32_t flags = 0;
-    if (mFlags & TEXTURE_NEEDS_Y_FLIP) {
-      flags |= LAYER_RENDER_STATE_Y_FLIPPED;
+    LayerRenderStateFlags flags = LayerRenderStateFlags::LAYER_RENDER_STATE_DEFAULT;
+    if (mFlags & TextureFlags::NEEDS_Y_FLIP) {
+      flags |= LayerRenderStateFlags::Y_FLIPPED;
     }
-    if (mFlags & TEXTURE_RB_SWAPPED) {
-      flags |= LAYER_RENDER_STATE_FORMAT_RB_SWAP;
+    if (mFlags & TextureFlags::RB_SWAPPED) {
+      flags |= LayerRenderStateFlags::FORMAT_RB_SWAP;
     }
     return LayerRenderState(mTextureSource->mGraphicBuffer.get(),
                             gfx::ThebesIntSize(mSize),
@@ -394,7 +396,6 @@ GrallocTextureHostOGL::GetAsSurface() {
 
 TemporaryRef<gfx::DataSourceSurface>
 GrallocTextureSourceOGL::GetAsSurface() {
-  MOZ_ASSERT(gl());
   if (!IsValid()) {
     return nullptr;
   }

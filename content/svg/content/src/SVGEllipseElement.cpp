@@ -17,9 +17,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGEllipseElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+SVGEllipseElement::WrapNode(JSContext *aCx)
 {
-  return SVGEllipseElementBinding::Wrap(aCx, aScope, this);
+  return SVGEllipseElementBinding::Wrap(aCx, this);
 }
 
 nsSVGElement::LengthInfo SVGEllipseElement::sLengthInfo[4] =
@@ -98,8 +98,8 @@ SVGEllipseElement::ConstructPath(gfxContext *aCtx)
   if (!aCtx->IsCairo()) {
     RefPtr<Path> path = BuildPath();
     if (path) {
-      gfxPath gfxpath(path);
-      aCtx->SetPath(&gfxpath);
+      nsRefPtr<gfxPath> gfxpath = new gfxPath(path);
+      aCtx->SetPath(gfxpath);
     }
     return;
   }

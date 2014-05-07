@@ -114,6 +114,7 @@ public:
   typedef mozilla::DisplayListClipState DisplayListClipState;
   typedef nsIWidget::ThemeGeometry ThemeGeometry;
   typedef mozilla::layers::Layer Layer;
+  typedef mozilla::layers::FrameMetrics::ViewID ViewID;
 
   /**
    * @param aReferenceFrame the frame at the root of the subtree; its origin
@@ -249,6 +250,10 @@ public:
    */
   nsIFrame* GetIgnoreScrollFrame() { return mIgnoreScrollFrame; }
   /**
+   * Get the ViewID of the nearest scrolling ancestor frame.
+   */
+  ViewID GetCurrentScrollParentId() const { return mCurrentScrollParentId; }
+  /**
    * Calling this setter makes us include all out-of-flow descendant
    * frames in the display list, wherever they may be positioned (even
    * outside the dirty rects).
@@ -316,6 +321,9 @@ public:
   {
     mAncestorHasTouchEventHandler = aValue;
   }
+
+  bool HaveScrollableDisplayPort() const { return mHaveScrollableDisplayPort; }
+  void SetHaveScrollableDisplayPort() { mHaveScrollableDisplayPort = true; }
 
   bool SetIsCompositingCheap(bool aCompositingCheap) { 
     bool temp = mIsCompositingCheap; 
@@ -599,6 +607,25 @@ public:
     bool                  mOldValue;
   };
 
+  /**
+   * A helper class to temporarily set the value of mCurrentScrollParentId.
+   */
+  class AutoCurrentScrollParentIdSetter;
+  friend class AutoCurrentScrollParentIdSetter;
+  class AutoCurrentScrollParentIdSetter {
+  public:
+    AutoCurrentScrollParentIdSetter(nsDisplayListBuilder* aBuilder, ViewID aScrollId)
+      : mBuilder(aBuilder), mOldValue(aBuilder->mCurrentScrollParentId) {
+      aBuilder->mCurrentScrollParentId = aScrollId;
+    }
+    ~AutoCurrentScrollParentIdSetter() {
+      mBuilder->mCurrentScrollParentId = mOldValue;
+    }
+  private:
+    nsDisplayListBuilder* mBuilder;
+    ViewID                mOldValue;
+  };
+
   // Helpers for tables
   nsDisplayTableItem* GetCurrentTableItem() { return mCurrentTableItem; }
   void SetCurrentTableItem(nsDisplayTableItem* aTableItem) { mCurrentTableItem = aTableItem; }
@@ -703,6 +730,7 @@ private:
   nsDisplayItem*                 mGlassDisplayItem;
   nsTArray<DisplayItemClip*>     mDisplayItemClipsToDestroy;
   Mode                           mMode;
+  ViewID                         mCurrentScrollParentId;
   bool                           mBuildCaret;
   bool                           mIgnoreSuppression;
   bool                           mHadToIgnoreSuppression;
@@ -723,6 +751,10 @@ private:
   bool                           mContainsPluginItem;
   bool                           mContainsBlendMode;
   bool                           mAncestorHasTouchEventHandler;
+  // True when the first async-scrollable scroll frame for which we build a
+  // display list has a display port. An async-scrollable scroll frame is one
+  // which WantsAsyncScroll().
+  bool                           mHaveScrollableDisplayPort;
 };
 
 class nsDisplayItem;
@@ -1206,7 +1238,11 @@ public:
    * Stores the given opacity value to be applied when drawing. Returns
    * false if this isn't supported for this display item.
    */
-  virtual bool ApplyOpacity(float aOpacity) { return false; }
+  virtual bool ApplyOpacity(nsDisplayListBuilder* aBuilder,
+                            float aOpacity,
+                            const DisplayItemClip* aClip) {
+    return false;
+  }
   
 #ifdef MOZ_DUMP_PAINTING
   /**
@@ -1280,6 +1316,17 @@ public:
       return;
     }
     mClip = aBuilder->AllocateDisplayItemClip(aClip);
+  }
+
+  void IntersectClip(nsDisplayListBuilder* aBuilder, const DisplayItemClip& aClip)
+  {
+    if (mClip) {
+      DisplayItemClip temp = *mClip;
+      temp.IntersectWith(aClip);
+      SetClip(aBuilder, temp);
+    } else {
+      SetClip(aBuilder, aClip);
+    }
   }
 
   // If we return false here it means that if this item creates a layer then
@@ -2296,9 +2343,14 @@ public:
                                          const nsDisplayItemGeometry* aGeometry,
                                          nsRegion* aInvalidRegion) MOZ_OVERRIDE;
   
-  virtual bool ApplyOpacity(float aOpacity) MOZ_OVERRIDE
+  virtual bool ApplyOpacity(nsDisplayListBuilder* aBuilder,
+                            float aOpacity,
+                            const DisplayItemClip* aClip) MOZ_OVERRIDE
   {
     mOpacity = aOpacity;
+    if (aClip) {
+      IntersectClip(aBuilder, *aClip);
+    }
     return true;
   }
 
@@ -2566,17 +2618,6 @@ public:
     return nullptr;
   }
 
-  /**
-   * Returns true if all descendant display items can be placed in the same
-   * ThebesLayer --- GetLayerState returns LAYER_INACTIVE or LAYER_NONE,
-   * and they all have the given aAnimatedGeometryRoot.
-   */
-  static LayerState RequiredLayerStateForChildren(nsDisplayListBuilder* aBuilder,
-                                                  LayerManager* aManager,
-                                                  const ContainerLayerParameters& aParameters,
-                                                  const nsDisplayList& aList,
-                                                  nsIFrame* aItemFrame);
-
 protected:
   nsDisplayWrapList() {}
 
@@ -2807,6 +2848,8 @@ public:
   virtual nsRegion GetOpaqueRegion(nsDisplayListBuilder* aBuilder, bool* aSnap) MOZ_OVERRIDE;
 
   NS_DISPLAY_DECL_NAME("SubDocument", TYPE_SUBDOCUMENT)
+protected:
+  ViewID mScrollParentId;
 };
 
 /**
@@ -2944,6 +2987,7 @@ public:
 protected:
   nsIFrame* mScrollFrame;
   nsIFrame* mScrolledFrame;
+  ViewID mScrollParentId;
 };
 
 /**
@@ -3214,6 +3258,12 @@ public:
   /* UntransformRect is like TransformRect, except that it inverts the
    * transform.
    */
+  static bool UntransformRect(const nsRect &aTransformedBounds,
+                              const nsRect &aChildBounds,
+                              const nsIFrame* aFrame,
+                              const nsPoint &aOrigin,
+                              nsRect *aOutRect);
+
   bool UntransformVisibleRect(nsDisplayListBuilder* aBuilder,
                               nsRect* aOutRect);
 

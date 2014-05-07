@@ -12,7 +12,7 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(DOMRectReadOnly, mParent)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(DOMRectReadOnly, mParent)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(DOMRectReadOnly)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(DOMRectReadOnly)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMRectReadOnly)
@@ -21,15 +21,15 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMRectReadOnly)
 NS_INTERFACE_MAP_END
 
 JSObject*
-DOMRectReadOnly::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+DOMRectReadOnly::WrapObject(JSContext* aCx)
 {
   MOZ_ASSERT(mParent);
-  return DOMRectReadOnlyBinding::Wrap(aCx, aScope, this);
+  return DOMRectReadOnlyBinding::Wrap(aCx, this);
 }
 
 // -----------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS_INHERITED1(DOMRect, DOMRectReadOnly, nsIDOMClientRect)
+NS_IMPL_ISUPPORTS_INHERITED(DOMRect, DOMRectReadOnly, nsIDOMClientRect)
 
 #define FORWARD_GETTER(_name)                                                   \
   NS_IMETHODIMP                                                                 \
@@ -47,10 +47,10 @@ FORWARD_GETTER(Width)
 FORWARD_GETTER(Height)
 
 JSObject*
-DOMRect::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+DOMRect::WrapObject(JSContext* aCx)
 {
   MOZ_ASSERT(mParent);
-  return DOMRectBinding::Wrap(aCx, aScope, this);
+  return DOMRectBinding::Wrap(aCx, this);
 }
 
 already_AddRefed<DOMRect>
@@ -72,11 +72,11 @@ DOMRect::Constructor(const GlobalObject& aGlobal, double aX, double aY,
 
 // -----------------------------------------------------------------------------
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(DOMRectList, mParent, mArray)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(DOMRectList, mParent, mArray)
 
 NS_INTERFACE_TABLE_HEAD(DOMRectList)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_TABLE1(DOMRectList, nsIDOMClientRectList)
+  NS_INTERFACE_TABLE(DOMRectList, nsIDOMClientRectList)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(DOMRectList)
 NS_INTERFACE_MAP_END
 
@@ -99,9 +99,9 @@ DOMRectList::Item(uint32_t aIndex, nsIDOMClientRect** aReturn)
 }
 
 JSObject*
-DOMRectList::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
+DOMRectList::WrapObject(JSContext *cx)
 {
-  return mozilla::dom::DOMRectListBinding::Wrap(cx, scope, this);
+  return mozilla::dom::DOMRectListBinding::Wrap(cx, this);
 }
 
 static double

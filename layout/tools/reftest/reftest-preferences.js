@@ -29,8 +29,6 @@
     branch.setBoolPref("security.fileuri.strict_origin_policy", false);
     // Disable the thumbnailing service
     branch.setBoolPref("browser.pagethumbnails.capturing_disabled", true);
-    // Enable APZC so we can test it
-    branch.setBoolPref("layers.async-pan-zoom.enabled", true);
     // Since our tests are 800px wide, set the assume-designed-for width of all
     // pages to be 800px (instead of the default of 980px). This ensures that
     // in our 800px window we don't zoom out by default to try to fit the
@@ -40,4 +38,11 @@
     // can't guarantee taking both reftest snapshots at the same point
     // during the fade.
     branch.setBoolPref("layout.testing.overlay-scrollbars.always-visible", true);
-
+    // Disable interruptible reflow since (1) it's normally not going to
+    // happen, but (2) it might happen if we somehow end up with both
+    // pending user events and clock skew.  So to avoid having to change
+    // MakeProgress to deal with waiting for interruptible reflows to
+    // complete for a rare edge case, we just disable interruptible
+    // reflow so that that rare edge case doesn't lead to reftest
+    // failures.
+    branch.setBoolPref("layout.interruptible-reflow.enabled", false);

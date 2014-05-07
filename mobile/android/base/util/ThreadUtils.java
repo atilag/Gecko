@@ -5,6 +5,8 @@
 
 package org.mozilla.gecko.util;
 
+import org.mozilla.gecko.mozglue.RobocopTarget;
+
 import java.util.Map;
 
 import android.os.Handler;
@@ -23,8 +25,8 @@ public final class ThreadUtils {
         THROW,
     }
 
-    private static Thread sUiThread;
-    private static Thread sBackgroundThread;
+    private static volatile Thread sUiThread;
+    private static volatile Thread sBackgroundThread;
 
     private static Handler sUiHandler;
 
@@ -118,6 +120,7 @@ public final class ThreadUtils {
         assertOnThread(getUiThread(), AssertBehavior.THROW);
     }
 
+    @RobocopTarget
     public static void assertOnGeckoThread() {
         assertOnThread(sGeckoThread, AssertBehavior.THROW);
     }
@@ -158,6 +161,10 @@ public final class ThreadUtils {
     }
 
     public static boolean isOnBackgroundThread() {
+        if (sBackgroundThread == null) {
+            return false;
+        }
+
         return isOnThread(sBackgroundThread);
     }
 

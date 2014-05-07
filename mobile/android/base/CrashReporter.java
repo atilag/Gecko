@@ -133,10 +133,10 @@ public class CrashReporter extends Activity
 
         // Set the flag that indicates we were stopped as expected, as
         // we will send a crash report, so it is not a silent OOM crash.
-        SharedPreferences prefs =
-            getSharedPreferences(GeckoApp.PREFS_NAME, 0);
+        SharedPreferences prefs = GeckoSharedPrefs.forApp(this);
         SharedPreferences.Editor editor = prefs.edit();
         editor.putBoolean(GeckoApp.PREFS_WAS_STOPPED, true);
+        editor.putBoolean(GeckoApp.PREFS_CRASHED, true);
         editor.commit();
 
         final CheckBox allowContactCheckBox = (CheckBox) findViewById(R.id.allow_contact);
@@ -231,8 +231,7 @@ public class CrashReporter extends Activity
     }
 
     private void savePrefs() {
-        SharedPreferences prefs = getSharedPreferences(GeckoApp.PREFS_NAME, 0);
-        SharedPreferences.Editor editor = prefs.edit();
+        SharedPreferences.Editor editor = GeckoSharedPrefs.forApp(this).edit();
                   
         final boolean allowContact = ((CheckBox) findViewById(R.id.allow_contact)).isChecked();
         final boolean includeUrl   = ((CheckBox) findViewById(R.id.include_url)).isChecked();
@@ -452,7 +451,7 @@ public class CrashReporter extends Activity
             String action = "android.intent.action.MAIN";
             Intent intent = new Intent(action);
             intent.setClassName(AppConstants.ANDROID_PACKAGE_NAME,
-                                AppConstants.BROWSER_INTENT_CLASS);
+                                AppConstants.BROWSER_INTENT_CLASS_NAME);
             intent.putExtra("didRestart", true);
             Log.i(LOGTAG, intent.toString());
             startActivity(intent);

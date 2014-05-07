@@ -46,7 +46,7 @@ FreezeThaw(JSContext *cx, JS::HandleScript script)
 
     // thaw
     JSScript *script2 = JS_DecodeScript(cx, memory, nbytes,
-                                        script->principals(), script->originPrincipals());
+                                        script->originPrincipals());
     js_free(memory);
     return script2;
 }
@@ -70,7 +70,6 @@ FreezeThaw(JSContext *cx, JS::HandleObject funobj)
     // thaw
     JSScript *script = GetScript(cx, funobj);
     JSObject *funobj2 = JS_DecodeInterpretedFunction(cx, memory, nbytes,
-                                                     script->principals(),
                                                      script->originPrincipals());
     js_free(memory);
     return funobj2;
@@ -136,7 +135,7 @@ JSScript *createScriptViaXDR(JSPrincipals *orig, int testCase)
     }
 
     JS::RootedValue v(cx);
-    bool ok = JS_ExecuteScript(cx, global, script, v.address());
+    bool ok = JS_ExecuteScript(cx, global, script, &v);
     if (!ok || !v.isObject())
         return nullptr;
     JS::RootedObject funobj(cx, &v.toObject());
@@ -172,13 +171,13 @@ BEGIN_TEST(testXDR_bug506491)
 
     // execute
     JS::RootedValue v2(cx);
-    CHECK(JS_ExecuteScript(cx, global, script, v2.address()));
+    CHECK(JS_ExecuteScript(cx, global, script, &v2));
 
     // try to break the Block object that is the parent of f
     JS_GC(rt);
 
     // confirm
-    EVAL("f() === 'ok';\n", v2.address());
+    EVAL("f() === 'ok';\n", &v2);
     JS::RootedValue trueval(cx, JSVAL_TRUE);
     CHECK_SAME(v2, trueval);
     return true;
@@ -197,7 +196,7 @@ BEGIN_TEST(testXDR_bug516827)
     CHECK(script);
 
     // execute with null result meaning no result wanted
-    CHECK(JS_ExecuteScript(cx, global, script, nullptr));
+    CHECK(JS_ExecuteScript(cx, global, script));
     return true;
 }
 END_TEST(testXDR_bug516827)

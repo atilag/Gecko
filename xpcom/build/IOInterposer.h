@@ -27,8 +27,10 @@ public:
     OpFSync = (1 << 3),
     OpStat = (1 << 4),
     OpClose = (1 << 5),
+    OpNextStage = (1 << 6), // Meta - used when leaving startup, entering shutdown
     OpWriteFSync = (OpWrite | OpFSync),
-    OpAll = (OpCreateOrOpen | OpRead | OpWrite | OpFSync | OpStat | OpClose)
+    OpAll = (OpCreateOrOpen | OpRead | OpWrite | OpFSync | OpStat | OpClose),
+    OpAllWithStaging = (OpAll | OpNextStage)
   };
 
   /** A representation of an I/O observation  */
@@ -56,13 +58,18 @@ public:
                 const TimeStamp& aEnd, const char* aReference);
 
     /**
-     * Operation observed, this is either OpRead, OpWrite or OpFSync,
-     * combinations of these flags are only used when registering observers.
+     * Operation observed, this is one of the individual Operation values.
+     * Combinations of these flags are only used when registering observers.
      */
     Operation ObservedOperation() const
     {
       return mOperation;
     }
+
+    /**
+     * Return the observed operation as a human-readable string.
+     */
+    const char* ObservedOperationString() const;
 
     /** Time at which the I/O operation was started */
     TimeStamp Start() const
@@ -147,38 +154,24 @@ protected:
 };
 
 /**
- * Class offering the public static IOInterposer API.
- *
- * This class is responsible for ensuring that events are routed to the
- * appropriate observers. Methods Init() and Clear() should only be called from
- * the main-thread at startup and shutdown, respectively.
- *
- * Remark: Instances of this class will never be created, you should consider it
- * to be a namespace containing static functions. The class is created to
- * facilitate to a private static instance variable sObservedOperations.
- * As we want to access this from an inline static methods, we have to do this
- * trick.
+ * These functions are responsible for ensuring that events are routed to the
+ * appropriate observers.
  */
-class IOInterposer MOZ_FINAL
+namespace IOInterposer
 {
-  // Track whether or not a given type of observation is being observed
-  static IOInterposeObserver::Operation sObservedOperations;
-
-  // No instance of class should be created, they'd be empty anyway.
-  IOInterposer();
-public:
-
   /**
    * This function must be called from the main-thread when no other threads are
    * running before any of the other methods on this class may be used.
    *
    * IO reports can however, safely assume that IsObservedOperation() will
-   * return false, until the IOInterposer is initialized.
+   * return false until the IOInterposer is initialized.
    *
    * Remark, it's safe to call this method multiple times, so just call it when
    * you to utilize IO interposing.
+   *
+   * Using the IOInterposerInit class is preferred to calling this directly.
    */
-  static void Init();
+  bool Init();
 
   /**
    * This function must be called from the main thread, and furthermore
@@ -188,16 +181,16 @@ public:
    * Callers should take care that no other consumers are subscribed to events,
    * as these events will stop when this function is called.
    *
-   * In practice, we don't use this method, as the IOInterposer is used for
+   * In practice, we don't use this method as the IOInterposer is used for
    * late-write checks.
    */
-  static void Clear();
+  void Clear();
 
   /**
    * This function immediately disables IOInterposer functionality in a fast,
    * thread-safe manner. Primarily for use by the crash reporter.
    */
-  static void Disable();
+  void Disable();
 
   /**
    * Report IO to registered observers.
@@ -219,14 +212,14 @@ public:
    * Remark: Init() must be called before any IO is reported. But
    * IsObservedOperation() will return false until Init() is called.
    */
-  static void Report(IOInterposeObserver::Observation& aObservation);
+  void Report(IOInterposeObserver::Observation& aObservation);
 
   /**
    * Return whether or not an operation is observed. Reporters should not
    * report operations that are not being observed by anybody. This mechanism
    * allows us to avoid reporting I/O when no observers are registered.
    */
-  static bool IsObservedOperation(IOInterposeObserver::Operation aOp);
+  bool IsObservedOperation(IOInterposeObserver::Operation aOp);
 
   /**
    * Register IOInterposeObserver, the observer object will receive all
@@ -234,8 +227,8 @@ public:
    *
    * Remark: Init() must be called before observers are registered.
    */
-  static void Register(IOInterposeObserver::Operation aOp,
-                       IOInterposeObserver* aObserver);
+  void Register(IOInterposeObserver::Operation aOp,
+                IOInterposeObserver* aObserver);
 
   /**
    * Unregister an IOInterposeObserver for a given operation
@@ -245,18 +238,38 @@ public:
    *
    * Remark: Init() must be called before observers are unregistered.
    */
-  static void Unregister(IOInterposeObserver::Operation aOp,
-                         IOInterposeObserver* aObserver);
+  void Unregister(IOInterposeObserver::Operation aOp,
+                  IOInterposeObserver* aObserver);
 
   /**
-   * Registers the current thread with the IOInterposer.
+   * Registers the current thread with the IOInterposer. This must be done to
+   * ensure that per-thread data is created in an orderly fashion.
+   * We could have written this to initialize that data lazily, however this
+   * could have unintended consequences if a thread that is not aware of
+   * IOInterposer was implicitly registered: its per-thread data would never
+   * be deleted because it would not know to unregister itself.
    *
    * @param aIsMainThread true if IOInterposer should treat the current thread
    *                      as the main thread.
    */
-  static void
+  void
   RegisterCurrentThread(bool aIsMainThread = false);
-};
+
+  /**
+   * Unregisters the current thread with the IOInterposer. This is important
+   * to call when a thread is shutting down because it cleans up data that
+   * is stored in a TLS slot.
+   */
+  void
+  UnregisterCurrentThread();
+
+  /**
+   * Called to inform observers that the process has transitioned out of the
+   * startup stage or into the shutdown stage. Main thread only.
+   */
+  void
+  EnteringNextStage();
+} // namespace IOInterposer
 
 class IOInterposerInit
 {
@@ -268,8 +281,12 @@ public:
 #endif
   }
 
-  // No destructor needed at the moment -- this stuff stays active for the
-  // life of the process. This may change in the future.
+  ~IOInterposerInit()
+  {
+#if defined(MOZ_ENABLE_PROFILER_SPS)
+    IOInterposer::Clear();
+#endif
+  }
 };
 
 } // namespace mozilla

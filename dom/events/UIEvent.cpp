@@ -9,10 +9,10 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/ContentEvents.h"
+#include "mozilla/EventStateManager.h"
 #include "mozilla/TextEvents.h"
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
-#include "nsEventStateManager.h"
 #include "nsIContent.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIDOMWindow.h"
@@ -32,8 +32,8 @@ UIEvent::UIEvent(EventTarget* aOwner,
   , mLayerPoint(0, 0)
   , mPagePoint(0, 0)
   , mMovementPoint(0, 0)
-  , mIsPointerLocked(nsEventStateManager::sIsPointerLocked)
-  , mLastClientPoint(nsEventStateManager::sLastClientPoint)
+  , mIsPointerLocked(EventStateManager::sIsPointerLocked)
+  , mLastClientPoint(EventStateManager::sLastClientPoint)
 {
   if (aEvent) {
     mEventIsInternal = false;
@@ -94,8 +94,8 @@ UIEvent::Constructor(const GlobalObject& aGlobal,
   return e.forget();
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_1(UIEvent, Event,
-                                     mView)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(UIEvent, Event,
+                                   mView)
 
 NS_IMPL_ADDREF_INHERITED(UIEvent, Event)
 NS_IMPL_RELEASE_INHERITED(UIEvent, Event)

@@ -77,7 +77,7 @@ protected:
 //
 // nsISupports implementation...
 //
-NS_IMPL_ISUPPORTS1(nsJSThunk, nsIInputStream)
+NS_IMPL_ISUPPORTS(nsJSThunk, nsIInputStream)
 
 
 nsJSThunk::nsJSThunk()
@@ -315,8 +315,7 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
         nsJSUtils::EvaluateOptions evalOptions;
         evalOptions.setCoerceToString(true);
         rv = nsJSUtils::EvaluateString(cx, NS_ConvertUTF8toUTF16(script),
-                                       globalJSObject, options, evalOptions,
-                                       v.address());
+                                       globalJSObject, options, evalOptions, &v);
 
         // If there's an error on cx as a result of that call, report
         // it now -- either we're just running under the event loop,
@@ -502,9 +501,9 @@ nsresult nsJSChannel::Init(nsIURI *aURI)
 // nsISupports implementation...
 //
 
-NS_IMPL_ISUPPORTS7(nsJSChannel, nsIChannel, nsIRequest, nsIRequestObserver,
-                   nsIStreamListener, nsIScriptChannel, nsIPropertyBag,
-                   nsIPropertyBag2)
+NS_IMPL_ISUPPORTS(nsJSChannel, nsIChannel, nsIRequest, nsIRequestObserver,
+                  nsIStreamListener, nsIScriptChannel, nsIPropertyBag,
+                  nsIPropertyBag2)
 
 //
 // nsIRequest implementation...
@@ -1132,7 +1131,7 @@ nsJSProtocolHandler::~nsJSProtocolHandler()
 {
 }
 
-NS_IMPL_ISUPPORTS1(nsJSProtocolHandler, nsIProtocolHandler)
+NS_IMPL_ISUPPORTS(nsJSProtocolHandler, nsIProtocolHandler)
 
 nsresult
 nsJSProtocolHandler::Create(nsISupports *aOuter, REFNSIID aIID, void **aResult)

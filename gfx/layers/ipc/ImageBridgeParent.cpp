@@ -12,7 +12,7 @@
 #include "base/process_util.h"          // for OpenProcessHandle
 #include "base/task.h"                  // for CancelableTask, DeleteTask, etc
 #include "base/tracked.h"               // for FROM_HERE
-#include "mozilla/gfx/Point.h"          // for IntSize
+#include "mozilla/gfx/Point.h"                   // for IntSize
 #include "mozilla/ipc/MessageChannel.h" // for MessageChannel, etc
 #include "mozilla/ipc/ProtocolUtils.h"
 #include "mozilla/ipc/Transport.h"      // for Transport
@@ -25,6 +25,7 @@
 #include "mozilla/layers/PImageBridgeParent.h"
 #include "mozilla/layers/Compositor.h"
 #include "mozilla/mozalloc.h"           // for operator new, etc
+#include "mozilla/unused.h"
 #include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsDebug.h"                    // for NS_RUNTIMEABORT, etc
 #include "nsISupportsImpl.h"            // for ImageBridgeParent::Release, etc
@@ -34,14 +35,11 @@
 #include "mozilla/layers/TextureHost.h"
 #include "nsThreadUtils.h"
 
-using namespace base;
 using namespace mozilla::ipc;
 using namespace mozilla::gfx;
 
 namespace mozilla {
 namespace layers {
-
-class PGrallocBufferParent;
 
 ImageBridgeParent::ImageBridgeParent(MessageLoop* aLoop, Transport* aTransport)
   : mMessageLoop(aLoop)
@@ -118,7 +116,7 @@ ImageBridgeParent::RecvUpdateNoSwap(const EditArray& aEdits)
 static void
 ConnectImageBridgeInParentProcess(ImageBridgeParent* aBridge,
                                   Transport* aTransport,
-                                  ProcessHandle aOtherProcess)
+                                  base::ProcessHandle aOtherProcess)
 {
   aBridge->Open(aTransport, aOtherProcess, XRE_GetIOMessageLoop(), ipc::ParentSide);
 }
@@ -126,7 +124,7 @@ ConnectImageBridgeInParentProcess(ImageBridgeParent* aBridge,
 /*static*/ PImageBridgeParent*
 ImageBridgeParent::Create(Transport* aTransport, ProcessId aOtherProcess)
 {
-  ProcessHandle processHandle;
+  base::ProcessHandle processHandle;
   if (!base::OpenProcessHandle(aOtherProcess, &processHandle)) {
     return nullptr;
   }
@@ -162,45 +160,18 @@ static  uint64_t GenImageContainerID() {
   return sNextImageID;
 }
 
-PGrallocBufferParent*
-ImageBridgeParent::AllocPGrallocBufferParent(const IntSize& aSize,
-                                             const uint32_t& aFormat,
-                                             const uint32_t& aUsage,
-                                             MaybeMagicGrallocBufferHandle* aOutHandle)
-{
-#ifdef MOZ_HAVE_SURFACEDESCRIPTORGRALLOC
-  return GrallocBufferActor::Create(aSize, aFormat, aUsage, aOutHandle);
-#else
-  NS_RUNTIMEABORT("No gralloc buffers for you");
-  return nullptr;
-#endif
-}
-
-bool
-ImageBridgeParent::DeallocPGrallocBufferParent(PGrallocBufferParent* actor)
-{
-#ifdef MOZ_HAVE_SURFACEDESCRIPTORGRALLOC
-  delete actor;
-  return true;
-#else
-  NS_RUNTIMEABORT("Um, how did we get here?");
-  return false;
-#endif
-}
-
 PCompositableParent*
 ImageBridgeParent::AllocPCompositableParent(const TextureInfo& aInfo,
                                             uint64_t* aID)
 {
   uint64_t id = GenImageContainerID();
   *aID = id;
-  return new CompositableParent(this, aInfo, id);
+  return CompositableHost::CreateIPDLActor(this, aInfo, id);
 }
 
 bool ImageBridgeParent::DeallocPCompositableParent(PCompositableParent* aActor)
 {
-  delete aActor;
-  return true;
+  return CompositableHost::DestroyIPDLActor(aActor);
 }
 
 PTextureParent*
@@ -214,6 +185,37 @@ bool
 ImageBridgeParent::DeallocPTextureParent(PTextureParent* actor)
 {
   return TextureHost::DestroyIPDLActor(actor);
+}
+
+void
+ImageBridgeParent::SendFenceHandle(AsyncTransactionTracker* aTracker,
+                                   PTextureParent* aTexture,
+                                   const FenceHandle& aFence)
+{
+  HoldUntilComplete(aTracker);
+  mozilla::unused << SendParentAsyncMessage(OpDeliverFence(aTracker->GetId(),
+                                        aTexture, nullptr,
+                                        aFence));
+}
+
+bool
+ImageBridgeParent::RecvChildAsyncMessages(const InfallibleTArray<AsyncChildMessageData>& aMessages)
+{
+  for (AsyncChildMessageArray::index_type i = 0; i < aMessages.Length(); ++i) {
+    const AsyncChildMessageData& message = aMessages[i];
+
+    switch (message.type()) {
+      case AsyncChildMessageData::TOpReplyDeliverFence: {
+        const OpReplyDeliverFence& op = message.get_OpReplyDeliverFence();
+        TransactionCompleteted(op.transactionId());
+        break;
+      }
+      default:
+        NS_ERROR("unknown AsyncChildMessageData type");
+        return false;
+    }
+  }
+  return true;
 }
 
 MessageLoop * ImageBridgeParent::GetMessageLoop() {

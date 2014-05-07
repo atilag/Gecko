@@ -65,9 +65,9 @@ ArchiveReader::~ArchiveReader()
 }
 
 /* virtual */ JSObject*
-ArchiveReader::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+ArchiveReader::WrapObject(JSContext* aCx)
 {
-  return ArchiveReaderBinding::Wrap(aCx, aScope, this);
+  return ArchiveReaderBinding::Wrap(aCx, this);
 }
 
 nsresult
@@ -202,11 +202,11 @@ ArchiveReader::GenerateArchiveRequest()
   return ArchiveRequest::Create(mWindow, this);
 }
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_4(ArchiveReader,
-                                        mBlob,
-                                        mWindow,
-                                        mData.fileList,
-                                        mRequests)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(ArchiveReader,
+                                      mBlob,
+                                      mWindow,
+                                      mData.fileList,
+                                      mRequests)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ArchiveReader)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY

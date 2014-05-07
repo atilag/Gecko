@@ -82,28 +82,32 @@ public class Tabs implements GeckoEventListener {
     };
 
     private Tabs() {
-        registerEventListener("Session:RestoreEnd");
-        registerEventListener("SessionHistory:New");
-        registerEventListener("SessionHistory:Back");
-        registerEventListener("SessionHistory:Forward");
-        registerEventListener("SessionHistory:Goto");
-        registerEventListener("SessionHistory:Purge");
-        registerEventListener("Tab:Added");
-        registerEventListener("Tab:Close");
-        registerEventListener("Tab:Select");
-        registerEventListener("Content:LocationChange");
-        registerEventListener("Content:SecurityChange");
-        registerEventListener("Content:ReaderEnabled");
-        registerEventListener("Content:StateChange");
-        registerEventListener("Content:LoadError");
-        registerEventListener("Content:PageShow");
-        registerEventListener("DOMContentLoaded");
-        registerEventListener("DOMTitleChanged");
-        registerEventListener("Link:Favicon");
-        registerEventListener("Link:Feed");
-        registerEventListener("Link:OpenSearch");
-        registerEventListener("DesktopMode:Changed");
-        registerEventListener("Tab:ViewportMetadata");
+        EventDispatcher.getInstance().registerGeckoThreadListener(this,
+            "Session:RestoreEnd",
+            "SessionHistory:New",
+            "SessionHistory:Back",
+            "SessionHistory:Forward",
+            "SessionHistory:Goto",
+            "SessionHistory:Purge",
+            "Tab:Added",
+            "Tab:Close",
+            "Tab:Select",
+            "Content:LocationChange",
+            "Content:SecurityChange",
+            "Content:ReaderEnabled",
+            "Content:StateChange",
+            "Content:LoadError",
+            "Content:PageShow",
+            "DOMContentLoaded",
+            "DOMTitleChanged",
+            "Link:Favicon",
+            "Link:Feed",
+            "Link:OpenSearch",
+            "DesktopMode:Changed",
+            "Tab:ViewportMetadata",
+            "Tab:StreamStart",
+            "Tab:StreamStop");
+
     }
 
     public synchronized void attachToContext(Context context) {
@@ -379,7 +383,6 @@ public class Tabs implements GeckoEventListener {
     }
 
     // GeckoEventListener implementation
-
     @Override
     public void handleMessage(String event, JSONObject message) {
         Log.d(LOGTAG, "handleMessage: " + event);
@@ -486,7 +489,14 @@ public class Tabs implements GeckoEventListener {
                 tab.setZoomConstraints(new ZoomConstraints(message));
                 tab.setIsRTL(message.getBoolean("isRTL"));
                 notifyListeners(tab, TabEvents.VIEWPORT_CHANGE);
+            } else if (event.equals("Tab:StreamStart")) {
+                tab.setRecording(true);
+                notifyListeners(tab, TabEvents.RECORDING_CHANGE);
+            } else if (event.equals("Tab:StreamStop")) {
+                tab.setRecording(false);
+                notifyListeners(tab, TabEvents.RECORDING_CHANGE);
             }
+
         } catch (Exception e) {
             Log.w(LOGTAG, "handleMessage threw for " + event, e);
         }
@@ -557,7 +567,8 @@ public class Tabs implements GeckoEventListener {
         SECURITY_CHANGE,
         READER_ENABLED,
         DESKTOP_MODE_CHANGE,
-        VIEWPORT_CHANGE
+        VIEWPORT_CHANGE,
+        RECORDING_CHANGE
     }
 
     public void notifyListeners(Tab tab, TabEvents msg) {
@@ -624,10 +635,6 @@ public class Tabs implements GeckoEventListener {
         Handler backgroundHandler = ThreadUtils.getBackgroundHandler();
         backgroundHandler.removeCallbacks(mPersistTabsRunnable);
         backgroundHandler.postDelayed(mPersistTabsRunnable, PERSIST_TABS_AFTER_MILLISECONDS);
-    }
-
-    private void registerEventListener(String event) {
-        GeckoAppShell.getEventDispatcher().registerEventListener(event, this);
     }
 
     /**

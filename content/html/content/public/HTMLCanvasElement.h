@@ -13,7 +13,6 @@
 #include "nsSize.h"
 #include "nsError.h"
 
-#include "nsICanvasElementExternal.h"
 #include "mozilla/gfx/Rect.h"
 
 class nsICanvasRenderingContextInternal;
@@ -26,6 +25,9 @@ namespace layers {
 class CanvasLayer;
 class LayerManager;
 }
+namespace gfx {
+class SourceSurface;
+}
 
 namespace dom {
 
@@ -34,7 +36,6 @@ class HTMLCanvasPrintState;
 class PrintCallback;
 
 class HTMLCanvasElement MOZ_FINAL : public nsGenericHTMLElement,
-                                    public nsICanvasElementExternal,
                                     public nsIDOMHTMLCanvasElement
 {
   enum {
@@ -159,13 +160,7 @@ public:
    */
   bool GetIsOpaque();
 
-  /*
-   * nsICanvasElementExternal -- for use outside of content/layout
-   */
-  NS_IMETHOD_(nsIntSize) GetSizeExternal() MOZ_OVERRIDE;
-  NS_IMETHOD RenderContextsExternal(gfxContext *aContext,
-                                    GraphicsFilter aFilter,
-                                    uint32_t aFlags = RenderFlagPremultAlpha) MOZ_OVERRIDE;
+  virtual TemporaryRef<gfx::SourceSurface> GetSurfaceSnapshot(bool* aPremultAlpha = nullptr);
 
   virtual bool ParseAttribute(int32_t aNamespaceID,
                                 nsIAtom* aAttribute,
@@ -211,8 +206,7 @@ public:
   nsresult GetContext(const nsAString& aContextId, nsISupports** aContext);
 
 protected:
-  virtual JSObject* WrapNode(JSContext* aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
 
   nsIntSize GetWidthHeight();
 
@@ -278,7 +272,7 @@ public:
   NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(HTMLCanvasPrintState)
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(HTMLCanvasPrintState)
 
-  virtual JSObject* WrapObject(JSContext *cx, JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx) MOZ_OVERRIDE;
 
   HTMLCanvasElement* GetParentObject()
   {

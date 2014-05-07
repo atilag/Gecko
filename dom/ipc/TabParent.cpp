@@ -16,6 +16,7 @@
 #include "mozilla/docshell/OfflineCacheUpdateParent.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/PContentPermissionRequestParent.h"
+#include "mozilla/EventStateManager.h"
 #include "mozilla/Hal.h"
 #include "mozilla/ipc/DocumentRendererParent.h"
 #include "mozilla/layers/CompositorParent.h"
@@ -29,7 +30,6 @@
 #include "nsContentPermissionHelper.h"
 #include "nsContentUtils.h"
 #include "nsDebug.h"
-#include "nsEventStateManager.h"
 #include "nsFocusManager.h"
 #include "nsFrameLoader.h"
 #include "nsIContent.h"
@@ -38,6 +38,7 @@
 #include "nsIDOMElement.h"
 #include "nsIDOMEvent.h"
 #include "nsIDOMWindow.h"
+#include "nsIDOMWindowUtils.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIPromptFactory.h"
 #include "nsIURI.h"
@@ -198,7 +199,7 @@ TabParent* sEventCapturer;
 
 TabParent *TabParent::mIMETabParent = nullptr;
 
-NS_IMPL_ISUPPORTS3(TabParent, nsITabParent, nsIAuthPromptProvider, nsISecureBrowserUI)
+NS_IMPL_ISUPPORTS(TabParent, nsITabParent, nsIAuthPromptProvider, nsISecureBrowserUI)
 
 TabParent::TabParent(ContentParent* aManager, const TabContext& aContext, uint32_t aChromeFlags)
   : TabContext(aContext)
@@ -553,17 +554,12 @@ void TabParent::HandleLongTapUp(const CSSPoint& aPoint,
   }
 }
 
-void TabParent::NotifyTransformBegin(ViewID aViewId)
+void TabParent::NotifyAPZStateChange(ViewID aViewId,
+                                     APZStateChange aChange,
+                                     int aArg)
 {
   if (!mIsDestroyed) {
-    unused << SendNotifyTransformBegin(aViewId);
-  }
-}
-
-void TabParent::NotifyTransformEnd(ViewID aViewId)
-{
-  if (!mIsDestroyed) {
-    unused << SendNotifyTransformEnd(aViewId);
+    unused << SendNotifyAPZStateChange(aViewId, aChange, aArg);
   }
 }
 
@@ -683,7 +679,8 @@ TabParent::MapEventCoordinatesForChildProcess(WidgetEvent* aEvent)
   if (!frameLoader) {
     return false;
   }
-  LayoutDeviceIntPoint offset = nsEventStateManager::GetChildProcessOffset(frameLoader, *aEvent);
+  LayoutDeviceIntPoint offset =
+    EventStateManager::GetChildProcessOffset(frameLoader, *aEvent);
   MapEventCoordinatesForChildProcess(offset, aEvent);
   return true;
 }
@@ -794,6 +791,41 @@ DoCommandCallback(mozilla::Command aCommand, void* aData)
   static_cast<InfallibleTArray<mozilla::CommandInt>*>(aData)->AppendElement(aCommand);
 }
 
+bool
+TabParent::RecvRequestNativeKeyBindings(const WidgetKeyboardEvent& aEvent,
+                                        MaybeNativeKeyBinding* aBindings)
+{
+  AutoInfallibleTArray<mozilla::CommandInt, 4> singleLine;
+  AutoInfallibleTArray<mozilla::CommandInt, 4> multiLine;
+  AutoInfallibleTArray<mozilla::CommandInt, 4> richText;
+
+  *aBindings = mozilla::void_t();
+
+  nsCOMPtr<nsIWidget> widget = GetWidget();
+  if (!widget) {
+    return true;
+  }
+
+  WidgetKeyboardEvent localEvent(aEvent);
+
+  if (NS_FAILED(widget->AttachNativeKeyEvent(localEvent))) {
+    return true;
+  }
+
+  widget->ExecuteNativeKeyBinding(nsIWidget::NativeKeyBindingsForSingleLineEditor,
+                                  localEvent, DoCommandCallback, &singleLine);
+  widget->ExecuteNativeKeyBinding(nsIWidget::NativeKeyBindingsForMultiLineEditor,
+                                  localEvent, DoCommandCallback, &multiLine);
+  widget->ExecuteNativeKeyBinding(nsIWidget::NativeKeyBindingsForRichTextEditor,
+                                  localEvent, DoCommandCallback, &richText);
+
+  if (!singleLine.IsEmpty() || !multiLine.IsEmpty() || !richText.IsEmpty()) {
+    *aBindings = NativeKeyBinding(singleLine, multiLine, richText);
+  }
+
+  return true;
+}
+
 bool TabParent::SendRealKeyEvent(WidgetKeyboardEvent& event)
 {
   if (mIsDestroyed) {
@@ -844,8 +876,7 @@ bool TabParent::SendRealTouchEvent(WidgetTouchEvent& event)
     }
 
     mChildProcessOffsetAtTouchStart =
-        nsEventStateManager::GetChildProcessOffset(frameLoader,
-                                                   event);
+      EventStateManager::GetChildProcessOffset(frameLoader, event);
 
     MOZ_ASSERT((!sEventCapturer && mEventCaptureDepth == 0) ||
                (sEventCapturer == this && mEventCaptureDepth > 0));
@@ -1502,6 +1533,18 @@ TabParent::RecvSetInputContext(const int32_t& aIMEEnabled,
   observerService->NotifyObservers(nullptr, "ime-enabled-state-changed", state.get());
 
   return true;
+}
+
+bool
+TabParent::RecvIsParentWindowMainWidgetVisible(bool* aIsVisible)
+{
+  nsCOMPtr<nsIContent> frame = do_QueryInterface(mFrameElement);
+  if (!frame)
+    return true;
+  nsCOMPtr<nsIDOMWindowUtils> windowUtils =
+    do_QueryInterface(frame->OwnerDoc()->GetWindow());
+  nsresult rv = windowUtils->GetIsParentWindowMainWidgetVisible(aIsVisible);
+  return NS_SUCCEEDED(rv);
 }
 
 bool

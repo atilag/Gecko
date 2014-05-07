@@ -114,11 +114,10 @@ nsXBLProtoImplMethod::InstallMember(JSContext* aCx,
     JS::Rooted<JSObject*> method(aCx, JS_CloneFunctionObject(aCx, jsMethodObject, globalObject));
     NS_ENSURE_TRUE(method, NS_ERROR_OUT_OF_MEMORY);
 
-    JS::Rooted<JS::Value> value(aCx, JS::ObjectValue(*method));
     if (!::JS_DefineUCProperty(aCx, aTargetClassObject,
                                static_cast<const jschar*>(mName),
-                               name.Length(), value,
-                               nullptr, nullptr, JSPROP_ENUMERATE)) {
+                               name.Length(), method,
+                               JSPROP_ENUMERATE)) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
   }
@@ -296,8 +295,7 @@ nsXBLProtoImplAnonymousMethod::Execute(nsIContent* aBoundElement)
   JS::Rooted<JSObject*> globalObject(cx, global->GetGlobalJSObject());
 
   JS::Rooted<JS::Value> v(cx);
-  nsresult rv = nsContentUtils::WrapNative(cx, globalObject, aBoundElement, &v);
-
+  nsresult rv = nsContentUtils::WrapNative(cx, aBoundElement, &v);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Use nsCxPusher to make sure we call ScriptEvaluated when we're done.

@@ -33,7 +33,7 @@ protected:
   nsPopupSetFrame* GetPopupSetFrame();
 };
 
-NS_IMPL_ISUPPORTS_INHERITED1(nsPopupBoxObject, nsBoxObject, nsIPopupBoxObject)
+NS_IMPL_ISUPPORTS_INHERITED(nsPopupBoxObject, nsBoxObject, nsIPopupBoxObject)
 
 nsPopupSetFrame*
 nsPopupBoxObject::GetPopupSetFrame()
@@ -50,7 +50,7 @@ nsPopupBoxObject::HidePopup()
 {
   nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
   if (pm && mContent)
-    pm->HidePopup(mContent, false, true, false);
+    pm->HidePopup(mContent, false, true, false, false);
 
   return NS_OK;
 }

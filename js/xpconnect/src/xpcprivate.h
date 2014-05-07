@@ -1,7 +1,6 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=78:
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -90,7 +89,7 @@
 #include <string.h>
 
 #include "xpcpublic.h"
-#include "js/Tracer.h"
+#include "js/TracingAPI.h"
 #include "js/WeakMapPtr.h"
 #include "pldhash.h"
 #include "nscore.h"
@@ -557,7 +556,8 @@ public:
     AutoMarkingPtr**  GetAutoRootsAdr() {return &mAutoRoots;}
 
     JSObject* GetJunkScope();
-    void DeleteJunkScope();
+    JSObject* GetCompilationScope();
+    void DeleteSingletonScopes();
 
     PRTime GetWatchdogTimestamp(WatchdogTimestampCategory aCategory);
     void OnAfterProcessNextEvent() { mSlowScriptCheckpoint = mozilla::TimeStamp(); }
@@ -597,7 +597,8 @@ private:
     nsTArray<xpcContextCallback> extraContextCallbacks;
     nsRefPtr<WatchdogManager> mWatchdogManager;
     JS::GCSliceCallback mPrevGCSliceCallback;
-    JSObject* mJunkScope;
+    JS::PersistentRootedObject mJunkScope;
+    JS::PersistentRootedObject mCompilationScope;
     nsRefPtr<AsyncFreeSnowWhite> mAsyncSnowWhiteFreer;
 
     mozilla::TimeStamp mSlowScriptCheckpoint;
@@ -2047,7 +2048,6 @@ public:
     static nsresult
     WrapNewGlobal(xpcObjectHelper &nativeHelper,
                   nsIPrincipal *principal, bool initStandardClasses,
-                  bool fireOnNewGlobalHook,
                   JS::CompartmentOptions& aOptions,
                   XPCWrappedNative **wrappedGlobal);
 
@@ -2093,6 +2093,8 @@ public:
     XPCWrappedNativeTearOff* FindTearOff(XPCNativeInterface* aInterface,
                                          bool needJSObject = false,
                                          nsresult* pError = nullptr);
+    XPCWrappedNativeTearOff* FindTearOff(const nsIID& iid);
+
     void Mark() const
     {
         mSet->Mark();
@@ -2132,6 +2134,8 @@ public:
                                        "XPCWrappedNative::mFlatJSObject");
         }
     }
+
+    static void Trace(JSTracer *trc, JSObject *obj);
 
     void AutoTrace(JSTracer *trc) {
         TraceSelf(trc);
@@ -2538,6 +2542,9 @@ public:
                                          const nsID* iid,
                                          nsISupports* aOuter,
                                          nsresult* pErr);
+
+    // Note - This return the XPCWrappedNative, rather than the native itself,
+    // for the WN case. You probably want UnwrapReflectorToISupports.
     static bool GetISupportsFromJSObject(JSObject* obj, nsISupports** iface);
 
     /**
@@ -2767,7 +2774,7 @@ public:
     XPCJSContextStack(XPCJSRuntime *aRuntime)
       : mRuntime(aRuntime)
       , mSafeJSContext(nullptr)
-      , mSafeJSContextGlobal(nullptr)
+      , mSafeJSContextGlobal(aRuntime->Runtime(), nullptr)
     { }
 
     virtual ~XPCJSContextStack();
@@ -2803,7 +2810,7 @@ private:
     AutoInfallibleTArray<XPCJSContextInfo, 16> mStack;
     XPCJSRuntime* mRuntime;
     JSContext*  mSafeJSContext;
-    JSObject* mSafeJSContextGlobal;
+    JS::PersistentRootedObject mSafeJSContextGlobal;
 };
 
 /***************************************************************************/
@@ -3172,7 +3179,7 @@ public:
      * kept alive past the next CC.
      */
     jsval GetJSVal() const {
-        if (!JSVAL_IS_PRIMITIVE(mJSVal))
+        if (!mJSVal.isPrimitive())
             JS::ExposeObjectToActiveJS(&mJSVal.toObject());
         return mJSVal;
     }
@@ -3346,6 +3353,7 @@ public:
         , proto(cx)
         , sameZoneAs(cx)
         , invisibleToDebugger(false)
+        , discardSource(false)
         , globalProperties(true)
         , metadata(cx)
     { }
@@ -3359,6 +3367,7 @@ public:
     nsCString sandboxName;
     JS::RootedObject sameZoneAs;
     bool invisibleToDebugger;
+    bool discardSource;
     GlobalProperties globalProperties;
     JS::RootedValue metadata;
 
@@ -3395,6 +3404,10 @@ public:
 JSObject *
 CreateGlobalObject(JSContext *cx, const JSClass *clasp, nsIPrincipal *principal,
                    JS::CompartmentOptions& aOptions);
+
+bool
+InitGlobalObject(JSContext* aJSContext, JS::Handle<JSObject*> aGlobal,
+                 uint32_t aFlags);
 
 // Helper for creating a sandbox object to use for evaluating
 // untrusted code completely separated from all other code in the

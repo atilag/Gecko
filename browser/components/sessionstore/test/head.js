@@ -40,7 +40,8 @@ registerCleanupFunction(() => {
 let tmp = {};
 Cu.import("resource://gre/modules/Promise.jsm", tmp);
 Cu.import("resource:///modules/sessionstore/SessionStore.jsm", tmp);
-let {Promise, SessionStore} = tmp;
+Cu.import("resource:///modules/sessionstore/SessionSaver.jsm", tmp);
+let {Promise, SessionStore, SessionSaver} = tmp;
 
 let ss = Cc["@mozilla.org/browser/sessionstore;1"].getService(Ci.nsISessionStore);
 
@@ -164,6 +165,9 @@ function waitForBrowserState(aState, aSetStateCallback) {
   listening = true;
   gBrowser.tabContainer.addEventListener("SSTabRestored", onSSTabRestored, true);
 
+  // Ensure setBrowserState() doesn't remove the initial tab.
+  gBrowser.selectedTab = gBrowser.tabs[0];
+
   // Finally, call setBrowserState
   ss.setBrowserState(JSON.stringify(aState));
 }
@@ -265,23 +269,7 @@ function promiseSaveState() {
   return deferred.promise;
 }
 function forceSaveState() {
-  let promise = promiseSaveState();
-  const PREF = "browser.sessionstore.interval";
-  let original = Services.prefs.getIntPref(PREF);
-  // Set interval to an arbitrary non-0 duration
-  // to ensure that setting it to 0 will notify observers
-  Services.prefs.setIntPref(PREF, 1000);
-  Services.prefs.setIntPref(PREF, 0);
-  return promise.then(
-    function onSuccess(x) {
-      Services.prefs.setIntPref(PREF, original);
-      return x;
-    },
-    function onError(x) {
-      Services.prefs.setIntPref(PREF, original);
-      throw x;
-    }
-  );
+  return SessionSaver.run();
 }
 
 function promiseSaveFileContents() {
@@ -535,6 +523,7 @@ let TestRunner = {
    */
   finish: function () {
     closeAllButPrimaryWindow();
+    gBrowser.selectedTab = gBrowser.tabs[0];
     waitForBrowserState(this.backupState, finish);
   }
 };

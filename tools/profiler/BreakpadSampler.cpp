@@ -26,10 +26,6 @@
 #include "UnwinderThread2.h"
 #include "TableTicker.h"
 
-// JSON
-#include "JSObjectBuilder.h"
-#include "nsIJSRuntimeService.h"
-
 // Meta
 #include "nsXPCOM.h"
 #include "nsXPCOMCID.h"
@@ -239,12 +235,12 @@ void populateBuffer(UnwinderThreadBuffer* utb, TickSample* sample,
   // Add any extras
   if (!sLastTracerEvent.IsNull() && sample) {
     TimeDuration delta = sample->timestamp - sLastTracerEvent;
-    utb__addEntry( utb, ProfileEntry('r', delta.ToMilliseconds()) );
+    utb__addEntry( utb, ProfileEntry('r', static_cast<float>(delta.ToMilliseconds())) );
   }
 
   if (sample) {
     TimeDuration delta = sample->timestamp - sStartTime;
-    utb__addEntry( utb, ProfileEntry('t', delta.ToMilliseconds()) );
+    utb__addEntry( utb, ProfileEntry('t', static_cast<float>(delta.ToMilliseconds())) );
   }
 
   if (sLastFrameNumber != sFrameNumber) {

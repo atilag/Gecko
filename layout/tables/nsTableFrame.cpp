@@ -1409,6 +1409,11 @@ nsTableFrame::PaintTableBorderBackground(nsRenderingContext& aRenderingContext,
 int
 nsTableFrame::GetLogicalSkipSides(const nsHTMLReflowState* aReflowState) const
 {
+  if (MOZ_UNLIKELY(StyleBorder()->mBoxDecorationBreak ==
+                     NS_STYLE_BOX_DECORATION_BREAK_CLONE)) {
+    return 0;
+  }
+
   int skip = 0;
   // frame attribute was accounted for in nsHTMLTableElement::MapTableBorderInto
   // account for pagination
@@ -1955,7 +1960,8 @@ nsTableFrame::FixupPositionedTableParts(nsPresContext*           aPresContext,
     // FIXME: Unconditionally using NS_UNCONSTRAINEDSIZE for the height and
     // ignoring any change to the reflow status aren't correct. We'll never
     // paginate absolutely positioned frames.
-    overflowTracker.AddFrame(positionedPart);
+    overflowTracker.AddFrame(positionedPart,
+      OverflowChangedTracker::CHILDREN_AND_PARENT_CHANGED);
     nsFrame* positionedFrame = static_cast<nsFrame*>(positionedPart);
     positionedFrame->FinishReflowWithAbsoluteFrames(PresContext(),
                                                     desiredSize,

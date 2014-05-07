@@ -25,6 +25,7 @@
 
 #include "mozilla/Attributes.h"
 
+#include "js/TracingAPI.h"
 #include "js/TypeDecls.h"
 
 class nsIRDFResource;
@@ -42,7 +43,6 @@ class nsIXULPrototypeScript;
 #include "nsURIHashKey.h"
 #include "nsInterfaceHashtable.h"
 
-struct JSTracer;
 struct PRLogModuleInfo;
 
 class nsRefMapEntry : public nsStringHashKey
@@ -298,8 +298,7 @@ protected:
     nsresult
     Persist(nsIContent* aElement, int32_t aNameSpaceID, nsIAtom* aAttribute);
 
-    virtual JSObject* WrapNode(JSContext *aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+    virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
 
     // IMPORTANT: The ownership implicit in the following member
     // variables has been explicitly checked and set using nsCOMPtr
@@ -461,7 +460,8 @@ protected:
      * If the current transcluded script is being compiled off thread, the
      * source for that script.
      */
-    nsString mOffThreadCompileString;
+    jschar* mOffThreadCompileStringBuf;
+    size_t mOffThreadCompileStringLength;
 
     /**
      * Check if a XUL template builder has already been hooked up.

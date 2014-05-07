@@ -261,8 +261,7 @@ public:
 
 
   // nsINode
-  virtual JSObject* WrapNode(JSContext* aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
 
   // nsIContent
   virtual nsresult PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
@@ -284,7 +283,7 @@ public:
 
   virtual void FieldSetDisabledChanged(bool aNotify) MOZ_OVERRIDE;
 
-  nsEventStates IntrinsicState() const MOZ_OVERRIDE;
+  EventStates IntrinsicState() const MOZ_OVERRIDE;
 
   /**
    * To be called when stuff is added under a child of the select--but *before*

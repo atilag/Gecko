@@ -27,6 +27,7 @@ using mozilla::plugins::PluginInstanceParent;
 #include "nsWindowGfx.h"
 #include <windows.h>
 #include "gfxImageSurface.h"
+#include "gfxUtils.h"
 #include "gfxWindowsSurface.h"
 #include "gfxWindowsPlatform.h"
 #include "mozilla/gfx/2D.h"
@@ -52,7 +53,6 @@ using mozilla::plugins::PluginInstanceParent;
 
 #include "nsUXThemeData.h"
 #include "nsUXThemeConstants.h"
-#include "mozilla/gfx/2D.h"
 
 extern "C" {
 #define PIXMAN_DONT_DEFINE_STDINT
@@ -265,9 +265,7 @@ bool nsWindow::OnPaint(HDC aDC, uint32_t aNestingLevel)
 #endif // WIDGET_DEBUG_OUTPUT
 
   HDC hDC = aDC ? aDC : (::BeginPaint(mWnd, &ps));
-  if (!IsRenderMode(gfxWindowsPlatform::RENDER_DIRECT2D)) {
-    mPaintDC = hDC;
-  }
+  mPaintDC = hDC;
 
 #ifdef MOZ_XUL
   bool forceRepaint = aDC || (eTransparencyTransparent == mTransparencyMode);
@@ -383,21 +381,10 @@ bool nsWindow::OnPaint(HDC aDC, uint32_t aNestingLevel)
             thebesContext = new gfxContext(targetSurface);
           }
 
-          if (IsRenderMode(gfxWindowsPlatform::RENDER_DIRECT2D)) {
-            const nsIntRect* r;
-            for (nsIntRegionRectIterator iter(region);
-                 (r = iter.Next()) != nullptr;) {
-              thebesContext->Rectangle(gfxRect(r->x, r->y, r->width, r->height), true);
-            }
-            thebesContext->Clip();
-            thebesContext->SetOperator(gfxContext::OPERATOR_CLEAR);
-            thebesContext->Paint();
-            thebesContext->SetOperator(gfxContext::OPERATOR_OVER);
-          }
-
           // don't need to double buffer with anything but GDI
           BufferMode doubleBuffering = mozilla::layers::BufferMode::BUFFER_NONE;
-          if (IsRenderMode(gfxWindowsPlatform::RENDER_GDI)) {
+          if (IsRenderMode(gfxWindowsPlatform::RENDER_GDI) ||
+              IsRenderMode(gfxWindowsPlatform::RENDER_DIRECT2D)) {
 #ifdef MOZ_XUL
             switch (mTransparencyMode) {
               case eTransparencyGlass:
@@ -628,31 +615,26 @@ nsresult nsWindowGfx::CreateIcon(imgIContainer *aContainer,
              (aScaledSize.width == 0 && aScaledSize.height == 0));
 
   // Get the image data
-  nsRefPtr<gfxASurface> thebesSurface =
+  RefPtr<SourceSurface> surface =
     aContainer->GetFrame(imgIContainer::FRAME_CURRENT,
                          imgIContainer::FLAG_SYNC_DECODE);
-  NS_ENSURE_TRUE(thebesSurface, NS_ERROR_NOT_AVAILABLE);
+  NS_ENSURE_TRUE(surface, NS_ERROR_NOT_AVAILABLE);
 
-  RefPtr<SourceSurface> surface =
-    gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(nullptr,
-                                                           thebesSurface);
-  NS_ENSURE_TRUE(surface, NS_ERROR_FAILURE);
-
-  IntSize surfaceSize(surface->GetSize().width, surface->GetSize().height);
-  if (surfaceSize.IsEmpty()) {
+  IntSize frameSize = surface->GetSize();
+  if (frameSize.IsEmpty()) {
     return NS_ERROR_FAILURE;
   }
 
   IntSize iconSize(aScaledSize.width, aScaledSize.height);
   if (iconSize == IntSize(0, 0)) { // use frame's intrinsic size
-    iconSize = surfaceSize;
+    iconSize = frameSize;
   }
 
   RefPtr<DataSourceSurface> dataSurface;
   bool mappedOK;
   DataSourceSurface::MappedSurface map;
 
-  if (iconSize != surfaceSize) {
+  if (iconSize != frameSize) {
     // Scale the surface
     dataSurface = Factory::CreateDataSourceSurface(iconSize,
                                                    SurfaceFormat::B8G8R8A8);
@@ -668,28 +650,19 @@ nsresult nsWindowGfx::CreateIcon(imgIContainer *aContainer,
                                        SurfaceFormat::B8G8R8A8);
     dt->DrawSurface(surface,
                     Rect(0, 0, iconSize.width, iconSize.height),
-                    Rect(0, 0, surfaceSize.width, surfaceSize.height),
+                    Rect(0, 0, frameSize.width, frameSize.height),
                     DrawSurfaceOptions(),
                     DrawOptions(1.0f, CompositionOp::OP_SOURCE));
   } else if (surface->GetFormat() != SurfaceFormat::B8G8R8A8) {
     // Convert format to SurfaceFormat::B8G8R8A8
-    dataSurface = Factory::CreateDataSourceSurface(iconSize,
-                                                   SurfaceFormat::B8G8R8A8);
+    dataSurface = gfxUtils::
+      CopySurfaceToDataSourceSurfaceWithFormat(surface,
+                                               SurfaceFormat::B8G8R8A8);
     NS_ENSURE_TRUE(dataSurface, NS_ERROR_FAILURE);
-
-    mappedOK = dataSurface->Map(DataSourceSurface::MapType::READ_WRITE, &map);
-    NS_ENSURE_TRUE(mappedOK, NS_ERROR_FAILURE);
-
-    RefPtr<DrawTarget> dt =
-      Factory::CreateDrawTargetForData(BackendType::CAIRO,
-                                       map.mData,
-                                       dataSurface->GetSize(),
-                                       map.mStride,
-                                       SurfaceFormat::B8G8R8A8);
-    dt->CopySurface(surface, IntRect(IntPoint(0, 0), iconSize),
-                    IntPoint(0, 0));
+    mappedOK = dataSurface->Map(DataSourceSurface::MapType::READ, &map);
   } else {
     dataSurface = surface->GetDataSurface();
+    NS_ENSURE_TRUE(dataSurface, NS_ERROR_FAILURE);
     mappedOK = dataSurface->Map(DataSourceSurface::MapType::READ, &map);
   }
   NS_ENSURE_TRUE(dataSurface && mappedOK, NS_ERROR_FAILURE);

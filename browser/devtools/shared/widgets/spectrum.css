@@ -2,6 +2,43 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#eyedropper-button {
+  background-image: url("chrome://browser/skin/devtools/command-eyedropper.png");
+  width: 16px;
+  height: 16px;
+  background-size: 64px 16px;
+  background-position: 0 center;
+  background-repeat: no-repeat;
+  -moz-margin-start: 5px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.theme-light #eyedropper-button {
+  filter: url(chrome://browser/skin/devtools/filters.svg#invert);
+  border: 1px solid #AAA;
+}
+
+.theme-dark #eyedropper-button {
+  border: 1px solid #444;
+}
+
+#eyedropper-button:hover {
+  background-position: -16px center;
+}
+#eyedropper-button:hover:active {
+  background-position: -32px center;
+}
+#eyedropper-button[checked=true] {
+  background-position: -48px center;
+}
+
+@media (min-resolution: 2dppx) {
+  #eyedropper-button {
+    background-image: url("chrome://browser/skin/devtools/command-eyedropper@2x.png");
+  }
+}
+
 /* Mix-in classes */
 
 .spectrum-checker {
@@ -107,15 +144,15 @@ http://www.briangrinstead.com/blog/keep-aspect-ratio-with-html-and-css */
 }
 
 .spectrum-sat {
-  background-image: -moz-linear-gradient(left, #FFF, rgba(204, 154, 129, 0));
+  background-image: linear-gradient(to right, #FFF, rgba(204, 154, 129, 0));
 }
 
 .spectrum-val {
-  background-image: -moz-linear-gradient(bottom, #000000, rgba(204, 154, 129, 0));
+  background-image: linear-gradient(to top, #000000, rgba(204, 154, 129, 0));
 }
 
 .spectrum-hue {
-  background: -moz-linear-gradient(top, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%);
+  background: linear-gradient(to bottom, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%);
 }
 
 .spectrum-dragger {

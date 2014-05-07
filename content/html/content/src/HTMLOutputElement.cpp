@@ -6,11 +6,11 @@
 #include "mozilla/dom/HTMLOutputElement.h"
 
 #include "mozAutoDocUpdate.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/dom/HTMLFormElement.h"
 #include "mozilla/dom/HTMLOutputElementBinding.h"
 #include "nsContentUtils.h"
 #include "nsDOMSettableTokenList.h"
-#include "nsEventStates.h"
 #include "nsFormSubmission.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Output)
@@ -49,9 +49,9 @@ NS_IMPL_ADDREF_INHERITED(HTMLOutputElement, Element)
 NS_IMPL_RELEASE_INHERITED(HTMLOutputElement, Element)
 
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLOutputElement)
-  NS_INTERFACE_TABLE_INHERITED2(HTMLOutputElement,
-                                nsIMutationObserver,
-                                nsIConstraintValidation)
+  NS_INTERFACE_TABLE_INHERITED(HTMLOutputElement,
+                               nsIMutationObserver,
+                               nsIConstraintValidation)
 NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLFormElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLOutputElement)
@@ -93,10 +93,10 @@ HTMLOutputElement::ParseAttribute(int32_t aNamespaceID, nsIAtom* aAttribute,
                                                   aValue, aResult);
 }
 
-nsEventStates
+EventStates
 HTMLOutputElement::IntrinsicState() const
 {
-  nsEventStates states = nsGenericHTMLFormElement::IntrinsicState();
+  EventStates states = nsGenericHTMLFormElement::IntrinsicState();
 
   // We don't have to call IsCandidateForConstraintValidation()
   // because <output> can't be barred from constraint validation.
@@ -212,9 +212,9 @@ void HTMLOutputElement::ContentRemoved(nsIDocument* aDocument,
 }
 
 JSObject*
-HTMLOutputElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+HTMLOutputElement::WrapNode(JSContext* aCx)
 {
-  return HTMLOutputElementBinding::Wrap(aCx, aScope, this);
+  return HTMLOutputElementBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

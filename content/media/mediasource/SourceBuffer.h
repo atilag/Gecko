@@ -14,12 +14,12 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/SourceBufferBinding.h"
 #include "mozilla/dom/TypedArray.h"
+#include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/mozalloc.h"
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionNoteChild.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsDOMEventTargetHelper.h"
 #include "nsISupports.h"
 #include "nsStringGlue.h"
 #include "nscore.h"
@@ -29,6 +29,7 @@ struct JSContext;
 
 namespace mozilla {
 
+class ContainerParser;
 class ErrorResult;
 class SourceBufferResource;
 class SubBufferDecoder;
@@ -38,7 +39,7 @@ namespace dom {
 
 class TimeRanges;
 
-class SourceBuffer MOZ_FINAL : public nsDOMEventTargetHelper
+class SourceBuffer MOZ_FINAL : public DOMEventTargetHelper
 {
 public:
   /** WebIDL Methods. */
@@ -86,14 +87,14 @@ public:
   /** End WebIDL Methods. */
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(SourceBuffer, nsDOMEventTargetHelper)
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(SourceBuffer, DOMEventTargetHelper)
 
-  explicit SourceBuffer(MediaSource* aMediaSource, const nsACString& aType);
+  static already_AddRefed<SourceBuffer> Create(MediaSource* aMediaSource, const nsACString& aType);
   ~SourceBuffer();
 
   MediaSource* GetParentObject() const;
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   // Notify the SourceBuffer that it has been detached from the
   // MediaSource's sourceBuffer list.
@@ -108,10 +109,18 @@ public:
   // Evict data in the source buffer in the given time range.
   void Evict(double aStart, double aEnd);
 
+  // Returns true if the data in the source buffer contains the given time.
+  bool ContainsTime(double aTime);
+
 private:
+  SourceBuffer(MediaSource* aMediaSource, const nsACString& aType);
+
   friend class AsyncEventRunner<SourceBuffer>;
   void DispatchSimpleEvent(const char* aName);
   void QueueAsyncSimpleEvent(const char* aName);
+
+  // Create a new decoder for mType, add it to mDecoders and update mCurrentDecoder.
+  bool InitNewDecoder();
 
   // Update mUpdating and fire the appropriate events.
   void StartUpdating();
@@ -127,6 +136,10 @@ private:
 
   nsRefPtr<MediaSource> mMediaSource;
 
+  const nsAutoCString mType;
+
+  nsAutoPtr<ContainerParser> mParser;
+
   nsRefPtr<SubBufferDecoder> mDecoder;
 
   double mAppendWindowStart;
@@ -136,6 +149,8 @@ private:
 
   SourceBufferAppendMode mAppendMode;
   bool mUpdating;
+
+  bool mDecoderInit;
 };
 
 } // namespace dom

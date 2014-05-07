@@ -3,7 +3,7 @@ Cu.import("resource://gre/modules/osfile.jsm");
 const {Services} = Cu.import("resource://gre/modules/Services.jsm");
 const {FileUtils} = Cu.import("resource://gre/modules/FileUtils.jsm");
 const {devtools} = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
-const promise = require("sdk/core/promise");
+const {Promise: promise} = Cu.import("resource://gre/modules/Promise.jsm", {});
 
 // XXX: bug 912476 make this module a real protocol.js front
 // by converting webapps actor to protocol.js
@@ -139,9 +139,7 @@ function removeServerTemporaryFile(client, fileActor) {
     to: fileActor,
     type: "remove"
   };
-  client.request(request, function (aResponse) {
-    console.error("Failed removing server side temporary package file", aResponse);
-  });
+  client.request(request);
 }
 
 function installPackaged(client, webappsActor, packagePath, appId) {
@@ -183,7 +181,9 @@ function installPackaged(client, webappsActor, packagePath, appId) {
             zipFile.remove(false);
           // In case of success or error, ensure deleting the temporary package file
           // also created on the device, but only once install request is done
-          deferred.promise.then(removeServerTemporaryFile, removeServerTemporaryFile);
+          deferred.promise.then(
+            () => removeServerTemporaryFile(client, fileActor),
+            () => removeServerTemporaryFile(client, fileActor));
         });
   });
   return deferred.promise;

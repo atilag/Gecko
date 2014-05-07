@@ -14,10 +14,10 @@ namespace dom {
  * DeviceMotionEvent
  *****************************************************************************/
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_3(DeviceMotionEvent, Event,
-                                     mAcceleration,
-                                     mAccelerationIncludingGravity,
-                                     mRotationRate)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(DeviceMotionEvent, Event,
+                                   mAcceleration,
+                                   mAccelerationIncludingGravity,
+                                   mRotationRate)
 
 NS_IMPL_ADDREF_INHERITED(DeviceMotionEvent, Event)
 NS_IMPL_RELEASE_INHERITED(DeviceMotionEvent, Event)
@@ -95,7 +95,7 @@ DeviceMotionEvent::Constructor(const GlobalObject& aGlobal,
  * DeviceAcceleration
  *****************************************************************************/
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(DeviceAcceleration, mOwner)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(DeviceAcceleration, mOwner)
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(DeviceAcceleration, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(DeviceAcceleration, Release)
@@ -120,7 +120,7 @@ DeviceAcceleration::~DeviceAcceleration()
  * DeviceRotationRate
  *****************************************************************************/
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(DeviceRotationRate, mOwner)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(DeviceRotationRate, mOwner)
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(DeviceRotationRate, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(DeviceRotationRate, Release)

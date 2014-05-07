@@ -73,7 +73,7 @@ SandboxLogJSStack(void)
   }
   nsCOMPtr<nsIStackFrame> frame = dom::GetCurrentJSStack();
   for (int i = 0; frame != nullptr; ++i) {
-    nsAutoCString fileName, funName;
+    nsAutoString fileName, funName;
     int32_t lineNumber;
 
     // Don't stop unwinding if an attribute can't be read.
@@ -86,8 +86,10 @@ SandboxLogJSStack(void)
 
     if (!funName.IsVoid() || !fileName.IsVoid()) {
       LOG_ERROR("JS frame %d: %s %s line %d", i,
-                funName.IsVoid() ? "(anonymous)" : funName.get(),
-                fileName.IsVoid() ? "(no file)" : fileName.get(),
+                funName.IsVoid() ?
+                  "(anonymous)" : NS_ConvertUTF16toUTF8(funName).get(),
+                fileName.IsVoid() ?
+                  "(no file)" : NS_ConvertUTF16toUTF8(fileName).get(),
                 lineNumber);
     }
 
@@ -386,6 +388,14 @@ BroadcastSetThreadSandbox()
   SetThreadSandbox();
 }
 
+// This function can overapproximate (i.e., return true even if
+// sandboxing isn't supported, but not the reverse).  See bug 993145.
+static bool
+IsSandboxingSupported(void)
+{
+  return prctl(PR_GET_SECCOMP) != -1;
+}
+
 /**
  * Starts the seccomp sandbox for this process and sets user/group-based privileges.
  * Should be called only once, and before any potentially harmful content is loaded.
@@ -408,7 +418,9 @@ SetCurrentProcessSandbox()
   }
 #endif
 
-  BroadcastSetThreadSandbox();
+  if (IsSandboxingSupported()) {
+    BroadcastSetThreadSandbox();
+  }
 }
 
 } // namespace mozilla

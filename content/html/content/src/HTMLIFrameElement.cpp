@@ -27,8 +27,8 @@ HTMLIFrameElement::~HTMLIFrameElement()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED1(HTMLIFrameElement, nsGenericHTMLFrameElement,
-                             nsIDOMHTMLIFrameElement)
+NS_IMPL_ISUPPORTS_INHERITED(HTMLIFrameElement, nsGenericHTMLFrameElement,
+                            nsIDOMHTMLIFrameElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLIFrameElement)
 
@@ -247,9 +247,9 @@ HTMLIFrameElement::GetSandboxFlags()
 }
 
 JSObject*
-HTMLIFrameElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+HTMLIFrameElement::WrapNode(JSContext* aCx)
 {
-  return HTMLIFrameElementBinding::Wrap(aCx, aScope, this);
+  return HTMLIFrameElementBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

@@ -288,7 +288,7 @@ public:
   nsCOMPtr<nsIDNSRecord>  mResponse;
   nsCOMPtr<nsITimer>      mTimer;
 };
-NS_IMPL_ISUPPORTS2(PACResolver, nsIDNSListener, nsITimerCallback)
+NS_IMPL_ISUPPORTS(PACResolver, nsIDNSListener, nsITimerCallback)
 
 static
 void PACLogToConsole(nsString &aMessage)
@@ -585,7 +585,9 @@ const JSClass JSRuntimeWrapper::sGlobalClass = {
   "PACResolutionThreadGlobal",
   JSCLASS_GLOBAL_FLAGS,
   JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
-  JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub
+  JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub,
+  nullptr, nullptr, nullptr, nullptr,
+  JS_GlobalObjectTraceHook
 };
 
 nsresult
@@ -634,7 +636,7 @@ ProxyAutoConfig::SetupJS()
   options.setFileAndLine(mPACURI.get(), 1);
   JS::Rooted<JSScript*> script(cx, JS_CompileScript(cx, global, mPACScript.get(),
                                                     mPACScript.Length(), options));
-  if (!script || !JS_ExecuteScript(cx, global, script, nullptr)) {
+  if (!script || !JS_ExecuteScript(cx, global, script)) {
     nsString alertMessage(NS_LITERAL_STRING("PAC file failed to install from "));
     if (isDataURI) {
       alertMessage += NS_LITERAL_STRING("data: URI");

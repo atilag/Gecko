@@ -5,9 +5,8 @@
 #ifndef mozilla_dom_IccManager_h
 #define mozilla_dom_IccManager_h
 
+#include "mozilla/DOMEventTargetHelper.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsDOMEventTargetHelper.h"
-#include "nsIDOMIccManager.h"
 #include "nsIIccProvider.h"
 #include "nsTArrayHelpers.h"
 
@@ -16,17 +15,14 @@ namespace dom {
 
 class IccListener;
 
-class IccManager MOZ_FINAL : public nsDOMEventTargetHelper
-                           , public nsIDOMMozIccManager
+class IccManager MOZ_FINAL : public DOMEventTargetHelper
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIDOMMOZICCMANAGER
 
-  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper)
+  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(DOMEventTargetHelper)
 
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(IccManager,
-                                                         nsDOMEventTargetHelper)
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IccManager, DOMEventTargetHelper)
 
   IccManager(nsPIDOMWindow* aWindow);
   ~IccManager();
@@ -40,17 +36,23 @@ public:
   nsresult
   NotifyIccRemove(const nsAString& aIccId);
 
+  IMPL_EVENT_HANDLER(iccdetected)
+  IMPL_EVENT_HANDLER(iccundetected)
+
+  void
+  GetIccIds(nsTArray<nsString>& aIccIds);
+
+  already_AddRefed<nsISupports>
+  GetIccById(const nsAString& aIccId) const;
+
+  nsPIDOMWindow*
+  GetParentObject() const { return GetOwner(); }
+
+  virtual JSObject*
+  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+
 private:
   nsTArray<nsRefPtr<IccListener>> mIccListeners;
-
-  // Cached iccIds js array object. Cleared whenever the NotifyIccAdd() or
-  // NotifyIccRemove() is called, and then rebuilt once a page looks for the
-  // iccIds attribute.
-  JS::Heap<JSObject*> mJsIccIds;
-  bool mRooted;
-
-  void Root();
-  void Unroot();
 };
 
 } // namespace dom

@@ -23,8 +23,8 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
- * 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
  * ***** END LICENSE BLOCK ***** */
 
 #ifndef assembler_assembler_X86Assembler_h
@@ -366,6 +366,7 @@ private:
         GROUP3_OP_TEST = 0,
         GROUP3_OP_NOT  = 2,
         GROUP3_OP_NEG  = 3,
+        GROUP3_OP_IMUL = 5,
         GROUP3_OP_DIV  = 6,
         GROUP3_OP_IDIV = 7,
 
@@ -942,6 +943,13 @@ public:
         m_formatter.oneByteOp64(OP_SUB_EvGv, src, dst);
     }
 
+    void subq_rm(RegisterID src, int offset, RegisterID base)
+    {
+        spew("subq       %s, %s0x%x(%s)",
+             nameIReg(8,src), PRETTY_PRINT_OFFSET(offset), nameIReg(8,base));
+        m_formatter.oneByteOp64(OP_SUB_EvGv, src, base, offset);
+    }
+
     void subq_mr(int offset, RegisterID base, RegisterID dst)
     {
         spew("subq       %s0x%x(%s), %s",
@@ -1146,6 +1154,13 @@ public:
     {
         spew("imull      %s, %s", nameIReg(4,src), nameIReg(4, dst));
         m_formatter.twoByteOp(OP2_IMUL_GvEv, dst, src);
+    }
+
+    void imull_r(RegisterID multiplier)
+    {
+        spew("imull      %s",
+             nameIReg(4, multiplier));
+        m_formatter.oneByteOp(OP_GROUP3_Ev, GROUP3_OP_IMUL, multiplier);
     }
 
     void imull_mr(int offset, RegisterID base, RegisterID dst)
@@ -1941,7 +1956,7 @@ public:
 
     JmpSrc movl_ripr(RegisterID dst)
     {
-        spew("movl       \?(%%rip), %s",
+        spew("movl       ?(%%rip), %s",
              nameIReg(dst));
         m_formatter.oneByteRipOp(OP_MOV_GvEv, (RegisterID)dst, 0);
         return JmpSrc(m_formatter.size());
@@ -1949,7 +1964,7 @@ public:
 
     JmpSrc movl_rrip(RegisterID src)
     {
-        spew("movl       %s, \?(%%rip)",
+        spew("movl       %s, ?(%%rip)",
              nameIReg(src));
         m_formatter.oneByteRipOp(OP_MOV_EvGv, (RegisterID)src, 0);
         return JmpSrc(m_formatter.size());
@@ -1957,7 +1972,7 @@ public:
 
     JmpSrc movq_ripr(RegisterID dst)
     {
-        spew("movl       \?(%%rip), %s",
+        spew("movl       ?(%%rip), %s",
              nameIReg(dst));
         m_formatter.oneByteRipOp64(OP_MOV_GvEv, dst, 0);
         return JmpSrc(m_formatter.size());
@@ -2169,7 +2184,7 @@ public:
 
     JmpSrc leaq_rip(RegisterID dst)
     {
-        spew("leaq       \?(%%rip), %s",
+        spew("leaq       ?(%%rip), %s",
              nameIReg(dst));
         m_formatter.oneByteRipOp64(OP_LEA, dst, 0);
         return JmpSrc(m_formatter.size());
@@ -2766,7 +2781,7 @@ public:
 #else
     JmpSrc movsd_ripr(XMMRegisterID dst)
     {
-        spew("movsd      \?(%%rip), %s",
+        spew("movsd      ?(%%rip), %s",
              nameFPReg(dst));
         m_formatter.prefix(PRE_SSE_F2);
         m_formatter.twoByteRipOp(OP2_MOVSD_VsdWsd, (RegisterID)dst, 0);
@@ -2774,7 +2789,7 @@ public:
     }
     JmpSrc movss_ripr(XMMRegisterID dst)
     {
-        spew("movss      \?(%%rip), %s",
+        spew("movss      ?(%%rip), %s",
              nameFPReg(dst));
         m_formatter.prefix(PRE_SSE_F3);
         m_formatter.twoByteRipOp(OP2_MOVSD_VsdWsd, (RegisterID)dst, 0);
@@ -2782,7 +2797,7 @@ public:
     }
     JmpSrc movsd_rrip(XMMRegisterID src)
     {
-        spew("movsd      %s, \?(%%rip)",
+        spew("movsd      %s, ?(%%rip)",
              nameFPReg(src));
         m_formatter.prefix(PRE_SSE_F2);
         m_formatter.twoByteRipOp(OP2_MOVSD_WsdVsd, (RegisterID)src, 0);

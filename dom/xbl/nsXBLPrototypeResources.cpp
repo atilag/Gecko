@@ -25,7 +25,6 @@ nsXBLPrototypeResources::nsXBLPrototypeResources(nsXBLPrototypeBinding* aBinding
   MOZ_COUNT_CTOR(nsXBLPrototypeResources);
 
   mLoader = new nsXBLResourceLoader(aBinding, this);
-  NS_IF_ADDREF(mLoader);
 }
 
 nsXBLPrototypeResources::~nsXBLPrototypeResources()
@@ -33,17 +32,16 @@ nsXBLPrototypeResources::~nsXBLPrototypeResources()
   MOZ_COUNT_DTOR(nsXBLPrototypeResources);
   if (mLoader) {
     mLoader->mResources = nullptr;
-    NS_RELEASE(mLoader);
   }
 }
 
-void 
+void
 nsXBLPrototypeResources::AddResource(nsIAtom* aResourceType, const nsAString& aSrc)
 {
   if (mLoader)
     mLoader->AddResource(aResourceType, aSrc);
 }
- 
+
 void
 nsXBLPrototypeResources::LoadResources(bool* aResult)
 {
@@ -54,7 +52,7 @@ nsXBLPrototypeResources::LoadResources(bool* aResult)
 }
 
 void
-nsXBLPrototypeResources::AddResourceListener(nsIContent* aBoundElement) 
+nsXBLPrototypeResources::AddResourceListener(nsIContent* aBoundElement)
 {
   if (mLoader)
     mLoader->AddResourceListener(aBoundElement);
@@ -68,7 +66,12 @@ nsXBLPrototypeResources::FlushSkinSheets()
 
   nsCOMPtr<nsIDocument> doc =
     mLoader->mBinding->XBLDocumentInfo()->GetDocument();
-  mozilla::css::Loader* cssLoader = doc->CSSLoader();
+
+  // If doc is null, we're in the process of tearing things down, so just
+  // return without rebuilding anything.
+  if (!doc) {
+    return NS_OK;
+  }
 
   // We have scoped stylesheets.  Reload any chrome stylesheets we
   // encounter.  (If they aren't skin sheets, it doesn't matter, since
@@ -77,6 +80,8 @@ nsXBLPrototypeResources::FlushSkinSheets()
 
   sheet_array_type oldSheets(mStyleSheetList);
   mStyleSheetList.Clear();
+
+  mozilla::css::Loader* cssLoader = doc->CSSLoader();
 
   for (sheet_array_type::size_type i = 0, count = oldSheets.Length();
        i < count; ++i) {
@@ -95,7 +100,7 @@ nsXBLPrototypeResources::FlushSkinSheets()
 
     mStyleSheetList.AppendElement(newSheet);
   }
-  mRuleProcessor = new nsCSSRuleProcessor(mStyleSheetList, 
+  mRuleProcessor = new nsCSSRuleProcessor(mStyleSheetList,
                                           nsStyleSet::eDocSheet,
                                           nullptr);
 
@@ -108,4 +113,17 @@ nsXBLPrototypeResources::Write(nsIObjectOutputStream* aStream)
   if (mLoader)
     return mLoader->Write(aStream);
   return NS_OK;
+}
+
+void
+nsXBLPrototypeResources::Traverse(nsCycleCollectionTraversalCallback &cb) const
+{
+  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "proto mResources mLoader");
+  cb.NoteXPCOMChild(mLoader);
+}
+
+void
+nsXBLPrototypeResources::ClearLoader()
+{
+  mLoader = nullptr;
 }

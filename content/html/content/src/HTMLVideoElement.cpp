@@ -41,8 +41,8 @@ namespace dom {
 
 static bool sVideoStatsEnabled;
 
-NS_IMPL_ISUPPORTS_INHERITED2(HTMLVideoElement, HTMLMediaElement,
-                             nsIDOMHTMLMediaElement, nsIDOMHTMLVideoElement)
+NS_IMPL_ISUPPORTS_INHERITED(HTMLVideoElement, HTMLMediaElement,
+                            nsIDOMHTMLMediaElement, nsIDOMHTMLVideoElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLVideoElement)
 
@@ -234,9 +234,9 @@ NS_IMETHODIMP HTMLVideoElement::GetMozHasAudio(bool *aHasAudio) {
 }
 
 JSObject*
-HTMLVideoElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+HTMLVideoElement::WrapNode(JSContext* aCx)
 {
-  return HTMLVideoElementBinding::Wrap(aCx, aScope, this);
+  return HTMLVideoElementBinding::Wrap(aCx, this);
 }
 
 void

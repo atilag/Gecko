@@ -9,7 +9,8 @@ EXPORTS.mozilla.net += [
     'controller/RtspControllerParent.h',
     'controller/RtspMetaData.h',
     'rtsp/RTSPSource.h',
-    'RtspChannel.h',
+    'RtspChannelChild.h',
+    'RtspChannelParent.h',
     'RtspHandler.h',
 ]
 
@@ -19,7 +20,8 @@ SOURCES += [
     'controller/RtspControllerChild.cpp',
     'controller/RtspControllerParent.cpp',
     'controller/RtspMetaData.cpp',
-    'RtspChannel.cpp',
+    'RtspChannelChild.cpp',
+    'RtspChannelParent.cpp',
     'RtspHandler.cpp',
 ]
 
@@ -55,7 +57,6 @@ DEFINES['FORCE_PR_LOG'] = True
 LOCAL_INCLUDES += [
     '../../base/src',
     '/content/base/src',
-    '/dom/events',
     'controller',
     'rtsp',
 ]

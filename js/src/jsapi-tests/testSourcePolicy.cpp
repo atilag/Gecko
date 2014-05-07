@@ -9,14 +9,14 @@
 BEGIN_TEST(testBug795104)
 {
     JS::CompileOptions opts(cx);
-    opts.setSourcePolicy(JS::CompileOptions::NO_SOURCE);
+    JS::CompartmentOptionsRef(cx->compartment()).setDiscardSource(true);
     const size_t strLen = 60002;
     char *s = static_cast<char *>(JS_malloc(cx, strLen));
     CHECK(s);
     s[0] = '"';
     memset(s + 1, 'x', strLen - 2);
     s[strLen - 1] = '"';
-    CHECK(JS::Evaluate(cx, global, opts, s, strLen, nullptr));
+    CHECK(JS::Evaluate(cx, global, opts, s, strLen));
     CHECK(JS::CompileFunction(cx, global, opts, "f", 0, nullptr, s, strLen));
     JS_free(cx, s);
 
@@ -31,7 +31,7 @@ BEGIN_TEST(testScriptSourceReentrant)
     JS::CompileOptions opts(cx);
     bool match = false;
     JS_SetNewScriptHook(rt, NewScriptHook, &match);
-    CHECK(JS::Evaluate(cx, global, opts, simpleSource, strlen(simpleSource), nullptr));
+    CHECK(JS::Evaluate(cx, global, opts, simpleSource, strlen(simpleSource)));
     CHECK(match);
     JS_SetNewScriptHook(rt, nullptr, nullptr);
 

@@ -172,6 +172,7 @@ public:
     virtual bool RecvSetCursor(const uint32_t& aValue) MOZ_OVERRIDE;
     virtual bool RecvSetBackgroundColor(const nscolor& aValue) MOZ_OVERRIDE;
     virtual bool RecvSetStatus(const uint32_t& aType, const nsString& aStatus) MOZ_OVERRIDE;
+    virtual bool RecvIsParentWindowMainWidgetVisible(bool* aIsVisible);
     virtual bool RecvShowTooltip(const uint32_t& aX, const uint32_t& aY, const nsString& aTooltip);
     virtual bool RecvHideTooltip();
     virtual bool RecvGetDPI(float* aValue) MOZ_OVERRIDE;
@@ -211,14 +212,18 @@ public:
     void HandleLongTapUp(const CSSPoint& aPoint,
                          int32_t aModifiers,
                          const ScrollableLayerGuid& aGuid);
-    void NotifyTransformBegin(ViewID aViewId);
-    void NotifyTransformEnd(ViewID aViewId);
+    void NotifyAPZStateChange(ViewID aViewId,
+                              APZStateChange aChange,
+                              int aArg);
     void Activate();
     void Deactivate();
 
     bool MapEventCoordinatesForChildProcess(mozilla::WidgetEvent* aEvent);
     void MapEventCoordinatesForChildProcess(const LayoutDeviceIntPoint& aOffset,
                                             mozilla::WidgetEvent* aEvent);
+
+    virtual bool RecvRequestNativeKeyBindings(const mozilla::WidgetKeyboardEvent& aEvent,
+                                              MaybeNativeKeyBinding* aBindings) MOZ_OVERRIDE;
 
     void SendMouseEvent(const nsAString& aType, float aX, float aY,
                         int32_t aButton, int32_t aClickCount,

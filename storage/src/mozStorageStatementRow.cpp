@@ -23,7 +23,7 @@ StatementRow::StatementRow(Statement *aStatement)
 {
 }
 
-NS_IMPL_ISUPPORTS2(
+NS_IMPL_ISUPPORTS(
   StatementRow,
   mozIStorageStatementRow,
   nsIXPCScriptable
@@ -117,7 +117,6 @@ StatementRow::NewResolve(nsIXPConnectWrappedNative *aWrapper,
                          JSContext *aCtx,
                          JSObject *aScopeObj,
                          jsid aId,
-                         uint32_t aFlags,
                          JSObject **_objp,
                          bool *_retval)
 {
@@ -142,8 +141,8 @@ StatementRow::NewResolve(nsIXPConnectWrappedNative *aWrapper,
       return NS_OK;
     }
 
-    *_retval = ::JS_DefinePropertyById(aCtx, scopeObj, aId, JSVAL_VOID,
-                                     nullptr, nullptr, 0);
+    JS::Rooted<jsid> id(aCtx, aId);
+    *_retval = ::JS_DefinePropertyById(aCtx, scopeObj, id, JS::UndefinedHandleValue, 0);
     *_objp = scopeObj;
     return NS_OK;
   }

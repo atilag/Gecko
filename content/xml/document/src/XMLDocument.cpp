@@ -228,7 +228,7 @@ XMLDocument::~XMLDocument()
 }
 
 // QueryInterface implementation for XMLDocument
-NS_IMPL_ISUPPORTS_INHERITED1(XMLDocument, nsDocument, nsIDOMXMLDocument)
+NS_IMPL_ISUPPORTS_INHERITED(XMLDocument, nsDocument, nsIDOMXMLDocument)
 
 nsresult
 XMLDocument::Init()
@@ -600,9 +600,9 @@ XMLDocument::Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const
 }
 
 JSObject*
-XMLDocument::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+XMLDocument::WrapNode(JSContext *aCx)
 {
-  return XMLDocumentBinding::Wrap(aCx, aScope, this);
+  return XMLDocumentBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

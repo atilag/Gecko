@@ -43,6 +43,7 @@
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/BasicEvents.h"
 #include "mozilla/EventListenerManager.h"
+#include "mozilla/EventStateManager.h"
 #include "nsIDOMNodeFilter.h"
 
 #include "nsIDOMStyleSheet.h"
@@ -121,6 +122,7 @@
 #include "nsDateTimeFormatCID.h"
 #include "nsIDateTimeFormat.h"
 #include "mozilla/EventDispatcher.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/InternalMutationEvent.h"
 #include "nsDOMCID.h"
 
@@ -158,7 +160,6 @@
 #include "mozilla/dom/EncodingUtils.h"
 #include "mozilla/dom/quota/QuotaManager.h"
 #include "nsDOMNavigationTiming.h"
-#include "nsEventStateManager.h"
 
 #include "nsSMILAnimationController.h"
 #include "imgIContainer.h"
@@ -722,76 +723,48 @@ nsDOMStyleSheetList::~nsDOMStyleSheetList()
   }
 }
 
-DOMCI_DATA(StyleSheetList, nsDOMStyleSheetList)
+NS_IMPL_ISUPPORTS_INHERITED(nsDOMStyleSheetList, StyleSheetList,
+                            nsIDocumentObserver,
+                            nsIMutationObserver)
 
-// XXX couldn't we use the GetIIDs method from CSSStyleSheetList here?
-// QueryInterface implementation for nsDOMStyleSheetList
-NS_INTERFACE_TABLE_HEAD(nsDOMStyleSheetList)
-  NS_INTERFACE_TABLE3(nsDOMStyleSheetList,
-                      nsIDOMStyleSheetList,
-                      nsIDocumentObserver,
-                      nsIMutationObserver)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(StyleSheetList)
-NS_INTERFACE_MAP_END
-
-
-NS_IMPL_ADDREF(nsDOMStyleSheetList)
-NS_IMPL_RELEASE(nsDOMStyleSheetList)
-
-
-NS_IMETHODIMP
-nsDOMStyleSheetList::GetLength(uint32_t* aLength)
+uint32_t
+nsDOMStyleSheetList::Length()
 {
-  if (mDocument) {
-    // XXX Find the number and then cache it. We'll use the
-    // observer notification to figure out if new ones have
-    // been added or removed.
-    if (-1 == mLength) {
-      mLength = mDocument->GetNumberOfStyleSheets();
+  if (!mDocument) {
+    return 0;
+  }
+
+  // XXX Find the number and then cache it. We'll use the
+  // observer notification to figure out if new ones have
+  // been added or removed.
+  if (-1 == mLength) {
+    mLength = mDocument->GetNumberOfStyleSheets();
 
 #ifdef DEBUG
-      int32_t i;
-      for (i = 0; i < mLength; i++) {
-        nsIStyleSheet *sheet = mDocument->GetStyleSheetAt(i);
-        nsCOMPtr<nsIDOMStyleSheet> domss(do_QueryInterface(sheet));
-        NS_ASSERTION(domss, "All \"normal\" sheets implement nsIDOMStyleSheet");
-      }
-#endif
+    int32_t i;
+    for (i = 0; i < mLength; i++) {
+      nsIStyleSheet *sheet = mDocument->GetStyleSheetAt(i);
+      nsCOMPtr<nsIDOMStyleSheet> domss(do_QueryInterface(sheet));
+      NS_ASSERTION(domss, "All \"normal\" sheets implement nsIDOMStyleSheet");
     }
-    *aLength = mLength;
+#endif
   }
-  else {
-    *aLength = 0;
-  }
-
-  return NS_OK;
+  return mLength;
 }
 
-nsIStyleSheet*
-nsDOMStyleSheetList::GetItemAt(uint32_t aIndex)
+nsCSSStyleSheet*
+nsDOMStyleSheetList::IndexedGetter(uint32_t aIndex, bool& aFound)
 {
   if (!mDocument || aIndex >= (uint32_t)mDocument->GetNumberOfStyleSheets()) {
+    aFound = false;
     return nullptr;
   }
 
+  aFound = true;
   nsIStyleSheet *sheet = mDocument->GetStyleSheetAt(aIndex);
   NS_ASSERTION(sheet, "Must have a sheet");
 
-  return sheet;
-}
-
-NS_IMETHODIMP
-nsDOMStyleSheetList::Item(uint32_t aIndex, nsIDOMStyleSheet** aReturn)
-{
-  nsIStyleSheet *sheet = GetItemAt(aIndex);
-  if (!sheet) {
-      *aReturn = nullptr;
-
-      return NS_OK;
-  }
-
-  return CallQueryInterface(sheet, aReturn);
+  return static_cast<nsCSSStyleSheet*>(sheet);
 }
 
 void
@@ -827,7 +800,7 @@ nsDOMStyleSheetList::StyleSheetRemoved(nsIDocument *aDocument,
 }
 
 // nsOnloadBlocker implementation
-NS_IMPL_ISUPPORTS1(nsOnloadBlocker, nsIRequest)
+NS_IMPL_ISUPPORTS(nsOnloadBlocker, nsIRequest)
 
 NS_IMETHODIMP
 nsOnloadBlocker::GetName(nsACString &aResult)
@@ -1147,9 +1120,9 @@ nsExternalResourceMap::AddExternalResource(nsIURI* aURI,
   return rv;
 }
 
-NS_IMPL_ISUPPORTS2(nsExternalResourceMap::PendingLoad,
-                   nsIStreamListener,
-                   nsIRequestObserver)
+NS_IMPL_ISUPPORTS(nsExternalResourceMap::PendingLoad,
+                  nsIStreamListener,
+                  nsIRequestObserver)
 
 NS_IMETHODIMP
 nsExternalResourceMap::PendingLoad::OnStartRequest(nsIRequest *aRequest,
@@ -1344,11 +1317,11 @@ nsExternalResourceMap::PendingLoad::StartLoad(nsIURI* aURI,
   return channel->AsyncOpen(this, nullptr);
 }
 
-NS_IMPL_ISUPPORTS1(nsExternalResourceMap::LoadgroupCallbacks,
-                   nsIInterfaceRequestor)
+NS_IMPL_ISUPPORTS(nsExternalResourceMap::LoadgroupCallbacks,
+                  nsIInterfaceRequestor)
 
 #define IMPL_SHIM(_i) \
-  NS_IMPL_ISUPPORTS1(nsExternalResourceMap::LoadgroupCallbacks::_i##Shim, _i)
+  NS_IMPL_ISUPPORTS(nsExternalResourceMap::LoadgroupCallbacks::_i##Shim, _i)
 
 IMPL_SHIM(nsILoadContext)
 IMPL_SHIM(nsIProgressEventSink)
@@ -1554,7 +1527,8 @@ nsIDocument::nsIDocument()
     mAllowDNSPrefetch(true),
     mIsBeingUsedAsImage(false),
     mHasLinksToUpdate(false),
-    mPartID(0)
+    mPartID(0),
+    mDidFireDOMContentLoaded(true)
 {
   SetInDocument();
 }
@@ -2239,6 +2213,7 @@ nsDocument::Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup)
                                 NS_GET_IID(nsIURI), getter_AddRefs(baseURI));
     if (baseURI) {
       mDocumentBaseURI = baseURI;
+      mChromeXHRDocBaseURI = baseURI;
     }
   }
 
@@ -2320,9 +2295,11 @@ nsDocument::ResetToURI(nsIURI *aURI, nsILoadGroup *aLoadGroup,
   mOriginalURI = nullptr;
 
   SetDocumentURI(aURI);
+  mChromeXHRDocURI = aURI;
   // If mDocumentBaseURI is null, nsIDocument::GetBaseURI() returns
   // mDocumentURI.
   mDocumentBaseURI = nullptr;
+  mChromeXHRDocBaseURI = nullptr;
 
   if (aLoadGroup) {
     mDocumentLoadGroup = do_GetWeakReference(aLoadGroup);
@@ -2945,6 +2922,18 @@ nsDocument::SetDocumentURI(nsIURI* aURI)
   }
 }
 
+void
+nsDocument::SetChromeXHRDocURI(nsIURI* aURI)
+{
+  mChromeXHRDocURI = aURI;
+}
+
+void
+nsDocument::SetChromeXHRDocBaseURI(nsIURI* aURI)
+{
+  mChromeXHRDocBaseURI = aURI;
+}
+
 NS_IMETHODIMP
 nsDocument::GetLastModified(nsAString& aLastModified)
 {
@@ -3420,9 +3409,15 @@ nsIDocument::ReleaseCapture() const
 }
 
 already_AddRefed<nsIURI>
-nsIDocument::GetBaseURI() const
+nsIDocument::GetBaseURI(bool aTryUseXHRDocBaseURI) const
 {
-  nsCOMPtr<nsIURI> uri = GetDocBaseURI();
+  nsCOMPtr<nsIURI> uri;
+  if (aTryUseXHRDocBaseURI && mChromeXHRDocBaseURI) {
+    uri = mChromeXHRDocBaseURI;
+  } else {
+    uri = GetDocBaseURI();
+  }
+
   return uri.forget();
 }
 
@@ -4685,6 +4680,8 @@ nsDocument::BeginLoad()
   // Block onload here to prevent having to deal with blocking and
   // unblocking it while we know the document is loading.
   BlockOnload();
+  mDidFireDOMContentLoaded = false;
+  BlockDOMContentLoaded();
 
   if (mScriptLoader) {
     mScriptLoader->BeginDeferringScripts();
@@ -4926,6 +4923,19 @@ nsDocument::EndLoad()
 
   NS_DOCUMENT_NOTIFY_OBSERVERS(EndLoad, (this));
 
+  UnblockDOMContentLoaded();
+}
+
+void
+nsDocument::UnblockDOMContentLoaded()
+{
+  MOZ_ASSERT(mBlockDOMContentLoaded);
+  if (--mBlockDOMContentLoaded != 0 || mDidFireDOMContentLoaded) {
+    return;
+  }
+  mDidFireDOMContentLoaded = true;
+
+  MOZ_ASSERT(mReadyState == READYSTATE_INTERACTIVE);
   if (!mSynchronousDOMContentLoaded) {
     nsRefPtr<nsIRunnable> ev =
       NS_NewRunnableMethod(this, &nsDocument::DispatchContentLoadedEvents);
@@ -4936,7 +4946,7 @@ nsDocument::EndLoad()
 }
 
 void
-nsDocument::ContentStateChanged(nsIContent* aContent, nsEventStates aStateMask)
+nsDocument::ContentStateChanged(nsIContent* aContent, EventStates aStateMask)
 {
   NS_PRECONDITION(!nsContentUtils::IsSafeToRunScript(),
                   "Someone forgot a scriptblocker");
@@ -4945,7 +4955,7 @@ nsDocument::ContentStateChanged(nsIContent* aContent, nsEventStates aStateMask)
 }
 
 void
-nsDocument::DocumentStatesChanged(nsEventStates aStateMask)
+nsDocument::DocumentStatesChanged(EventStates aStateMask)
 {
   // Invalidate our cached state.
   mGotDocumentState &= ~aStateMask;
@@ -5487,8 +5497,7 @@ nsDocument::CustomElementConstructor(JSContext* aCx, unsigned aArgc, JS::Value* 
     return true;
   }
 
-  rv = nsContentUtils::WrapNative(aCx, global, newElement, newElement,
-                                  args.rval());
+  rv = nsContentUtils::WrapNative(aCx, newElement, newElement, args.rval());
   NS_ENSURE_SUCCESS(rv, true);
 
   return true;
@@ -5556,7 +5565,7 @@ class ProcessStackRunner MOZ_FINAL : public nsIRunnable
   bool mIsBaseQueue;
 };
 
-NS_IMPL_ISUPPORTS1(ProcessStackRunner, nsIRunnable);
+NS_IMPL_ISUPPORTS(ProcessStackRunner, nsIRunnable);
 
 } // anonymous namespace
 
@@ -5841,7 +5850,7 @@ nsDocument::RegisterElement(JSContext* aCx, const nsAString& aType,
 
     JS::Rooted<JSPropertyDescriptor> descRoot(aCx);
     JS::MutableHandle<JSPropertyDescriptor> desc(&descRoot);
-    if(!JS_GetPropertyDescriptor(aCx, protoObject, "constructor", 0, desc)) {
+    if (!JS_GetPropertyDescriptor(aCx, protoObject, "constructor", desc)) {
       rv.Throw(NS_ERROR_UNEXPECTED);
       return nullptr;
     }
@@ -6071,7 +6080,7 @@ nsDocument::GetStyleSheets(nsIDOMStyleSheetList** aStyleSheets)
   return NS_OK;
 }
 
-nsIDOMStyleSheetList*
+StyleSheetList*
 nsDocument::StyleSheets()
 {
   if (!mDOMStyleSheets) {
@@ -7154,6 +7163,29 @@ nsIDocument::GetURL(nsString& aURL) const
   return GetDocumentURI(aURL);
 }
 
+void
+nsIDocument::GetDocumentURIFromJS(nsString& aDocumentURI) const
+{
+  if (!mChromeXHRDocURI || !nsContentUtils::IsCallerChrome()) {
+    return GetDocumentURI(aDocumentURI);
+  }
+
+  nsAutoCString uri;
+  mChromeXHRDocURI->GetSpec(uri);
+  CopyUTF8toUTF16(uri, aDocumentURI);
+}
+
+nsIURI*
+nsIDocument::GetDocumentURIObject() const
+{
+  if (!mChromeXHRDocURI) {
+    return GetDocumentURI();
+  }
+
+  return mChromeXHRDocURI;
+}
+
+
 // readonly attribute DOMString compatMode;
 // Returns "BackCompat" if we are in quirks mode, "CSS1Compat" if we are
 // in almost standards or full standards mode. See bug 105640.  This was
@@ -7383,14 +7415,13 @@ nsIDocument::AdoptNode(nsINode& aAdoptedNode, ErrorResult& rv)
   if (!sameDocument) {
     newScope = GetWrapper();
     if (!newScope && GetScopeObject() && GetScopeObject()->GetGlobalJSObject()) {
-      // We need to pass some sort of scope object to WrapNative. It's kind of
-      // irrelevant, given that we're passing aAllowWrapping = false, and
-      // documents should always insist on being wrapped in an canonical
-      // scope. But we try to pass something sane anyway.
-      JS::Rooted<JSObject*> global(cx, GetScopeObject()->GetGlobalJSObject());
-
+      // Make sure cx is in a semi-sane compartment before we call WrapNative.
+      // It's kind of irrelevant, given that we're passing aAllowWrapping =
+      // false, and documents should always insist on being wrapped in an
+      // canonical scope. But we try to pass something sane anyway.
+      JSAutoCompartment ac(cx, GetScopeObject()->GetGlobalJSObject());
       JS::Rooted<JS::Value> v(cx);
-      rv = nsContentUtils::WrapNative(cx, global, this, this, &v,
+      rv = nsContentUtils::WrapNative(cx, this, this, &v,
                                       /* aAllowWrapping = */ false);
       if (rv.Failed())
         return nullptr;
@@ -7719,7 +7750,13 @@ nsIDocument::CreateEvent(const nsAString& aEventType, ErrorResult& rv) const
   rv = EventDispatcher::CreateEvent(const_cast<nsIDocument*>(this),
                                     presContext, nullptr, aEventType,
                                     getter_AddRefs(ev));
-  return ev ? dont_AddRef(ev.forget().take()->InternalDOMEvent()) : nullptr;
+  if (!ev) {
+    return nullptr;
+  }
+  WidgetEvent* e = ev->GetInternalNSEvent();
+  e->mFlags.mBubbles = false;
+  e->mFlags.mCancelable = false;
+  return dont_AddRef(ev.forget().take()->InternalDOMEvent());
 }
 
 void
@@ -8840,12 +8877,14 @@ nsDocument::OnPageHide(bool aPersisted,
 
   // Dispatch observer notification to notify observers page is hidden.
   nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-  nsIPrincipal *principal = GetPrincipal();
-  os->NotifyObservers(static_cast<nsIDocument*>(this),
-                      nsContentUtils::IsSystemPrincipal(principal) ?
-                        "chrome-page-hidden" :
-                        "content-page-hidden",
-                      nullptr);
+  if (os) {
+    nsIPrincipal* principal = GetPrincipal();
+    os->NotifyObservers(static_cast<nsIDocument*>(this),
+                        nsContentUtils::IsSystemPrincipal(principal) ?
+                          "chrome-page-hidden" :
+                          "content-page-hidden",
+                        nullptr);
+  }
 
   DispatchPageTransition(target, NS_LITERAL_STRING("pagehide"), aPersisted);
 
@@ -9024,9 +9063,11 @@ nsDocument::CloneDocHelper(nsDocument* clone) const
 
   // Set URI/principal
   clone->nsDocument::SetDocumentURI(nsIDocument::GetDocumentURI());
+  clone->SetChromeXHRDocURI(mChromeXHRDocURI);
   // Must set the principal first, since SetBaseURI checks it.
   clone->SetPrincipal(NodePrincipal());
   clone->mDocumentBaseURI = mDocumentBaseURI;
+  clone->SetChromeXHRDocBaseURI(mChromeXHRDocBaseURI);
 
   if (mCreatingStaticClone) {
     nsCOMPtr<nsILoadGroup> loadGroup;
@@ -9241,6 +9282,7 @@ nsDocument::MaybePreLoadImage(nsIURI* uri, const nsAString &aCrossOriginAttr)
                               mDocumentURI, // uri of document used as referrer
                               nullptr,       // no observer
                               loadFlags,
+                              NS_LITERAL_STRING("img"),
                               getter_AddRefs(request));
 
   // Pin image-reference to avoid evicting it from the img-cache before
@@ -9251,7 +9293,7 @@ nsDocument::MaybePreLoadImage(nsIURI* uri, const nsAString &aCrossOriginAttr)
   }
 }
 
-nsEventStates
+EventStates
 nsDocument::GetDocumentState()
 {
   if (!mGotDocumentState.HasState(NS_DOCUMENT_STATE_RTL_LOCALE)) {
@@ -9286,7 +9328,7 @@ public:
   }
   NS_DECL_ISUPPORTS
 };
-NS_IMPL_ISUPPORTS1(StubCSSLoaderObserver, nsICSSLoaderObserver)
+NS_IMPL_ISUPPORTS(StubCSSLoaderObserver, nsICSSLoaderObserver)
 
 }
 
@@ -9864,23 +9906,6 @@ nsDocument::AddImage(imgIRequest* aImage)
   }
 
   return rv;
-}
-
-static void
-NotifyAudioAvailableListener(nsIContent *aContent, void *aUnused)
-{
-  nsCOMPtr<nsIDOMHTMLMediaElement> domMediaElem(do_QueryInterface(aContent));
-  if (domMediaElem) {
-    HTMLMediaElement* mediaElem = static_cast<HTMLMediaElement*>(aContent);
-    mediaElem->NotifyAudioAvailableListener();
-  }
-}
-
-void
-nsDocument::NotifyAudioAvailableListener()
-{
-  mHasAudioAvailableListener = true;
-  EnumerateFreezableElements(::NotifyAudioAvailableListener, nullptr);
 }
 
 nsresult
@@ -10593,7 +10618,7 @@ nsDocument::ExitFullscreen(nsIDocument* aDoc)
 {
   // Unlock the pointer, if it's locked.
   nsCOMPtr<Element> pointerLockedElement =
-    do_QueryReferent(nsEventStateManager::sPointerLockedElement);
+    do_QueryReferent(EventStateManager::sPointerLockedElement);
   if (pointerLockedElement) {
     UnlockPointer();
   }
@@ -10658,7 +10683,7 @@ nsDocument::RestorePreviousFullScreenState()
 
   // If fullscreen mode is updated the pointer should be unlocked
   nsCOMPtr<Element> pointerLockedElement =
-    do_QueryReferent(nsEventStateManager::sPointerLockedElement);
+    do_QueryReferent(EventStateManager::sPointerLockedElement);
   if (pointerLockedElement) {
     UnlockPointer();
   }
@@ -10857,7 +10882,7 @@ nsDocument::CleanupFullscreenState()
     Element* top = FullScreenStackTop();
     NS_ASSERTION(top, "Should have a top when full-screen stack isn't empty");
     if (top) {
-      nsEventStateManager::SetFullScreenState(top, false);
+      EventStateManager::SetFullScreenState(top, false);
     }
     mFullScreenStack.Clear();
   }
@@ -10878,9 +10903,9 @@ nsDocument::FullScreenStackPush(Element* aElement)
     // We're pushing a new element onto the full-screen stack, so we must
     // remove the ancestor and full-screen styles from the former top of the
     // stack.
-    nsEventStateManager::SetFullScreenState(top, false);
+    EventStateManager::SetFullScreenState(top, false);
   }
-  nsEventStateManager::SetFullScreenState(aElement, true);
+  EventStateManager::SetFullScreenState(aElement, true);
   nsWeakPtr weakElement = do_GetWeakReference(aElement);
   mFullScreenStack.AppendElement(weakElement);
   NS_ASSERTION(GetFullScreenElement() == aElement, "Should match");
@@ -10896,7 +10921,7 @@ nsDocument::FullScreenStackPop()
 
   // Remove styles from existing top element.
   Element* top = FullScreenStackTop();
-  nsEventStateManager::SetFullScreenState(top, false);
+  EventStateManager::SetFullScreenState(top, false);
 
   // Remove top element. Note the remaining top element in the stack
   // will not have full-screen style bits set, so we will need to restore
@@ -10917,7 +10942,7 @@ nsDocument::FullScreenStackPop()
     } else {
       // The top element of the stack is now an in-doc element. Apply the
       // full-screen styles and return.
-      nsEventStateManager::SetFullScreenState(element, true);
+      EventStateManager::SetFullScreenState(element, true);
       break;
     }
   }
@@ -11094,7 +11119,7 @@ nsDocument::RequestFullScreen(Element* aElement,
   // If a document is already in fullscreen, then unlock the mouse pointer
   // before setting a new document to fullscreen
   nsCOMPtr<Element> pointerLockedElement =
-    do_QueryReferent(nsEventStateManager::sPointerLockedElement);
+    do_QueryReferent(EventStateManager::sPointerLockedElement);
   if (pointerLockedElement) {
     UnlockPointer();
   }
@@ -11414,9 +11439,9 @@ public:
   bool mUserInputOrChromeCaller;
 };
 
-NS_IMPL_ISUPPORTS_INHERITED1(nsPointerLockPermissionRequest,
-                             nsRunnable,
-                             nsIContentPermissionRequest)
+NS_IMPL_ISUPPORTS_INHERITED(nsPointerLockPermissionRequest,
+                            nsRunnable,
+                            nsIContentPermissionRequest)
 
 NS_IMETHODIMP
 nsPointerLockPermissionRequest::GetTypes(nsIArray** aTypes)
@@ -11488,7 +11513,7 @@ nsPointerLockPermissionRequest::Allow(JS::HandleValue aChoices)
   Handled();
 
   nsCOMPtr<Element> pointerLockedElement =
-    do_QueryReferent(nsEventStateManager::sPointerLockedElement);
+    do_QueryReferent(EventStateManager::sPointerLockedElement);
   if (e == pointerLockedElement) {
     DispatchPointerLockChange(d);
     return NS_OK;
@@ -11507,10 +11532,10 @@ nsPointerLockPermissionRequest::Allow(JS::HandleValue aChoices)
 
   d->mCancelledPointerLockRequests = 0;
   e->SetPointerLock();
-  nsEventStateManager::sPointerLockedElement = do_GetWeakReference(e);
-  nsEventStateManager::sPointerLockedDoc = do_GetWeakReference(doc);
-  NS_ASSERTION(nsEventStateManager::sPointerLockedElement &&
-               nsEventStateManager::sPointerLockedDoc,
+  EventStateManager::sPointerLockedElement = do_GetWeakReference(e);
+  EventStateManager::sPointerLockedDoc = do_GetWeakReference(doc);
+  NS_ASSERTION(EventStateManager::sPointerLockedElement &&
+               EventStateManager::sPointerLockedDoc,
                "aElement and this should support weak references!");
 
   DispatchPointerLockChange(d);
@@ -11563,7 +11588,7 @@ nsDocument::RequestPointerLock(Element* aElement)
     "Must pass non-null element to nsDocument::RequestPointerLock");
 
   nsCOMPtr<Element> pointerLockedElement =
-    do_QueryReferent(nsEventStateManager::sPointerLockedElement);
+    do_QueryReferent(EventStateManager::sPointerLockedElement);
   if (aElement == pointerLockedElement) {
     DispatchPointerLockChange(this);
     return;
@@ -11574,7 +11599,7 @@ nsDocument::RequestPointerLock(Element* aElement)
     return;
   }
 
-  bool userInputOrChromeCaller = nsEventStateManager::IsHandlingUserInput() ||
+  bool userInputOrChromeCaller = EventStateManager::IsHandlingUserInput() ||
                                  nsContentUtils::IsCallerChrome();
 
   gPendingPointerLockRequest =
@@ -11694,7 +11719,7 @@ nsDocument::SetPointerLock(Element* aElement, int aCursorStyle)
   }
 
   // Hide the cursor and set pointer lock for future mouse events
-  nsRefPtr<nsEventStateManager> esm = presContext->EventStateManager();
+  nsRefPtr<EventStateManager> esm = presContext->EventStateManager();
   esm->SetCursor(aCursorStyle, nullptr, false,
                  0.0f, 0.0f, widget, true);
   esm->SetPointerLock(widget, aElement);
@@ -11705,12 +11730,12 @@ nsDocument::SetPointerLock(Element* aElement, int aCursorStyle)
 void
 nsDocument::UnlockPointer(nsIDocument* aDoc)
 {
-  if (!nsEventStateManager::sIsPointerLocked) {
+  if (!EventStateManager::sIsPointerLocked) {
     return;
   }
 
   nsCOMPtr<nsIDocument> pointerLockedDoc =
-    do_QueryReferent(nsEventStateManager::sPointerLockedDoc);
+    do_QueryReferent(EventStateManager::sPointerLockedDoc);
   if (!pointerLockedDoc || (aDoc && aDoc != pointerLockedDoc)) {
     return;
   }
@@ -11720,13 +11745,13 @@ nsDocument::UnlockPointer(nsIDocument* aDoc)
   }
 
   nsCOMPtr<Element> pointerLockedElement =
-    do_QueryReferent(nsEventStateManager::sPointerLockedElement);
+    do_QueryReferent(EventStateManager::sPointerLockedElement);
   if (pointerLockedElement) {
     pointerLockedElement->ClearPointerLock();
   }
 
-  nsEventStateManager::sPointerLockedElement = nullptr;
-  nsEventStateManager::sPointerLockedDoc = nullptr;
+  EventStateManager::sPointerLockedElement = nullptr;
+  EventStateManager::sPointerLockedDoc = nullptr;
   static_cast<nsDocument*>(pointerLockedDoc.get())->mAllowRelocking = !!aDoc;
   gPendingPointerLockRequest = nullptr;
   DispatchPointerLockChange(pointerLockedDoc);
@@ -11758,14 +11783,14 @@ Element*
 nsIDocument::GetMozPointerLockElement()
 {
   nsCOMPtr<Element> pointerLockedElement =
-    do_QueryReferent(nsEventStateManager::sPointerLockedElement);
+    do_QueryReferent(EventStateManager::sPointerLockedElement);
   if (!pointerLockedElement) {
     return nullptr;
   }
 
   // Make sure pointer locked element is in the same document.
   nsCOMPtr<nsIDocument> pointerLockedDoc =
-    do_QueryReferent(nsEventStateManager::sPointerLockedDoc);
+    do_QueryReferent(EventStateManager::sPointerLockedDoc);
   if (pointerLockedDoc != this) {
     return nullptr;
   }
@@ -11875,7 +11900,7 @@ nsIDocument::DocAddSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const
   for (uint32_t i = 0, count = mExtraPropertyTables.Length();
        i < count; ++i) {
     aWindowSizes->mPropertyTablesSize +=
-      mExtraPropertyTables[i]->SizeOfExcludingThis(aWindowSizes->mMallocSizeOf);
+      mExtraPropertyTables[i]->SizeOfIncludingThis(aWindowSizes->mMallocSizeOf);
   }
 
   if (EventListenerManager* elm = GetExistingListenerManager()) {
@@ -12099,11 +12124,11 @@ nsDocument::Evaluate(const nsAString& aExpression, nsIDOMNode* aContextNode,
 // This is just a hack around the fact that window.document is not
 // [Unforgeable] yet.
 JSObject*
-nsIDocument::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aScope)
+nsIDocument::WrapObject(JSContext *aCx)
 {
   MOZ_ASSERT(IsDOMBinding());
 
-  JS::Rooted<JSObject*> obj(aCx, nsINode::WrapObject(aCx, aScope));
+  JS::Rooted<JSObject*> obj(aCx, nsINode::WrapObject(aCx));
   if (!obj) {
     return nullptr;
   }
@@ -12122,23 +12147,21 @@ nsIDocument::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aScope)
   JSAutoCompartment ac(aCx, obj);
 
   JS::Rooted<JS::Value> winVal(aCx);
-  nsresult rv = nsContentUtils::WrapNative(aCx, obj, win,
-                                           &NS_GET_IID(nsIDOMWindow),
-                                           &winVal);
+  nsresult rv = nsContentUtils::WrapNative(aCx, win, &NS_GET_IID(nsIDOMWindow),
+                                           &winVal,
+                                           false);
   if (NS_FAILED(rv)) {
     Throw(aCx, rv);
     return nullptr;
   }
 
-  MOZ_ASSERT(&winVal.toObject() == js::UncheckedUnwrap(&winVal.toObject()),
-             "WrapNative shouldn't create a cross-compartment wrapper");
-
   NS_NAMED_LITERAL_STRING(doc_str, "document");
 
-  if (!JS_DefineUCProperty(aCx, JSVAL_TO_OBJECT(winVal), doc_str.get(),
-                           doc_str.Length(), JS::ObjectValue(*obj),
-                           JS_PropertyStub, JS_StrictPropertyStub,
-                           JSPROP_READONLY | JSPROP_ENUMERATE)) {
+  JS::Rooted<JSObject*> winObj(aCx, &winVal.toObject());
+  if (!JS_DefineUCProperty(aCx, winObj, doc_str.get(),
+                           doc_str.Length(), obj,
+                           JSPROP_READONLY | JSPROP_ENUMERATE,
+                           JS_PropertyStub, JS_StrictPropertyStub)) {
     return nullptr;
   }
 

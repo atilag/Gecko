@@ -56,7 +56,9 @@ static const JSClass global_class = {
     "JSDGlobal", JSCLASS_GLOBAL_FLAGS |
     JSCLASS_HAS_PRIVATE | JSCLASS_PRIVATE_IS_NSISUPPORTS,
     JS_PropertyStub,  JS_DeletePropertyStub,  JS_PropertyStub,  JS_StrictPropertyStub,
-    JS_EnumerateStub, JS_ResolveStub,   JS_ConvertStub,   global_finalize
+    JS_EnumerateStub, JS_ResolveStub,   JS_ConvertStub,   global_finalize,
+    nullptr, nullptr, nullptr,
+    JS_GlobalObjectTraceHook
 };
 
 static bool
@@ -117,16 +119,16 @@ _newJSDContext(JSRuntime*         jsrt,
     if( ! jsd_InitScriptManager(jsdc) )
         goto label_newJSDContext_failure;
 
-
-    jsdc->glob = CreateJSDGlobal(cx, &global_class);
-
-    if( ! jsdc->glob )
-        goto label_newJSDContext_failure;
-
     {
+        JS::RootedObject global(cx, CreateJSDGlobal(cx, &global_class));
+        if( ! global )
+            goto label_newJSDContext_failure;
+
+        jsdc->glob = global;
+
         JSAutoCompartment ac(cx, jsdc->glob);
-        ok = JS_AddNamedObjectRoot(cx, &jsdc->glob, "JSD context global") &&
-             JS_InitStandardClasses(cx, JS::HandleObject::fromMarkedLocation(&jsdc->glob));
+        ok = JS::AddNamedObjectRoot(cx, &jsdc->glob, "JSD context global") &&
+             JS_InitStandardClasses(cx, global);
     }
     if( ! ok )
         goto label_newJSDContext_failure;
@@ -143,7 +145,7 @@ _newJSDContext(JSRuntime*         jsrt,
 label_newJSDContext_failure:
     if( jsdc ) {
         if ( jsdc->glob )
-            JS_RemoveObjectRootRT(JS_GetRuntime(cx), &jsdc->glob);
+            JS::RemoveObjectRootRT(JS_GetRuntime(cx), &jsdc->glob);
         jsd_DestroyObjectManager(jsdc);
         jsd_DestroyAtomTable(jsdc);
         free(jsdc);
@@ -161,7 +163,7 @@ _destroyJSDContext(JSDContext* jsdc)
     JSD_UNLOCK();
 
     if ( jsdc->glob ) {
-        JS_RemoveObjectRootRT(jsdc->jsrt, &jsdc->glob);
+        JS::RemoveObjectRootRT(jsdc->jsrt, &jsdc->glob);
     }
     jsd_DestroyObjectManager(jsdc);
     jsd_DestroyAtomTable(jsdc);

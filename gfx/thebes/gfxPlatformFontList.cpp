@@ -9,6 +9,7 @@
 #include "prlog.h"
 
 #include "gfxPlatformFontList.h"
+#include "gfxUserFontSet.h"
 
 #include "nsUnicharUtils.h"
 #include "nsUnicodeRange.h"
@@ -41,6 +42,52 @@ using namespace mozilla;
 
 gfxPlatformFontList *gfxPlatformFontList::sPlatformFontList = nullptr;
 
+// Character ranges that require complex-script shaping support in the font,
+// and so should be masked out by ReadCMAP if the necessary layout tables
+// are not present.
+// Currently used by the Mac and FT2 implementations only, but probably should
+// be supported on Windows as well.
+const gfxFontEntry::ScriptRange gfxPlatformFontList::sComplexScriptRanges[] = {
+    // Actually, now that harfbuzz supports presentation-forms shaping for
+    // Arabic, we can render it without layout tables. So maybe we don't
+    // want to mask the basic Arabic block here?
+    // This affects the arabic-fallback-*.html reftests, which rely on
+    // loading a font that *doesn't* have any GSUB table.
+    { 0x0600, 0x06FF, { TRUETYPE_TAG('a','r','a','b'), 0, 0 } },
+    { 0x0700, 0x074F, { TRUETYPE_TAG('s','y','r','c'), 0, 0 } },
+    { 0x0750, 0x077F, { TRUETYPE_TAG('a','r','a','b'), 0, 0 } },
+    { 0x08A0, 0x08FF, { TRUETYPE_TAG('a','r','a','b'), 0, 0 } },
+    { 0x0900, 0x097F, { TRUETYPE_TAG('d','e','v','2'),
+                        TRUETYPE_TAG('d','e','v','a'), 0 } },
+    { 0x0980, 0x09FF, { TRUETYPE_TAG('b','n','g','2'),
+                        TRUETYPE_TAG('b','e','n','g'), 0 } },
+    { 0x0A00, 0x0A7F, { TRUETYPE_TAG('g','u','r','2'),
+                        TRUETYPE_TAG('g','u','r','u'), 0 } },
+    { 0x0A80, 0x0AFF, { TRUETYPE_TAG('g','j','r','2'),
+                        TRUETYPE_TAG('g','u','j','r'), 0 } },
+    { 0x0B00, 0x0B7F, { TRUETYPE_TAG('o','r','y','2'),
+                        TRUETYPE_TAG('o','r','y','a'), 0 } },
+    { 0x0B80, 0x0BFF, { TRUETYPE_TAG('t','m','l','2'),
+                        TRUETYPE_TAG('t','a','m','l'), 0 } },
+    { 0x0C00, 0x0C7F, { TRUETYPE_TAG('t','e','l','2'),
+                        TRUETYPE_TAG('t','e','l','u'), 0 } },
+    { 0x0C80, 0x0CFF, { TRUETYPE_TAG('k','n','d','2'),
+                        TRUETYPE_TAG('k','n','d','a'), 0 } },
+    { 0x0D00, 0x0D7F, { TRUETYPE_TAG('m','l','m','2'),
+                        TRUETYPE_TAG('m','l','y','m'), 0 } },
+    { 0x0D80, 0x0DFF, { TRUETYPE_TAG('s','i','n','h'), 0, 0 } },
+    { 0x0E80, 0x0EFF, { TRUETYPE_TAG('l','a','o',' '), 0, 0 } },
+    { 0x0F00, 0x0FFF, { TRUETYPE_TAG('t','i','b','t'), 0, 0 } },
+    { 0x1000, 0x109f, { TRUETYPE_TAG('m','y','m','r'),
+                        TRUETYPE_TAG('m','y','m','2'), 0 } },
+    { 0x1780, 0x17ff, { TRUETYPE_TAG('k','h','m','r'), 0, 0 } },
+    // Khmer Symbols (19e0..19ff) don't seem to need any special shaping
+    { 0xaa60, 0xaa7f, { TRUETYPE_TAG('m','y','m','r'),
+                        TRUETYPE_TAG('m','y','m','2'), 0 } },
+    // Thai seems to be "renderable" without AAT morphing tables
+    { 0, 0, { 0, 0, 0 } } // terminator
+};
+
 // prefs for the font info loader
 #define FONT_LOADER_FAMILIES_PER_SLICE_PREF "gfx.font_loader.families_per_slice"
 #define FONT_LOADER_DELAY_PREF              "gfx.font_loader.delay"
@@ -61,7 +108,7 @@ public:
 
 static gfxFontListPrefObserver* gFontListPrefObserver = nullptr;
 
-NS_IMPL_ISUPPORTS1(gfxFontListPrefObserver, nsIObserver)
+NS_IMPL_ISUPPORTS(gfxFontListPrefObserver, nsIObserver)
 
 NS_IMETHODIMP
 gfxFontListPrefObserver::Observe(nsISupports     *aSubject,
@@ -78,7 +125,7 @@ gfxFontListPrefObserver::Observe(nsISupports     *aSubject,
 
 MOZ_DEFINE_MALLOC_SIZE_OF(FontListMallocSizeOf)
 
-NS_IMPL_ISUPPORTS1(gfxPlatformFontList::MemoryReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(gfxPlatformFontList::MemoryReporter, nsIMemoryReporter)
 
 NS_IMETHODIMP
 gfxPlatformFontList::MemoryReporter::CollectReports
@@ -126,7 +173,7 @@ gfxPlatformFontList::gfxPlatformFontList(bool aNeedFullnamePostscriptNames)
     if (aNeedFullnamePostscriptNames) {
         mExtraNames = new ExtraNames();
     }
-    mFaceNamesInitialized = false;
+    mFaceNameListsInitialized = false;
 
     LoadBadUnderlineList();
 
@@ -158,7 +205,7 @@ gfxPlatformFontList::InitFontList()
         mExtraNames->mFullnames.Clear();
         mExtraNames->mPostscriptNames.Clear();
     }
-    mFaceNamesInitialized = false;
+    mFaceNameListsInitialized = false;
     mPrefFonts.Clear();
     mReplacementCharFallbackFamily = nullptr;
     CancelLoader();
@@ -180,46 +227,95 @@ gfxPlatformFontList::GenerateFontListKey(const nsAString& aKeyName, nsAString& a
     ToLowerCase(aResult);
 }
 
+struct InitOtherNamesData {
+    InitOtherNamesData(gfxPlatformFontList *aFontList,
+                       TimeStamp aStartTime)
+        : mFontList(aFontList), mStartTime(aStartTime), mTimedOut(false)
+    {}
+
+    gfxPlatformFontList *mFontList;
+    TimeStamp mStartTime;
+    bool mTimedOut;
+};
+
 void 
 gfxPlatformFontList::InitOtherFamilyNames()
 {
-    mOtherFamilyNamesInitialized = true;
+    if (mOtherFamilyNamesInitialized) {
+        return;
+    }
+
     TimeStamp start = TimeStamp::Now();
 
     // iterate over all font families and read in other family names
-    mFontFamilies.Enumerate(gfxPlatformFontList::InitOtherFamilyNamesProc, this);
+    InitOtherNamesData otherNamesData(this, start);
 
+    mFontFamilies.Enumerate(gfxPlatformFontList::InitOtherFamilyNamesProc,
+                            &otherNamesData);
+
+    if (!otherNamesData.mTimedOut) {
+        mOtherFamilyNamesInitialized = true;
+    }
     TimeStamp end = TimeStamp::Now();
     Telemetry::AccumulateTimeDelta(Telemetry::FONTLIST_INITOTHERFAMILYNAMES,
                                    start, end);
+
 #ifdef PR_LOGGING
     if (LOG_FONTINIT_ENABLED()) {
         TimeDuration elapsed = end - start;
-        LOG_FONTINIT(("(fontinit) InitOtherFamilyNames took %8.2f ms",
-                      elapsed.ToMilliseconds()));
+        LOG_FONTINIT(("(fontinit) InitOtherFamilyNames took %8.2f ms %s",
+                      elapsed.ToMilliseconds(),
+                      (otherNamesData.mTimedOut ? "timeout" : "")));
     }
 #endif
 }
-                                                         
+
+#define OTHERNAMES_TIMEOUT 200
+
 PLDHashOperator
 gfxPlatformFontList::InitOtherFamilyNamesProc(nsStringHashKey::KeyType aKey,
                                               nsRefPtr<gfxFontFamily>& aFamilyEntry,
                                               void* userArg)
 {
-    gfxPlatformFontList *fc = static_cast<gfxPlatformFontList*>(userArg);
-    aFamilyEntry->ReadOtherFamilyNames(fc);
+    InitOtherNamesData *data = static_cast<InitOtherNamesData*>(userArg);
+
+    aFamilyEntry->ReadOtherFamilyNames(data->mFontList);
+    TimeDuration elapsed = TimeStamp::Now() - data->mStartTime;
+    if (elapsed.ToMilliseconds() > OTHERNAMES_TIMEOUT) {
+        data->mTimedOut = true;
+        return PL_DHASH_STOP;
+    }
     return PL_DHASH_NEXT;
 }
+ 
+struct ReadFaceNamesData {
+    ReadFaceNamesData(gfxPlatformFontList *aFontList, TimeStamp aStartTime)
+        : mFontList(aFontList), mStartTime(aStartTime), mTimedOut(false),
+          mFirstChar(0)
+    {}
 
-void
-gfxPlatformFontList::InitFaceNameLists()
+    gfxPlatformFontList *mFontList;
+    TimeStamp mStartTime;
+    bool mTimedOut;
+
+    // if mFirstChar is not 0, only load facenames for families
+    // that start with this character
+    char16_t mFirstChar;
+};
+
+gfxFontEntry*
+gfxPlatformFontList::SearchFamiliesForFaceName(const nsAString& aFaceName)
 {
-    mFaceNamesInitialized = true;
-
     TimeStamp start = TimeStamp::Now();
+    gfxFontEntry *lookup = nullptr;
 
-    // iterate over all font families and read in other family names
-    mFontFamilies.Enumerate(gfxPlatformFontList::InitFaceNameListsProc, this);
+    ReadFaceNamesData faceNameListsData(this, start);
+
+    // iterate over familes starting with the same letter
+    faceNameListsData.mFirstChar = ToLowerCase(aFaceName.CharAt(0));
+    mFontFamilies.Enumerate(gfxPlatformFontList::ReadFaceNamesProc,
+                            &faceNameListsData);
+    lookup = FindFaceName(aFaceName);
 
     TimeStamp end = TimeStamp::Now();
     Telemetry::AccumulateTimeDelta(Telemetry::FONTLIST_INITFACENAMELISTS,
@@ -227,20 +323,84 @@ gfxPlatformFontList::InitFaceNameLists()
 #ifdef PR_LOGGING
     if (LOG_FONTINIT_ENABLED()) {
         TimeDuration elapsed = end - start;
-        LOG_FONTINIT(("(fontinit) InitFaceNameLists took %8.2f ms",
-                      elapsed.ToMilliseconds()));
+        LOG_FONTINIT(("(fontinit) SearchFamiliesForFaceName took %8.2f ms %s %s",
+                      elapsed.ToMilliseconds(),
+                      (lookup ? "found name" : ""),
+                      (faceNameListsData.mTimedOut ? "timeout" : "")));
     }
 #endif
+
+    return lookup;
 }
 
+// time limit for loading facename lists (ms)
+#define NAMELIST_TIMEOUT  200
+
 PLDHashOperator
-gfxPlatformFontList::InitFaceNameListsProc(nsStringHashKey::KeyType aKey,
-                                           nsRefPtr<gfxFontFamily>& aFamilyEntry,
-                                           void* userArg)
+gfxPlatformFontList::ReadFaceNamesProc(nsStringHashKey::KeyType aKey,
+                                       nsRefPtr<gfxFontFamily>& aFamilyEntry,
+                                       void* userArg)
 {
-    gfxPlatformFontList *fc = static_cast<gfxPlatformFontList*>(userArg);
+    ReadFaceNamesData *data = static_cast<ReadFaceNamesData*>(userArg);
+    gfxPlatformFontList *fc = data->mFontList;
+
+    // when filtering, skip names that don't start with the filter character
+    if (data->mFirstChar && ToLowerCase(aKey.CharAt(0)) != data->mFirstChar) {
+        return PL_DHASH_NEXT;
+    }
+
     aFamilyEntry->ReadFaceNames(fc, fc->NeedFullnamePostscriptNames());
+
+    TimeDuration elapsed = TimeStamp::Now() - data->mStartTime;
+    if (elapsed.ToMilliseconds() > NAMELIST_TIMEOUT) {
+        data->mTimedOut = true;
+        return PL_DHASH_STOP;
+    }
     return PL_DHASH_NEXT;
+}
+
+gfxFontEntry*
+gfxPlatformFontList::FindFaceName(const nsAString& aFaceName)
+{
+    gfxFontEntry *lookup;
+
+    // lookup in name lookup tables, return null if not found
+    if (mExtraNames &&
+        ((lookup = mExtraNames->mPostscriptNames.GetWeak(aFaceName)) ||
+         (lookup = mExtraNames->mFullnames.GetWeak(aFaceName)))) {
+        return lookup;
+    }
+
+    return nullptr;
+}
+
+gfxFontEntry*
+gfxPlatformFontList::LookupInFaceNameLists(const nsAString& aFaceName)
+{
+    gfxFontEntry *lookup = nullptr;
+
+    // initialize facename lookup tables if needed
+    // note: this can terminate early or time out, in which case
+    //       mFaceNameListsInitialized remains false
+    if (!mFaceNameListsInitialized) {
+        lookup = SearchFamiliesForFaceName(aFaceName);
+        if (lookup) {
+            return lookup;
+        }
+    }
+
+    // lookup in name lookup tables, return null if not found
+    if (!(lookup = FindFaceName(aFaceName))) {
+        // names not completely initialized, so keep track of lookup misses
+        if (!mFaceNameListsInitialized) {
+            if (!mFaceNamesMissed) {
+                mFaceNamesMissed = new nsTHashtable<nsStringHashKey>(4);
+            }
+            mFaceNamesMissed->PutEntry(aFaceName);
+        }
+    }
+
+    return lookup;
 }
 
 void
@@ -301,6 +461,21 @@ gfxPlatformFontList::ResolveFontName(const nsAString& aFontName, nsAString& aRes
         return true;
     }
     return false;
+}
+
+static PLDHashOperator
+RebuildLocalFonts(nsPtrHashKey<gfxUserFontSet>* aKey,
+                  void* aClosure)
+{
+    aKey->GetKey()->RebuildLocalRules();
+    return PL_DHASH_NEXT;
+}
+
+void
+gfxPlatformFontList::UpdateFontList()
+{
+    InitFontList();
+    mUserFontSetList.EnumerateEntries(RebuildLocalFonts, nullptr);
 }
 
 struct FontListData {
@@ -432,7 +607,7 @@ gfxPlatformFontList::SystemFindFontForChar(const uint32_t aCh,
 #ifdef PR_LOGGING
     PRLogModuleInfo *log = gfxPlatform::GetLog(eGfxLog_textrun);
 
-    if (MOZ_UNLIKELY(log)) {
+    if (MOZ_UNLIKELY(PR_LOG_TEST(log, PR_LOG_WARNING))) {
         uint32_t unicodeRange = FindCharUnicodeRange(aCh);
         int32_t script = mozilla::unicode::GetScriptCode(aCh);
         PR_LOG(log, PR_LOG_WARNING,\
@@ -605,6 +780,13 @@ gfxPlatformFontList::FindFamily(const nsAString& aFamily)
         InitOtherFamilyNames();
         if ((familyEntry = mOtherFamilyNames.GetWeak(key)) != nullptr) {
             return CheckFamily(familyEntry);
+        } else if (!mOtherFamilyNamesInitialized) {
+            // localized family names load timed out, add name to list of
+            // names to check after localized names are loaded
+            if (!mOtherNamesMissed) {
+                mOtherNamesMissed = new nsTHashtable<nsStringHashKey>(4);
+            }
+            mOtherNamesMissed->PutEntry(key);
         }
     }
 
@@ -797,7 +979,56 @@ gfxPlatformFontList::LoadFontInfo()
     }
 #endif
 
+    if (done) {
+        mOtherFamilyNamesInitialized = true;
+        mFaceNameListsInitialized = true;
+    }
+
     return done;
+}
+
+struct LookupMissedFaceNamesData {
+    LookupMissedFaceNamesData(gfxPlatformFontList *aFontList)
+        : mFontList(aFontList), mFoundName(false) {}
+
+    gfxPlatformFontList *mFontList;
+    bool mFoundName;
+};
+
+/*static*/ PLDHashOperator
+gfxPlatformFontList::LookupMissedFaceNamesProc(nsStringHashKey *aKey,
+                                               void *aUserArg)
+{
+    LookupMissedFaceNamesData *data =
+        reinterpret_cast<LookupMissedFaceNamesData*>(aUserArg);
+
+    if (data->mFontList->FindFaceName(aKey->GetKey())) {
+        data->mFoundName = true;
+        return PL_DHASH_STOP;
+    }
+    return PL_DHASH_NEXT;
+}
+
+struct LookupMissedOtherNamesData {
+    LookupMissedOtherNamesData(gfxPlatformFontList *aFontList)
+        : mFontList(aFontList), mFoundName(false) {}
+
+    gfxPlatformFontList *mFontList;
+    bool mFoundName;
+};
+
+/*static*/ PLDHashOperator
+gfxPlatformFontList::LookupMissedOtherNamesProc(nsStringHashKey *aKey,
+                                                void *aUserArg)
+{
+    LookupMissedOtherNamesData *data =
+        reinterpret_cast<LookupMissedOtherNamesData*>(aUserArg);
+
+    if (data->mFontList->FindFamily(aKey->GetKey())) {
+        data->mFoundName = true;
+        return PL_DHASH_STOP;
+    }
+    return PL_DHASH_NEXT;
 }
 
 void 
@@ -805,23 +1036,47 @@ gfxPlatformFontList::CleanupLoader()
 {
     mFontFamiliesToLoad.Clear();
     mNumFamilies = 0;
+    bool rebuilt = false, forceReflow = false;
+
+    // if had missed face names that are now available, force reflow all
+    if (mFaceNamesMissed &&
+        mFaceNamesMissed->Count() != 0) {
+        LookupMissedFaceNamesData namedata(this);
+        mFaceNamesMissed->EnumerateEntries(LookupMissedFaceNamesProc, &namedata);
+        if (namedata.mFoundName) {
+            rebuilt = true;
+            mUserFontSetList.EnumerateEntries(RebuildLocalFonts, nullptr);
+        }
+        mFaceNamesMissed = nullptr;
+    }
+
+    if (mOtherNamesMissed) {
+        LookupMissedOtherNamesData othernamesdata(this);
+        mOtherNamesMissed->EnumerateEntries(LookupMissedOtherNamesProc,
+                                            &othernamesdata);
+        mOtherNamesMissed = nullptr;
+        if (othernamesdata.mFoundName) {
+            forceReflow = true;
+            ForceGlobalReflow();
+        }
+    }
 
 #ifdef PR_LOGGING
     if (LOG_FONTINIT_ENABLED() && mFontInfo) {
         LOG_FONTINIT(("(fontinit) fontloader load thread took %8.2f ms "
                       "%d families %d fonts %d cmaps "
-                      "%d facenames %d othernames",
+                      "%d facenames %d othernames %s %s",
                       mLoadTime.ToMilliseconds(),
                       mFontInfo->mLoadStats.families,
                       mFontInfo->mLoadStats.fonts,
                       mFontInfo->mLoadStats.cmaps,
                       mFontInfo->mLoadStats.facenames,
-                      mFontInfo->mLoadStats.othernames));
+                      mFontInfo->mLoadStats.othernames,
+                      (rebuilt ? "(userfont sets rebuilt)" : ""),
+                      (forceReflow ? "(global reflow)" : "")));
     }
 #endif
 
-    mOtherFamilyNamesInitialized = true;
-    mFaceNamesInitialized = true;
     gfxFontInfoLoader::CleanupLoader();
 }
 
@@ -837,6 +1092,15 @@ gfxPlatformFontList::GetPrefsAndStartLoader()
         std::max(1u, Preferences::GetUint(FONT_LOADER_INTERVAL_PREF));
 
     StartLoader(delay, interval);
+}
+
+void
+gfxPlatformFontList::ForceGlobalReflow()
+{
+    // modify a preference that will trigger reflow everywhere
+    static const char kPrefName[] = "font.internaluseonly.changed";
+    bool fontInternalChange = Preferences::GetBool(kPrefName, false);
+    Preferences::SetBool(kPrefName, !fontInternalChange);
 }
 
 // Support for memory reporting

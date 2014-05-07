@@ -7,6 +7,7 @@
 #define mozilla_dom_shadowroot_h__
 
 #include "mozilla/dom/DocumentFragment.h"
+#include "mozilla/dom/StyleSheetList.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsTHashtable.h"
@@ -52,7 +53,7 @@ public:
   void RemoveSheet(nsCSSStyleSheet* aSheet);
   bool ApplyAuthorStyles();
   void SetApplyAuthorStyles(bool aApplyAuthorStyles);
-  nsIDOMStyleSheetList* StyleSheets();
+  StyleSheetList* StyleSheets();
   HTMLShadowElement* GetShadowElement() { return mShadowElement; }
 
   /**
@@ -105,7 +106,7 @@ public:
   nsIContent* GetPoolHost() { return mPoolHost; }
   nsTArray<HTMLShadowElement*>& ShadowDescendants() { return mShadowDescendants; }
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   static bool IsPooledNode(nsIContent* aChild, nsIContent* aContainer,
                            nsIContent* aHost);
@@ -169,17 +170,22 @@ protected:
   bool mInsertionPointChanged;
 };
 
-class ShadowRootStyleSheetList : public nsIDOMStyleSheetList
+class ShadowRootStyleSheetList : public StyleSheetList
 {
 public:
   ShadowRootStyleSheetList(ShadowRoot* aShadowRoot);
   virtual ~ShadowRootStyleSheetList();
 
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_CLASS(ShadowRootStyleSheetList)
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(ShadowRootStyleSheetList, StyleSheetList)
 
-  // nsIDOMStyleSheetList
-  NS_DECL_NSIDOMSTYLESHEETLIST
+  virtual nsINode* GetParentObject() const MOZ_OVERRIDE
+  {
+    return mShadowRoot;
+  }
+
+  virtual uint32_t Length() MOZ_OVERRIDE;
+  virtual nsCSSStyleSheet* IndexedGetter(uint32_t aIndex, bool& aFound) MOZ_OVERRIDE;
 
 protected:
   nsRefPtr<ShadowRoot> mShadowRoot;

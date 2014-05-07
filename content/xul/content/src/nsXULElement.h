@@ -12,7 +12,7 @@
 #ifndef nsXULElement_h__
 #define nsXULElement_h__
 
-#include "js/Tracer.h"
+#include "js/TracingAPI.h"
 #include "mozilla/Attributes.h"
 #include "nsIDOMEvent.h"
 #include "nsIServiceManager.h"
@@ -54,6 +54,10 @@ class EventListenerManager;
 namespace css {
 class StyleRule;
 }
+}
+
+namespace JS {
+class SourceBufferHolder;
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -230,6 +234,12 @@ public:
                                  const nsCOMArray<nsINodeInfo> *aNodeInfos) MOZ_OVERRIDE;
     nsresult DeserializeOutOfLine(nsIObjectInputStream* aInput,
                                   nsXULPrototypeDocument* aProtoDoc);
+
+    nsresult Compile(JS::SourceBufferHolder& aSrcBuf,
+                     nsIURI* aURI, uint32_t aLineNo,
+                     nsIDocument* aDocument,
+                     nsXULPrototypeDocument* aProtoDoc,
+                     nsIOffThreadScriptReceiver *aOffThreadReceiver = nullptr);
 
     nsresult Compile(const char16_t* aText, int32_t aTextLength,
                      nsIURI* aURI, uint32_t aLineNo,
@@ -428,7 +438,7 @@ public:
     NS_DECL_NSIDOMXULELEMENT
 
     virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
-    virtual nsEventStates IntrinsicState() const MOZ_OVERRIDE;
+    virtual mozilla::EventStates IntrinsicState() const MOZ_OVERRIDE;
 
     nsresult GetFrameLoader(nsIFrameLoader** aFrameLoader);
     nsresult SwapFrameLoaders(nsIFrameLoaderOwner* aOtherOwner);
@@ -717,8 +727,7 @@ protected:
             !HasAttr(kNameSpaceID_None, nsGkAtoms::readonly);
     }
 
-    virtual JSObject* WrapNode(JSContext *aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+    virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
 
     void MaybeUpdatePrivateLifetime();
 };

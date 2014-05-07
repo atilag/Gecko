@@ -6,6 +6,8 @@
 #include "mozilla/a11y/SelectionManager.h"
 
 #include "DocAccessible-inl.h"
+#include "HyperTextAccessible.h"
+#include "HyperTextAccessible-inl.h"
 #include "nsAccessibilityService.h"
 #include "nsAccUtils.h"
 #include "nsCoreUtils.h"
@@ -14,13 +16,14 @@
 #include "nsIAccessibleTypes.h"
 #include "nsIDOMDocument.h"
 #include "nsIPresShell.h"
-#include "mozilla/Selection.h"
+#include "mozilla/dom/Selection.h"
 #include "mozilla/dom/Element.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
+using mozilla::dom::Selection;
 
-struct mozilla::a11y::SelData
+struct mozilla::a11y::SelData MOZ_FINAL
 {
   SelData(Selection* aSel, int32_t aReason) :
     mSel(aSel), mReason(aReason) {}
@@ -28,8 +31,18 @@ struct mozilla::a11y::SelData
   nsRefPtr<Selection> mSel;
   int16_t mReason;
 
-  NS_INLINE_DECL_REFCOUNTING(SelData);
+  NS_INLINE_DECL_REFCOUNTING(SelData)
+
+private:
+  // Private destructor, to discourage deletion outside of Release():
+  ~SelData() {}
 };
+
+SelectionManager::SelectionManager() :
+  mCaretOffset(-1), mAccWithCaret(nullptr)
+{
+
+}
 
 void
 SelectionManager::ClearControlSelectionListener()
@@ -139,10 +152,13 @@ SelectionManager::ProcessTextSelChangeEvent(AccEvent* aEvent)
   if (!caretCntr)
     return;
 
-  int32_t caretOffset = caretCntr->CaretOffset();
-  if (caretOffset != -1) {
+  Selection* selection = caretCntr->DOMSelection();
+  mCaretOffset = caretCntr->DOMPointToOffset(selection->GetFocusNode(),
+                                             selection->FocusOffset());
+  mAccWithCaret = caretCntr;
+  if (mCaretOffset != -1) {
     nsRefPtr<AccCaretMoveEvent> caretMoveEvent =
-      new AccCaretMoveEvent(caretCntr, caretOffset, aEvent->FromUserInput());
+      new AccCaretMoveEvent(caretCntr, mCaretOffset, aEvent->FromUserInput());
     nsEventShell::FireEvent(caretMoveEvent);
   }
 }

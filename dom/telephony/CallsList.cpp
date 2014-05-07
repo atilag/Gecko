@@ -13,9 +13,9 @@
 
 using namespace mozilla::dom;
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(CallsList,
-                                        mTelephony,
-                                        mGroup)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(CallsList,
+                                      mTelephony,
+                                      mGroup)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(CallsList)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(CallsList)
@@ -44,9 +44,9 @@ CallsList::GetParentObject() const
 }
 
 JSObject*
-CallsList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+CallsList::WrapObject(JSContext* aCx)
 {
-  return CallsListBinding::Wrap(aCx, aScope, this);
+  return CallsListBinding::Wrap(aCx, this);
 }
 
 already_AddRefed<TelephonyCall>

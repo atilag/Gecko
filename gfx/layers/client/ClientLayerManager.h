@@ -60,6 +60,10 @@ public:
                               EndTransactionFlags aFlags = END_DEFAULT);
 
   virtual LayersBackend GetBackendType() { return LayersBackend::LAYERS_CLIENT; }
+  virtual LayersBackend GetCompositorBackendType() MOZ_OVERRIDE
+  {
+    return AsShadowForwarder()->GetCompositorBackendType();
+  }
   virtual void GetBackendName(nsAString& name);
   virtual const char* Name() const { return "Client"; }
 
@@ -158,6 +162,8 @@ public:
   bool NeedsComposite() const { return mNeedsComposite; }
 
   virtual void Composite() MOZ_OVERRIDE;
+
+  virtual void DidComposite();
 
 protected:
   enum TransactionPhase {

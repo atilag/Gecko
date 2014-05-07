@@ -14,8 +14,8 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_1(GainNode, AudioNode,
-                                     mGain)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(GainNode, AudioNode,
+                                   mGain)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(GainNode)
 NS_INTERFACE_MAP_END_INHERITING(AudioNode)
@@ -101,6 +101,20 @@ public:
     }
   }
 
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    // Not owned:
+    // - mSource (probably)
+    // - mDestination (probably)
+    // - mGain - Internal ref owned by AudioNode
+    return AudioNodeEngine::SizeOfExcludingThis(aMallocSizeOf);
+  }
+
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
+
   AudioNodeStream* mSource;
   AudioNodeStream* mDestination;
   AudioParamTimeline mGain;
@@ -119,10 +133,24 @@ GainNode::GainNode(AudioContext* aContext)
   engine->SetSourceStream(static_cast<AudioNodeStream*> (mStream.get()));
 }
 
-JSObject*
-GainNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+size_t
+GainNode::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
-  return GainNodeBinding::Wrap(aCx, aScope, this);
+  size_t amount = AudioNode::SizeOfExcludingThis(aMallocSizeOf);
+  amount += mGain->SizeOfIncludingThis(aMallocSizeOf);
+  return amount;
+}
+
+size_t
+GainNode::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
+{
+  return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+}
+
+JSObject*
+GainNode::WrapObject(JSContext* aCx)
+{
+  return GainNodeBinding::Wrap(aCx, this);
 }
 
 void

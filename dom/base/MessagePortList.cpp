@@ -11,7 +11,7 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(MessagePortList, mOwner, mPorts)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(MessagePortList, mOwner, mPorts)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(MessagePortList)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(MessagePortList)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(MessagePortList)
@@ -20,9 +20,9 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(MessagePortList)
 NS_INTERFACE_MAP_END
 
 JSObject*
-MessagePortList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+MessagePortList::WrapObject(JSContext* aCx)
 {
-  return MessagePortListBinding::Wrap(aCx, aScope, this);
+  return MessagePortListBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

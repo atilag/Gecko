@@ -11,11 +11,9 @@
 #include "mozilla/layers/ImageBridgeChild.h"
 #include "mozilla/layers/GrallocTextureClient.h"
 #include "gfx2DGlue.h"
-#include "gfxImageSurface.h"
 #include "YCbCrUtils.h"                 // for YCbCr conversions
 
 #include <ColorConverter.h>
-#include <cutils/properties.h>
 #include <OMX_IVCommon.h>
 
 
@@ -48,14 +46,6 @@ struct GraphicBufferAutoUnlock {
   ~GraphicBufferAutoUnlock() { mGraphicBuffer->unlock(); }
 };
 
-static bool
-IsInEmulator()
-{
-  char propQemu[PROPERTY_VALUE_MAX];
-  property_get("ro.kernel.qemu", propQemu, "");
-  return !strncmp(propQemu, "1", 1);
-}
-
 GrallocImage::GrallocImage()
   : PlanarYCbCrImage(nullptr)
 {
@@ -77,7 +67,7 @@ GrallocImage::SetData(const Data& aData)
   mData = aData;
   mSize = aData.mPicSize;
 
-  if (IsInEmulator()) {
+  if (gfxPlatform::GetPlatform()->IsInGonkEmulator()) {
     // Emulator does not support HAL_PIXEL_FORMAT_YV12.
     return;
   }
@@ -193,99 +183,6 @@ ConvertYVU420SPToRGB565(void *aYData, uint32_t aYStride,
   }
 }
 
-already_AddRefed<gfxASurface>
-GrallocImage::DeprecatedGetAsSurface()
-{
-  if (!mTextureClient) {
-    return nullptr;
-  }
-  android::sp<GraphicBuffer> graphicBuffer =
-    mTextureClient->GetGraphicBuffer();
-
-  void *buffer;
-  int32_t rv =
-    graphicBuffer->lock(android::GraphicBuffer::USAGE_SW_READ_OFTEN, &buffer);
-
-  if (rv) {
-    NS_WARNING("Couldn't lock graphic buffer");
-    return nullptr;
-  }
-
-  GraphicBufferAutoUnlock unlock(graphicBuffer);
-
-  uint32_t format = graphicBuffer->getPixelFormat();
-  uint32_t omxFormat = 0;
-
-  for (int i = 0; sColorIdMap[i]; i += 2) {
-    if (sColorIdMap[i] == format) {
-      omxFormat = sColorIdMap[i + 1];
-      break;
-    }
-  }
-
-  if (!omxFormat) {
-    NS_WARNING("Unknown color format");
-    return nullptr;
-  }
-
-  nsRefPtr<gfxImageSurface> imageSurface =
-    new gfxImageSurface(gfx::ThebesIntSize(GetSize()), gfxImageFormat::RGB16_565);
-
-  uint32_t width = GetSize().width;
-  uint32_t height = GetSize().height;
-
-  if (format == HAL_PIXEL_FORMAT_YCrCb_420_SP_ADRENO) {
-    // The Adreno hardware decoder aligns image dimensions to a multiple of 32,
-    // so we have to account for that here
-    uint32_t alignedWidth = ALIGN(width, 32);
-    uint32_t alignedHeight = ALIGN(height, 32);
-    uint32_t uvOffset = ALIGN(alignedHeight * alignedWidth, 4096);
-    uint32_t uvStride = 2 * ALIGN(width / 2, 32);
-    uint8_t* buffer_as_bytes = static_cast<uint8_t*>(buffer);
-    ConvertYVU420SPToRGB565(buffer, alignedWidth,
-                            buffer_as_bytes + uvOffset, uvStride,
-                            imageSurface->Data(),
-                            width, height);
-
-    return imageSurface.forget();
-  } else if (format == HAL_PIXEL_FORMAT_YCrCb_420_SP) {
-    uint32_t uvOffset = height * width;
-    ConvertYVU420SPToRGB565(buffer, width,
-                            buffer + uvOffset, width,
-                            imageSurface->Data(),
-                            width, height);
-
-    return imageSurface.forget();
-  } else if (format == HAL_PIXEL_FORMAT_YV12) {
-    gfx::ConvertYCbCrToRGB(mData,
-                           gfx::ImageFormatToSurfaceFormat(imageSurface->Format()),
-                           mSize,
-                           imageSurface->Data(),
-                           imageSurface->Stride());
-    return imageSurface.forget();
-  }
-
-  android::ColorConverter colorConverter((OMX_COLOR_FORMATTYPE)omxFormat,
-                                         OMX_COLOR_Format16bitRGB565);
-
-  if (!colorConverter.isValid()) {
-    NS_WARNING("Invalid color conversion");
-    return nullptr;
-  }
-
-  rv = colorConverter.convert(buffer, width, height,
-                              0, 0, width - 1, height - 1 /* source crop */,
-                              imageSurface->Data(), width, height,
-                              0, 0, width - 1, height - 1 /* dest crop */);
-
-  if (rv) {
-    NS_WARNING("OMX color conversion failed");
-    return nullptr;
-  }
-
-  return imageSurface.forget();
-}
-
 TemporaryRef<gfx::SourceSurface>
 GrallocImage::GetAsSourceSurface()
 {
@@ -395,6 +292,15 @@ GrallocImage::GetAsSourceSurface()
   return surface;
 }
 
+android::sp<android::GraphicBuffer>
+GrallocImage::GetGraphicBuffer() const
+{
+  if (!mTextureClient) {
+    return nullptr;
+  }
+  return mTextureClient->GetGraphicBuffer();
+}
+
 void*
 GrallocImage::GetNativeBuffer()
 {
@@ -407,16 +313,6 @@ GrallocImage::GetNativeBuffer()
     return nullptr;
   }
   return graphicBuffer->getNativeBuffer();
-}
-
-SurfaceDescriptor
-GrallocImage::GetSurfaceDescriptor()
-{
-  SurfaceDescriptor desc;
-  if (mTextureClient && mTextureClient->ToSurfaceDescriptor(desc)) {
-    return desc;
-  }
-  return SurfaceDescriptor();
 }
 
 TextureClient*

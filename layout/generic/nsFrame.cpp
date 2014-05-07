@@ -34,7 +34,6 @@
 #include "nsLayoutUtils.h"
 
 #include "nsIDOMNode.h"
-#include "nsEventStateManager.h"
 #include "nsISelection.h"
 #include "nsISelectionPrivate.h"
 #include "nsFrameSelection.h"
@@ -49,9 +48,7 @@
 #include "nsStyleStructInlines.h"
 #include <algorithm>
 
-#ifdef IBMBIDI
 #include "nsBidiPresUtils.h"
-#endif
 
 // For triple-click pref
 #include "imgIContainer.h"
@@ -79,6 +76,8 @@
 
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
+#include "mozilla/EventStateManager.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/MouseEvents.h"
@@ -314,6 +313,11 @@ nsIFrame::FindCloserFrameForSelection(
                                          aCurrentBestFrame->mYDistance)) {
     aCurrentBestFrame->mFrame = this;
   }
+}
+
+void
+nsIFrame::ContentStatesChanged(mozilla::EventStates aStates)
+{
 }
 
 void
@@ -947,6 +951,11 @@ nsIFrame::GetUsedPadding() const
 int
 nsIFrame::GetSkipSides(const nsHTMLReflowState* aReflowState) const
 {
+  if (MOZ_UNLIKELY(StyleBorder()->mBoxDecorationBreak ==
+                     NS_STYLE_BOX_DECORATION_BREAK_CLONE)) {
+    return 0;
+  }
+
   // Convert the logical skip sides to physical sides using the frame's
   // writing mode
   WritingMode writingMode = GetWritingMode();
@@ -1271,7 +1280,8 @@ nsIFrame::OutsetBorderRadii(nscoord aRadii[8], const nsMargin &aOffsets)
 }
 
 /* virtual */ bool
-nsIFrame::GetBorderRadii(nscoord aRadii[8]) const
+nsIFrame::GetBorderRadii(const nsSize& aFrameSize, const nsSize& aBorderArea,
+                         int aSkipSides, nscoord aRadii[8]) const
 {
   if (IsThemed()) {
     // When we're themed, the native theme code draws the border and
@@ -1286,9 +1296,16 @@ nsIFrame::GetBorderRadii(nscoord aRadii[8]) const
     }
     return false;
   }
-  nsSize size = GetSize();
-  return ComputeBorderRadii(StyleBorder()->mBorderRadius, size, size,
-                            GetSkipSides(), aRadii);
+  return ComputeBorderRadii(StyleBorder()->mBorderRadius,
+                            aFrameSize, aBorderArea,
+                            aSkipSides, aRadii);
+}
+
+bool
+nsIFrame::GetBorderRadii(nscoord aRadii[8]) const
+{
+  nsSize sz = GetSize();
+  return GetBorderRadii(sz, sz, GetSkipSides(), aRadii);
 }
 
 bool
@@ -1923,22 +1940,16 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
       if (overflow.IsEmpty() && !Preserves3DChildren()) {
         return;
       }
-      // Trying to back-transform arbitrary rects gives us really weird results. I believe 
-      // this is from points that lie beyond the vanishing point. As a workaround we transform
-      // the overflow rect into screen space and compare in that coordinate system.
 
-      // Transform the overflow rect into screen space.
       nsPoint offset = aBuilder->ToReferenceFrame(this);
-      nsRect trans = nsDisplayTransform::TransformRect(overflow + offset, this, offset);
       dirtyRect += offset;
-      if (dirtyRect.Intersects(trans)) {
-        // If they intersect, we take our whole overflow rect. We could instead take the intersection
-        // and then reverse transform it but I doubt this extra work is worthwhile.
-        dirtyRect = overflow;
+
+      nsRect untransformedDirtyRect;
+      if (nsDisplayTransform::UntransformRect(dirtyRect, overflow, this, offset, &untransformedDirtyRect)) {
+        dirtyRect = untransformedDirtyRect;
       } else {
-        if (!Preserves3DChildren()) {
-          return;
-        }
+        NS_WARNING("Unable to untransform dirty rect!");
+        // This should only happen if the transform is singular, in which case nothing is visible anyway
         dirtyRect.SetEmpty();
       }
     }
@@ -3445,40 +3456,43 @@ static FrameTarget GetSelectionClosestFrameForLine(
   // Account for end of lines (any iterator from the block is valid)
   if (aLine == aParent->end_lines())
     return DrillDownToSelectionFrame(aParent, true, aFlags);
-  nsIFrame *closestFromLeft = nullptr, *closestFromRight = nullptr;
-  nsRect rect = aLine->mBounds;
-  nscoord closestLeft = rect.x, closestRight = rect.XMost();
+  nsIFrame *closestFromIStart = nullptr, *closestFromIEnd = nullptr;
+  nscoord closestIStart = aLine->IStart(), closestIEnd = aLine->IEnd();
+  WritingMode wm = aLine->mWritingMode;
+  LogicalPoint pt(wm, aPoint, aLine->mContainerWidth);
   for (int32_t n = aLine->GetChildCount(); n;
        --n, frame = frame->GetNextSibling()) {
     if (!SelfIsSelectable(frame, aFlags) || frame->IsEmpty())
       continue;
-    nsRect frameRect = frame->GetRect();
-    if (aPoint.x >= frameRect.x) {
-      if (aPoint.x < frameRect.XMost()) {
+    LogicalRect frameRect = LogicalRect(wm, frame->GetRect(),
+                                        aLine->mContainerWidth);
+    if (pt.I(wm) >= frameRect.IStart(wm)) {
+      if (pt.I(wm) < frameRect.IEnd(wm)) {
         return GetSelectionClosestFrameForChild(frame, aPoint, aFlags);
       }
-      if (frameRect.XMost() >= closestLeft) {
-        closestFromLeft = frame;
-        closestLeft = frameRect.XMost();
+      if (frameRect.IEnd(wm) >= closestIStart) {
+        closestFromIStart = frame;
+        closestIStart = frameRect.IEnd(wm);
       }
     } else {
-      if (frameRect.x <= closestRight) {
-        closestFromRight = frame;
-        closestRight = frameRect.x;
+      if (frameRect.IStart(wm) <= closestIEnd) {
+        closestFromIEnd = frame;
+        closestIEnd = frameRect.IStart(wm);
       }
     }
   }
-  if (!closestFromLeft && !closestFromRight) {
+  if (!closestFromIStart && !closestFromIEnd) {
     // We should only get here if there are no selectable frames on a line
     // XXX Do we need more elaborate handling here?
     return FrameTarget::Null();
   }
-  if (closestFromLeft &&
-      (!closestFromRight ||
-       (abs(aPoint.x - closestLeft) <= abs(aPoint.x - closestRight)))) {
-    return GetSelectionClosestFrameForChild(closestFromLeft, aPoint, aFlags);
+  if (closestFromIStart &&
+      (!closestFromIEnd ||
+       (abs(pt.I(wm) - closestIStart) <= abs(pt.I(wm) - closestIEnd)))) {
+    return GetSelectionClosestFrameForChild(closestFromIStart, aPoint,
+                                            aFlags);
   }
-  return GetSelectionClosestFrameForChild(closestFromRight, aPoint, aFlags);
+  return GetSelectionClosestFrameForChild(closestFromIEnd, aPoint, aFlags);
 }
 
 // This method is for the special handling we do for block frames; they're
@@ -3507,15 +3521,18 @@ static FrameTarget GetSelectionClosestFrameForBlock(nsIFrame* aFrame,
   }
   nsBlockFrame::line_iterator curLine = firstLine;
   nsBlockFrame::line_iterator closestLine = end;
+  // Convert aPoint into a LogicalPoint in the writing-mode of this block
+  WritingMode wm = curLine->mWritingMode;
+  LogicalPoint pt(wm, aPoint, curLine->mContainerWidth);
   while (curLine != end) {
-    // Check to see if our point lies with the line's Y bounds
-    nscoord y = aPoint.y - curLine->mBounds.y;
-    nscoord height = curLine->mBounds.height;
-    if (y >= 0 && y < height) {
+    // Check to see if our point lies within the line's block-direction bounds
+    nscoord BCoord = pt.B(wm) - curLine->BStart();
+    nscoord BSize = curLine->BSize();
+    if (BCoord >= 0 && BCoord < BSize) {
       closestLine = curLine;
       break; // We found the line; stop looking
     }
-    if (y < 0)
+    if (BCoord < 0)
       break;
     ++curLine;
   }
@@ -3544,7 +3561,7 @@ static FrameTarget GetSelectionClosestFrameForBlock(nsIFrame* aFrame,
         return DrillDownToSelectionFrame(aFrame, true, aFlags);
       closestLine = prevLine;
     } else { // Figure out which line is closer
-      if (aPoint.y - prevLine->mBounds.YMost() < nextLine->mBounds.y - aPoint.y)
+      if (pt.B(wm) - prevLine->BEnd() < nextLine->BStart() - pt.B(wm))
         closestLine = prevLine;
       else
         closestLine = nextLine;
@@ -4471,6 +4488,17 @@ nsIFrame::SetView(nsView* aView)
 {
   if (aView) {
     aView->SetFrame(this);
+
+#ifdef DEBUG
+    nsIAtom* frameType = GetType();
+    NS_ASSERTION(frameType == nsGkAtoms::scrollFrame ||
+                 frameType == nsGkAtoms::subDocumentFrame ||
+                 frameType == nsGkAtoms::listControlFrame ||
+                 frameType == nsGkAtoms::objectFrame ||
+                 frameType == nsGkAtoms::viewportFrame ||
+                 frameType == nsGkAtoms::menuPopupFrame,
+                 "Only specific frame types can have an nsView");
+#endif
 
     // Set a property on the frame
     Properties().Set(ViewProperty(), aView);
@@ -6534,8 +6562,7 @@ nsIFrame::PeekOffset(nsPeekOffsetStruct* aPos)
       uint32_t lineFlags;
       nsIFrame* baseFrame = nullptr;
       bool endOfLine = (eSelectEndLine == aPos->mAmount);
-      
-#ifdef IBMBIDI
+
       if (aPos->mVisual && PresContext()->BidiEnabled()) {
         bool lineIsRTL = it->GetDirection();
         bool isReordered;
@@ -6549,9 +6576,7 @@ nsIFrame::PeekOffset(nsPeekOffsetStruct* aPos)
           if ((embeddingLevel & 1) == !lineIsRTL)
             endOfLine = !endOfLine;
         }
-      } else
-#endif
-      {
+      } else {
         it->GetLine(thisLine, &firstFrame, &lineFrameCount, usedRect, &lineFlags);
 
         nsIFrame* frame = firstFrame;
@@ -6667,8 +6692,8 @@ nsFrame::BreakWordBetweenPunctuation(const PeekWordState* aState,
   }
   if (!Preferences::GetBool("layout.word_select.stop_at_punctuation")) {
     // When this pref is false, we never stop at a punctuation boundary unless
-    // it's after whitespace
-    return false;
+    // it's followed by whitespace (in the relevant direction).
+    return aWhitespaceAfter;
   }
   if (!aIsKeyboardSelect) {
     // mouse caret movement (e.g. word selection) always stops at every punctuation boundary
@@ -6763,7 +6788,6 @@ nsIFrame::GetFrameFromDirection(nsDirection aDirection, bool aVisual,
     bool atLineEdge;
     nsIFrame *firstFrame;
     nsIFrame *lastFrame;
-#ifdef IBMBIDI
     if (aVisual && presContext->BidiEnabled()) {
       bool lineIsRTL = it->GetDirection();
       bool isReordered;
@@ -6781,9 +6805,7 @@ nsIFrame::GetFrameFromDirection(nsDirection aDirection, bool aVisual,
       } else {
         atLineEdge = true;
       }
-    } else
-#endif
-    {
+    } else {
       nsRect  nonUsedRect;
       int32_t lineFrameCount;
       uint32_t lineFlags;
@@ -6839,14 +6861,12 @@ nsIFrame::GetFrameFromDirection(nsDirection aDirection, bool aVisual,
 
   *aOutOffset = (aDirection == eDirNext) ? 0 : -1;
 
-#ifdef IBMBIDI
   if (aVisual) {
     uint8_t newLevel = NS_GET_EMBEDDING_LEVEL(traversedFrame);
     uint8_t newBaseLevel = NS_GET_BASE_LEVEL(traversedFrame);
     if ((newLevel & 1) != (newBaseLevel & 1)) // The new frame is reverse-direction, go to the other end
       *aOutOffset = -1 - *aOutOffset;
   }
-#endif
   *aOutFrame = traversedFrame;
   return NS_OK;
 }
@@ -7176,18 +7196,28 @@ nsIFrame::FinishAndStoreOverflow(nsOverflowAreas& aOverflowAreas,
                "Don't call - overflow rects not maintained on these SVG frames");
 
   nsRect bounds(nsPoint(0, 0), aNewSize);
-  // Store the passed in overflow area if we are a preserve-3d frame,
-  // and it's not just the frame bounds.
-  if ((Preserves3D() || HasPerspective()) && (!aOverflowAreas.VisualOverflow().IsEqualEdges(bounds) ||
-                        !aOverflowAreas.ScrollableOverflow().IsEqualEdges(bounds))) {
-    nsOverflowAreas* initial =
-      static_cast<nsOverflowAreas*>(Properties().Get(nsIFrame::InitialOverflowProperty()));
-    if (!initial) {
-      Properties().Set(nsIFrame::InitialOverflowProperty(),
-                       new nsOverflowAreas(aOverflowAreas));
-    } else if (initial != &aOverflowAreas) {
-      *initial = aOverflowAreas;
+  // Store the passed in overflow area if we are a preserve-3d frame or we have
+  // a transform, and it's not just the frame bounds.
+  if (Preserves3D() || HasPerspective() || IsTransformed()) {
+    if (!aOverflowAreas.VisualOverflow().IsEqualEdges(bounds) ||
+        !aOverflowAreas.ScrollableOverflow().IsEqualEdges(bounds)) {
+
+      nsOverflowAreas* initial =
+        static_cast<nsOverflowAreas*>(Properties().Get(nsIFrame::InitialOverflowProperty()));
+      if (!initial) {
+        Properties().Set(nsIFrame::InitialOverflowProperty(),
+                         new nsOverflowAreas(aOverflowAreas));
+      } else if (initial != &aOverflowAreas) {
+        *initial = aOverflowAreas;
+      }
     }
+#ifdef DEBUG
+    Properties().Set(nsIFrame::DebugInitialOverflowPropertyApplied(), nullptr);
+#endif
+  } else {
+#ifdef DEBUG
+  Properties().Delete(nsIFrame::DebugInitialOverflowPropertyApplied());
+#endif
   }
 
   // This is now called FinishAndStoreOverflow() instead of 

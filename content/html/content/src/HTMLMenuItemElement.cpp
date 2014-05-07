@@ -172,8 +172,8 @@ HTMLMenuItemElement::~HTMLMenuItemElement()
 }
 
 
-NS_IMPL_ISUPPORTS_INHERITED1(HTMLMenuItemElement, nsGenericHTMLElement,
-                             nsIDOMHTMLMenuItemElement)
+NS_IMPL_ISUPPORTS_INHERITED(HTMLMenuItemElement, nsGenericHTMLElement,
+                            nsIDOMHTMLMenuItemElement)
 
 //NS_IMPL_ELEMENT_CLONE(HTMLMenuItemElement)
 nsresult
@@ -485,9 +485,9 @@ HTMLMenuItemElement::InitChecked()
 }
 
 JSObject*
-HTMLMenuItemElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+HTMLMenuItemElement::WrapNode(JSContext* aCx)
 {
-  return HTMLMenuItemElementBinding::Wrap(aCx, aScope, this);
+  return HTMLMenuItemElementBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/EventDispatcher.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/dom/HTMLOptGroupElement.h"
 #include "mozilla/dom/HTMLOptGroupElementBinding.h"
 #include "mozilla/dom/HTMLSelectElement.h" // SafeOptionListMutation
@@ -11,7 +12,6 @@
 #include "nsStyleConsts.h"
 #include "nsIFrame.h"
 #include "nsIFormControlFrame.h"
-#include "nsEventStates.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(OptGroup)
 
@@ -36,8 +36,8 @@ HTMLOptGroupElement::~HTMLOptGroupElement()
 }
 
 
-NS_IMPL_ISUPPORTS_INHERITED1(HTMLOptGroupElement, nsGenericHTMLElement,
-                             nsIDOMHTMLOptGroupElement)
+NS_IMPL_ISUPPORTS_INHERITED(HTMLOptGroupElement, nsGenericHTMLElement,
+                            nsIDOMHTMLOptGroupElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLOptGroupElement)
 
@@ -125,10 +125,10 @@ HTMLOptGroupElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
                                             aNotify);
 }
 
-nsEventStates
+EventStates
 HTMLOptGroupElement::IntrinsicState() const
 {
-  nsEventStates state = nsGenericHTMLElement::IntrinsicState();
+  EventStates state = nsGenericHTMLElement::IntrinsicState();
 
   if (HasAttr(kNameSpaceID_None, nsGkAtoms::disabled)) {
     state |= NS_EVENT_STATE_DISABLED;
@@ -142,9 +142,9 @@ HTMLOptGroupElement::IntrinsicState() const
 }
 
 JSObject*
-HTMLOptGroupElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+HTMLOptGroupElement::WrapNode(JSContext* aCx)
 {
-  return HTMLOptGroupElementBinding::Wrap(aCx, aScope, this);
+  return HTMLOptGroupElementBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

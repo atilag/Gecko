@@ -53,11 +53,12 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=821850
           is(typeof bound.wrappedJSObject.unexposedProperty, 'undefined',
              "Unexposed property should not be defined in content");
 
-          // Check that here document.QueryInterface works
-          ok("QueryInterface" in document,
-             "Should have a document.QueryInterface here");
-          is(document.QueryInterface(Components.interfaces.nsIDOMDocument),
-             document, "Should be able to QI the document");
+          // Check that here HTMLImageElement.QueryInterface works
+          var img = document.querySelector("img");
+          ok("QueryInterface" in img,
+             "Should have a img.QueryInterface here");
+          is(img.QueryInterface(Components.interfaces.nsIImageLoadingContent),
+             img, "Should be able to QI the image");
 
           // Make sure standard constructors work right in the presence of
           // sandboxPrototype and Xray-resolved constructors.
@@ -198,18 +199,6 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=821850
     checkMayTamper(proto, 'prop', "XBL Proto Prop");
     checkMayTamper(proto, 'primitiveField', "XBL Field Accessor");
 
-    // As above, check that content can do what it wants with the prototype's
-    // property on the global.
-    var protoName, count = 0;
-    for (var k of Object.getOwnPropertyNames(window)) {
-      if (!/testBinding/.exec(k))
-        continue;
-      count++;
-      protoName = k;
-    }
-    is(count, 1, "Should be exactly one prototype object");
-    checkMayTamper(window, protoName, "XBL prototype prop on window");
-
     // Tamper with the derived object. This doesn't affect the XBL scope thanks
     // to Xrays.
     bound.method = function() { return "heh"; };
@@ -301,6 +290,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=821850
 <div id="content">
   <div id="bound">Bound element</div>
   <div id="bound2">Bound element</div>
+  <img/>
 </div>
 <pre id="test">
 </pre>

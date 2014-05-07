@@ -463,16 +463,6 @@ nsStyleAnimation::ComputeDistance(nsCSSProperty aProperty,
       return true;
     }
     case eUnit_Float: {
-      // Special case for flex-grow and flex-shrink: animations are
-      // disallowed between 0 and other values.
-      if ((aProperty == eCSSProperty_flex_grow ||
-           aProperty == eCSSProperty_flex_shrink) &&
-          (aStartValue.GetFloatValue() == 0.0f ||
-           aEndValue.GetFloatValue() == 0.0f) &&
-          aStartValue.GetFloatValue() != aEndValue.GetFloatValue()) {
-        return false;
-      }
-
       float startFloat = aStartValue.GetFloatValue();
       float endFloat = aEndValue.GetFloatValue();
       aDistance = Abs(double(endFloat) - double(startFloat));
@@ -1948,16 +1938,6 @@ nsStyleAnimation::AddWeighted(nsCSSProperty aProperty,
       return true;
     }
     case eUnit_Float: {
-      // Special case for flex-grow and flex-shrink: animations are
-      // disallowed between 0 and other values.
-      if ((aProperty == eCSSProperty_flex_grow ||
-           aProperty == eCSSProperty_flex_shrink) &&
-          (aValue1.GetFloatValue() == 0.0f ||
-           aValue2.GetFloatValue() == 0.0f) &&
-          aValue1.GetFloatValue() != aValue2.GetFloatValue()) {
-        return false;
-      }
-
       aResultValue.SetFloatValue(RestrictValue(aProperty,
         aCoeff1 * aValue1.GetFloatValue() +
         aCoeff2 * aValue2.GetFloatValue()));
@@ -3731,9 +3711,9 @@ nsStyleAnimation::Value::SetAndAdoptCSSValueListValue(
 {
   FreeValue();
   NS_ABORT_IF_FALSE(IsCSSValueListUnit(aUnit), "bad unit");
-  NS_ABORT_IF_FALSE(aUnit != eUnit_Dasharray || aUnit != eUnit_Filter ||
+  NS_ABORT_IF_FALSE(aUnit == eUnit_Shadow || aUnit == eUnit_Filter ||
                     aValueList != nullptr,
-                    "dasharrays and filters may not be null");
+                    "value lists other than shadows and filters may not be null");
   mUnit = aUnit;
   mValue.mCSSValueList = aValueList; // take ownership
 }

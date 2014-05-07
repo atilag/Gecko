@@ -57,6 +57,8 @@ public:
                            const SerializedLoadContext& aSerialized,
                            nsCOMPtr<nsILoadContext> &aResult);
 
+  virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+
   virtual void
   CloneManagees(ProtocolBase* aSource,
               mozilla::ipc::ProtocolCloneContext* aCtx) MOZ_OVERRIDE;
@@ -143,6 +145,15 @@ protected:
                 mozilla::ipc::ProtocolCloneContext* aCtx) MOZ_OVERRIDE;
   virtual PRtspControllerParent* AllocPRtspControllerParent() MOZ_OVERRIDE;
   virtual bool DeallocPRtspControllerParent(PRtspControllerParent*) MOZ_OVERRIDE;
+
+  virtual PRtspChannelParent*
+    AllocPRtspChannelParent(const RtspChannelConnectArgs& aArgs)
+                            MOZ_OVERRIDE;
+  virtual bool
+    RecvPRtspChannelConstructor(PRtspChannelParent* aActor,
+                                const RtspChannelConnectArgs& aArgs)
+                                MOZ_OVERRIDE;
+  virtual bool DeallocPRtspChannelParent(PRtspChannelParent*) MOZ_OVERRIDE;
 
   virtual PChannelDiverterParent*
   AllocPChannelDiverterParent(const ChannelDiverterArgs& channel) MOZ_OVERRIDE;

@@ -17,7 +17,8 @@ const Runtime = require("sdk/system/runtime");
 const Self = require("sdk/self");
 const URL = require("sdk/url");
 const Subprocess = require("subprocess");
-const { Promise } = Cu.import("resource://gre/modules/Promise.jsm", {});
+const { Promise: promise } = Cu.import("resource://gre/modules/Promise.jsm", {});
+const Prefs = require("sdk/simple-prefs").prefs;
 
 const { rootURI: ROOT_URI } = require('@loader/options');
 const PROFILE_URL = ROOT_URI + "profile/";
@@ -112,7 +113,7 @@ exports.SimulatorProcess = Class({
 
   // request a b2g instance kill
   kill: function() {
-    let deferred = Promise.defer();
+    let deferred = promise.defer();
     if (this.process) {
       this.once("exit", (exitCode) => {
         this.shuttingDown = false;
@@ -125,7 +126,7 @@ exports.SimulatorProcess = Class({
       }
       return deferred.promise;
     } else {
-      return Promise.resolve(undefined);
+      return promise.resolve(undefined);
     }
   },
 
@@ -136,7 +137,15 @@ exports.SimulatorProcess = Class({
 
   // compute current b2g file handle
   get b2gExecutable() {
-    if (this._executable) return this._executable;
+    if (this._executable) {
+      return this._executable;
+    }
+
+    if (Prefs.customRuntime) {
+      this._executable = Prefs.customRuntime;
+      this._executableFilename = "Custom runtime";
+      return this._executable;
+    }
 
     let bin = URL.toFilename(BIN_URL);
     let executables = {
@@ -145,8 +154,10 @@ exports.SimulatorProcess = Class({
       Linux: "b2g-bin",
     };
 
-    console.log("bin url: "+bin+"/"+executables[Runtime.OS]);
-    let path = bin + "/" + executables[Runtime.OS];
+    let path = bin;
+    path += Runtime.OS == "WINNT" ? "\\" : "/";
+    path += executables[Runtime.OS];
+    console.log("simulator path: " + path);
 
     let executable = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
     executable.initWithPath(path);
@@ -166,9 +177,9 @@ exports.SimulatorProcess = Class({
   get b2gArguments() {
     let args = [];
 
-    let profile = URL.toFilename(PROFILE_URL);
+    let profile = Prefs.gaiaProfile || URL.toFilename(PROFILE_URL);
     args.push("-profile", profile);
-    Cu.reportError(profile);
+    console.log("profile", profile);
 
     // NOTE: push dbgport option on the b2g-desktop commandline
     args.push("-start-debugger-server", "" + this.remoteDebuggerPort);

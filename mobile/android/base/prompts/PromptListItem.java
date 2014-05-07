@@ -2,6 +2,7 @@ package org.mozilla.gecko.prompts;
 
 import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.GeckoAppShell;
+import org.mozilla.gecko.widget.GeckoActionProvider;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -41,7 +42,8 @@ public class PromptListItem {
         if (obj != null) {
             showAsActions = true;
             String uri = obj.isNull("uri") ? "" : obj.optString("uri");
-            String type = obj.isNull("type") ? "text/html" : obj.optString("type", "text/html");
+            String type = obj.isNull("type") ? GeckoActionProvider.DEFAULT_MIME_TYPE :
+                                               obj.optString("type", GeckoActionProvider.DEFAULT_MIME_TYPE);
             mIntent = GeckoAppShell.getShareIntent(GeckoAppShell.getContext(), uri, type, "");
             isParent = true;
         } else {
@@ -51,12 +53,15 @@ public class PromptListItem {
             isParent = aObject.optBoolean("isParent") || aObject.optBoolean("menu");
         }
 
-        BitmapUtils.getDrawable(GeckoAppShell.getContext(), aObject.optString("icon"), new BitmapUtils.BitmapLoader() {
-            @Override
-            public void onBitmapFound(Drawable d) {
-                mIcon = d;
-            }
-        });
+        final String iconStr = aObject.optString("icon");
+        if (iconStr != null) {
+            BitmapUtils.getDrawable(GeckoAppShell.getContext(), iconStr, new BitmapUtils.BitmapLoader() {
+                    @Override
+                    public void onBitmapFound(Drawable d) {
+                        mIcon = d;
+                    }
+                });
+        }
     }
 
     public void setIntent(Intent i) {

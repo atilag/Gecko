@@ -685,7 +685,9 @@ const JSClass ThreadLocalJSRuntime::sGlobalClass = {
   "IndexedDBTransactionThreadGlobal",
   JSCLASS_GLOBAL_FLAGS,
   JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
-  JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub
+  JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub,
+  nullptr, nullptr, nullptr, nullptr,
+  JS_GlobalObjectTraceHook
 };
 
 inline
@@ -778,11 +780,7 @@ public:
     nsRefPtr<IDBFileHandle> fileHandle = IDBFileHandle::Create(aDatabase,
       aData.name, aData.type, fileInfo.forget());
 
-    JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
-    if (!global) {
-      return nullptr;
-    }
-    return fileHandle->WrapObject(aCx, global);
+    return fileHandle->WrapObject(aCx);
   }
 
   static JSObject* CreateAndWrapBlobOrFile(JSContext* aCx,
@@ -832,16 +830,14 @@ public:
       }
 
       JS::Rooted<JS::Value> wrappedBlob(aCx);
-      JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
-      rv = nsContentUtils::WrapNative(aCx, global, domBlob,
-                                      &NS_GET_IID(nsIDOMBlob),
+      rv = nsContentUtils::WrapNative(aCx, domBlob, &NS_GET_IID(nsIDOMBlob),
                                       &wrappedBlob);
       if (NS_FAILED(rv)) {
         NS_WARNING("Failed to wrap native!");
         return nullptr;
       }
 
-      return JSVAL_TO_OBJECT(wrappedBlob);
+      return wrappedBlob.toObjectOrNull();
     }
 
     nsCOMPtr<nsIDOMFile> domFile;
@@ -859,16 +855,14 @@ public:
     }
 
     JS::Rooted<JS::Value> wrappedFile(aCx);
-    JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
-    rv = nsContentUtils::WrapNative(aCx, global, domFile,
-                                    &NS_GET_IID(nsIDOMFile),
+    rv = nsContentUtils::WrapNative(aCx, domFile, &NS_GET_IID(nsIDOMFile),
                                     &wrappedFile);
     if (NS_FAILED(rv)) {
       NS_WARNING("Failed to wrap native!");
       return nullptr;
     }
 
-    return JSVAL_TO_OBJECT(wrappedFile);
+    return wrappedFile.toObjectOrNull();
   }
 };
 
@@ -913,11 +907,8 @@ public:
     JS::Rooted<JSString*> type(aCx,
       JS_NewUCStringCopyN(aCx, aData.type.get(), aData.type.Length()));
     if (!type ||
-        !JS_DefineProperty(aCx, obj, "size",
-                           JS_NumberValue((double)aData.size),
-                           nullptr, nullptr, 0) ||
-        !JS_DefineProperty(aCx, obj, "type", STRING_TO_JSVAL(type),
-                           nullptr, nullptr, 0)) {
+        !JS_DefineProperty(aCx, obj, "size", double(aData.size), 0) ||
+        !JS_DefineProperty(aCx, obj, "type", type, 0)) {
       return nullptr;
     }
 
@@ -930,10 +921,8 @@ public:
     JS::Rooted<JSObject*> date(aCx,
       JS_NewDateObjectMsec(aCx, aData.lastModifiedDate));
     if (!name || !date ||
-        !JS_DefineProperty(aCx, obj, "name", STRING_TO_JSVAL(name),
-                           nullptr, nullptr, 0) ||
-        !JS_DefineProperty(aCx, obj, "lastModifiedDate", OBJECT_TO_JSVAL(date),
-                           nullptr, nullptr, 0)) {
+        !JS_DefineProperty(aCx, obj, "name", name, 0) ||
+        !JS_DefineProperty(aCx, obj, "lastModifiedDate", date, 0)) {
       return nullptr;
     }
 
@@ -1341,6 +1330,9 @@ IDBObjectStore::DeserializeValue(JSContext* aCx,
   JSStructuredCloneCallbacks callbacks = {
     IDBObjectStore::StructuredCloneReadCallback<MainThreadDeserializationTraits>,
     nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
     nullptr
   };
 
@@ -1362,6 +1354,9 @@ IDBObjectStore::SerializeValue(JSContext* aCx,
   JSStructuredCloneCallbacks callbacks = {
     nullptr,
     StructuredCloneWriteCallback,
+    nullptr,
+    nullptr,
+    nullptr,
     nullptr
   };
 
@@ -1842,7 +1837,7 @@ IDBObjectStore::GetAddInfo(JSContext* aCx,
 
   // Return DATA_ERR if a key was passed in and this objectStore uses inline
   // keys.
-  if (!JSVAL_IS_VOID(aKeyVal) && HasValidKeyPath()) {
+  if (!aKeyVal.isUndefined() && HasValidKeyPath()) {
     return NS_ERROR_DOM_INDEXEDDB_DATA_ERR;
   }
 
@@ -2610,9 +2605,9 @@ NS_IMPL_CYCLE_COLLECTING_ADDREF(IDBObjectStore)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(IDBObjectStore)
 
 JSObject*
-IDBObjectStore::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+IDBObjectStore::WrapObject(JSContext* aCx)
 {
-  return IDBObjectStoreBinding::Wrap(aCx, aScope, this);
+  return IDBObjectStoreBinding::Wrap(aCx, this);
 }
 
 JS::Value
@@ -2620,14 +2615,14 @@ IDBObjectStore::GetKeyPath(JSContext* aCx, ErrorResult& aRv)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  if (!JSVAL_IS_VOID(mCachedKeyPath)) {
+  if (!mCachedKeyPath.isUndefined()) {
     return mCachedKeyPath;
   }
 
   aRv = GetKeyPath().ToJSVal(aCx, mCachedKeyPath);
   ENSURE_SUCCESS(aRv, JSVAL_VOID);
 
-  if (JSVAL_IS_GCTHING(mCachedKeyPath)) {
+  if (mCachedKeyPath.isGCThing()) {
     mozilla::HoldJSObjects(this);
     mRooted = true;
   }
@@ -2991,7 +2986,7 @@ CopyData(nsIInputStream* aInputStream, nsIOutputStream* aOutputStream)
 
     uint32_t numRead;
     rv = aInputStream->Read(copyBuffer, sizeof(copyBuffer), &numRead);
-    IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+    NS_ENSURE_SUCCESS(rv, rv);
 
     if (!numRead) {
       break;
@@ -2999,16 +2994,16 @@ CopyData(nsIInputStream* aInputStream, nsIOutputStream* aOutputStream)
 
     uint32_t numWrite;
     rv = aOutputStream->Write(copyBuffer, numRead, &numWrite);
-    IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-    if (numWrite < numRead) {
-      // Must have hit the quota limit.
-      return NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR;
+    if (rv == NS_ERROR_FILE_NO_DEVICE_SPACE) {
+      rv = NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR;
     }
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    NS_ENSURE_TRUE(numWrite == numRead, NS_ERROR_FAILURE);
   } while (true);
 
   rv = aOutputStream->Flush();
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
 }
@@ -3251,6 +3246,11 @@ AddHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
         IDB_ENSURE_TRUE(outputStream, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
         rv = CopyData(inputStream, outputStream);
+        if (NS_FAILED(rv) &&
+            NS_ERROR_GET_MODULE(rv) != NS_ERROR_MODULE_DOM_INDEXEDDB) {
+          IDB_REPORT_INTERNAL_ERR();
+          rv = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+        }
         NS_ENSURE_SUCCESS(rv, rv);
 
         cloneFile.mFile->AddFileInfo(fileInfo);
@@ -4521,6 +4521,9 @@ CreateIndexHelper::InsertDataFromObjectStore(mozIStorageConnection* aConnection)
 
     JSStructuredCloneCallbacks callbacks = {
       IDBObjectStore::StructuredCloneReadCallback<CreateIndexDeserializationTraits>,
+      nullptr,
+      nullptr,
+      nullptr,
       nullptr,
       nullptr
     };

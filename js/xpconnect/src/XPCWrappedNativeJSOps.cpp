@@ -1,7 +1,6 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=78:
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -122,8 +121,8 @@ GetDoubleWrappedJSObject(XPCCallContext& ccx, XPCWrappedNative* wrapper)
 
             RootedValue val(ccx);
             if (JS_GetPropertyById(ccx, mainObj, id, &val) &&
-                !JSVAL_IS_PRIMITIVE(val)) {
-                obj = JSVAL_TO_OBJECT(val);
+                !val.isPrimitive()) {
+                obj = val.toObjectOrNull();
             }
         }
     }
@@ -249,9 +248,8 @@ DefinePropertyIfFound(XPCCallContext& ccx,
                 AutoResolveName arn(ccx, id);
                 if (resolved)
                     *resolved = true;
-                return JS_DefinePropertyById(ccx, obj, id,
-                                             OBJECT_TO_JSVAL(JS_GetFunctionObject(fun)),
-                                             nullptr, nullptr,
+                RootedObject value(ccx, JS_GetFunctionObject(fun));
+                return JS_DefinePropertyById(ccx, obj, id, value,
                                              propFlags & ~JSPROP_ENUMERATE);
             }
         }
@@ -278,8 +276,7 @@ DefinePropertyIfFound(XPCCallContext& ccx,
                 AutoResolveName arn(ccx, id);
                 if (resolved)
                     *resolved = true;
-                return JS_DefinePropertyById(ccx, obj, id, OBJECT_TO_JSVAL(jso),
-                                             nullptr, nullptr,
+                return JS_DefinePropertyById(ccx, obj, id, jso,
                                              propFlags & ~JSPROP_ENUMERATE);
             } else if (NS_FAILED(rv) && rv != NS_ERROR_NO_INTERFACE) {
                 return Throw(rv, ccx);
@@ -314,10 +311,9 @@ DefinePropertyIfFound(XPCCallContext& ccx,
             AutoResolveName arn(ccx, id);
             if (resolved)
                 *resolved = true;
-            return JS_DefinePropertyById(ccx, obj, id, JSVAL_VOID,
-                                         JS_DATA_TO_FUNC_PTR(JSPropertyOp,
-                                                             funobj.get()),
-                                         nullptr, propFlags);
+            return JS_DefinePropertyById(ccx, obj, id, UndefinedHandleValue, propFlags,
+                                         JS_DATA_TO_FUNC_PTR(JSPropertyOp, funobj.get()),
+                                         nullptr);
         }
 
         if (resolved)
@@ -339,8 +335,7 @@ DefinePropertyIfFound(XPCCallContext& ccx,
             AutoResolveName arn(ccx, id);
             if (resolved)
                 *resolved = true;
-            return JS_DefinePropertyById(ccx, obj, id, OBJECT_TO_JSVAL(jso),
-                                         nullptr, nullptr,
+            return JS_DefinePropertyById(ccx, obj, id, jso,
                                          propFlags & ~JSPROP_ENUMERATE);
         }
         if (resolved)
@@ -354,8 +349,7 @@ DefinePropertyIfFound(XPCCallContext& ccx,
         if (resolved)
             *resolved = true;
         return member->GetConstantValue(ccx, iface, val.address()) &&
-               JS_DefinePropertyById(ccx, obj, id, val, nullptr, nullptr,
-                                     propFlags);
+               JS_DefinePropertyById(ccx, obj, id, val, propFlags);
     }
 
     if (id == rt->GetStringID(XPCJSRuntime::IDX_TO_STRING) ||
@@ -373,8 +367,7 @@ DefinePropertyIfFound(XPCCallContext& ccx,
         AutoResolveName arn(ccx, id);
         if (resolved)
             *resolved = true;
-        return JS_DefinePropertyById(ccx, obj, id, funval, nullptr, nullptr,
-                                     propFlags);
+        return JS_DefinePropertyById(ccx, obj, id, funval, propFlags);
     }
 
     // else...
@@ -382,7 +375,7 @@ DefinePropertyIfFound(XPCCallContext& ccx,
     MOZ_ASSERT(member->IsAttribute(), "way broken!");
 
     propFlags |= JSPROP_GETTER | JSPROP_SHARED;
-    JSObject* funobj = JSVAL_TO_OBJECT(funval);
+    JSObject* funobj = funval.toObjectOrNull();
     JSPropertyOp getter = JS_DATA_TO_FUNC_PTR(JSPropertyOp, funobj);
     JSStrictPropertyOp setter;
     if (member->IsWritableAttribute()) {
@@ -397,8 +390,7 @@ DefinePropertyIfFound(XPCCallContext& ccx,
     if (resolved)
         *resolved = true;
 
-    return JS_DefinePropertyById(ccx, obj, id, JSVAL_VOID, getter, setter,
-                                 propFlags);
+    return JS_DefinePropertyById(ccx, obj, id, UndefinedHandleValue, propFlags, getter, setter);
 }
 
 /***************************************************************************/
@@ -488,7 +480,7 @@ XPC_WN_Shared_Convert(JSContext *cx, HandleObject obj, JSType type, MutableHandl
                 if (!XPCWrappedNative::CallMethod(ccx))
                     return false;
 
-                if (JSVAL_IS_PRIMITIVE(vp))
+                if (vp.isPrimitive())
                     return true;
             }
 
@@ -592,8 +584,8 @@ MarkWrappedNative(JSTracer *trc, JSObject *obj)
         wrapper->TraceInside(trc);
 }
 
-static void
-XPC_WN_NoHelper_Trace(JSTracer *trc, JSObject *obj)
+/* static */ void
+XPCWrappedNative::Trace(JSTracer *trc, JSObject *obj)
 {
     MarkWrappedNative(trc, obj);
 }
@@ -678,7 +670,7 @@ const XPCWrappedNativeJSClass XPC_WN_NoHelper_JSClass = {
     nullptr,                         // call
     nullptr,                         // construct
     nullptr,                         // hasInstance
-    XPC_WN_NoHelper_Trace,          // trace
+    XPCWrappedNative::Trace,         // trace
     JS_NULL_CLASS_SPEC,
 
     // ClassExtension
@@ -873,7 +865,7 @@ XPC_WN_Helper_Finalize(js::FreeOp *fop, JSObject *obj)
 }
 
 static bool
-XPC_WN_Helper_NewResolve(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
+XPC_WN_Helper_NewResolve(JSContext *cx, HandleObject obj, HandleId id,
                          MutableHandleObject objp)
 {
     nsresult rv = NS_OK;
@@ -893,7 +885,7 @@ XPC_WN_Helper_NewResolve(JSContext *cx, HandleObject obj, HandleId id, unsigned 
         if (allowPropMods)
             oldResolvingWrapper = ccx.SetResolvingWrapper(wrapper);
 
-        rv = si->GetCallback()->NewResolve(wrapper, cx, obj, id, flags,
+        rv = si->GetCallback()->NewResolve(wrapper, cx, obj, id,
                                            obj2FromScriptable.address(), &retval);
 
         if (allowPropMods)
@@ -1208,7 +1200,10 @@ XPCNativeScriptableShared::PopulateJSClass()
     if (mFlags.WantHasInstance())
         mJSClass.base.hasInstance = XPC_WN_Helper_HasInstance;
 
-    mJSClass.base.trace = XPC_WN_NoHelper_Trace;
+    if (mFlags.IsGlobalObject())
+        mJSClass.base.trace = JS_GlobalObjectTraceHook;
+    else
+        mJSClass.base.trace = XPCWrappedNative::Trace;
 
     if (mFlags.WantOuterObject())
         mJSClass.base.ext.outerObject = XPC_WN_OuterObject;

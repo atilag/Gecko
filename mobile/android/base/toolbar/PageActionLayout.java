@@ -5,6 +5,7 @@
 
 package org.mozilla.gecko.toolbar;
 
+import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.R;
@@ -60,11 +61,12 @@ public class PageActionLayout extends LinearLayout implements GeckoEventListener
         setNumberShown(DEFAULT_PAGE_ACTIONS_SHOWN);
         refreshPageActionIcons();
 
-        registerEventListener("PageActions:Add");
-        registerEventListener("PageActions:Remove");
+        EventDispatcher.getInstance().registerGeckoThreadListener(this,
+            "PageActions:Add",
+            "PageActions:Remove");
     }
 
-    public void setNumberShown(int count) {
+    private void setNumberShown(int count) {
         mMaxVisiblePageActions = count;
 
         for(int index = 0; index < count; index++) {
@@ -75,16 +77,9 @@ public class PageActionLayout extends LinearLayout implements GeckoEventListener
     }
 
     public void onDestroy() {
-        unregisterEventListener("PageActions:Add");
-        unregisterEventListener("PageActions:Remove");
-    }
-
-    protected void registerEventListener(String event) {
-        GeckoAppShell.getEventDispatcher().registerEventListener(event, this);
-    }
-
-    protected void unregisterEventListener(String event) {
-        GeckoAppShell.getEventDispatcher().unregisterEventListener(event, this);
+        EventDispatcher.getInstance().unregisterGeckoThreadListener(this,
+            "PageActions:Add",
+            "PageActions:Remove");
     }
 
     @Override
@@ -118,7 +113,7 @@ public class PageActionLayout extends LinearLayout implements GeckoEventListener
         }
     }
 
-    public void addPageAction(final String id, final String title, final String imageData, final OnPageActionClickListeners mOnPageActionClickListeners, boolean mImportant) {
+    private void addPageAction(final String id, final String title, final String imageData, final OnPageActionClickListeners mOnPageActionClickListeners, boolean mImportant) {
         final PageAction pageAction = new PageAction(id, title, null, mOnPageActionClickListeners, mImportant);
 
         int insertAt = mPageActionList.size();
@@ -138,7 +133,7 @@ public class PageActionLayout extends LinearLayout implements GeckoEventListener
         });
     }
 
-    public void removePageAction(String id) {
+    private void removePageAction(String id) {
         for(int i = 0; i < mPageActionList.size(); i++) {
             if (mPageActionList.get(i).getID().equals(id)) {
                 mPageActionList.remove(i);
@@ -291,7 +286,7 @@ public class PageActionLayout extends LinearLayout implements GeckoEventListener
         mPageActionsMenu.show();
     }
 
-    public static interface OnPageActionClickListeners {
+    private static interface OnPageActionClickListeners {
         public void onClick(String id);
         public boolean onLongClick(String id);
     }

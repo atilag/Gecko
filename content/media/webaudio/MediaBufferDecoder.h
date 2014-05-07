@@ -57,6 +57,7 @@ struct WebAudioDecodeJob MOZ_FINAL
   bool AllocateBuffer();
 
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
   JS::Heap<JSObject*> mArrayBuffer;
   nsCString mContentType;
@@ -79,9 +80,6 @@ class MediaBufferDecoder
 public:
   void AsyncDecodeMedia(const char* aContentType, uint8_t* aBuffer,
                         uint32_t aLength, WebAudioDecodeJob& aDecodeJob);
-
-  bool SyncDecodeMedia(const char* aContentType, uint8_t* aBuffer,
-                       uint32_t aLength, WebAudioDecodeJob& aDecodeJob);
 
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
   {

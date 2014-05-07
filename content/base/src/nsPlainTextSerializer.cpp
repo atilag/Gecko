@@ -112,8 +112,8 @@ nsPlainTextSerializer::~nsPlainTextSerializer()
   NS_WARN_IF_FALSE(mHeadLevel == 0, "Wrong head level!");
 }
 
-NS_IMPL_ISUPPORTS1(nsPlainTextSerializer,
-                   nsIContentSerializer)
+NS_IMPL_ISUPPORTS(nsPlainTextSerializer,
+                  nsIContentSerializer)
 
 
 NS_IMETHODIMP 
@@ -278,7 +278,8 @@ nsPlainTextSerializer::AppendText(nsIContent* aText,
     return NS_ERROR_FAILURE;
   }
   
-  int32_t endoffset = (aEndOffset == -1) ? frag->GetLength() : aEndOffset;
+  int32_t fragLength = frag->GetLength();
+  int32_t endoffset = (aEndOffset == -1) ? fragLength : std::min(aEndOffset, fragLength);
   NS_ASSERTION(aStartOffset <= endoffset, "A start offset is beyond the end of the text fragment!");
 
   int32_t length = endoffset - aStartOffset;

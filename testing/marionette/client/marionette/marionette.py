@@ -11,12 +11,19 @@ import time
 import traceback
 
 from application_cache import ApplicationCache
-from client import MarionetteClient
 from decorators import do_crash_check
 from emulator import Emulator
 from emulator_screen import EmulatorScreen
-from errors import *
+from errors import (
+        ErrorCodes, MarionetteException, InstallGeckoError, TimeoutException, InvalidResponseException,
+        JavascriptException, NoSuchElementException, XPathLookupException, NoSuchWindowException,
+        StaleElementException, ScriptTimeoutException, ElementNotVisibleException,
+        NoSuchFrameException, InvalidElementStateException, NoAlertPresentException,
+        InvalidCookieDomainException, UnableToSetCookieException, InvalidSelectorException,
+        MoveTargetOutOfBoundsException, FrameSendNotInitializedError, FrameSendFailureError
+        )
 from keys import Keys
+from marionette_transport import MarionetteTransport
 
 import geckoinstance
 
@@ -511,7 +518,7 @@ class Marionette(object):
             self.port = self.emulator.setup_port_forwarding(self.port)
             assert(self.emulator.wait_for_port()), "Timed out waiting for port!"
 
-        self.client = MarionetteClient(self.host, self.port)
+        self.client = MarionetteTransport(self.host, self.port)
 
         if emulator:
             self.emulator.setup(self,
@@ -522,7 +529,7 @@ class Marionette(object):
         if self.session:
             try:
                 self.delete_session()
-            except (MarionetteException, socket.error):
+            except (MarionetteException, socket.error, IOError):
                 # These exceptions get thrown if the Marionette server
                 # hit an exception/died or the connection died. We can
                 # do no further server-side cleanup in this case.

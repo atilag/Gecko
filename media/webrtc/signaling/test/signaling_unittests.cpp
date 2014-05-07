@@ -48,7 +48,9 @@
 #include "mtransport_test_utils.h"
 #include "gtest_ringbuffer_dumper.h"
 MtransportTestUtils *test_utils;
-nsCOMPtr<nsIThread> gThread;
+nsCOMPtr<nsIThread> gMainThread;
+nsCOMPtr<nsIThread> gGtestThread;
+bool gTestsComplete = false;
 
 #ifndef USE_FAKE_MEDIA_STREAMS
 #error USE_FAKE_MEDIA_STREAMS undefined
@@ -213,19 +215,6 @@ enum mediaPipelineFlags
 };
 
 
-static bool SetupGlobalThread() {
-  if (!gThread) {
-    nsIThread *thread;
-
-    nsresult rv = NS_NewNamedThread("pseudo-main",&thread);
-    if (NS_FAILED(rv))
-      return false;
-
-    gThread = thread;
-  }
-  return true;
-}
-
 class TestObserver : public AFakePCObserver
 {
 public:
@@ -266,7 +255,7 @@ public:
   NS_IMETHODIMP OnIceCandidate(uint16_t level, const char *mid, const char *cand, ER&);
 };
 
-NS_IMPL_ISUPPORTS1(TestObserver, nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(TestObserver, nsISupportsWeakReference)
 
 NS_IMETHODIMP
 TestObserver::OnCreateOfferSuccess(const char* offer, ER&)
@@ -382,6 +371,7 @@ TestObserver::OnStateChange(PCObserverStateType state_type, ER&, void*)
   switch (state_type)
   {
   case PCObserverStateType::ReadyState:
+    MOZ_ASSERT(NS_IsMainThread());
     rv = pc->ReadyState(&gotready);
     NS_ENSURE_SUCCESS(rv, rv);
     std::cout << "Ready State: "
@@ -389,6 +379,7 @@ TestObserver::OnStateChange(PCObserverStateType state_type, ER&, void*)
               << std::endl;
     break;
   case PCObserverStateType::IceConnectionState:
+    MOZ_ASSERT(NS_IsMainThread());
     rv = pc->IceConnectionState(&gotice);
     NS_ENSURE_SUCCESS(rv, rv);
     std::cout << "ICE Connection State: "
@@ -396,6 +387,7 @@ TestObserver::OnStateChange(PCObserverStateType state_type, ER&, void*)
               << std::endl;
     break;
   case PCObserverStateType::IceGatheringState:
+    MOZ_ASSERT(NS_IsMainThread());
     rv = pc->IceGatheringState(&goticegathering);
     NS_ENSURE_SUCCESS(rv, rv);
     std::cout
@@ -408,6 +400,7 @@ TestObserver::OnStateChange(PCObserverStateType state_type, ER&, void*)
     // NS_ENSURE_SUCCESS(rv, rv);
     break;
   case PCObserverStateType::SipccState:
+    MOZ_ASSERT(NS_IsMainThread());
     rv = pc->SipccState(&gotsipcc);
     NS_ENSURE_SUCCESS(rv, rv);
     std::cout << "SIPCC State: "
@@ -415,6 +408,7 @@ TestObserver::OnStateChange(PCObserverStateType state_type, ER&, void*)
               << std::endl;
     break;
   case PCObserverStateType::SignalingState:
+    MOZ_ASSERT(NS_IsMainThread());
     rv = pc->SignalingState(&gotsignaling);
     NS_ENSURE_SUCCESS(rv, rv);
     std::cout << "Signaling State: "
@@ -684,41 +678,302 @@ class ParsedSDP {
   int num_lines;
 };
 
-class SignalingAgent {
- public:
-  SignalingAgent(const std::string &aName) : pc(nullptr), name(aName) {
-    cfg_.addStunServer(g_stun_server_address, g_stun_server_port);
 
-    pc = sipcc::PeerConnectionImpl::CreatePeerConnection();
-    EXPECT_TRUE(pc);
+// This class wraps the PeerConnection object and ensures that all calls
+// into it happen on the main thread.
+class PCDispatchWrapper : public nsSupportsWeakReference
+{
+ public:
+  PCDispatchWrapper(sipcc::PeerConnectionImpl *peerConnection) {
+    pc_ = peerConnection;
   }
 
-  SignalingAgent(const std::string &aName, const std::string stun_addr,
-                 uint16_t stun_port) : pc(nullptr), name(aName) {
+  virtual ~PCDispatchWrapper() {}
+
+  NS_DECL_THREADSAFE_ISUPPORTS
+
+  sipcc::PeerConnectionImpl *pcImpl() const {
+    return pc_;
+  }
+
+  const nsRefPtr<sipcc::PeerConnectionMedia>& media() const {
+    return pc_->media();
+  }
+
+  NS_IMETHODIMP Initialize(TestObserver* aObserver,
+                      nsGlobalWindow* aWindow,
+                      const sipcc::IceConfiguration& aConfiguration,
+                      nsIThread* aThread) {
+    nsresult rv;
+
+    if (NS_IsMainThread()) {
+      rv = pc_->Initialize(*aObserver, aWindow, aConfiguration, aThread);
+    } else {
+      // It would have been preferable here to dispatch directly to
+      // PeerConnectionImpl::Initialize but since all the PC methods
+      // have overrides clang will throw a 'couldn't infer template
+      // argument' error.
+      // Instead we are dispatching back to the same method for
+      // all of these.
+      gMainThread->Dispatch(
+        WrapRunnableRet(this, &PCDispatchWrapper::Initialize,
+          aObserver, aWindow, aConfiguration, aThread, &rv),
+        NS_DISPATCH_SYNC);
+      rv = NS_OK;
+    }
+
+    return rv;
+  }
+
+  NS_IMETHODIMP CreateOffer(const MediaConstraintsExternal& aConstraints) {
+    nsresult rv;
+
+    if (NS_IsMainThread()) {
+      rv = pc_->CreateOffer(aConstraints);
+    } else {
+      gMainThread->Dispatch(
+        WrapRunnableRet(this, &PCDispatchWrapper::CreateOffer,
+          aConstraints, &rv),
+        NS_DISPATCH_SYNC);
+    }
+
+    return rv;
+  }
+
+  NS_IMETHODIMP CreateAnswer(const MediaConstraintsExternal& aConstraints) {
+    nsresult rv;
+
+    if (NS_IsMainThread()) {
+      rv = pc_->CreateAnswer(aConstraints);
+    } else {
+      gMainThread->Dispatch(
+        WrapRunnableRet(this, &PCDispatchWrapper::CreateAnswer,
+          aConstraints, &rv),
+        NS_DISPATCH_SYNC);
+    }
+
+    return rv;
+  }
+
+  NS_IMETHODIMP SetLocalDescription (int32_t aAction, const char* aSDP) {
+    nsresult rv;
+
+    if (NS_IsMainThread()) {
+      rv = pc_->SetLocalDescription(aAction, aSDP);
+    } else {
+      gMainThread->Dispatch(
+        WrapRunnableRet(this, &PCDispatchWrapper::SetLocalDescription,
+          aAction, aSDP, &rv),
+        NS_DISPATCH_SYNC);
+    }
+
+    return rv;
+  }
+
+  NS_IMETHODIMP SetRemoteDescription (int32_t aAction, const char* aSDP) {
+    nsresult rv;
+
+    if (NS_IsMainThread()) {
+      rv = pc_->SetRemoteDescription(aAction, aSDP);
+    } else {
+      gMainThread->Dispatch(
+        WrapRunnableRet(this, &PCDispatchWrapper::SetRemoteDescription,
+          aAction, aSDP, &rv),
+        NS_DISPATCH_SYNC);
+    }
+
+    return rv;
+  }
+
+  NS_IMETHODIMP AddIceCandidate(const char* aCandidate, const char* aMid,
+                                unsigned short aLevel) {
+    nsresult rv;
+
+    if (NS_IsMainThread()) {
+      rv = pc_->AddIceCandidate(aCandidate, aMid, aLevel);
+    } else {
+      gMainThread->Dispatch(
+        WrapRunnableRet(this, &PCDispatchWrapper::AddIceCandidate,
+          aCandidate, aMid, aLevel, &rv),
+        NS_DISPATCH_SYNC);
+    }
+    return rv;
+  }
+
+  NS_IMETHODIMP AddStream(DOMMediaStream *aMediaStream,
+    const MediaConstraintsExternal& aConstraints) {
+    nsresult rv;
+
+    if (NS_IsMainThread()) {
+      rv = pc_->AddStream(*aMediaStream, aConstraints);
+    } else {
+      gMainThread->Dispatch(
+        WrapRunnableRet(this, &PCDispatchWrapper::AddStream,
+          aMediaStream, aConstraints, &rv),
+        NS_DISPATCH_SYNC);
+    }
+
+    return rv;
+  }
+
+  NS_IMETHODIMP RemoveStream(DOMMediaStream *aMediaStream) {
+    nsresult rv;
+
+    if (NS_IsMainThread()) {
+      rv = pc_->RemoveStream(*aMediaStream);
+    } else {
+      gMainThread->Dispatch(
+        WrapRunnableRet(this, &PCDispatchWrapper::RemoveStream,
+          aMediaStream, &rv),
+        NS_DISPATCH_SYNC);
+    }
+
+    return rv;
+  }
+
+  NS_IMETHODIMP GetLocalDescription(char** aSDP) {
+    nsresult rv;
+
+    if (NS_IsMainThread()) {
+      rv = pc_->GetLocalDescription(aSDP);
+    } else {
+      gMainThread->Dispatch(
+        WrapRunnableRet(this, &PCDispatchWrapper::GetLocalDescription,
+          aSDP, &rv),
+        NS_DISPATCH_SYNC);
+    }
+
+    return rv;
+  }
+
+  NS_IMETHODIMP GetRemoteDescription(char** aSDP) {
+    nsresult rv;
+
+    if (NS_IsMainThread()) {
+      rv = pc_->GetRemoteDescription(aSDP);
+    } else {
+      gMainThread->Dispatch(
+        WrapRunnableRet(this, &PCDispatchWrapper::GetRemoteDescription,
+          aSDP, &rv),
+        NS_DISPATCH_SYNC);
+    }
+
+    return rv;
+  }
+
+  mozilla::dom::PCImplSignalingState SignalingState() {
+    mozilla::dom::PCImplSignalingState result;
+
+    if (NS_IsMainThread()) {
+      result = pc_->SignalingState();
+    } else {
+      gMainThread->Dispatch(
+        WrapRunnableRet(this, &PCDispatchWrapper::SignalingState,
+          &result),
+        NS_DISPATCH_SYNC);
+    }
+
+    return result;
+  }
+
+  mozilla::dom::PCImplSipccState SipccState() {
+    mozilla::dom::PCImplSipccState result;
+
+    if (NS_IsMainThread()) {
+      result = pc_->SipccState();
+    } else {
+      gMainThread->Dispatch(
+        WrapRunnableRet(this, &PCDispatchWrapper::SipccState,
+          &result),
+        NS_DISPATCH_SYNC);
+    }
+
+    return result;
+  }
+
+  mozilla::dom::PCImplIceConnectionState IceConnectionState() {
+    mozilla::dom::PCImplIceConnectionState result;
+
+    if (NS_IsMainThread()) {
+      result = pc_->IceConnectionState();
+    } else {
+      gMainThread->Dispatch(
+        WrapRunnableRet(this, &PCDispatchWrapper::IceConnectionState,
+          &result),
+        NS_DISPATCH_SYNC);
+    }
+
+    return result;
+  }
+
+  mozilla::dom::PCImplIceGatheringState IceGatheringState() {
+    mozilla::dom::PCImplIceGatheringState result;
+
+    if (NS_IsMainThread()) {
+      result = pc_->IceGatheringState();
+    } else {
+      gMainThread->Dispatch(
+        WrapRunnableRet(this, &PCDispatchWrapper::IceGatheringState,
+          &result),
+        NS_DISPATCH_SYNC);
+    }
+
+    return result;
+  }
+
+  NS_IMETHODIMP Close() {
+    nsresult rv;
+
+    if (NS_IsMainThread()) {
+      rv = pc_->Close();
+    } else {
+      gMainThread->Dispatch(
+        WrapRunnableRet(this, &PCDispatchWrapper::Close, &rv),
+        NS_DISPATCH_SYNC);
+    }
+
+    return rv;
+  }
+
+ private:
+  mozilla::RefPtr<sipcc::PeerConnectionImpl> pc_;
+};
+
+NS_IMPL_ISUPPORTS(PCDispatchWrapper, nsISupportsWeakReference)
+
+
+class SignalingAgent {
+ public:
+  SignalingAgent(const std::string &aName,
+    const std::string stun_addr = g_stun_server_address,
+    uint16_t stun_port = g_stun_server_port) : pc(nullptr), name(aName) {
     cfg_.addStunServer(stun_addr, stun_port);
 
-    pc = sipcc::PeerConnectionImpl::CreatePeerConnection();
-    EXPECT_TRUE(pc);
+    sipcc::PeerConnectionImpl *pcImpl =
+      sipcc::PeerConnectionImpl::CreatePeerConnection();
+    EXPECT_TRUE(pcImpl);
+
+    pc = new PCDispatchWrapper(pcImpl);
   }
 
 
   ~SignalingAgent() {
-    mozilla::SyncRunnable::DispatchToThread(gThread,
+    mozilla::SyncRunnable::DispatchToThread(gMainThread,
       WrapRunnable(this, &SignalingAgent::Close));
   }
 
-  void Init_m(nsCOMPtr<nsIThread> thread)
+  void Init_m()
   {
-    pObserver = new TestObserver(pc, name);
+    pObserver = new TestObserver(pc->pcImpl(), name);
     ASSERT_TRUE(pObserver);
 
-    ASSERT_EQ(pc->Initialize(*pObserver, nullptr, cfg_, thread), NS_OK);
+    ASSERT_EQ(pc->Initialize(pObserver, nullptr, cfg_, gMainThread), NS_OK);
   }
 
-  void Init(nsCOMPtr<nsIThread> thread)
+  void Init()
   {
-    mozilla::SyncRunnable::DispatchToThread(thread,
-      WrapRunnable(this, &SignalingAgent::Init_m, thread));
+    mozilla::SyncRunnable::DispatchToThread(gMainThread,
+      WrapRunnable(this, &SignalingAgent::Init_m));
 
     ASSERT_TRUE_WAIT(sipcc_state() == PCImplSipccState::Started,
                      kDefaultTimeout);
@@ -838,7 +1093,7 @@ class SignalingAgent {
     }
 
     domMediaStream->SetHintContents(hint);
-    ASSERT_EQ(pc->AddStream(*domMediaStream, *constraints), NS_OK);
+    ASSERT_EQ(pc->AddStream(domMediaStream, *constraints), NS_OK);
     domMediaStream_ = domMediaStream;
   }
 
@@ -847,7 +1102,7 @@ class SignalingAgent {
   // parameter is absent, removes the stream that was most
   // recently added to the PeerConnection.
   void RemoveLastStreamAdded() {
-    ASSERT_EQ(pc->RemoveStream(*domMediaStream_), NS_OK);
+    ASSERT_EQ(pc->RemoveStream(domMediaStream_), NS_OK);
   }
 
   void CreateOffer(sipcc::MediaConstraints& constraints,
@@ -930,7 +1185,7 @@ void CreateAnswer(sipcc::MediaConstraints& constraints, std::string offer,
     // hints as were passed in.
     // When complete RemoveStream will remove and entire stream and its tracks
     // not just disable a track as this is currently doing
-    ASSERT_EQ(pc->RemoveStream(*domMediaStream_), NS_OK);
+    ASSERT_EQ(pc->RemoveStream(domMediaStream_), NS_OK);
 
     // Now call CreateOffer as JS would
     pObserver->state = TestObserver::stateNoResponse;
@@ -1075,12 +1330,17 @@ void CreateAnswer(sipcc::MediaConstraints& constraints, std::string offer,
 
   mozilla::RefPtr<mozilla::MediaPipeline> GetMediaPipeline(
     bool local, int stream, int track) {
-    sipcc::SourceStreamInfo *streamInfo;
-
+    sipcc::SourceStreamInfo* streamInfo;
     if (local) {
-      streamInfo = pc->media()->GetLocalStream(stream);
+      mozilla::SyncRunnable::DispatchToThread(
+        gMainThread, WrapRunnableRet(
+          pc->media(), &sipcc::PeerConnectionMedia::GetLocalStream,
+          stream, &streamInfo));
     } else {
-      streamInfo = pc->media()->GetRemoteStream(stream);
+      mozilla::SyncRunnable::DispatchToThread(
+        gMainThread, WrapRunnableRet(
+          pc->media(), &sipcc::PeerConnectionMedia::GetRemoteStream,
+          stream, &streamInfo));
     }
 
     if (!streamInfo) {
@@ -1142,7 +1402,7 @@ void CreateAnswer(sipcc::MediaConstraints& constraints, std::string offer,
   }
 
 public:
-  mozilla::RefPtr<sipcc::PeerConnectionImpl> pc;
+  nsRefPtr<PCDispatchWrapper> pc;
   nsRefPtr<TestObserver> pObserver;
   char* offer_;
   char* answer_;
@@ -1282,7 +1542,6 @@ class SignalingEnvironment : public ::testing::Environment {
 class SignalingAgentTest : public ::testing::Test {
  public:
   static void SetUpTestCase() {
-    ASSERT_TRUE(SetupGlobalThread());
   }
 
   void TearDown() {
@@ -1301,7 +1560,7 @@ class SignalingAgentTest : public ::testing::Test {
     ScopedDeletePtr<SignalingAgent> agent(
         new SignalingAgent("agent", stun_addr, stun_port));
 
-    agent->Init(gThread);
+    agent->Init();
 
     if (wait_for_gather) {
       if (!agent->WaitForGatherAllowFail())
@@ -1345,7 +1604,6 @@ public:
         stun_port_(stun_port) {}
 
   static void SetUpTestCase() {
-    ASSERT_TRUE(SetupGlobalThread());
   }
 
   void EnsureInit() {
@@ -1356,8 +1614,8 @@ public:
     a1_ = new SignalingAgent(callerName, stun_addr_, stun_port_);
     a2_ = new SignalingAgent(calleeName, stun_addr_, stun_port_);
 
-    a1_->Init(gThread);
-    a2_->Init(gThread);
+    a1_->Init();
+    a2_->Init();
 
     if (wait_for_gather_) {
       WaitForGather();
@@ -1370,7 +1628,6 @@ public:
   }
 
   static void TearDownTestCase() {
-    gThread = nullptr;
   }
 
   void CreateOffer(sipcc::MediaConstraints& constraints,
@@ -1636,12 +1893,51 @@ public:
   uint16_t stun_port_;
 };
 
+static void SetIntPrefOnMainThread(nsCOMPtr<nsIPrefBranch> prefs,
+  const char *pref_name,
+  int new_value) {
+  MOZ_ASSERT(NS_IsMainThread());
+  prefs->SetIntPref(pref_name, new_value);
+}
+
+static void SetMaxFsFr(nsCOMPtr<nsIPrefBranch> prefs,
+  int max_fs,
+  int max_fr) {
+  gMainThread->Dispatch(
+    WrapRunnableNM(SetIntPrefOnMainThread,
+      prefs,
+      "media.navigator.video.max_fs",
+      max_fs),
+    NS_DISPATCH_SYNC);
+
+  gMainThread->Dispatch(
+    WrapRunnableNM(SetIntPrefOnMainThread,
+      prefs,
+      "media.navigator.video.max_fr",
+      max_fr),
+    NS_DISPATCH_SYNC);
+}
+
 class FsFrPrefClearer {
   public:
     FsFrPrefClearer(nsCOMPtr<nsIPrefBranch> prefs): mPrefs(prefs) {}
     ~FsFrPrefClearer() {
-      mPrefs->ClearUserPref("media.navigator.video.max_fs");
-      mPrefs->ClearUserPref("media.navigator.video.max_fr");
+      gMainThread->Dispatch(
+        WrapRunnableNM(FsFrPrefClearer::ClearUserPrefOnMainThread,
+          mPrefs,
+          "media.navigator.video.max_fs"),
+        NS_DISPATCH_SYNC);
+      gMainThread->Dispatch(
+        WrapRunnableNM(FsFrPrefClearer::ClearUserPrefOnMainThread,
+          mPrefs,
+          "media.navigator.video.max_fr"),
+        NS_DISPATCH_SYNC);
+    }
+
+    static void ClearUserPrefOnMainThread(nsCOMPtr<nsIPrefBranch> prefs,
+      const char *pref_name) {
+      MOZ_ASSERT(NS_IsMainThread());
+      prefs->ClearUserPref(pref_name);
     }
   private:
     nsCOMPtr<nsIPrefBranch> mPrefs;
@@ -2817,7 +3113,7 @@ TEST_F(SignalingTest, missingUfrag)
     "a=candidate:0 2 UDP 2113601790 192.168.178.20 50769 typ host\r\n"
     "a=candidate:1 2 UDP 1694236670 77.9.79.167 50769 typ srflx raddr "
       "192.168.178.20 rport 50769\r\n"
-    "m=application 54054 DTLS/SCTP 5000 \r\n"
+    "m=application 54054 DTLS/SCTP 5000\r\n"
     "c=IN IP4 77.9.79.167\r\n"
     "a=fmtp:HuRUu]Dtcl\\zM,7(OmEU%O$gU]x/z\tD protocol=webrtc-datachannel;"
       "streams=16\r\n"
@@ -3458,8 +3754,7 @@ TEST_F(SignalingTest, MaxFsFrInOffer)
   ASSERT_TRUE(prefs);
   FsFrPrefClearer prefClearer(prefs);
 
-  prefs->SetIntPref("media.navigator.video.max_fs", 300);
-  prefs->SetIntPref("media.navigator.video.max_fr", 30);
+  SetMaxFsFr(prefs, 300, 30);
 
   a1_->CreateOffer(constraints, OFFER_AV, SHOULD_CHECK_AV);
 
@@ -3479,8 +3774,7 @@ TEST_F(SignalingTest, MaxFsFrInAnswer)
   FsFrPrefClearer prefClearer(prefs);
 
   // We don't want max_fs and max_fr prefs impact SDP at this moment
-  prefs->SetIntPref("media.navigator.video.max_fs", 0);
-  prefs->SetIntPref("media.navigator.video.max_fr", 0);
+  SetMaxFsFr(prefs, 0, 0);
 
   a1_->CreateOffer(constraints, OFFER_AV, SHOULD_CHECK_AV);
 
@@ -3489,8 +3783,7 @@ TEST_F(SignalingTest, MaxFsFrInAnswer)
 
   a2_->SetRemote(TestObserver::OFFER, a1_->offer());
 
-  prefs->SetIntPref("media.navigator.video.max_fs", 600);
-  prefs->SetIntPref("media.navigator.video.max_fr", 60);
+  SetMaxFsFr(prefs, 600, 60);
 
   a2_->CreateAnswer(constraints, a1_->offer(), OFFER_AV | ANSWER_AV);
 
@@ -3510,8 +3803,7 @@ TEST_F(SignalingTest, MaxFsFrCalleeCodec)
   FsFrPrefClearer prefClearer(prefs);
 
   // We don't want max_fs and max_fr prefs impact SDP at this moment
-  prefs->SetIntPref("media.navigator.video.max_fs", 0);
-  prefs->SetIntPref("media.navigator.video.max_fr", 0);
+  SetMaxFsFr(prefs, 0, 0);
 
   a1_->CreateOffer(constraints, OFFER_AV, SHOULD_CHECK_AV);
 
@@ -3567,8 +3859,7 @@ TEST_F(SignalingTest, MaxFsFrCallerCodec)
   FsFrPrefClearer prefClearer(prefs);
 
   // We don't want max_fs and max_fr prefs impact SDP at this moment
-  prefs->SetIntPref("media.navigator.video.max_fs", 0);
-  prefs->SetIntPref("media.navigator.video.max_fr", 0);
+  SetMaxFsFr(prefs, 0, 0);
 
   a1_->CreateOffer(constraints, OFFER_AV, SHOULD_CHECK_AV);
   a1_->SetLocal(TestObserver::OFFER, a1_->offer());
@@ -3642,6 +3933,39 @@ static std::string get_environment(const char *name) {
   return value;
 }
 
+// This exists to send as an event to trigger shutdown.
+static void tests_complete() {
+  gTestsComplete = true;
+}
+
+// The GTest thread runs this instead of the main thread so it can
+// do things like ASSERT_TRUE_WAIT which you could not do on the main thread.
+static int gtest_main(int argc, char **argv) {
+  MOZ_ASSERT(!NS_IsMainThread());
+
+  ::testing::InitGoogleTest(&argc, argv);
+
+  for(int i=0; i<argc; i++) {
+    if (!strcmp(argv[i],"-t")) {
+      kDefaultTimeout = 20000;
+    }
+   }
+
+  ::testing::AddGlobalTestEnvironment(new test::SignalingEnvironment);
+  int result = RUN_ALL_TESTS();
+
+  test_utils->sts_target()->Dispatch(
+    WrapRunnableNM(&TestStunServer::ShutdownInstance), NS_DISPATCH_SYNC);
+
+  // Set the global shutdown flag and tickle the main thread
+  // The main thread did not go through Init() so calling Shutdown()
+  // on it will not work.
+  gMainThread->Dispatch(WrapRunnableNM(tests_complete), NS_DISPATCH_SYNC);
+
+  return result;
+}
+
+
 int main(int argc, char **argv) {
 
   // This test can cause intermittent oranges on the builders
@@ -3667,14 +3991,6 @@ int main(int argc, char **argv) {
   NSS_NoDB_Init(nullptr);
   NSS_SetDomesticPolicy();
 
-  ::testing::InitGoogleTest(&argc, argv);
-
-  for(int i=0; i<argc; i++) {
-    if (!strcmp(argv[i],"-t")) {
-      kDefaultTimeout = 20000;
-    }
-  }
-
   ::testing::TestEventListeners& listeners =
         ::testing::UnitTest::GetInstance()->listeners();
   // Adds a listener to the end.  Google Test takes the ownership.
@@ -3682,15 +3998,28 @@ int main(int argc, char **argv) {
   test_utils->sts_target()->Dispatch(
     WrapRunnableNM(&TestStunServer::GetInstance), NS_DISPATCH_SYNC);
 
-  ::testing::AddGlobalTestEnvironment(new test::SignalingEnvironment);
-  int result = RUN_ALL_TESTS();
+  // Set the main thread global which is this thread.
+  nsIThread *thread;
+  NS_GetMainThread(&thread);
+  gMainThread = thread;
+  MOZ_ASSERT(NS_IsMainThread());
 
-  test_utils->sts_target()->Dispatch(
-    WrapRunnableNM(&TestStunServer::ShutdownInstance), NS_DISPATCH_SYNC);
+  // Now create the GTest thread and run all of the tests on it
+  // When it is complete it will set gTestsComplete
+  NS_NewNamedThread("gtest_thread", &thread);
+  gGtestThread = thread;
 
-  // Because we don't initialize on the main thread, we can't register for
-  // XPCOM shutdown callbacks (where the context is usually shut down) --
-  // so we need to explictly destroy the context.
+  int result;
+  gGtestThread->Dispatch(
+    WrapRunnableNMRet(gtest_main, argc, argv, &result), NS_DISPATCH_NORMAL);
+
+  // Here we handle the event queue for dispatches to the main thread
+  // When the GTest thread is complete it will send one more dispatch
+  // with gTestsComplete == true.
+  while (!gTestsComplete && NS_ProcessNextEvent());
+
+  gGtestThread->Shutdown();
+
   sipcc::PeerConnectionCtx::Destroy();
   delete test_utils;
 

@@ -31,8 +31,10 @@ class CompileRuntime
 
     bool onMainThread();
 
-    // &mainThread.ionTop
-    const void *addressOfIonTop();
+    js::PerThreadData *mainThread();
+
+    // &mainThread.jitTop
+    const void *addressOfJitTop();
 
     // rt->mainThread.jitStackLimit;
     const void *addressOfJitStackLimit();

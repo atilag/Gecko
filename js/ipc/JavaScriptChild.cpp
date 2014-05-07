@@ -174,8 +174,7 @@ EmptyDesc(PPropertyDescriptor *desc)
 
 bool
 JavaScriptChild::AnswerGetPropertyDescriptor(const ObjectId &objId, const nsString &id,
-                                             const uint32_t &flags, ReturnStatus *rs,
-                                             PPropertyDescriptor *out)
+                                             ReturnStatus *rs, PPropertyDescriptor *out)
 {
     AutoSafeJSContext cx;
     JSAutoRequest request(cx);
@@ -193,7 +192,7 @@ JavaScriptChild::AnswerGetPropertyDescriptor(const ObjectId &objId, const nsStri
         return fail(cx, rs);
 
     Rooted<JSPropertyDescriptor> desc(cx);
-    if (!JS_GetPropertyDescriptorById(cx, obj, internedId, flags, &desc))
+    if (!JS_GetPropertyDescriptorById(cx, obj, internedId, &desc))
         return fail(cx, rs);
 
     if (!desc.object())
@@ -207,8 +206,7 @@ JavaScriptChild::AnswerGetPropertyDescriptor(const ObjectId &objId, const nsStri
 
 bool
 JavaScriptChild::AnswerGetOwnPropertyDescriptor(const ObjectId &objId, const nsString &id,
-                                                const uint32_t &flags, ReturnStatus *rs,
-                                                PPropertyDescriptor *out)
+                                                ReturnStatus *rs, PPropertyDescriptor *out)
 {
     AutoSafeJSContext cx;
     JSAutoRequest request(cx);
@@ -226,7 +224,7 @@ JavaScriptChild::AnswerGetOwnPropertyDescriptor(const ObjectId &objId, const nsS
         return fail(cx, rs);
 
     Rooted<JSPropertyDescriptor> desc(cx);
-    if (!JS_GetPropertyDescriptorById(cx, obj, internedId, flags, &desc))
+    if (!JS_GetPropertyDescriptorById(cx, obj, internedId, &desc))
         return fail(cx, rs);
 
     if (desc.object() != obj)
@@ -259,14 +257,14 @@ JavaScriptChild::AnswerDefineProperty(const ObjectId &objId, const nsString &id,
     if (!toDescriptor(cx, descriptor, &desc))
         return false;
 
-    if (!js::CheckDefineProperty(cx, obj, internedId, desc.value(), desc.getter(),
-                                 desc.setter(), desc.attributes()))
+    if (!js::CheckDefineProperty(cx, obj, internedId, desc.value(), desc.attributes(),
+                                 desc.getter(), desc.setter()))
     {
         return fail(cx, rs);
     }
 
-    if (!JS_DefinePropertyById(cx, obj, internedId, desc.value(), desc.getter(),
-                               desc.setter(), desc.attributes()))
+    if (!JS_DefinePropertyById(cx, obj, internedId, desc.value(), desc.attributes(),
+                               desc.getter(), desc.setter()))
     {
         return fail(cx, rs);
     }
@@ -344,7 +342,7 @@ JavaScriptChild::AnswerHasOwn(const ObjectId &objId, const nsString &id, ReturnS
         return fail(cx, rs);
 
     Rooted<JSPropertyDescriptor> desc(cx);
-    if (!JS_GetPropertyDescriptorById(cx, obj, internedId, 0, &desc))
+    if (!JS_GetPropertyDescriptorById(cx, obj, internedId, &desc))
         return fail(cx, rs);
     *bp = (desc.object() == obj);
 
@@ -439,6 +437,8 @@ JavaScriptChild::AnswerIsExtensible(const ObjectId &objId, ReturnStatus *rs, boo
     if (!obj)
         return false;
 
+    JSAutoCompartment comp(cx, obj);
+
     bool extensible;
     if (!JS_IsExtensible(cx, obj, &extensible))
         return fail(cx, rs);
@@ -501,7 +501,7 @@ JavaScriptChild::AnswerCall(const ObjectId &objId, const nsTArray<JSParam> &argv
         ContextOptionsRef(cx).setDontReportUncaught(true);
 
         HandleValueArray args = HandleValueArray::subarray(vals, 2, vals.length() - 2);
-        bool success = JS::Call(cx, vals.handleAt(1), vals.handleAt(0), args, &rval);
+        bool success = JS::Call(cx, vals[1], vals[0], args, &rval);
         if (!success)
             return fail(cx, rs);
     }
@@ -536,7 +536,7 @@ JavaScriptChild::AnswerCall(const ObjectId &objId, const nsTArray<JSParam> &argv
     // treat this as the outparam never having been set.
     for (size_t i = 0; i < vals.length(); i++) {
         JSVariant variant;
-        if (!toVariant(cx, vals.handleAt(i), &variant))
+        if (!toVariant(cx, vals[i], &variant))
             return fail(cx, rs);
         outparams->ReplaceElementAt(i, JSParam(variant));
     }
@@ -596,7 +596,7 @@ JavaScriptChild::AnswerGetPropertyNames(const ObjectId &objId, const uint32_t &f
 
     for (size_t i = 0; i < props.length(); i++) {
         nsString name;
-        if (!convertIdToGeckoString(cx, props.handleAt(i), &name))
+        if (!convertIdToGeckoString(cx, props[i], &name))
             return fail(cx, rs);
 
         names->AppendElement(name);

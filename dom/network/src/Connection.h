@@ -6,12 +6,12 @@
 #ifndef mozilla_dom_network_Connection_h
 #define mozilla_dom_network_Connection_h
 
-#include "nsINetworkProperties.h"
-#include "nsDOMEventTargetHelper.h"
-#include "nsCycleCollectionParticipant.h"
-#include "mozilla/Observer.h"
 #include "Types.h"
+#include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/Observer.h"
 #include "mozilla/dom/NetworkInformationBinding.h"
+#include "nsCycleCollectionParticipant.h"
+#include "nsINetworkProperties.h"
 
 namespace mozilla {
 
@@ -22,7 +22,7 @@ class NetworkInformation;
 namespace dom {
 namespace network {
 
-class Connection MOZ_FINAL : public nsDOMEventTargetHelper
+class Connection MOZ_FINAL : public DOMEventTargetHelper
                            , public NetworkObserver
                            , public nsINetworkProperties
 {
@@ -30,7 +30,7 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSINETWORKPROPERTIES
 
-  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper)
+  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(DOMEventTargetHelper)
 
   Connection();
 
@@ -42,8 +42,7 @@ public:
 
   // WebIDL
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   ConnectionType Type() const { return mType; }
 

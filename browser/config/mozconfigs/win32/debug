@@ -3,6 +3,7 @@
 ac_add_options --enable-debug
 ac_add_options --enable-trace-malloc
 ac_add_options --enable-signmar
+ac_add_options --enable-require-all-d3dc-versions
 
 # Needed to enable breakpad in application.ini
 export MOZILLA_OFFICIAL=1
@@ -18,5 +19,7 @@ ac_add_options --enable-warnings-as-errors
 
 # Package js shell.
 export MOZ_PACKAGE_JSSHELL=1
+
+. "$topsrcdir/build/mozconfig.cache"
 
 . "$topsrcdir/build/mozconfig.common.override"

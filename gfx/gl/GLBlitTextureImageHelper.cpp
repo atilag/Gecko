@@ -12,7 +12,6 @@
 #include "nsRect.h"
 #include "gfx2DGlue.h"
 #include "gfxUtils.h"
-#include "GLDrawRectHelper.h"
 
 namespace mozilla {
 namespace gl {
@@ -53,7 +52,7 @@ GLBlitTextureImageHelper::BlitTextureImage(TextureImage *aSrc, const nsIntRect& 
     float blitScaleY = float(aDstRect.height) / float(aSrcRect.height);
 
     // We start iterating over all destination tiles
-    aDst->BeginTileIteration();
+    aDst->BeginBigImageIteration();
     do {
         // calculate portion of the tile that is going to be painted to
         nsIntRect dstSubRect;
@@ -74,7 +73,7 @@ GLBlitTextureImageHelper::BlitTextureImage(TextureImage *aSrc, const nsIntRect& 
         SetBlitFramebufferForDestTexture(aDst->GetTextureID());
         UseBlitProgram();
 
-        aSrc->BeginTileIteration();
+        aSrc->BeginBigImageIteration();
         // now iterate over all tiles in the source Image...
         do {
             // calculate portion of the source tile that is in the source rect
@@ -148,9 +147,24 @@ GLBlitTextureImageHelper::BlitTextureImage(TextureImage *aSrc, const nsIntRect& 
             ScopedBindTextureUnit autoTexUnit(mGL, LOCAL_GL_TEXTURE0);
             ScopedBindTexture autoTex(mGL, aSrc->GetTextureID());
 
-            mGL->DrawRectHelper()->DrawRects(0, 1, rects);
+            mGL->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, 0);
+
+            mGL->fVertexAttribPointer(0, 2, LOCAL_GL_FLOAT, LOCAL_GL_FALSE, 0, rects.vertCoords().Elements());
+            mGL->fVertexAttribPointer(1, 2, LOCAL_GL_FLOAT, LOCAL_GL_FALSE, 0, rects.texCoords().Elements());
+
+            mGL->fEnableVertexAttribArray(0);
+            mGL->fEnableVertexAttribArray(1);
+
+            mGL->fDrawArrays(LOCAL_GL_TRIANGLES, 0, rects.elements());
+
+            mGL->fDisableVertexAttribArray(0);
+            mGL->fDisableVertexAttribArray(1);
+
         } while (aSrc->NextTile());
     } while (aDst->NextTile());
+
+    mGL->fVertexAttribPointer(0, 2, LOCAL_GL_FLOAT, LOCAL_GL_FALSE, 0, nullptr);
+    mGL->fVertexAttribPointer(1, 2, LOCAL_GL_FLOAT, LOCAL_GL_FALSE, 0, nullptr);
 
     // unbind the previous texture from the framebuffer
     SetBlitFramebufferForDestTexture(0);

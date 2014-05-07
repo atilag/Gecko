@@ -156,7 +156,7 @@ nsFontFaceLoader::LoadTimerCallback(nsITimer* aTimer, void* aClosure)
   }
 }
 
-NS_IMPL_ISUPPORTS1(nsFontFaceLoader, nsIStreamLoaderObserver)
+NS_IMPL_ISUPPORTS(nsFontFaceLoader, nsIStreamLoaderObserver)
 
 NS_IMETHODIMP
 nsFontFaceLoader::OnStreamComplete(nsIStreamLoader* aLoader,
@@ -490,7 +490,22 @@ nsUserFontSet::UpdateRules(const nsTArray<nsFontFaceRuleContainer>& aRules)
     IncrementGeneration();
   }
 
+  // local rules have been rebuilt, so clear the flag
+  mLocalRulesUsed = false;
+
   return modified;
+}
+
+static bool
+HasLocalSrc(const nsCSSValue::Array *aSrcArr)
+{
+  size_t numSrc = aSrcArr->Count();
+  for (size_t i = 0; i < numSrc; i++) {
+    if (aSrcArr->Item(i).GetUnit() == eCSSUnit_Local_Font) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void
@@ -524,8 +539,20 @@ nsUserFontSet::InsertRule(nsCSSFontFaceRule* aRule, uint8_t aSheetType,
   // to the new rule list, and put the entry into the appropriate family
   for (uint32_t i = 0; i < aOldRules.Length(); ++i) {
     const FontFaceRuleRecord& ruleRec = aOldRules[i];
+
     if (ruleRec.mContainer.mRule == aRule &&
         ruleRec.mContainer.mSheetType == aSheetType) {
+
+      // if local rules were used, don't use the old font entry
+      // for rules containing src local usage
+      if (mLocalRulesUsed) {
+        aRule->GetDesc(eCSSFontDesc_Src, val);
+        unit = val.GetUnit();
+        if (unit == eCSSUnit_Array && HasLocalSrc(val.GetArrayValue())) {
+          break;
+        }
+      }
+
       AddFontFace(fontfamily, ruleRec.mFontEntry);
       mRules.AppendElement(ruleRec);
       aOldRules.RemoveElementAt(i);
@@ -982,4 +1009,17 @@ nsUserFontSet::GetPrivateBrowsing()
 
   nsCOMPtr<nsILoadContext> loadContext = ps->GetDocument()->GetLoadContext();
   return loadContext && loadContext->UsePrivateBrowsing();
+}
+
+void
+nsUserFontSet::DoRebuildUserFontSet()
+{
+  if (!mPresContext) {
+    // AFAICS, this can only happen if someone has already called Destroy() on
+    // this font-set, which means it is in the process of being torn down --
+    // so there's no point trying to update its rules.
+    return;
+  }
+
+  mPresContext->RebuildUserFontSet();
 }

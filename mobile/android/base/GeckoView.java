@@ -93,17 +93,18 @@ public class GeckoView extends LayerView
             tabs.attachToContext(context);
         }
 
-        GeckoAppShell.registerEventListener("Gecko:Ready", this);
-        GeckoAppShell.registerEventListener("Content:StateChange", this);
-        GeckoAppShell.registerEventListener("Content:LoadError", this);
-        GeckoAppShell.registerEventListener("Content:PageShow", this);
-        GeckoAppShell.registerEventListener("DOMTitleChanged", this);
-        GeckoAppShell.registerEventListener("Link:Favicon", this);
-        GeckoAppShell.registerEventListener("Prompt:Show", this);
-        GeckoAppShell.registerEventListener("Prompt:ShowTop", this);
+        EventDispatcher.getInstance().registerGeckoThreadListener(this,
+            "Gecko:Ready",
+            "Content:StateChange",
+            "Content:LoadError",
+            "Content:PageShow",
+            "DOMTitleChanged",
+            "Link:Favicon",
+            "Prompt:Show",
+            "Prompt:ShowTop");
 
         ThreadUtils.setUiThread(Thread.currentThread(), new Handler());
-        initializeView(GeckoAppShell.getEventDispatcher());
+        initializeView(EventDispatcher.getInstance());
 
         if (GeckoThread.checkAndSetLaunchState(GeckoThread.LaunchState.Launching, GeckoThread.LaunchState.Launched)) {
             // This is the first launch, so finish initialization and go.
@@ -214,7 +215,7 @@ public class GeckoView extends LayerView
         if (selectedTab != null)
             Tabs.getInstance().notifyListeners(selectedTab, Tabs.TabEvents.SELECTED);
         geckoConnected();
-        GeckoAppShell.setLayerClient(getLayerClient());
+        GeckoAppShell.setLayerClient(getLayerClientObject());
         GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Viewport:Flush", null));
     }
 

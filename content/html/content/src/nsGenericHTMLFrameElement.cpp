@@ -38,10 +38,10 @@ NS_IMPL_ADDREF_INHERITED(nsGenericHTMLFrameElement, nsGenericHTMLElement)
 NS_IMPL_RELEASE_INHERITED(nsGenericHTMLFrameElement, nsGenericHTMLElement)
 
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(nsGenericHTMLFrameElement)
-  NS_INTERFACE_TABLE_INHERITED3(nsGenericHTMLFrameElement,
-                                nsIFrameLoaderOwner,
-                                nsIDOMMozBrowserFrame,
-                                nsIMozBrowserFrame)
+  NS_INTERFACE_TABLE_INHERITED(nsGenericHTMLFrameElement,
+                               nsIFrameLoaderOwner,
+                               nsIDOMMozBrowserFrame,
+                               nsIMozBrowserFrame)
 NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLElement)
 
 NS_IMPL_BOOL_ATTR(nsGenericHTMLFrameElement, Mozbrowser, mozbrowser)
@@ -418,7 +418,7 @@ nsGenericHTMLFrameElement::GetReallyIsBrowserOrApp(bool *aOut)
   // Fail if the node principal isn't trusted.
   nsIPrincipal *principal = NodePrincipal();
   nsCOMPtr<nsIPermissionManager> permMgr =
-    do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
+    services::GetPermissionManager();
   NS_ENSURE_TRUE(permMgr, NS_OK);
 
   uint32_t permission = nsIPermissionManager::DENY_ACTION;
@@ -464,7 +464,7 @@ nsGenericHTMLFrameElement::GetAppManifestURL(nsAString& aOut)
   // Check permission.
   nsIPrincipal *principal = NodePrincipal();
   nsCOMPtr<nsIPermissionManager> permMgr =
-    do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
+    services::GetPermissionManager();
   NS_ENSURE_TRUE(permMgr, NS_OK);
 
   uint32_t permission = nsIPermissionManager::DENY_ACTION;

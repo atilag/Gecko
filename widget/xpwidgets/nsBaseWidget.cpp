@@ -19,6 +19,7 @@
 #include "nsISimpleEnumerator.h"
 #include "nsIContent.h"
 #include "nsIDocument.h"
+#include "nsIPresShell.h"
 #include "nsIServiceManager.h"
 #include "mozilla/Preferences.h"
 #include "BasicLayers.h"
@@ -28,7 +29,6 @@
 #include "nsIXULWindow.h"
 #include "nsIBaseWindow.h"
 #include "nsXULPopupManager.h"
-#include "nsEventStateManager.h"
 #include "nsIWidgetListener.h"
 #include "nsIGfxInfo.h"
 #include "npapi.h"
@@ -82,7 +82,7 @@ bool            gDisableNativeTheme               = false;
 int32_t nsIWidget::sPointerIdCounter = 0;
 
 // nsBaseWidget
-NS_IMPL_ISUPPORTS1(nsBaseWidget, nsIWidget)
+NS_IMPL_ISUPPORTS(nsBaseWidget, nsIWidget)
 
 
 nsAutoRollup::nsAutoRollup()
@@ -137,7 +137,7 @@ nsBaseWidget::nsBaseWidget()
   nsContentUtils::RegisterShutdownObserver(mShutdownObserver);
 }
 
-NS_IMPL_ISUPPORTS1(WidgetShutdownObserver, nsIObserver)
+NS_IMPL_ISUPPORTS(WidgetShutdownObserver, nsIObserver)
 
 NS_IMETHODIMP
 WidgetShutdownObserver::Observe(nsISupports *aSubject,
@@ -1613,10 +1613,10 @@ case _value: eventName.AssignLiteral(_name) ; break
     _ASSIGN_eventName(NS_DRAGDROP_ENTER,"NS_DND_ENTER");
     _ASSIGN_eventName(NS_DRAGDROP_EXIT,"NS_DND_EXIT");
     _ASSIGN_eventName(NS_DRAGDROP_OVER,"NS_DND_OVER");
+    _ASSIGN_eventName(NS_EDITOR_INPUT,"NS_EDITOR_INPUT");
     _ASSIGN_eventName(NS_FOCUS_CONTENT,"NS_FOCUS_CONTENT");
     _ASSIGN_eventName(NS_FORM_SELECTED,"NS_FORM_SELECTED");
     _ASSIGN_eventName(NS_FORM_CHANGE,"NS_FORM_CHANGE");
-    _ASSIGN_eventName(NS_FORM_INPUT,"NS_FORM_INPUT");
     _ASSIGN_eventName(NS_FORM_RESET,"NS_FORM_RESET");
     _ASSIGN_eventName(NS_FORM_SUBMIT,"NS_FORM_SUBMIT");
     _ASSIGN_eventName(NS_IMAGE_ABORT,"NS_IMAGE_ABORT");
@@ -1718,7 +1718,7 @@ class Debug_PrefObserver MOZ_FINAL : public nsIObserver {
     NS_DECL_NSIOBSERVER
 };
 
-NS_IMPL_ISUPPORTS1(Debug_PrefObserver, nsIObserver)
+NS_IMPL_ISUPPORTS(Debug_PrefObserver, nsIObserver)
 
 NS_IMETHODIMP
 Debug_PrefObserver::Observe(nsISupports* subject, const char* topic,

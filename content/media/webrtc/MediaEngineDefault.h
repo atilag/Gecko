@@ -41,14 +41,16 @@ public:
   virtual void GetName(nsAString&);
   virtual void GetUUID(nsAString&);
 
-  virtual nsresult Allocate(const MediaEnginePrefs &aPrefs);
+  virtual nsresult Allocate(const VideoTrackConstraintsN &aConstraints,
+                            const MediaEnginePrefs &aPrefs);
   virtual nsresult Deallocate();
   virtual nsresult Start(SourceMediaStream*, TrackID);
   virtual nsresult Stop(SourceMediaStream*, TrackID);
   virtual nsresult Snapshot(uint32_t aDuration, nsIDOMFile** aFile);
   virtual nsresult Config(bool aEchoOn, uint32_t aEcho,
                           bool aAgcOn, uint32_t aAGC,
-                          bool aNoiseOn, uint32_t aNoise) { return NS_OK; };
+                          bool aNoiseOn, uint32_t aNoise,
+                          int32_t aPlayoutDelay) { return NS_OK; };
   virtual void NotifyPull(MediaStreamGraph* aGraph,
                           SourceMediaStream *aSource,
                           TrackID aId,
@@ -93,14 +95,16 @@ public:
   virtual void GetName(nsAString&);
   virtual void GetUUID(nsAString&);
 
-  virtual nsresult Allocate(const MediaEnginePrefs &aPrefs);
+  virtual nsresult Allocate(const AudioTrackConstraintsN &aConstraints,
+                            const MediaEnginePrefs &aPrefs);
   virtual nsresult Deallocate();
   virtual nsresult Start(SourceMediaStream*, TrackID);
   virtual nsresult Stop(SourceMediaStream*, TrackID);
   virtual nsresult Snapshot(uint32_t aDuration, nsIDOMFile** aFile);
   virtual nsresult Config(bool aEchoOn, uint32_t aEcho,
                           bool aAgcOn, uint32_t aAGC,
-                          bool aNoiseOn, uint32_t aNoise) { return NS_OK; };
+                          bool aNoiseOn, uint32_t aNoise,
+                          int32_t aPlayoutDelay) { return NS_OK; };
   virtual void NotifyPull(MediaStreamGraph* aGraph,
                           SourceMediaStream *aSource,
                           TrackID aId,
@@ -119,7 +123,7 @@ protected:
   nsCOMPtr<nsITimer> mTimer;
 
   SourceMediaStream* mSource;
-  nsRefPtr<SineWaveGenerator> mSineGenerator;
+  nsAutoPtr<SineWaveGenerator> mSineGenerator;
 };
 
 
@@ -129,12 +133,13 @@ public:
   MediaEngineDefault()
   : mMutex("mozilla::MediaEngineDefault")
   {}
-  ~MediaEngineDefault() {}
 
   virtual void EnumerateVideoDevices(nsTArray<nsRefPtr<MediaEngineVideoSource> >*);
   virtual void EnumerateAudioDevices(nsTArray<nsRefPtr<MediaEngineAudioSource> >*);
 
 private:
+  ~MediaEngineDefault() {}
+
   Mutex mMutex;
   // protected with mMutex:
 

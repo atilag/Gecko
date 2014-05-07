@@ -41,16 +41,9 @@ public:
   ~TextEncoder()
   {}
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope,
-                       bool* aTookOwnership)
+  JSObject* WrapObject(JSContext* aCx, bool* aTookOwnership)
   {
-    return TextEncoderBinding::Wrap(aCx, aScope, this, aTookOwnership);
-  }
-
-  nsISupports*
-  GetParentObject()
-  {
-    return nullptr;
+    return TextEncoderBinding::Wrap(aCx, this, aTookOwnership);
   }
 
   JSObject* Encode(JSContext* aCx,

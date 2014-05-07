@@ -7,11 +7,7 @@
 const Cu = Components.utils;
 
 const PREF_BRANCH = "toolkit.telemetry.";
-#ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
-const PREF_ENABLED = PREF_BRANCH + "enabledPreRelease";
-#else
 const PREF_ENABLED = PREF_BRANCH + "enabled";
-#endif
 
 this.EXPORTED_SYMBOLS = [
   "UITelemetry",
@@ -145,7 +141,6 @@ this.UITelemetry = {
     delete this._activeSessions[aName];
 
     if (!sessionStart) {
-      Services.console.logStringMessage("UITelemetry error: no session [" + aName + "] to stop!");
       return;
     }
 

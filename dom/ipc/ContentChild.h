@@ -10,7 +10,12 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/PContentChild.h"
 #include "mozilla/dom/ipc/Blob.h"
+#include "nsHashKeys.h"
+#include "nsIObserver.h"
+#include "nsTHashtable.h"
+
 #include "nsWeakPtr.h"
+
 
 struct ChromePackage;
 class nsIDOMBlob;
@@ -84,6 +89,11 @@ public:
     PCompositorChild*
     AllocPCompositorChild(mozilla::ipc::Transport* aTransport,
                           base::ProcessId aOtherProcess) MOZ_OVERRIDE;
+
+    PSharedBufferManagerChild*
+    AllocPSharedBufferManagerChild(mozilla::ipc::Transport* aTransport,
+                                    base::ProcessId aOtherProcess) MOZ_OVERRIDE;
+
     PImageBridgeChild*
     AllocPImageBridgeChild(mozilla::ipc::Transport* aTransport,
                            base::ProcessId aOtherProcess) MOZ_OVERRIDE;
@@ -297,6 +307,8 @@ private:
 
     InfallibleTArray<nsAutoPtr<AlertObserver> > mAlertObservers;
     nsRefPtr<ConsoleListener> mConsoleListener;
+
+    nsTHashtable<nsPtrHashKey<nsIObserver>> mIdleObservers;
 
     /**
      * An ID unique to the process containing our corresponding

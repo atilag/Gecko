@@ -169,12 +169,13 @@ public:
 
   virtual void DoneCreatingElement() MOZ_OVERRIDE;
 
-  virtual nsEventStates IntrinsicState() const MOZ_OVERRIDE;
+  virtual EventStates IntrinsicState() const MOZ_OVERRIDE;
 
   // Element
 private:
-  virtual void AddStates(nsEventStates aStates);
-  virtual void RemoveStates(nsEventStates aStates);
+  virtual void AddStates(EventStates aStates);
+  virtual void RemoveStates(EventStates aStates);
+
 public:
 
   // nsITextControlElement
@@ -734,8 +735,7 @@ public:
   static Decimal StringToDecimal(const nsAString& aValue);
 
 protected:
-  virtual JSObject* WrapNode(JSContext* aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
 
   // Pull IsSingleLineTextControl into our scope, otherwise it'd be hidden
   // by the nsITextControlElement version.
@@ -1321,7 +1321,7 @@ private:
   bool SupportsSetRangeText() const {
     return mType == NS_FORM_INPUT_TEXT || mType == NS_FORM_INPUT_SEARCH ||
            mType == NS_FORM_INPUT_URL || mType == NS_FORM_INPUT_TEL ||
-           mType == NS_FORM_INPUT_PASSWORD;
+           mType == NS_FORM_INPUT_PASSWORD || mType == NS_FORM_INPUT_NUMBER;
   }
 
   static bool MayFireChangeOnBlur(uint8_t aType) {

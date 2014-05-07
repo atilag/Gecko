@@ -309,6 +309,29 @@ js::math_ceil(JSContext *cx, unsigned argc, Value *vp)
     return true;
 }
 
+bool
+js::math_clz32(JSContext *cx, unsigned argc, Value *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    if (args.length() == 0) {
+        args.rval().setInt32(32);
+        return true;
+    }
+
+    uint32_t n;
+    if (!ToUint32(cx, args[0], &n))
+        return false;
+
+    if (n == 0) {
+        args.rval().setInt32(32);
+        return true;
+    }
+
+    args.rval().setInt32(mozilla::CountLeadingZeroes32(n));
+    return true;
+}
+
 double
 js::math_cos_impl(MathCache *cache, double x)
 {
@@ -440,12 +463,23 @@ js::math_imul(JSContext *cx, unsigned argc, Value *vp)
 
 // Implements Math.fround (20.2.2.16) up to step 3
 bool
-js::RoundFloat32(JSContext *cx, Handle<Value> v, float *out)
+js::RoundFloat32(JSContext *cx, HandleValue v, float *out)
 {
     double d;
     bool success = ToNumber(cx, v, &d);
     *out = static_cast<float>(d);
     return success;
+}
+
+bool
+js::RoundFloat32(JSContext *cx, HandleValue arg, MutableHandleValue res)
+{
+    float f;
+    if (!RoundFloat32(cx, arg, &f))
+        return false;
+
+    res.setDouble(static_cast<double>(f));
+    return true;
 }
 
 bool
@@ -1427,6 +1461,7 @@ static const JSFunctionSpec math_static_methods[] = {
     JS_FN("atan",           math_atan,            1, 0),
     JS_FN("atan2",          math_atan2,           2, 0),
     JS_FN("ceil",           math_ceil,            1, 0),
+    JS_FN("clz32",          math_clz32,           1, 0),
     JS_FN("cos",            math_cos,             1, 0),
     JS_FN("exp",            math_exp,             1, 0),
     JS_FN("floor",          math_floor,           1, 0),
@@ -1468,8 +1503,9 @@ js_InitMathClass(JSContext *cx, HandleObject obj)
     if (!Math)
         return nullptr;
 
-    if (!JS_DefineProperty(cx, obj, js_Math_str, OBJECT_TO_JSVAL(Math),
-                           JS_PropertyStub, JS_StrictPropertyStub, 0)) {
+    if (!JS_DefineProperty(cx, obj, js_Math_str, Math, 0,
+                           JS_PropertyStub, JS_StrictPropertyStub))
+    {
         return nullptr;
     }
 

@@ -296,7 +296,7 @@ CallJSNativeConstructor(JSContext *cx, Native native, const CallArgs &args)
                  native != js::CallOrConstructBoundFunction &&
                  native != js::IteratorConstructor &&
                  (!callee->is<JSFunction>() || callee->as<JSFunction>().native() != obj_construct),
-                 !args.rval().isPrimitive() && callee != &args.rval().toObject());
+                 args.rval().isObject() && callee != &args.rval().toObject());
 
     return true;
 }
@@ -408,6 +408,13 @@ js::ExclusiveContext::enterCompartment(JSCompartment *c)
 }
 
 inline void
+js::ExclusiveContext::enterNullCompartment()
+{
+    enterCompartmentDepth_++;
+    setCompartment(nullptr);
+}
+
+inline void
 js::ExclusiveContext::leaveCompartment(JSCompartment *oldCompartment)
 {
     JS_ASSERT(hasEnteredCompartment());
@@ -417,7 +424,8 @@ js::ExclusiveContext::leaveCompartment(JSCompartment *oldCompartment)
     // compartment.
     JSCompartment *startingCompartment = compartment_;
     setCompartment(oldCompartment);
-    startingCompartment->leave();
+    if (startingCompartment)
+        startingCompartment->leave();
 }
 
 inline void

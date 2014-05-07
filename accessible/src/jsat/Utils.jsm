@@ -247,6 +247,16 @@ this.Utils = {
       return new Rect(objX.value, objY.value, objW.value, objH.value);
   },
 
+  /**
+   * Get current display DPI.
+   */
+  get dpi() {
+    delete this.dpi;
+    this.dpi = this.win.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(
+      Ci.nsIDOMWindowUtils).displayDPI;
+    return this.dpi;
+  },
+
   isInSubtree: function isInSubtree(aAccessible, aSubTreeRoot) {
     let acc = aAccessible;
     while (acc) {
@@ -333,6 +343,17 @@ this.Utils = {
     }
 
     return null;
+  },
+
+  isListItemDecorator: function isListItemDecorator(aStaticText,
+                                                    aExcludeOrdered) {
+    let parent = aStaticText.parent;
+    if (aExcludeOrdered && parent.parent.DOMNode.nodeName === 'OL') {
+      return false;
+    }
+
+    return parent.role === Roles.LISTITEM && parent.childCount > 1 &&
+      aStaticText.indexInParent === 0;
   }
 };
 
@@ -587,7 +608,7 @@ PivotContext.prototype = {
       while (parent && (parent = parent.parent)) {
        ancestry.push(parent);
       }
-    } catch (e) {
+    } catch (x) {
       // A defunct accessible will raise an exception geting parent.
       Logger.debug('Failed to get parent:', x);
     }

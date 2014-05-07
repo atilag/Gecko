@@ -36,8 +36,6 @@
 #include "pratom.h"                     // For PR_ATOMIC_INCREMENT/DECREMENT
 #include "gfxPrefs.h"
 
-class gfxImageSurface;
-
 namespace mozilla {
 namespace layers {
 
@@ -47,10 +45,12 @@ class ClientLayerManager;
 
 
 // A class to help implement copy-on-write semantics for shared tiles.
-class gfxSharedReadLock : public AtomicRefCounted<gfxSharedReadLock> {
-public:
-  MOZ_DECLARE_REFCOUNTED_TYPENAME(gfxSharedReadLock)
+class gfxSharedReadLock {
+protected:
   virtual ~gfxSharedReadLock() {}
+
+public:
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(gfxSharedReadLock)
 
   virtual int32_t ReadLock() = 0;
   virtual int32_t ReadUnlock() = 0;
@@ -483,7 +483,7 @@ public:
 
   virtual TextureInfo GetTextureInfo() const MOZ_OVERRIDE
   {
-    return TextureInfo(BUFFER_TILED);
+    return TextureInfo(CompositableType::BUFFER_TILED);
   }
 
   virtual void ClearCachedResources() MOZ_OVERRIDE;

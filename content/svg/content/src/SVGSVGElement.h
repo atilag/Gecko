@@ -30,6 +30,7 @@ class nsSVGImageFrame;
 namespace mozilla {
 class AutoSVGRenderingState;
 class DOMSVGAnimatedPreserveAspectRatio;
+class DOMSVGLength;
 class EventChainPreVisitor;
 class SVGFragmentIdentifier;
 
@@ -92,8 +93,7 @@ class SVGSVGElement MOZ_FINAL : public SVGSVGElementBase
 
   SVGSVGElement(already_AddRefed<nsINodeInfo>& aNodeInfo,
                 FromParser aFromParser);
-  virtual JSObject* WrapNode(JSContext *aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
 
   friend nsresult (::NS_NewSVGSVGElement(nsIContent **aResult,
                                          already_AddRefed<nsINodeInfo>&& aNodeInfo,
@@ -240,7 +240,7 @@ public:
   void SetCurrentTime(float seconds);
   void DeselectAll();
   already_AddRefed<nsIDOMSVGNumber> CreateSVGNumber();
-  already_AddRefed<nsIDOMSVGLength> CreateSVGLength();
+  already_AddRefed<DOMSVGLength> CreateSVGLength();
   already_AddRefed<SVGAngle> CreateSVGAngle();
   already_AddRefed<nsISVGPoint> CreateSVGPoint();
   already_AddRefed<SVGMatrix> CreateSVGMatrix();

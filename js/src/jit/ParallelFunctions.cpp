@@ -256,7 +256,8 @@ jit::SetPropertyPar(ForkJoinContext *cx, HandleObject obj, HandlePropertyName na
 
     RootedValue v(cx, value);
     RootedId id(cx, NameToId(name));
-    return baseops::SetPropertyHelper<ParallelExecution>(cx, obj, obj, id, 0, &v, strict);
+    return baseops::SetPropertyHelper<ParallelExecution>(cx, obj, obj, id, baseops::Qualified, &v,
+                                                         strict);
 }
 
 bool
@@ -273,7 +274,16 @@ jit::SetElementPar(ForkJoinContext *cx, HandleObject obj, HandleValue index, Han
     // can't modify any TI state anyways. If we need to add a new type, we
     // would bail out.
     RootedValue v(cx, value);
-    return baseops::SetPropertyHelper<ParallelExecution>(cx, obj, obj, id, 0, &v, strict);
+    return baseops::SetPropertyHelper<ParallelExecution>(cx, obj, obj, id, baseops::Qualified, &v,
+                                                         strict);
+}
+
+bool
+jit::SetDenseElementPar(ForkJoinContext *cx, HandleObject obj, int32_t index, HandleValue value,
+                        bool strict)
+{
+    RootedValue indexVal(cx, Int32Value(index));
+    return SetElementPar(cx, obj, indexVal, value, strict);
 }
 
 JSString *
@@ -497,9 +507,9 @@ jit::BitNotPar(ForkJoinContext *cx, HandleValue in, int32_t *out)
     JS_BEGIN_MACRO                                                      \
     int32_t left, right;                                                \
     if (lhs.isObject() || rhs.isObject())                               \
-        return TP_RETRY_SEQUENTIALLY;                                   \
-    if (!NonObjectToInt32(cx, lhs, &left) ||                         \
-        !NonObjectToInt32(cx, rhs, &right))                          \
+        return false;                                                   \
+    if (!NonObjectToInt32(cx, lhs, &left) ||                            \
+        !NonObjectToInt32(cx, rhs, &right))                             \
     {                                                                   \
         return false;                                                   \
     }                                                                   \
@@ -528,7 +538,7 @@ jit::BitAndPar(ForkJoinContext *cx, HandleValue lhs, HandleValue rhs, int32_t *o
 bool
 jit::BitLshPar(ForkJoinContext *cx, HandleValue lhs, HandleValue rhs, int32_t *out)
 {
-    BIT_OP(left << (right & 31));
+    BIT_OP(uint32_t(left) << (right & 31));
 }
 
 bool

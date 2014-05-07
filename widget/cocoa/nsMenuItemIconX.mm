@@ -36,7 +36,6 @@
 #include "imgLoader.h"
 #include "imgRequestProxy.h"
 #include "nsMenuItemX.h"
-#include "gfxImageSurface.h"
 #include "gfxPlatform.h"
 #include "imgIContainer.h"
 #include "nsCocoaUtils.h"
@@ -57,7 +56,7 @@ static const uint32_t kIconBytes = kIconBytesPerRow * kIconHeight;
 typedef NS_STDCALL_FUNCPROTO(nsresult, GetRectSideMethod, nsIDOMRect,
                              GetBottom, (nsIDOMCSSPrimitiveValue**));
 
-NS_IMPL_ISUPPORTS1(nsMenuItemIconX, imgINotificationObserver)
+NS_IMPL_ISUPPORTS(nsMenuItemIconX, imgINotificationObserver)
 
 nsMenuItemIconX::nsMenuItemIconX(nsMenuObjectX* aMenuItem,
                                  nsIContent*    aContent,
@@ -317,7 +316,7 @@ nsMenuItemIconX::LoadIcon(nsIURI* aIconURI)
   // not exposed to web content
   nsresult rv = loader->LoadImage(aIconURI, nullptr, nullptr, nullptr, loadGroup, this,
                                    nullptr, nsIRequest::LOAD_NORMAL, nullptr,
-                                   nullptr, getter_AddRefs(mIconRequest));
+                                   nullptr, EmptyString(), getter_AddRefs(mIconRequest));
   if (NS_FAILED(rv)) return rv;
 
   // We need to request the icon be decoded (bug 573583, bug 705516).
@@ -387,18 +386,14 @@ nsMenuItemIconX::OnStopFrame(imgIRequest*    aRequest)
   if (mImageRegionRect.IsEmpty()) {
     mImageRegionRect.SetRect(0, 0, origWidth, origHeight);
   }
-  
-  nsRefPtr<gfxASurface> thebesSurface =
+
+  RefPtr<SourceSurface> surface =
     imageContainer->GetFrame(imgIContainer::FRAME_CURRENT,
                              imgIContainer::FLAG_NONE);
-  if (!thebesSurface) {
+  if (!surface) {
     [mNativeMenuItem setImage:nil];
     return NS_ERROR_FAILURE;
   }
-  RefPtr<SourceSurface> surface =
-    gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(nullptr,
-                                                           thebesSurface);
-  NS_ENSURE_TRUE(surface, NS_ERROR_FAILURE);
 
   CGImageRef origImage = NULL;
   nsresult rv = nsCocoaUtils::CreateCGImageFromSurface(surface, &origImage);

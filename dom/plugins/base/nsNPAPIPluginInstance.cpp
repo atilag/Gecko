@@ -95,15 +95,11 @@ static bool EnsureGLContext()
   return sPluginContext != nullptr;
 }
 
-class SharedPluginTexture {
+class SharedPluginTexture MOZ_FINAL {
 public:
   NS_INLINE_DECL_REFCOUNTING(SharedPluginTexture)
 
   SharedPluginTexture() : mLock("SharedPluginTexture.mLock")
-  {
-  }
-
-  ~SharedPluginTexture()
   {
   }
 
@@ -123,10 +119,10 @@ public:
   }
 
   void Release(nsNPAPIPluginInstance::TextureInfo& aTextureInfo)
-  { 
+  {
     mTextureInfo = aTextureInfo;
     mLock.Unlock();
-  } 
+  }
 
   SharedTextureHandle CreateSharedHandle()
   {
@@ -148,13 +144,18 @@ public:
     // ensures that we create a new one in Lock()
     sPluginContext->fDeleteTextures(1, &mTextureInfo.mTexture);
     mTextureInfo.mTexture = 0;
-    
+
     return handle;
   }
 
 private:
+  // Private destructor, to discourage deletion outside of Release():
+  ~SharedPluginTexture()
+  {
+  }
+
   nsNPAPIPluginInstance::TextureInfo mTextureInfo;
- 
+
   Mutex mLock;
 };
 
@@ -230,7 +231,7 @@ nsNPAPIPluginInstance::Destroy()
 #if MOZ_WIDGET_ANDROID
   if (mContentSurface)
     mContentSurface->SetFrameAvailableCallback(nullptr);
-  
+
   mContentTexture = nullptr;
   mContentSurface = nullptr;
 
@@ -266,7 +267,7 @@ nsresult nsNPAPIPluginInstance::Initialize(nsNPAPIPlugin *aPlugin, nsPluginInsta
       PL_strcpy(mMIMEType, aMIMEType);
     }
   }
-  
+
   return Start();
 }
 
@@ -436,7 +437,7 @@ nsNPAPIPluginInstance::Start()
     // Note: If we failed to get the tag type, we may be a full page plugin, so no arguments
     rv = GetAttributes(count, names, values);
     NS_ENSURE_SUCCESS(rv, rv);
-    
+
     // nsPluginTagType_Object or Applet may also have PARAM tags
     // Note: The arrays handed back by GetParameters() are
     // crafted specially to be directly behind the arrays from GetAttributes()
@@ -445,7 +446,7 @@ nsNPAPIPluginInstance::Start()
     if (tagtype != nsPluginTagType_Embed) {
       uint16_t pcount = 0;
       const char* const* pnames = nullptr;
-      const char* const* pvalues = nullptr;    
+      const char* const* pvalues = nullptr;
       if (NS_SUCCEEDED(GetParameters(pcount, pnames, pvalues))) {
         // Android expects an empty string as the separator instead of null
 #ifdef MOZ_WIDGET_ANDROID
@@ -552,7 +553,7 @@ nsNPAPIPluginInstance::Start()
     nsJSNPRuntime::OnPluginDestroy(&mNPP);
     return NS_ERROR_FAILURE;
   }
-  
+
   return NS_OK;
 }
 
@@ -706,7 +707,7 @@ nsresult nsNPAPIPluginInstance::HandleEvent(void* event, int16_t* result,
     tmpResult = (*pluginFunctions->event)(&mNPP, event);
 #endif
     NPP_PLUGIN_LOG(PLUGIN_LOG_NOISY,
-      ("NPP HandleEvent called: this=%p, npp=%p, event=%p, return=%d\n", 
+      ("NPP HandleEvent called: this=%p, npp=%p, event=%p, return=%d\n",
       this, &mNPP, event, tmpResult));
 
     if (result)
@@ -733,7 +734,7 @@ nsresult nsNPAPIPluginInstance::GetValueFromPlugin(NPPVariable variable, void* v
     NS_TRY_SAFE_CALL_RETURN(pluginError, (*pluginFunctions->getvalue)(&mNPP, variable, value), this,
                             NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO);
     NPP_PLUGIN_LOG(PLUGIN_LOG_NORMAL,
-    ("NPP GetValue called: this=%p, npp=%p, var=%d, value=%d, return=%d\n", 
+    ("NPP GetValue called: this=%p, npp=%p, var=%d, value=%d, return=%d\n",
     this, &mNPP, variable, value, pluginError));
 
     if (pluginError == NPERR_NO_ERROR) {
@@ -749,7 +750,7 @@ nsNPAPIPlugin* nsNPAPIPluginInstance::GetPlugin()
   return mPlugin;
 }
 
-nsresult nsNPAPIPluginInstance::GetNPP(NPP* aNPP) 
+nsresult nsNPAPIPluginInstance::GetNPP(NPP* aNPP)
 {
   if (aNPP)
     *aNPP = &mNPP;
@@ -870,7 +871,7 @@ void nsNPAPIPluginInstance::NotifyFullScreen(bool aFullScreen)
   SendLifecycleEvent(this, mFullScreen ? kEnterFullScreen_ANPLifecycleAction : kExitFullScreen_ANPLifecycleAction);
 
   if (mFullScreen && mFullScreenOrientation != dom::eScreenOrientation_None) {
-    GeckoAppShell::LockScreenOrientation(mFullScreenOrientation);
+    mozilla::widget::android::GeckoAppShell::LockScreenOrientation(mFullScreenOrientation);
   }
 }
 
@@ -899,7 +900,7 @@ void nsNPAPIPluginInstance::SetANPDrawingModel(uint32_t aModel)
 
 void* nsNPAPIPluginInstance::GetJavaSurface()
 {
-  void* surface = nullptr; 
+  void* surface = nullptr;
   nsresult rv = GetValueFromPlugin(kJavaSurface_ANPGetValue, &surface);
   if (NS_FAILED(rv))
     return nullptr;
@@ -927,11 +928,11 @@ void nsNPAPIPluginInstance::SetFullScreenOrientation(uint32_t orientation)
     // We're already fullscreen so immediately apply the orientation change
 
     if (mFullScreenOrientation != dom::eScreenOrientation_None) {
-      GeckoAppShell::LockScreenOrientation(mFullScreenOrientation);
+      mozilla::widget::android::GeckoAppShell::LockScreenOrientation(mFullScreenOrientation);
     } else if (oldOrientation != dom::eScreenOrientation_None) {
       // We applied an orientation when we entered fullscreen, but
       // we don't want it anymore
-      GeckoAppShell::UnlockScreenOrientation();
+      mozilla::widget::android::GeckoAppShell::UnlockScreenOrientation();
     }
   }
 }
@@ -1109,7 +1110,7 @@ nsresult nsNPAPIPluginInstance::IsRemoteDrawingCoreAnimation(bool* aDrawing)
   PluginLibrary* library = mPlugin->GetLibrary();
   if (!library)
       return NS_ERROR_FAILURE;
-  
+
   return library->IsRemoteDrawingCoreAnimation(&mNPP, aDrawing);
 #else
   return NS_ERROR_FAILURE;
@@ -1129,7 +1130,7 @@ nsresult nsNPAPIPluginInstance::ContentsScaleFactorChanged(double aContentsScale
   // We only need to call this if the plugin is running OOP.
   if (!library->IsOOP())
       return NS_OK;
-  
+
   return library->ContentsScaleFactorChanged(&mNPP, aContentsScaleFactor);
 #else
   return NS_ERROR_FAILURE;
@@ -1359,7 +1360,7 @@ nsNPAPIPluginInstance::PopPopupsEnabledState()
   window->PopPopupControlState(oldState);
 
   mPopupStates.RemoveElementAt(last);
-  
+
   return NS_OK;
 }
 

@@ -19,8 +19,8 @@ NS_IMPL_ADDREF_INHERITED(XBLChildrenElement, Element)
 NS_IMPL_RELEASE_INHERITED(XBLChildrenElement, Element)
 
 NS_INTERFACE_TABLE_HEAD(XBLChildrenElement)
-  NS_INTERFACE_TABLE_INHERITED2(XBLChildrenElement, nsIDOMNode,
-                                                    nsIDOMElement)
+  NS_INTERFACE_TABLE_INHERITED(XBLChildrenElement, nsIDOMNode,
+                               nsIDOMElement)
   NS_ELEMENT_INTERFACE_TABLE_TO_MAP_SEGUE
 NS_INTERFACE_MAP_END_INHERITING(Element)
 
@@ -75,15 +75,15 @@ XBLChildrenElement::ParseAttribute(int32_t aNamespaceID,
 
 using namespace mozilla::dom;
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(nsAnonymousContentList, mParent)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsAnonymousContentList, mParent)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsAnonymousContentList)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsAnonymousContentList)
 
 NS_INTERFACE_TABLE_HEAD(nsAnonymousContentList)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_TABLE_INHERITED2(nsAnonymousContentList, nsINodeList,
-                                                        nsIDOMNodeList)
+  NS_INTERFACE_TABLE_INHERITED(nsAnonymousContentList, nsINodeList,
+                               nsIDOMNodeList)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE
   NS_INTERFACE_MAP_ENTRIES_CYCLE_COLLECTION(nsAnonymousContentList)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
@@ -212,7 +212,7 @@ nsAnonymousContentList::IndexOf(nsIContent* aContent)
 }
 
 JSObject*
-nsAnonymousContentList::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
+nsAnonymousContentList::WrapObject(JSContext *cx)
 {
-  return mozilla::dom::NodeListBinding::Wrap(cx, scope, this);
+  return mozilla::dom::NodeListBinding::Wrap(cx, this);
 }

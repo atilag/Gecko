@@ -84,6 +84,7 @@ class nsIDOMCrypto;
 class nsIDOMOfflineResourceList;
 class nsIScrollableFrame;
 class nsIControllers;
+class nsIJSID;
 class nsIScriptContext;
 class nsIScriptTimeoutHandler;
 class nsIWebBrowserChrome;
@@ -94,7 +95,6 @@ class nsScreen;
 class nsHistory;
 class nsGlobalWindowObserver;
 class nsGlobalWindow;
-class nsDOMEventTargetHelper;
 class nsDOMWindowUtils;
 class nsIIdleService;
 struct nsIntSize;
@@ -103,7 +103,7 @@ struct nsRect;
 class nsWindowSizes;
 
 namespace mozilla {
-class Selection;
+class DOMEventTargetHelper;
 namespace dom {
 class BarProp;
 class Console;
@@ -113,6 +113,7 @@ class Gamepad;
 class MediaQueryList;
 class Navigator;
 class OwningExternalOrWindowProxy;
+class Selection;
 class SpeechSynthesis;
 class WakeLock;
 namespace indexedDB {
@@ -277,6 +278,16 @@ public:
     result.forget(aResult);
     return NS_OK;
   }
+  void Get(JSContext* aCx, JS::Handle<JSObject*> aScope, nsIPrincipal* aSubject,
+           JS::MutableHandle<JS::Value> aResult, mozilla::ErrorResult& aError)
+  {
+    if (aSubject->Subsumes(mOrigin)) {
+      aError = nsContentUtils::XPConnect()->VariantToJS(aCx, aScope,
+                                                        mValue, aResult);
+    } else {
+      aResult.setUndefined();
+    }
+  }
   virtual ~DialogValueHolder() {}
 private:
   nsCOMPtr<nsIPrincipal> mOrigin;
@@ -334,8 +345,7 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
 
   // nsWrapperCache
-  virtual JSObject *WrapObject(JSContext *cx,
-                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE
+  virtual JSObject *WrapObject(JSContext *cx) MOZ_OVERRIDE
   {
     NS_ASSERTION(IsOuterWindow(),
                  "Inner window supports nsWrapperCache, fix WrapObject!");
@@ -348,8 +358,9 @@ public:
   // nsIScriptGlobalObject
   JSObject *FastGetGlobalJSObject() const
   {
-    return mJSObject;
+    return GetWrapperPreserveColor();
   }
+
   void TraceGlobalJSObject(JSTracer* aTrc);
 
   virtual nsresult EnsureScriptEnvironment();
@@ -357,9 +368,10 @@ public:
   virtual nsIScriptContext *GetScriptContext();
 
   void PoisonOuterWindowProxy(JSObject *aObject);
-  virtual void OnFinalize(JSObject* aObject);
 
   virtual bool IsBlackForCC(bool aTracingNeeded = true);
+
+  static JSObject* OuterObject(JSContext* aCx, JS::Handle<JSObject*> aObj);
 
   // nsIScriptObjectPrincipal
   virtual nsIPrincipal* GetPrincipal();
@@ -547,9 +559,6 @@ public:
   void DisableDialogs();
   bool AreDialogsEnabled();
 
-  // Inner windows only.
-  virtual void SetHasAudioAvailableEventListeners();
-
   nsIScriptContext *GetContextInternal()
   {
     if (mOuterWindow) {
@@ -583,6 +592,9 @@ public:
   {
     return mIsChrome;
   }
+
+  using nsPIDOMWindow::IsModalContentWindow;
+  static bool IsModalContentWindow(JSContext* aCx, JSObject* aGlobal);
 
   // GetScrollFrame does not flush.  Callers should do it themselves as needed,
   // depending on which info they actually want off the scrollable frame.
@@ -684,8 +696,8 @@ public:
 
   void UnmarkGrayTimers();
 
-  void AddEventTargetObject(nsDOMEventTargetHelper* aObject);
-  void RemoveEventTargetObject(nsDOMEventTargetHelper* aObject);
+  void AddEventTargetObject(mozilla::DOMEventTargetHelper* aObject);
+  void RemoveEventTargetObject(mozilla::DOMEventTargetHelper* aObject);
 
   void NotifyIdleObserver(IdleObserverHolder* aIdleObserverHolder,
                           bool aCallOnidle);
@@ -768,7 +780,7 @@ public:
   }
 #define WINDOW_ONLY_EVENT EVENT
 #define TOUCH_EVENT EVENT
-#include "nsEventNameList.h"
+#include "mozilla/EventNameList.h"
 #undef TOUCH_EVENT
 #undef WINDOW_ONLY_EVENT
 #undef BEFOREUNLOAD_EVENT
@@ -779,6 +791,8 @@ public:
   {
     return nullptr;
   }
+
+  static bool WindowOnWebIDL(JSContext* /* unused */, JSObject* aObj);
 
   nsIDOMWindow* GetWindow(mozilla::ErrorResult& aError);
   nsIDOMWindow* GetSelf(mozilla::ErrorResult& aError);
@@ -868,7 +882,7 @@ public:
             mozilla::ErrorResult& aError);
   nsIDOMStorage* GetSessionStorage(mozilla::ErrorResult& aError);
   nsIDOMStorage* GetLocalStorage(mozilla::ErrorResult& aError);
-  mozilla::Selection* GetSelection(mozilla::ErrorResult& aError);
+  mozilla::dom::Selection* GetSelection(mozilla::ErrorResult& aError);
   mozilla::dom::indexedDB::IDBFactory* GetIndexedDB(mozilla::ErrorResult& aError);
   already_AddRefed<nsICSSDeclaration>
     GetComputedStyle(mozilla::dom::Element& aElt, const nsAString& aPseudoElt,
@@ -985,6 +999,14 @@ public:
                        mozilla::dom::Element* aPanel,
                        mozilla::ErrorResult& aError);
 
+  JS::Value GetDialogArguments(JSContext* aCx, mozilla::ErrorResult& aError);
+  JS::Value GetReturnValue(JSContext* aCx, mozilla::ErrorResult& aError);
+  void SetReturnValue(JSContext* aCx, JS::Handle<JS::Value> aReturnValue,
+                      mozilla::ErrorResult& aError);
+
+  JS::Value GetInterface(JSContext* aCx, nsIJSID* aIID,
+                         mozilla::ErrorResult& aError);
+
 protected:
   // Array of idle observers that are notified of idle events.
   nsTObserverArray<IdleObserverHolder> mIdleObservers;
@@ -1036,7 +1058,7 @@ protected:
 
   // Only to be called on an inner window.
   // aDocument must not be null.
-  void InnerSetNewDocument(nsIDocument* aDocument);
+  void InnerSetNewDocument(JSContext* aCx, nsIDocument* aDocument);
 
   nsresult DefineArgumentsProperty(nsIArray *aArguments);
 
@@ -1176,8 +1198,7 @@ protected:
   already_AddRefed<nsIBaseWindow> GetTreeOwnerWindow();
   already_AddRefed<nsIWebBrowserChrome> GetWebBrowserChrome();
   nsresult SecurityCheckURL(const char *aURL);
-  nsresult BuildURIfromBase(const char *aURL, nsIURI **aBuiltURI,
-                            JSContext **aCXused);
+
   bool PopupWhitelisted();
   PopupControlState RevisePopupAbuseLevel(PopupControlState);
   void     FireAbuseEvents(bool aBlocked, bool aWindow,
@@ -1301,9 +1322,6 @@ protected:
   void ClearStatus();
 
   virtual void UpdateParentTarget();
-
-  // Outer windows only.
-  bool GetIsTabModalPromptAllowed();
 
   inline int32_t DOMMinTimeoutValue() const;
 
@@ -1446,6 +1464,9 @@ protected:
   // For |window.dialogArguments|, via |showModalDialog|.
   nsRefPtr<DialogValueHolder> mDialogArguments;
 
+  // Only used in the outer.
+  nsRefPtr<DialogValueHolder> mReturnValue;
+
   nsRefPtr<mozilla::dom::Navigator> mNavigator;
   nsRefPtr<nsScreen>            mScreen;
   nsRefPtr<nsDOMWindowList>     mFrames;
@@ -1470,8 +1491,6 @@ protected:
   nsCOMPtr<nsIDOMStorage>      mLocalStorage;
   nsCOMPtr<nsIDOMStorage>      mSessionStorage;
 
-  nsCOMPtr<nsIXPConnectJSObjectHolder> mInnerWindowHolder;
-
   // These member variable are used only on inner windows.
   nsRefPtr<mozilla::EventListenerManager> mListenerManager;
   // mTimeouts is generally sorted by mWhen, unless mTimeoutInsertionPoint is
@@ -1490,9 +1509,6 @@ protected:
 
   // These member variables are used on both inner and the outer windows.
   nsCOMPtr<nsIPrincipal> mDocumentPrincipal;
-
-  // The JS global object.  Global objects are always allocated tenured.
-  JS::TenuredHeap<JSObject*> mJSObject;
 
   typedef nsCOMArray<nsIDOMStorageEvent> nsDOMStorageEventArray;
   nsDOMStorageEventArray mPendingStorageEvents;
@@ -1546,7 +1562,7 @@ protected:
   // currently enabled on this window.
   bool                          mAreDialogsEnabled;
 
-  nsTHashtable<nsPtrHashKey<nsDOMEventTargetHelper> > mEventTargetObjects;
+  nsTHashtable<nsPtrHashKey<mozilla::DOMEventTargetHelper> > mEventTargetObjects;
 
   nsTArray<uint32_t> mEnabledSensors;
 
@@ -1645,12 +1661,6 @@ public:
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIDOMMODALCONTENTWINDOW
-
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsGlobalModalWindow, nsGlobalWindow)
-
-protected:
-  // For use by outer windows only.
-  nsRefPtr<DialogValueHolder> mReturnValue;
 };
 
 /* factory function */

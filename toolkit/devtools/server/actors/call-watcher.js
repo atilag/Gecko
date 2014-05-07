@@ -5,7 +5,7 @@
 
 const {Cc, Ci, Cu, Cr} = require("chrome");
 const events = require("sdk/event/core");
-const promise = require("sdk/core/promise");
+const {Promise: promise} = Cu.import("resource://gre/modules/Promise.jsm", {});
 const protocol = require("devtools/server/protocol");
 const {ContentObserver} = require("devtools/content-observer");
 
@@ -79,7 +79,7 @@ let FunctionCallActor = protocol.ActorClass({
       name: name,
       stack: stack,
       args: args,
-      return: result
+      result: result
     };
 
     this.meta = {

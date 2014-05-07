@@ -3312,10 +3312,10 @@ SVGTextFrame::ScheduleReflowSVGNonDisplayText()
   MOZ_ASSERT(f, "should have found an ancestor frame to reflow");
 
   PresContext()->PresShell()->FrameNeedsReflow(
-    f, nsIPresShell::eResize, NS_FRAME_HAS_DIRTY_CHILDREN);
+    f, nsIPresShell::eStyleChange, NS_FRAME_IS_DIRTY);
 }
 
-NS_IMPL_ISUPPORTS1(SVGTextFrame::MutationObserver, nsIMutationObserver)
+NS_IMPL_ISUPPORTS(SVGTextFrame::MutationObserver, nsIMutationObserver)
 
 void
 SVGTextFrame::MutationObserver::ContentAppended(nsIDocument* aDocument,
@@ -5181,12 +5181,8 @@ SVGTextFrame::DoReflow()
   if (!kid)
     return;
 
-  nsIPresShell* presShell = presContext->PresShell();
-  NS_ASSERTION(presShell, "null presShell");
   nsRefPtr<nsRenderingContext> renderingContext =
-    presShell->GetReferenceRenderingContext();
-  if (!renderingContext)
-    return;
+    presContext->PresShell()->CreateReferenceRenderingContext();
 
   if (UpdateFontSizeScaleFactor()) {
     // If the font size scale factor changed, we need the block to report

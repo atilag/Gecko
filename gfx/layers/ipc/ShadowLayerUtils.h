@@ -38,6 +38,10 @@ namespace mozilla { namespace layers {
 struct MagicGrallocBufferHandle {
   bool operator==(const MagicGrallocBufferHandle&) const { return false; }
 };
+
+struct GrallocBufferRef {
+  bool operator==(const GrallocBufferRef&) const { return false; }
+};
 } }
 #endif
 
@@ -82,13 +86,21 @@ struct ParamTraits<mozilla::layers::MagicGrallocBufferHandle> {
   static void Write(Message*, const paramType&) {}
   static bool Read(const Message*, void**, paramType*) { return false; }
 };
+
+template <>
+struct ParamTraits<mozilla::layers::GrallocBufferRef> {
+  typedef mozilla::layers::GrallocBufferRef paramType;
+  static void Write(Message*, const paramType&) {}
+  static bool Read(const Message*, void**, paramType*) { return false; }
+};
 #endif  // !defined(MOZ_HAVE_XSURFACEDESCRIPTORGRALLOC)
 
 template <>
 struct ParamTraits<mozilla::ScreenRotation>
-  : public EnumSerializer<mozilla::ScreenRotation,
-                          mozilla::ROTATION_0,
-                          mozilla::ROTATION_COUNT>
+  : public ContiguousEnumSerializer<
+             mozilla::ScreenRotation,
+             mozilla::ROTATION_0,
+             mozilla::ROTATION_COUNT>
 {};
 
 } // namespace IPC

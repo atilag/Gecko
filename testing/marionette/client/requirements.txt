@@ -1,3 +1,4 @@
+./transport
 manifestdestiny
 mozhttpd >= 0.5
 mozinfo >= 0.7
@@ -8,3 +9,4 @@ moznetwork >= 0.21
 mozcrash >= 0.5
 mozprofile >= 0.7
 moztest >= 0.1
+mozversion >= 0.2

@@ -141,12 +141,6 @@ class BumpChunk
         return aligned;
     }
 
-    void *allocInfallible(size_t n) {
-        void *result = tryAlloc(n);
-        JS_ASSERT(result);
-        return result;
-    }
-
     static BumpChunk *new_(size_t chunkSize);
     static void delete_(BumpChunk *chunk);
 };
@@ -269,19 +263,10 @@ class LifoAlloc
         if (!getOrCreateChunk(n))
             return nullptr;
 
-        return latest->allocInfallible(n);
-    }
-
-    MOZ_ALWAYS_INLINE
-    void *allocInfallible(size_t n) {
-        void *result;
-        if (latest && (result = latest->tryAlloc(n)))
-            return result;
-
-        mozilla::DebugOnly<BumpChunk *> chunk = getOrCreateChunk(n);
-        JS_ASSERT(chunk);
-
-        return latest->allocInfallible(n);
+        // Since we just created a large enough chunk, this can't fail.
+        result = latest->tryAlloc(n);
+        MOZ_ASSERT(result);
+        return result;
     }
 
     // Ensures that enough space exists to satisfy N bytes worth of
@@ -502,6 +487,36 @@ class LifoAllocScope
         JS_ASSERT(shouldRelease);
         lifoAlloc->release(mark);
         shouldRelease = false;
+    }
+};
+
+class LifoAllocPolicy
+{
+    LifoAlloc &alloc_;
+
+  public:
+    LifoAllocPolicy(LifoAlloc &alloc)
+      : alloc_(alloc)
+    {}
+    void *malloc_(size_t bytes) {
+        return alloc_.alloc(bytes);
+    }
+    void *calloc_(size_t bytes) {
+        void *p = malloc_(bytes);
+        if (p)
+            memset(p, 0, bytes);
+        return p;
+    }
+    void *realloc_(void *p, size_t oldBytes, size_t bytes) {
+        void *n = malloc_(bytes);
+        if (!n)
+            return n;
+        memcpy(n, p, Min(oldBytes, bytes));
+        return n;
+    }
+    void free_(void *p) {
+    }
+    void reportAllocOverflow() const {
     }
 };
 

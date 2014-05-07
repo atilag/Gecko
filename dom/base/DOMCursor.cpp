@@ -10,8 +10,8 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_1(DOMCursor, DOMRequest,
-                                     mCallback)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(DOMCursor, DOMRequest,
+                                   mCallback)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(DOMCursor)
   NS_INTERFACE_MAP_ENTRY(nsIDOMDOMCursor)
@@ -76,9 +76,9 @@ DOMCursor::Continue(ErrorResult& aRv)
 }
 
 /* virtual */ JSObject*
-DOMCursor::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+DOMCursor::WrapObject(JSContext* aCx)
 {
-  return DOMCursorBinding::Wrap(aCx, aScope, this);
+  return DOMCursorBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

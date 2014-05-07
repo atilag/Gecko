@@ -33,10 +33,10 @@
 #include "nsDisplayList.h"
 #include "nsIReflowCallback.h"
 #include "nsISound.h"
-#include "nsEventStateManager.h"
 #include "nsIDOMXULMenuListElement.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/EventDispatcher.h"
+#include "mozilla/EventStateManager.h"
 #include "mozilla/Likely.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/MouseEvents.h"
@@ -713,7 +713,7 @@ nsMenuFrame::CloseMenu(bool aDeselectMenu)
   // Close the menu asynchronously
   nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
   if (pm && HasPopup())
-    pm->HidePopup(GetPopup()->GetContent(), false, aDeselectMenu, true);
+    pm->HidePopup(GetPopup()->GetContent(), false, aDeselectMenu, true, false);
 }
 
 bool
@@ -807,7 +807,7 @@ nsMenuFrame::Enter(WidgetGUIEvent* aEvent)
       if (pm) {
         nsIFrame* popup = pm->GetTopPopup(ePopupTypeAny);
         if (popup)
-          pm->HidePopup(popup->GetContent(), true, true, true);
+          pm->HidePopup(popup->GetContent(), true, true, true, false);
       }
     }
 #endif   // #ifdef XP_WIN
@@ -1267,7 +1267,7 @@ nsMenuFrame::CreateMenuCommandEvent(WidgetGUIEvent* aEvent, bool aFlipChecked)
   // Because the command event is firing asynchronously, a flag is needed to
   // indicate whether user input is being handled. This ensures that a popup
   // window won't get blocked.
-  bool userinput = nsEventStateManager::IsHandlingUserInput();
+  bool userinput = EventStateManager::IsHandlingUserInput();
 
   mDelayedMenuCommandEvent =
     new nsXULMenuCommandEvent(mContent, isTrusted, shift, control, alt, meta,
@@ -1467,7 +1467,7 @@ nsIScrollableFrame* nsMenuFrame::GetScrollTargetFrame()
 }
 
 // nsMenuTimerMediator implementation.
-NS_IMPL_ISUPPORTS1(nsMenuTimerMediator, nsITimerCallback)
+NS_IMPL_ISUPPORTS(nsMenuTimerMediator, nsITimerCallback)
 
 /**
  * Constructs a wrapper around an nsMenuFrame.

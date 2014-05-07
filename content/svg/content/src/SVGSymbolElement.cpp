@@ -12,17 +12,17 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGSymbolElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+SVGSymbolElement::WrapNode(JSContext *aCx)
 {
-  return SVGSymbolElementBinding::Wrap(aCx, aScope, this);
+  return SVGSymbolElementBinding::Wrap(aCx, this);
 }
 
 //----------------------------------------------------------------------
 // nsISupports methods
 
-NS_IMPL_ISUPPORTS_INHERITED4(SVGSymbolElement, SVGSymbolElementBase,
-                             nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement, mozilla::dom::SVGTests)
+NS_IMPL_ISUPPORTS_INHERITED(SVGSymbolElement, SVGSymbolElementBase,
+                            nsIDOMNode, nsIDOMElement,
+                            nsIDOMSVGElement, mozilla::dom::SVGTests)
 
 //----------------------------------------------------------------------
 // Implementation

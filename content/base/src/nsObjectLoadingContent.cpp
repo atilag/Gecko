@@ -19,12 +19,12 @@
 #include "nsIDOMHTMLObjectElement.h"
 #include "nsIDOMHTMLAppletElement.h"
 #include "nsIExternalProtocolHandler.h"
-#include "nsEventStates.h"
 #include "nsIObjectFrame.h"
 #include "nsIPermissionManager.h"
 #include "nsPluginHost.h"
 #include "nsPluginInstanceOwner.h"
 #include "nsJSNPRuntime.h"
+#include "nsINestedURI.h"
 #include "nsIPresShell.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsScriptSecurityManager.h"
@@ -81,6 +81,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h"
 #include "mozilla/EventDispatcher.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/Telemetry.h"
 
 #ifdef XP_WIN
@@ -395,7 +396,7 @@ private:
   nsCOMPtr<nsIObjectLoadingContent> mContent;
 };
 
-NS_IMPL_ISUPPORTS_INHERITED1(nsStopPluginRunnable, nsRunnable, nsITimerCallback)
+NS_IMPL_ISUPPORTS_INHERITED(nsStopPluginRunnable, nsRunnable, nsITimerCallback)
 
 NS_IMETHODIMP
 nsStopPluginRunnable::Notify(nsITimer *aTimer)
@@ -1157,7 +1158,7 @@ protected:
   nsCOMPtr<nsIObjectLoadingContent> mContent;
 };
 
-NS_IMPL_CYCLE_COLLECTION_1(ObjectInterfaceRequestorShim, mContent)
+NS_IMPL_CYCLE_COLLECTION(ObjectInterfaceRequestorShim, mContent)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ObjectInterfaceRequestorShim)
   NS_INTERFACE_MAP_ENTRY(nsIInterfaceRequestor)
@@ -1201,7 +1202,7 @@ nsObjectLoadingContent::AsyncOnChannelRedirect(nsIChannel *aOldChannel,
 }
 
 // <public>
-nsEventStates
+EventStates
 nsObjectLoadingContent::ObjectState() const
 {
   switch (mType) {
@@ -1214,7 +1215,7 @@ nsObjectLoadingContent::ObjectState() const
       // These are OK. If documents start to load successfully, they display
       // something, and are thus not broken in this sense. The same goes for
       // plugins.
-      return nsEventStates();
+      return EventStates();
     case eType_Null:
       switch (mFallbackType) {
         case eFallbackSuppressed:
@@ -1904,7 +1905,7 @@ nsObjectLoadingContent::LoadObject(bool aNotify,
   }
 
   // Save these for NotifyStateChanged();
-  nsEventStates oldState = ObjectState();
+  EventStates oldState = ObjectState();
   ObjectType oldType = mType;
 
   ParameterUpdateFlags stateChange = UpdateObjectParameters();
@@ -2022,6 +2023,31 @@ nsObjectLoadingContent::LoadObject(bool aNotify,
       } else {
         fallbackType = eFallbackSuppressed;
       }
+    }
+  }
+
+  // Don't allow view-source scheme.
+  // view-source is the only scheme to which this applies at the moment due to
+  // potential timing attacks to read data from cross-origin documents. If this
+  // widens we should add a protocol flag for whether the scheme is only allowed
+  // in top and use something like nsNetUtil::NS_URIChainHasFlags.
+  if (mType != eType_Null) {
+    nsCOMPtr<nsIURI> tempURI = mURI;
+    nsCOMPtr<nsINestedURI> nestedURI = do_QueryInterface(tempURI);
+    while (nestedURI) {
+      // view-source should always be an nsINestedURI, loop and check the
+      // scheme on this and all inner URIs that are also nested URIs.
+      bool isViewSource = false;
+      rv = tempURI->SchemeIs("view-source", &isViewSource);
+      if (NS_FAILED(rv) || isViewSource) {
+        LOG(("OBJLC [%p]: Blocking as effective URI has view-source scheme",
+             this));
+        mType = eType_Null;
+        break;
+      }
+
+      nestedURI->GetInnerURI(getter_AddRefs(tempURI));
+      nestedURI = do_QueryInterface(tempURI);
     }
   }
 
@@ -2323,6 +2349,12 @@ nsObjectLoadingContent::OpenChannel()
   nsCOMPtr<nsIHttpChannel> httpChan(do_QueryInterface(chan));
   if (httpChan) {
     httpChan->SetReferrer(doc->GetDocumentURI());
+
+    // Set the initiator type
+    nsCOMPtr<nsITimedChannel> timedChannel(do_QueryInterface(httpChan));
+    if (timedChannel) {
+      timedChannel->SetInitiatorType(thisContent->LocalName());
+    }
   }
 
   // Set up the channel's principal and such, like nsDocShell::DoURILoad does.
@@ -2427,7 +2459,7 @@ nsObjectLoadingContent::UnloadObject(bool aResetState)
 
 void
 nsObjectLoadingContent::NotifyStateChanged(ObjectType aOldType,
-                                           nsEventStates aOldState,
+                                           EventStates aOldState,
                                            bool aSync,
                                            bool aNotify)
 {
@@ -2458,12 +2490,12 @@ nsObjectLoadingContent::NotifyStateChanged(ObjectType aOldType,
     return; // Nothing to do
   }
 
-  nsEventStates newState = ObjectState();
+  EventStates newState = ObjectState();
 
   if (newState != aOldState) {
     // This will trigger frame construction
     NS_ASSERTION(InActiveDocument(thisContent), "Something is confused");
-    nsEventStates changedBits = aOldState ^ newState;
+    EventStates changedBits = aOldState ^ newState;
 
     {
       nsAutoScriptBlocker scriptBlocker;
@@ -2731,7 +2763,7 @@ DoDelayedStop(nsPluginInstanceOwner* aInstanceOwner,
 
 void
 nsObjectLoadingContent::LoadFallback(FallbackType aType, bool aNotify) {
-  nsEventStates oldState = ObjectState();
+  EventStates oldState = ObjectState();
   ObjectType oldType = mType;
 
   NS_ASSERTION(!mInstanceOwner && !mFrameLoader && !mChannel,
@@ -3089,8 +3121,8 @@ nsObjectLoadingContent::ShouldPlay(FallbackType &aReason, bool aIgnoreCurrentTyp
   NS_ENSURE_SUCCESS(rv, false);
   nsCOMPtr<nsIDocument> topDoc = do_QueryInterface(topDocument);
 
-  nsCOMPtr<nsIPermissionManager> permissionManager = do_GetService(NS_PERMISSIONMANAGER_CONTRACTID, &rv);
-  NS_ENSURE_SUCCESS(rv, false);
+  nsCOMPtr<nsIPermissionManager> permissionManager = services::GetPermissionManager();
+  NS_ENSURE_TRUE(permissionManager, false);
 
   // For now we always say that the system principal uses click-to-play since
   // that maintains current behavior and we have tests that expect this.
@@ -3203,7 +3235,7 @@ nsObjectLoadingContent::LegacyCall(JSContext* aCx,
   }
 
   for (size_t i = 0; i < args.length(); i++) {
-    if (!JS_WrapValue(aCx, args.handleAt(i))) {
+    if (!JS_WrapValue(aCx, args[i])) {
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return JS::UndefinedValue();
     }
@@ -3508,5 +3540,5 @@ nsObjectLoadingContent::SetupProtoChainRunner::Run()
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS1(nsObjectLoadingContent::SetupProtoChainRunner, nsIRunnable)
+NS_IMPL_ISUPPORTS(nsObjectLoadingContent::SetupProtoChainRunner, nsIRunnable)
 

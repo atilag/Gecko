@@ -17,13 +17,13 @@ using WebCore::DynamicsCompressor;
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_6(DynamicsCompressorNode, AudioNode,
-                                     mThreshold,
-                                     mKnee,
-                                     mRatio,
-                                     mReduction,
-                                     mAttack,
-                                     mRelease)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(DynamicsCompressorNode, AudioNode,
+                                   mThreshold,
+                                   mKnee,
+                                   mRatio,
+                                   mReduction,
+                                   mAttack,
+                                   mRelease)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(DynamicsCompressorNode)
 NS_INTERFACE_MAP_END_INHERITING(AudioNode)
@@ -130,6 +130,23 @@ public:
                                    mCompressor->parameterValue(DynamicsCompressor::ParamReduction));
   }
 
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    // Not owned:
+    // - mSource (probably)
+    // - mDestination (probably)
+    // - Don't count the AudioParamTimelines, their inner refs are owned by the
+    // AudioNode.
+    size_t amount = AudioNodeEngine::SizeOfExcludingThis(aMallocSizeOf);
+    amount += mCompressor->sizeOfIncludingThis(aMallocSizeOf);
+    return amount;
+  }
+
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
+
 private:
   void SendReductionParamToMainThread(AudioNodeStream* aStream, float aReduction)
   {
@@ -205,10 +222,28 @@ DynamicsCompressorNode::DynamicsCompressorNode(AudioContext* aContext)
   engine->SetSourceStream(static_cast<AudioNodeStream*> (mStream.get()));
 }
 
-JSObject*
-DynamicsCompressorNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+size_t
+DynamicsCompressorNode::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
-  return DynamicsCompressorNodeBinding::Wrap(aCx, aScope, this);
+  size_t amount = AudioNode::SizeOfExcludingThis(aMallocSizeOf);
+  amount += mThreshold->SizeOfIncludingThis(aMallocSizeOf);
+  amount += mKnee->SizeOfIncludingThis(aMallocSizeOf);
+  amount += mRatio->SizeOfIncludingThis(aMallocSizeOf);
+  amount += mAttack->SizeOfIncludingThis(aMallocSizeOf);
+  amount += mRelease->SizeOfIncludingThis(aMallocSizeOf);
+  return amount;
+}
+
+size_t
+DynamicsCompressorNode::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
+{
+  return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+}
+
+JSObject*
+DynamicsCompressorNode::WrapObject(JSContext* aCx)
+{
+  return DynamicsCompressorNodeBinding::Wrap(aCx, this);
 }
 
 void

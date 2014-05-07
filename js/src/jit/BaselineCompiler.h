@@ -14,8 +14,12 @@
 # include "jit/x86/BaselineCompiler-x86.h"
 #elif defined(JS_CODEGEN_X64)
 # include "jit/x64/BaselineCompiler-x64.h"
-#else
+#elif defined(JS_CODEGEN_ARM)
 # include "jit/arm/BaselineCompiler-arm.h"
+#elif defined(JS_CODEGEN_MIPS)
+# include "jit/mips/BaselineCompiler-mips.h"
+#else
+# error "Unknown architecture!"
 #endif
 
 namespace js {
@@ -60,6 +64,7 @@ namespace jit {
     _(JSOP_OBJECT)             \
     _(JSOP_REGEXP)             \
     _(JSOP_LAMBDA)             \
+    _(JSOP_LAMBDA_ARROW)       \
     _(JSOP_BITOR)              \
     _(JSOP_BITXOR)             \
     _(JSOP_BITAND)             \
@@ -92,6 +97,8 @@ namespace jit {
     _(JSOP_INITELEM)           \
     _(JSOP_INITELEM_GETTER)    \
     _(JSOP_INITELEM_SETTER)    \
+    _(JSOP_INITELEM_INC)       \
+    _(JSOP_SPREAD)             \
     _(JSOP_MUTATEPROTO)        \
     _(JSOP_INITPROP)           \
     _(JSOP_INITPROP_GETTER)    \
@@ -104,7 +111,6 @@ namespace jit {
     _(JSOP_DELELEM)            \
     _(JSOP_IN)                 \
     _(JSOP_GETGNAME)           \
-    _(JSOP_CALLGNAME)          \
     _(JSOP_BINDGNAME)          \
     _(JSOP_SETGNAME)           \
     _(JSOP_SETNAME)            \
@@ -115,23 +121,18 @@ namespace jit {
     _(JSOP_LENGTH)             \
     _(JSOP_GETXPROP)           \
     _(JSOP_GETALIASEDVAR)      \
-    _(JSOP_CALLALIASEDVAR)     \
     _(JSOP_SETALIASEDVAR)      \
     _(JSOP_NAME)               \
-    _(JSOP_CALLNAME)           \
     _(JSOP_BINDNAME)           \
     _(JSOP_DELNAME)            \
     _(JSOP_GETINTRINSIC)       \
-    _(JSOP_CALLINTRINSIC)      \
     _(JSOP_DEFVAR)             \
     _(JSOP_DEFCONST)           \
     _(JSOP_SETCONST)           \
     _(JSOP_DEFFUN)             \
     _(JSOP_GETLOCAL)           \
-    _(JSOP_CALLLOCAL)          \
     _(JSOP_SETLOCAL)           \
     _(JSOP_GETARG)             \
-    _(JSOP_CALLARG)            \
     _(JSOP_SETARG)             \
     _(JSOP_CALL)               \
     _(JSOP_FUNCALL)            \
@@ -178,6 +179,14 @@ class BaselineCompiler : public BaselineCompilerSpecific
     // Native code offset right before the scope chain is initialized.
     CodeOffsetLabel prologueOffset_;
 
+    // Native code offset right before the frame is popped and the method
+    // returned from.
+    CodeOffsetLabel epilogueOffset_;
+
+    // Native code offset right after debug prologue and epilogue, or
+    // equivalent positions when debug mode is off.
+    CodeOffsetLabel postDebugPrologueOffset_;
+
     // Whether any on stack arguments are modified.
     bool modifiesArguments_;
 
@@ -193,7 +202,7 @@ class BaselineCompiler : public BaselineCompilerSpecific
     }
 
   public:
-    BaselineCompiler(JSContext *cx, TempAllocator &alloc, HandleScript script);
+    BaselineCompiler(JSContext *cx, TempAllocator &alloc, JSScript *script);
     bool init();
 
     MethodStatus compile();
@@ -206,12 +215,12 @@ class BaselineCompiler : public BaselineCompilerSpecific
 #ifdef JSGC_GENERATIONAL
     bool emitOutOfLinePostBarrierSlot();
 #endif
-    bool emitIC(ICStub *stub, bool isForOp);
+    bool emitIC(ICStub *stub, ICEntry::Kind kind);
     bool emitOpIC(ICStub *stub) {
-        return emitIC(stub, true);
+        return emitIC(stub, ICEntry::Kind_Op);
     }
     bool emitNonOpIC(ICStub *stub) {
-        return emitIC(stub, false);
+        return emitIC(stub, ICEntry::Kind_NonOp);
     }
 
     bool emitStackCheck(bool earlyCheck=false);

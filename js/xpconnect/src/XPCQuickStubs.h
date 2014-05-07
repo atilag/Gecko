@@ -1,6 +1,6 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -224,7 +224,7 @@ protected:
      * without doing anything else. Otherwise, the JSString* created
      * from |v| will be returned.  It'll be rooted, as needed, in
      * *pval.  nullBehavior and undefinedBehavior control what happens
-     * when |v| is JSVAL_IS_NULL and JSVAL_IS_VOID respectively.
+     * when v.isNull() and v.isUndefined() are respectively true.
      */
     template<class traits>
     JSString* InitOrStringify(JSContext* cx, JS::HandleValue v,
@@ -233,13 +233,13 @@ protected:
                               StringificationBehavior nullBehavior,
                               StringificationBehavior undefinedBehavior) {
         JSString *s;
-        if (JSVAL_IS_STRING(v)) {
-            s = JSVAL_TO_STRING(v);
+        if (v.isString()) {
+            s = v.toString();
         } else {
             StringificationBehavior behavior = eStringify;
-            if (JSVAL_IS_NULL(v)) {
+            if (v.isNull()) {
                 behavior = nullBehavior;
-            } else if (JSVAL_IS_VOID(v)) {
+            } else if (v.isUndefined()) {
                 behavior = undefinedBehavior;
             }
 
@@ -312,8 +312,8 @@ class xpc_qsACString : public xpc_qsBasicString<nsACString, nsCString>
 public:
     xpc_qsACString(JSContext *cx, JS::HandleValue v,
                    JS::MutableHandleValue pval, bool notpassed,
-                   StringificationBehavior nullBehavior,
-                   StringificationBehavior undefinedBehavior);
+                   StringificationBehavior nullBehavior = eNull,
+                   StringificationBehavior undefinedBehavior = eNull);
 };
 
 /**
@@ -506,12 +506,6 @@ xpc_qsGetWrapperCache(nsWrapperCache *cache)
     return cache;
 }
 
-// nsGlobalWindow implements nsWrapperCache, but doesn't always use it. Don't
-// try to use it without fixing that first.
-class nsGlobalWindow;
-inline nsWrapperCache*
-xpc_qsGetWrapperCache(nsGlobalWindow *not_allowed);
-
 inline nsWrapperCache*
 xpc_qsGetWrapperCache(void *p)
 {
@@ -601,9 +595,9 @@ PropertyOpForwarder(JSContext *cx, unsigned argc, jsval *vp)
     if (!obj)
         return false;
 
-    jsval v = js::GetFunctionNativeReserved(callee, 0);
+    JS::RootedValue v(cx, js::GetFunctionNativeReserved(callee, 0));
 
-    JSObject *ptrobj = JSVAL_TO_OBJECT(v);
+    JSObject *ptrobj = v.toObjectOrNull();
     Op *popp = static_cast<Op *>(JS_GetPrivate(ptrobj));
 
     v = js::GetFunctionNativeReserved(callee, 1);

@@ -96,6 +96,7 @@ private:
 //
 
 class CSSRuleListImpl;
+class nsICSSRuleList;
 
 // CID for the nsCSSStyleSheet class
 // ca926f30-2a7e-477e-8467-803fb32af20a
@@ -275,7 +276,7 @@ public:
   // called GetOwnerRule because that would be ambiguous with the ImportRule
   // version.
   nsIDOMCSSRule* GetDOMOwnerRule() const;
-  nsIDOMCSSRuleList* GetCssRules(mozilla::ErrorResult& aRv);
+  nsICSSRuleList* GetCssRules(mozilla::ErrorResult& aRv);
   uint32_t InsertRule(const nsAString& aRule, uint32_t aIndex,
                       mozilla::ErrorResult& aRv) {
     uint32_t retval;
@@ -295,8 +296,7 @@ public:
     return mozilla::dom::ParentObject(static_cast<nsIStyleSheet*>(mParent),
                                       mParent);
   }
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
 private:
   nsCSSStyleSheet(const nsCSSStyleSheet& aCopy,

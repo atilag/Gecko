@@ -22,7 +22,7 @@ using namespace js;
 using namespace js::gc;
 
 JS::Zone::Zone(JSRuntime *rt)
-  : JS::shadow::Zone(rt, &rt->gcMarker),
+  : JS::shadow::Zone(rt, &rt->gc.marker),
     allocator(this),
     ionUsingBarriers_(false),
     active(false),
@@ -49,13 +49,14 @@ JS::Zone::Zone(JSRuntime *rt)
     JS_ASSERT(reinterpret_cast<JS::shadow::Zone *>(this) ==
               static_cast<JS::shadow::Zone *>(this));
 
-    setGCMaxMallocBytes(rt->gcMaxMallocBytes * 0.9);
+    setGCMaxMallocBytes(rt->gc.maxMallocBytes * 0.9);
 }
 
 Zone::~Zone()
 {
-    if (this == runtimeFromMainThread()->systemZone)
-        runtimeFromMainThread()->systemZone = nullptr;
+    JSRuntime *rt = runtimeFromMainThread();
+    if (this == rt->gc.systemZone)
+        rt->gc.systemZone = nullptr;
 
 #ifdef JS_ION
     js_delete(jitZone_);
@@ -105,7 +106,7 @@ Zone::onTooMuchMalloc()
 }
 
 void
-Zone::sweep(FreeOp *fop, bool releaseTypes)
+Zone::sweep(FreeOp *fop, bool releaseTypes, bool *oom)
 {
     /*
      * Periodically release observed types for all scripts. This is safe to
@@ -115,8 +116,8 @@ Zone::sweep(FreeOp *fop, bool releaseTypes)
         releaseTypes = false;
 
     {
-        gcstats::AutoPhase ap(fop->runtime()->gcStats, gcstats::PHASE_DISCARD_ANALYSIS);
-        types.sweep(fop, releaseTypes);
+        gcstats::AutoPhase ap(fop->runtime()->gc.stats, gcstats::PHASE_DISCARD_ANALYSIS);
+        types.sweep(fop, releaseTypes, oom);
     }
 
     if (!fop->runtime()->debuggerList.isEmpty())
@@ -133,11 +134,11 @@ Zone::sweepBreakpoints(FreeOp *fop)
      * to iterate over the scripts belonging to a single compartment in a zone.
      */
 
-    gcstats::AutoPhase ap1(fop->runtime()->gcStats, gcstats::PHASE_SWEEP_TABLES);
-    gcstats::AutoPhase ap2(fop->runtime()->gcStats, gcstats::PHASE_SWEEP_TABLES_BREAKPOINT);
+    gcstats::AutoPhase ap1(fop->runtime()->gc.stats, gcstats::PHASE_SWEEP_TABLES);
+    gcstats::AutoPhase ap2(fop->runtime()->gc.stats, gcstats::PHASE_SWEEP_TABLES_BREAKPOINT);
 
     JS_ASSERT(isGCSweeping());
-    for (CellIterUnderGC i(this, FINALIZE_SCRIPT); !i.done(); i.next()) {
+    for (ZoneCellIterUnderGC i(this, FINALIZE_SCRIPT); !i.done(); i.next()) {
         JSScript *script = i.get<JSScript>();
         JS_ASSERT(script->zone()->isGCSweeping());
         if (!script->hasAnyBreakpointsOrStepMode())
@@ -177,7 +178,7 @@ Zone::discardJitCode(FreeOp *fop)
 
 # ifdef DEBUG
         /* Assert no baseline scripts are marked as active. */
-        for (CellIterUnderGC i(this, FINALIZE_SCRIPT); !i.done(); i.next()) {
+        for (ZoneCellIterUnderGC i(this, FINALIZE_SCRIPT); !i.done(); i.next()) {
             JSScript *script = i.get<JSScript>();
             JS_ASSERT_IF(script->hasBaselineScript(), !script->baselineScript()->active());
         }
@@ -189,7 +190,7 @@ Zone::discardJitCode(FreeOp *fop)
         /* Only mark OSI points if code is being discarded. */
         jit::InvalidateAll(fop, this);
 
-        for (CellIterUnderGC i(this, FINALIZE_SCRIPT); !i.done(); i.next()) {
+        for (ZoneCellIterUnderGC i(this, FINALIZE_SCRIPT); !i.done(); i.next()) {
             JSScript *script = i.get<JSScript>();
             jit::FinishInvalidation<SequentialExecution>(fop, script);
 
@@ -229,7 +230,7 @@ Zone::gcNumber()
 {
     // Zones in use by exclusive threads are not collected, and threads using
     // them cannot access the main runtime's gcNumber without racing.
-    return usedByExclusiveThread ? 0 : runtimeFromMainThread()->gcNumber;
+    return usedByExclusiveThread ? 0 : runtimeFromMainThread()->gc.number;
 }
 
 #ifdef JS_ION
@@ -247,15 +248,26 @@ Zone::createJitZone(JSContext *cx)
 #endif
 
 JS::Zone *
-js::ZoneOfObject(const JSObject &obj)
-{
-    return obj.zone();
-}
-
-JS::Zone *
 js::ZoneOfObjectFromAnyThread(const JSObject &obj)
 {
     return obj.zoneFromAnyThread();
 }
 
+bool
+Zone::hasMarkedCompartments()
+{
+    for (CompartmentsInZoneIter comp(this); !comp.done(); comp.next()) {
+        if (comp->marked)
+            return true;
+    }
+    return false;
+}
 
+JS::Zone *
+js::ZoneOfValue(const JS::Value &value)
+{
+    JS_ASSERT(value.isMarkable());
+    if (value.isObject())
+        return value.toObject().zone();
+    return static_cast<js::gc::Cell *>(value.toGCThing())->tenuredZone();
+}

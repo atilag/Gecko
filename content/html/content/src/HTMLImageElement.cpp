@@ -37,6 +37,7 @@
 
 #include "nsIDOMHTMLMapElement.h"
 #include "mozilla/EventDispatcher.h"
+#include "mozilla/EventStates.h"
 
 #include "nsLayoutUtils.h"
 
@@ -65,11 +66,11 @@ NS_IMPL_RELEASE_INHERITED(HTMLImageElement, Element)
 
 // QueryInterface implementation for HTMLImageElement
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLImageElement)
-  NS_INTERFACE_TABLE_INHERITED4(HTMLImageElement,
-                                nsIDOMHTMLImageElement,
-                                nsIImageLoadingContent,
-                                imgIOnloadBlocker,
-                                imgINotificationObserver)
+  NS_INTERFACE_TABLE_INHERITED(HTMLImageElement,
+                               nsIDOMHTMLImageElement,
+                               nsIImageLoadingContent,
+                               imgIOnloadBlocker,
+                               imgINotificationObserver)
 NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLElement)
 
 
@@ -526,7 +527,7 @@ HTMLImageElement::MaybeLoadImage()
   }
 }
 
-nsEventStates
+EventStates
 HTMLImageElement::IntrinsicState() const
 {
   return nsGenericHTMLElement::IntrinsicState() |
@@ -647,9 +648,9 @@ HTMLImageElement::GetCORSMode()
 }
 
 JSObject*
-HTMLImageElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+HTMLImageElement::WrapNode(JSContext* aCx)
 {
-  return HTMLImageElementBinding::Wrap(aCx, aScope, this);
+  return HTMLImageElementBinding::Wrap(aCx, this);
 }
 
 #ifdef DEBUG

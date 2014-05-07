@@ -9,7 +9,7 @@ const {Cc, Ci, Cu} = require("chrome");
 const ToolDefinitions = require("main").Tools;
 const {CssLogic} = require("devtools/styleinspector/css-logic");
 const {ELEMENT_STYLE} = require("devtools/server/actors/styles");
-const promise = require("sdk/core/promise");
+const {Promise: promise} = Cu.import("resource://gre/modules/Promise.jsm", {});
 const {EventEmitter} = require("devtools/toolkit/event-emitter");
 const {OutputParser} = require("devtools/output-parser");
 const {Tooltip} = require("devtools/shared/widgets/Tooltip");
@@ -17,9 +17,11 @@ const {PrefObserver, PREF_ORIG_SOURCES} = require("devtools/styleeditor/utils");
 const {gDevTools} = Cu.import("resource:///modules/devtools/gDevTools.jsm", {});
 
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/PluralForm.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/devtools/Templater.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
+                                  "resource://gre/modules/PluralForm.jsm");
 
 const FILTER_CHANGED_TIMEOUT = 300;
 const HTML_NS = "http://www.w3.org/1999/xhtml";
@@ -543,7 +545,8 @@ CssHtmlTree.prototype = {
 
       // Test for font family
       if (propName.textContent === "font-family") {
-        return this.tooltip.setFontFamilyContent(propValue.textContent);
+        this.tooltip.setFontFamilyContent(propValue.textContent);
+        return true;
       }
     }
 

@@ -19,8 +19,9 @@ class FramePanelLayout extends PanelLayout {
     private final View mChildView;
     private final ViewConfig mChildConfig;
 
-    public FramePanelLayout(Context context, PanelConfig panelConfig, DatasetHandler datasetHandler, OnUrlOpenListener urlOpenListener) {
-        super(context, panelConfig, datasetHandler, urlOpenListener);
+    public FramePanelLayout(Context context, PanelConfig panelConfig, DatasetHandler datasetHandler,
+        OnUrlOpenListener urlOpenListener, ContextMenuRegistry contextMenuRegistry) {
+        super(context, panelConfig, datasetHandler, urlOpenListener, contextMenuRegistry);
 
         // This layout can only hold one view so we simply
         // take the first defined view from PanelConfig.
@@ -39,7 +40,11 @@ class FramePanelLayout extends PanelLayout {
 
         if (mChildView instanceof DatasetBacked) {
             final FilterDetail filter = new FilterDetail(mChildConfig.getFilter(), null);
-            final DatasetRequest request = new DatasetRequest(mChildConfig.getDatasetId(), filter);
+
+            final DatasetRequest request = new DatasetRequest(mChildConfig.getIndex(),
+                                                              mChildConfig.getDatasetId(),
+                                                              filter);
+
             Log.d(LOGTAG, "Requesting child request: " + request);
             requestDataset(request);
         }

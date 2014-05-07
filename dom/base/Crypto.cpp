@@ -29,7 +29,7 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(Crypto)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(Crypto)
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(Crypto, mWindow)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Crypto, mWindow)
 
 Crypto::Crypto()
 {
@@ -50,9 +50,9 @@ Crypto::Init(nsIDOMWindow* aWindow)
 }
 
 /* virtual */ JSObject*
-Crypto::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+Crypto::WrapObject(JSContext* aCx)
 {
-  return CryptoBinding::Wrap(aCx, aScope, this);
+  return CryptoBinding::Wrap(aCx, this);
 }
 
 JSObject *
@@ -175,20 +175,6 @@ Crypto::ImportUserCertificates(const nsAString& aNickname,
 }
 
 void
-Crypto::PopChallengeResponse(const nsAString& aChallenge,
-                             nsAString& aReturn,
-                             ErrorResult& aRv)
-{
-  aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
-}
-
-void
-Crypto::Random(int32_t aNumBytes, nsAString& aReturn, ErrorResult& aRv)
-{
-  aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
-}
-
-void
 Crypto::SignText(JSContext* aContext,
                  const nsAString& aStringToSign,
                  const nsAString& aCaOption,
@@ -201,12 +187,6 @@ Crypto::SignText(JSContext* aContext,
 
 void
 Crypto::Logout(ErrorResult& aRv)
-{
-  aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
-}
-
-void
-Crypto::DisableRightClick(ErrorResult& aRv)
 {
   aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
 }

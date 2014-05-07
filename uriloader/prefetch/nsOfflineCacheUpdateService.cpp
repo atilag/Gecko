@@ -160,9 +160,9 @@ private:
     bool mDidReleaseThis;
 };
 
-NS_IMPL_ISUPPORTS2(nsOfflineCachePendingUpdate,
-                   nsIWebProgressListener,
-                   nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(nsOfflineCachePendingUpdate,
+                  nsIWebProgressListener,
+                  nsISupportsWeakReference)
 
 //-----------------------------------------------------------------------------
 // nsOfflineCacheUpdateService::nsIWebProgressListener
@@ -277,10 +277,10 @@ nsOfflineCachePendingUpdate::OnSecurityChange(nsIWebProgress *aWebProgress,
 // nsOfflineCacheUpdateService::nsISupports
 //-----------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS3(nsOfflineCacheUpdateService,
-                   nsIOfflineCacheUpdateService,
-                   nsIObserver,
-                   nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(nsOfflineCacheUpdateService,
+                  nsIOfflineCacheUpdateService,
+                  nsIObserver,
+                  nsISupportsWeakReference)
 
 //-----------------------------------------------------------------------------
 // nsOfflineCacheUpdateService <public>
@@ -695,7 +695,7 @@ OfflineAppPermForPrincipal(nsIPrincipal *aPrincipal,
     }
 
     nsCOMPtr<nsIPermissionManager> permissionManager =
-        do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
+        services::GetPermissionManager();
     if (!permissionManager) {
         return NS_OK;
     }
@@ -767,7 +767,7 @@ nsOfflineCacheUpdateService::AllowOfflineApp(nsIDOMWindow *aWindow,
     }
     else {
         nsCOMPtr<nsIPermissionManager> permissionManager =
-            do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
+            services::GetPermissionManager();
         if (!permissionManager)
             return NS_ERROR_NOT_AVAILABLE;
 

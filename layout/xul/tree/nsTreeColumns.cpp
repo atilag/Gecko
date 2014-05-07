@@ -376,9 +376,9 @@ nsTreeColumns::GetParentObject() const
 }
 
 /* virtual */ JSObject*
-nsTreeColumns::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+nsTreeColumns::WrapObject(JSContext* aCx)
 {
-  return dom::TreeColumnsBinding::Wrap(aCx, aScope, this);
+  return dom::TreeColumnsBinding::Wrap(aCx, this);
 }
 
 nsITreeBoxObject*
@@ -559,6 +559,12 @@ nsTreeColumns::NamedGetter(const nsAString& aId, bool& aFound)
   return nullptr;
 }
 
+bool
+nsTreeColumns::NameIsEnumerable(const nsAString& aName)
+{
+  return true;
+}
+
 nsTreeColumn*
 nsTreeColumns::GetNamedColumn(const nsAString& aId)
 {
@@ -574,7 +580,7 @@ nsTreeColumns::GetNamedColumn(const nsAString& aId, nsITreeColumn** _retval)
 }
 
 void
-nsTreeColumns::GetSupportedNames(nsTArray<nsString>& aNames)
+nsTreeColumns::GetSupportedNames(unsigned, nsTArray<nsString>& aNames)
 {
   for (nsTreeColumn* currCol = mFirstColumn; currCol; currCol = currCol->GetNext()) {
     aNames.AppendElement(currCol->GetId());

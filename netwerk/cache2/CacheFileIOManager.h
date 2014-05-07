@@ -6,6 +6,7 @@
 #define CacheFileIOManager__h__
 
 #include "CacheIOThread.h"
+#include "CacheStorageService.h"
 #include "nsIEventTarget.h"
 #include "nsITimer.h"
 #include "nsCOMPtr.h"
@@ -21,6 +22,8 @@
 class nsIFile;
 class nsITimer;
 class nsIDirectoryEnumerator;
+class nsILoadContextInfo;
+class nsICacheStorageVisitor;
 
 namespace mozilla {
 namespace net {
@@ -52,7 +55,7 @@ public:
   bool IsPriority() const { return mPriority; }
   bool FileExists() const { return mFileExists; }
   bool IsClosed() const { return mClosed; }
-  bool IsSpecialFile() const { return !mHash; }
+  bool IsSpecialFile() const { return mSpecialFile; }
   nsCString & Key() { return mKey; }
 
   // Memory reporting
@@ -70,6 +73,7 @@ private:
   bool                 mIsDoomed;
   bool                 mPriority;
   bool                 mClosed;
+  bool                 mSpecialFile;
   bool                 mInvalid;
   bool                 mFileExists; // This means that the file should exists,
                                     // but it can be still deleted by OS/user
@@ -174,6 +178,7 @@ class CloseFileEvent;
 class ReadEvent;
 class WriteEvent;
 class MetadataWriteScheduleEvent;
+class CacheFileContextEvictor;
 
 #define CACHEFILEIOLISTENER_IID \
 { /* dcaf2ddc-17cf-4242-bca1-8c86936375a5 */       \
@@ -236,10 +241,10 @@ public:
   static nsresult ShutdownMetadataWriteScheduling();
 
   static nsresult OpenFile(const nsACString &aKey,
-                           uint32_t aFlags,
+                           uint32_t aFlags, bool aResultOnAnyThread,
                            CacheFileIOListener *aCallback);
   static nsresult Read(CacheFileHandle *aHandle, int64_t aOffset,
-                       char *aBuf, int32_t aCount,
+                       char *aBuf, int32_t aCount, bool aResultOnAnyThread,
                        CacheFileIOListener *aCallback);
   static nsresult Write(CacheFileHandle *aHandle, int64_t aOffset,
                         const char *aBuf, int32_t aCount, bool aValidate,
@@ -257,6 +262,7 @@ public:
                              CacheFileIOListener *aCallback);
   static nsresult EvictIfOverLimit();
   static nsresult EvictAll();
+  static nsresult EvictByContext(nsILoadContextInfo *aLoadContextInfo);
 
   static nsresult InitIndexEntry(CacheFileHandle *aHandle,
                                  uint32_t         aAppId,
@@ -274,6 +280,13 @@ public:
   };
 
   static void GetCacheDirectory(nsIFile** result);
+
+  // Calls synchronously OnEntryInfo for an entry with the given hash.
+  // Tries to find an existing entry in the service hashtables first, if not
+  // found, loads synchronously from disk file.
+  // Callable on the IO thread only.
+  static nsresult GetEntryInfo(const SHA1Sum::Hash *aHash,
+                               CacheStorageService::EntryInfoCallback *aCallback);
 
   // Memory reporting
   static size_t SizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf);
@@ -295,6 +308,7 @@ private:
   friend class RenameFileEvent;
   friend class CacheIndex;
   friend class MetadataWriteScheduleEvent;
+  friend class CacheFileContextEvictor;
 
   virtual ~CacheFileIOManager();
 
@@ -302,6 +316,7 @@ private:
   nsresult ShutdownInternal();
 
   nsresult OpenFileInternal(const SHA1Sum::Hash *aHash,
+                            const nsACString &aKey,
                             uint32_t aFlags,
                             CacheFileHandle **_retval);
   nsresult OpenSpecialFileInternal(const nsACString &aKey,
@@ -322,6 +337,7 @@ private:
   nsresult EvictIfOverLimitInternal();
   nsresult OverLimitEvictionInternal();
   nsresult EvictAllInternal();
+  nsresult EvictByContextInternal(nsILoadContextInfo *aLoadContextInfo);
 
   nsresult TrashDirectory(nsIFile *aFile);
   static void OnTrashTimer(nsITimer *aTimer, void *aClosure);
@@ -342,9 +358,22 @@ private:
   nsresult OpenNSPRHandle(CacheFileHandle *aHandle, bool aCreate = false);
   void     NSPRHandleUsed(CacheFileHandle *aHandle);
 
+  // Removing all cache files during shutdown
+  nsresult SyncRemoveDir(nsIFile *aFile, const char *aDir);
+  void     SyncRemoveAllCacheFiles();
+
   nsresult ScheduleMetadataWriteInternal(CacheFile * aFile);
   nsresult UnscheduleMetadataWriteInternal(CacheFile * aFile);
   nsresult ShutdownMetadataWriteSchedulingInternal();
+
+  static nsresult CacheIndexStateChanged();
+  nsresult CacheIndexStateChangedInternal();
+
+  // Smart size calculation. UpdateSmartCacheSize() must be called on IO thread.
+  // It is called in EvictIfOverLimitInternal() just before we decide whether to
+  // start overlimit eviction or not and also in OverLimitEvictionInternal()
+  // before we start an eviction loop.
+  nsresult UpdateSmartCacheSize();
 
   // Memory reporting (private part)
   size_t SizeOfExcludingThisInternal(mozilla::MallocSizeOf mallocSizeOf) const;
@@ -366,6 +395,8 @@ private:
   nsCOMPtr<nsIFile>                    mTrashDir;
   nsCOMPtr<nsIDirectoryEnumerator>     mTrashDirEnumerator;
   nsTArray<nsCString>                  mFailedTrashDirs;
+  nsRefPtr<CacheFileContextEvictor>    mContextEvictor;
+  TimeStamp                            mLastSmartSizeTime;
 };
 
 } // net

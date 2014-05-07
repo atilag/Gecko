@@ -12,7 +12,7 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(SpeechGrammar, mParent)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(SpeechGrammar, mParent)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(SpeechGrammar)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(SpeechGrammar)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SpeechGrammar)
@@ -44,9 +44,9 @@ SpeechGrammar::GetParentObject() const
 }
 
 JSObject*
-SpeechGrammar::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+SpeechGrammar::WrapObject(JSContext* aCx)
 {
-  return SpeechGrammarBinding::Wrap(aCx, aScope, this);
+  return SpeechGrammarBinding::Wrap(aCx, this);
 }
 
 void

@@ -878,18 +878,31 @@ class LCallInstructionHelper : public LInstructionHelper<Defs, Operands, Temps>
 
 class LRecoverInfo : public TempObject
 {
-    MResumePoint *mir_;
+  public:
+    typedef Vector<MNode *, 2, IonAllocPolicy> Instructions;
+
+  private:
+    // List of instructions needed to recover the stack frames.
+    // Outer frames are stored before inner frames.
+    Instructions instructions_;
 
     // Cached offset where this resume point is encoded.
     RecoverOffset recoverOffset_;
 
-    LRecoverInfo(MResumePoint *mir);
+    LRecoverInfo(TempAllocator &alloc);
+    bool init(MResumePoint *mir);
 
+    // Fill the instruction vector such as all instructions needed for the
+    // recovery are pushed before the current instruction.
+    bool appendOperands(MNode *ins);
+    bool appendDefinition(MDefinition *def);
+    bool appendResumePoint(MResumePoint *rp);
   public:
     static LRecoverInfo *New(MIRGenerator *gen, MResumePoint *mir);
 
+    // Resume point of the inner most function.
     MResumePoint *mir() const {
-        return mir_;
+        return instructions_.back()->toResumePoint();
     }
     RecoverOffset recoverOffset() const {
         return recoverOffset_;
@@ -898,6 +911,48 @@ class LRecoverInfo : public TempObject
         JS_ASSERT(recoverOffset_ == INVALID_RECOVER_OFFSET);
         recoverOffset_ = offset;
     }
+
+    MNode **begin() {
+        return instructions_.begin();
+    }
+    MNode **end() {
+        return instructions_.end();
+    }
+    size_t numInstructions() const {
+        return instructions_.length();
+    }
+
+    class OperandIter
+    {
+      private:
+        MNode **it_;
+        size_t op_;
+
+      public:
+        OperandIter(MNode **it)
+          : it_(it), op_(0)
+        { }
+
+        MDefinition *operator *() {
+            return (*it_)->getOperand(op_);
+        }
+        MDefinition *operator ->() {
+            return (*it_)->getOperand(op_);
+        }
+
+        OperandIter &operator ++() {
+            ++op_;
+            if (op_ == (*it_)->numOperands()) {
+                op_ = 0;
+                ++it_;
+            }
+            return *this;
+        }
+
+        bool operator !=(const OperandIter &where) const {
+            return it_ != where.it_ || op_ != where.op_;
+        }
+    };
 };
 
 // An LSnapshot is the reflection of an MResumePoint in LIR. Unlike MResumePoints,
@@ -1576,6 +1631,10 @@ LAllocation::toRegister() const
 # include "jit/shared/LIR-x86-shared.h"
 #elif defined(JS_CODEGEN_ARM)
 # include "jit/arm/LIR-arm.h"
+#elif defined(JS_CODEGEN_MIPS)
+# include "jit/mips/LIR-mips.h"
+#else
+# error "Unknown architecture!"
 #endif
 
 #undef LIR_HEADER

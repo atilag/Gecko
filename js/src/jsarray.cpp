@@ -23,6 +23,7 @@
 #include "jsutil.h"
 
 #include "ds/Sort.h"
+#include "gc/Heap.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/ForkJoin.h"
 #include "vm/Interpreter.h"
@@ -88,7 +89,7 @@ js::GetLengthProperty(JSContext *cx, HandleObject obj, uint32_t *lengthp)
  *
  * This means the largest allowed index is actually 2^32-2 (4294967294).
  *
- * In our implementation, it would be sufficient to check for JSVAL_IS_INT(id)
+ * In our implementation, it would be sufficient to check for id.isInt32()
  * except that by using signed 31-bit integers we miss the top half of the
  * valid range. This function checks the string representation itself; note
  * that calling a standard conversion routine might allow strings such as
@@ -1743,14 +1744,14 @@ MergeSortByKey(K keys, size_t len, K scratch, C comparator, AutoValueVector *vec
         do {
             size_t k = keys[j].elementIndex;
             keys[j].elementIndex = j;
-            (*vec)[j] = (*vec)[k];
+            (*vec)[j].set((*vec)[k]);
             j = k;
         } while (j != i);
 
         // We could assert the loop invariant that |i == keys[i].elementIndex|
         // here if we synced |keys[i].elementIndex|.  But doing so would render
         // the assertion vacuous, so don't bother, even in debug builds.
-        (*vec)[i] = tv;
+        (*vec)[i].set(tv);
     }
 
     return true;
@@ -1819,7 +1820,7 @@ SortNumerically(JSContext *cx, AutoValueVector *vec, size_t len, ComparatorMatch
             return false;
 
         double dv;
-        if (!ToNumber(cx, vec->handleAt(i), &dv))
+        if (!ToNumber(cx, (*vec)[i], &dv))
             return false;
 
         NumericElement el = { dv, i };
@@ -2141,7 +2142,7 @@ js::ArrayShiftMoveElements(JSObject *obj)
      * themselves.
      */
     uint32_t initlen = obj->getDenseInitializedLength();
-    obj->moveDenseElementsUnbarriered(0, 1, initlen);
+    obj->moveDenseElementsNoPreBarrier(0, 1, initlen);
 }
 
 /* ES5 15.4.4.9 */
@@ -2353,8 +2354,14 @@ CanOptimizeForDenseStorage(HandleObject arr, uint32_t startingIndex, uint32_t co
 }
 
 /* ES5 15.4.4.12. */
-static bool
-array_splice(JSContext *cx, unsigned argc, Value *vp)
+bool
+js::array_splice(JSContext *cx, unsigned argc, Value *vp)
+{
+    return array_splice_impl(cx, argc, vp, true);
+}
+
+bool
+js::array_splice_impl(JSContext *cx, unsigned argc, Value *vp, bool returnValueIsUsed)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
@@ -2401,10 +2408,12 @@ array_splice(JSContext *cx, unsigned argc, Value *vp)
     /* Steps 2, 8-9. */
     Rooted<ArrayObject*> arr(cx);
     if (CanOptimizeForDenseStorage(obj, actualStart, actualDeleteCount, cx)) {
-        arr = NewDenseCopiedArray(cx, actualDeleteCount, obj, actualStart);
-        if (!arr)
-            return false;
-        TryReuseArrayType(obj, arr);
+        if (returnValueIsUsed) {
+            arr = NewDenseCopiedArray(cx, actualDeleteCount, obj, actualStart);
+            if (!arr)
+                return false;
+            TryReuseArrayType(obj, arr);
+        }
     } else {
         arr = NewDenseAllocatedArray(cx, actualDeleteCount);
         if (!arr)
@@ -2444,10 +2453,6 @@ array_splice(JSContext *cx, unsigned argc, Value *vp)
 
             /* Steps 12(c)-(d). */
             obj->shrinkElements(cx, finalLength);
-
-            /* Fix running enumerators for the deleted items. */
-            if (!js_SuppressDeletedElements(cx, obj, finalLength, len))
-                return false;
         } else {
             /*
              * This is all very slow if the length is very large. We don't yet
@@ -2561,7 +2566,9 @@ array_splice(JSContext *cx, unsigned argc, Value *vp)
         return false;
 
     /* Step 17. */
-    args.rval().setObject(*arr);
+    if (returnValueIsUsed)
+        args.rval().setObject(*arr);
+
     return true;
 }
 
@@ -2983,6 +2990,8 @@ static const JSFunctionSpec array_methods[] = {
     JS_SELF_HOSTED_FN("find",        "ArrayFind",        1,0),
     JS_SELF_HOSTED_FN("findIndex",   "ArrayFindIndex",   1,0),
 
+    JS_SELF_HOSTED_FN("fill",        "ArrayFill",        3,0),
+
     JS_SELF_HOSTED_FN("@@iterator",  "ArrayValues",      0,0),
     JS_SELF_HOSTED_FN("entries",     "ArrayEntries",     0,0),
     JS_SELF_HOSTED_FN("keys",        "ArrayKeys",        0,0),
@@ -3083,6 +3092,8 @@ js_InitArrayClass(JSContext *cx, HandleObject obj)
     RootedShape shape(cx, EmptyShape::getInitialShape(cx, &ArrayObject::class_, TaggedProto(proto),
                                                       proto->getParent(), metadata,
                                                       gc::FINALIZE_OBJECT0));
+    if (!shape)
+        return nullptr;
 
     RootedObject arrayProto(cx, JSObject::createArray(cx, gc::FINALIZE_OBJECT4, gc::TenuredHeap, shape, type, 0));
     if (!arrayProto || !JSObject::setSingletonType(cx, arrayProto) || !AddLengthProperty(cx, arrayProto))

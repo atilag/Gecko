@@ -34,7 +34,6 @@
 #include "nsLayoutUtils.h"
 #include "nsContentUtils.h"
 #include "nsCSSFrameConstructor.h"
-#include "nsEventStateManager.h"
 #include "nsIPopupBoxObject.h"
 #include "nsPIWindowRoot.h"
 #include "nsIReflowCallback.h"
@@ -47,6 +46,8 @@
 #include "nsThemeConstants.h"
 #include "nsDisplayList.h"
 #include "mozilla/EventDispatcher.h"
+#include "mozilla/EventStateManager.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/MouseEvents.h"
@@ -269,15 +270,12 @@ nsMenuPopupFrame::CreateWidgetForView(nsView* aView)
   }
 
   nsTransparencyMode mode = nsLayoutUtils::GetFrameTransparency(this, this);
-  bool viewHasTransparentContent = !mInContentShell &&
-                                     (eTransparencyTransparent ==
-                                      mode);
   nsIContent* parentContent = GetContent()->GetParent();
   nsIAtom *tag = nullptr;
   if (parentContent)
     tag = parentContent->Tag();
   widgetData.mSupportTranslucency = mode == eTransparencyTransparent;
-  widgetData.mDropShadow = !(viewHasTransparentContent || tag == nsGkAtoms::menulist);
+  widgetData.mDropShadow = !(mode == eTransparencyTransparent || tag == nsGkAtoms::menulist);
   widgetData.mPopupLevel = PopupLevel(widgetData.mNoAutoHide);
 
   // panels which have a parent level need a parent widget. This allows them to
@@ -838,10 +836,10 @@ nsMenuPopupFrame::HidePopup(bool aDeselectMenu, nsPopupState aNewState)
   // mouse_enter/mouse_exit event will be fired to clear current hover state, we should clear it manually.
   // This code may not the best solution, but we can leave it here until we find the better approach.
   NS_ASSERTION(mContent->IsElement(), "How do we have a non-element?");
-  nsEventStates state = mContent->AsElement()->State();
+  EventStates state = mContent->AsElement()->State();
 
   if (state.HasState(NS_EVENT_STATE_HOVER)) {
-    nsEventStateManager *esm = PresContext()->EventStateManager();
+    EventStateManager* esm = PresContext()->EventStateManager();
     esm->SetContentState(nullptr, NS_EVENT_STATE_HOVER);
   }
 

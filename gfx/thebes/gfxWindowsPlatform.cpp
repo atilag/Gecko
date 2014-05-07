@@ -109,7 +109,7 @@ public:
     }
 };
 
-NS_IMPL_ISUPPORTS1(GfxD2DSurfaceReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(GfxD2DSurfaceReporter, nsIMemoryReporter)
 
 #endif
 
@@ -139,7 +139,7 @@ public:
     }
 };
 
-NS_IMPL_ISUPPORTS1(GfxD2DVramReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(GfxD2DVramReporter, nsIMemoryReporter)
 
 #define GFX_USE_CLEARTYPE_ALWAYS "gfx.font_rendering.cleartype.always_use_for_content"
 #define GFX_DOWNLOADABLE_FONTS_USE_CLEARTYPE "gfx.font_rendering.cleartype.use_for_downloadable_fonts"
@@ -239,14 +239,15 @@ public:
                         queryStatistics.hProcess = ProcessHandle;
                         queryStatistics.QueryProcessSegment.SegmentId = i;
                         if (NT_SUCCESS(queryD3DKMTStatistics(&queryStatistics))) {
-                            if (aperture)
-                                sharedBytesUsed += queryStatistics.QueryResult
-                                                                  .ProcessSegmentInfo
-                                                                  .BytesCommitted;
+                            ULONGLONG bytesCommitted;
+                            if (!IsWin8OrLater())
+                                bytesCommitted = queryStatistics.QueryResult.ProcessSegmentInfo.Win7.BytesCommitted;
                             else
-                                dedicatedBytesUsed += queryStatistics.QueryResult
-                                                                     .ProcessSegmentInfo
-                                                                     .BytesCommitted;
+                                bytesCommitted = queryStatistics.QueryResult.ProcessSegmentInfo.Win8.BytesCommitted;
+                            if (aperture)
+                                sharedBytesUsed += bytesCommitted;
+                            else
+                                dedicatedBytesUsed += bytesCommitted;
                         }
                     }
                 }
@@ -280,7 +281,7 @@ public:
     }
 };
 
-NS_IMPL_ISUPPORTS1(GPUAdapterReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(GPUAdapterReporter, nsIMemoryReporter)
 
 static __inline void
 BuildKeyNameFromFontName(nsAString &aName)
@@ -312,9 +313,7 @@ gfxWindowsPlatform::gfxWindowsPlatform()
 
     UpdateRenderMode();
 
-    // This reporter is disabled because it frequently gives bogus values.  See
-    // bug 917496.
-    //RegisterStrongMemoryReporter(new GPUAdapterReporter());
+    RegisterStrongMemoryReporter(new GPUAdapterReporter());
 }
 
 gfxWindowsPlatform::~gfxWindowsPlatform()
@@ -444,6 +443,7 @@ gfxWindowsPlatform::UpdateRenderMode()
     } else {
       canvasMask |= BackendTypeBit(BackendType::SKIA);
     }
+    contentMask |= BackendTypeBit(BackendType::SKIA);
     InitBackendPrefs(canvasMask, defaultBackend,
                      contentMask, defaultBackend);
 }
@@ -476,8 +476,10 @@ gfxWindowsPlatform::CreateDevice(nsRefPtr<IDXGIAdapter1> &adapter1,
   if (device) {
     mD2DDevice = cairo_d2d_create_device_from_d3d10device(device);
 
-    // Setup a pref for future launch optimizaitons
-    Preferences::SetInt(kFeatureLevelPref, featureLevelIndex);
+    // Setup a pref for future launch optimizaitons when in main process.
+    if (XRE_GetProcessType() == GeckoProcessType_Default) {
+      Preferences::SetInt(kFeatureLevelPref, featureLevelIndex);
+    }
   }
 
   return device ? S_OK : hr;
@@ -731,6 +733,7 @@ gfxWindowsPlatform::UpdateFontList()
     return NS_OK;
 }
 
+static const char kFontAparajita[] = "Aparajita";
 static const char kFontArabicTypesetting[] = "Arabic Typesetting";
 static const char kFontArial[] = "Arial";
 static const char kFontArialUnicodeMS[] = "Arial Unicode MS";
@@ -740,8 +743,10 @@ static const char kFontEbrima[] = "Ebrima";
 static const char kFontEstrangeloEdessa[] = "Estrangelo Edessa";
 static const char kFontEuphemia[] = "Euphemia";
 static const char kFontGabriola[] = "Gabriola";
+static const char kFontJavaneseText[] = "Javanese Text";
 static const char kFontKhmerUI[] = "Khmer UI";
 static const char kFontLaoUI[] = "Lao UI";
+static const char kFontLeelawadeeUI[] = "Leelawadee UI";
 static const char kFontLucidaSansUnicode[] = "Lucida Sans Unicode";
 static const char kFontMVBoli[] = "MV Boli";
 static const char kFontMalgunGothic[] = "Malgun Gothic";
@@ -754,12 +759,16 @@ static const char kFontMicrosoftYaHei[] = "Microsoft YaHei";
 static const char kFontMicrosoftYiBaiti[] = "Microsoft Yi Baiti";
 static const char kFontMeiryo[] = "Meiryo";
 static const char kFontMongolianBaiti[] = "Mongolian Baiti";
+static const char kFontMyanmarText[] = "Myanmar Text";
+static const char kFontNirmalaUI[] = "Nirmala UI";
 static const char kFontNyala[] = "Nyala";
 static const char kFontPlantagenetCherokee[] = "Plantagenet Cherokee";
 static const char kFontSegoeUI[] = "Segoe UI";
 static const char kFontSegoeUISymbol[] = "Segoe UI Symbol";
 static const char kFontSylfaen[] = "Sylfaen";
 static const char kFontTraditionalArabic[] = "Traditional Arabic";
+static const char kFontUtsaah[] = "Utsaah";
+static const char kFontYuGothic[] = "Yu Gothic";
 
 void
 gfxWindowsPlatform::GetCommonFallbackFonts(const uint32_t aCh,
@@ -774,6 +783,7 @@ gfxWindowsPlatform::GetCommonFallbackFonts(const uint32_t aCh,
         if (p == 1) { // SMP plane
             aFontList.AppendElement(kFontSegoeUISymbol);
             aFontList.AppendElement(kFontEbrima);
+            aFontList.AppendElement(kFontNirmalaUI);
             aFontList.AppendElement(kFontCambriaMath);
         }
     } else {
@@ -792,8 +802,19 @@ gfxWindowsPlatform::GetCommonFallbackFonts(const uint32_t aCh,
             aFontList.AppendElement(kFontMVBoli);
             aFontList.AppendElement(kFontEbrima);
             break;
+        case 0x09:
+            aFontList.AppendElement(kFontNirmalaUI);
+            aFontList.AppendElement(kFontUtsaah);
+            aFontList.AppendElement(kFontAparajita);
+            break;
         case 0x0e:
             aFontList.AppendElement(kFontLaoUI);
+            break;
+        case 0x10:
+            aFontList.AppendElement(kFontMyanmarText);
+            break;
+        case 0x11:
+            aFontList.AppendElement(kFontMalgunGothic);
             break;
         case 0x12:
         case 0x13:
@@ -811,12 +832,19 @@ gfxWindowsPlatform::GetCommonFallbackFonts(const uint32_t aCh,
             break;
         case 0x18:  // Mongolian
             aFontList.AppendElement(kFontMongolianBaiti);
+            aFontList.AppendElement(kFontEuphemia);
             break;
         case 0x19:
             aFontList.AppendElement(kFontMicrosoftTaiLe);
             aFontList.AppendElement(kFontMicrosoftNewTaiLue);
             aFontList.AppendElement(kFontKhmerUI);
             break;
+            break;
+        case 0x1a:
+            aFontList.AppendElement(kFontLeelawadeeUI);
+            break;
+        case 0x1c:
+            aFontList.AppendElement(kFontNirmalaUI);
             break;
         case 0x20:  // Symbol ranges
         case 0x21:
@@ -843,6 +871,8 @@ gfxWindowsPlatform::GetCommonFallbackFonts(const uint32_t aCh,
         case 0x2f:
             aFontList.AppendElement(kFontEbrima);
             aFontList.AppendElement(kFontNyala);
+            aFontList.AppendElement(kFontSegoeUI);
+            aFontList.AppendElement(kFontSegoeUISymbol);
             aFontList.AppendElement(kFontMeiryo);
             break;
         case 0x28:  // Braille
@@ -858,21 +888,42 @@ gfxWindowsPlatform::GetCommonFallbackFonts(const uint32_t aCh,
         case 0x4d:
             aFontList.AppendElement(kFontSegoeUISymbol);
             break;
+        case 0x9f:
+            aFontList.AppendElement(kFontMicrosoftYaHei);
+            aFontList.AppendElement(kFontYuGothic);
+            break;
         case 0xa0:  // Yi
         case 0xa1:
         case 0xa2:
         case 0xa3:
         case 0xa4:
             aFontList.AppendElement(kFontMicrosoftYiBaiti);
+            aFontList.AppendElement(kFontSegoeUI);
             break;
         case 0xa5:
         case 0xa6:
         case 0xa7:
             aFontList.AppendElement(kFontEbrima);
+            aFontList.AppendElement(kFontSegoeUI);
             aFontList.AppendElement(kFontCambriaMath);
             break;
         case 0xa8:
              aFontList.AppendElement(kFontMicrosoftPhagsPa);
+             aFontList.AppendElement(kFontNirmalaUI);
+             break;
+        case 0xa9:
+             aFontList.AppendElement(kFontMalgunGothic);
+             aFontList.AppendElement(kFontJavaneseText);
+             break;
+        case 0xaa:
+             aFontList.AppendElement(kFontMyanmarText);
+             break;
+        case 0xab:
+             aFontList.AppendElement(kFontEbrima);
+             aFontList.AppendElement(kFontNyala);
+             break;
+        case 0xd7:
+             aFontList.AppendElement(kFontMalgunGothic);
              break;
         case 0xfb:
             aFontList.AppendElement(kFontMicrosoftUighur);

@@ -45,6 +45,11 @@ struct PatchableBackedgeInfo
     {}
 };
 
+struct ReciprocalMulConstants {
+    int32_t multiplier;
+    int32_t shiftAmount;
+};
+
 class CodeGeneratorShared : public LInstructionVisitor
 {
     js::Vector<OutOfLineCode *, 0, SystemAllocPolicy> outOfLineCode_;
@@ -88,6 +93,11 @@ class CodeGeneratorShared : public LInstructionVisitor
 
     // Patchable backedges generated for loops.
     Vector<PatchableBackedgeInfo, 0, SystemAllocPolicy> patchableBackedges_;
+
+#ifdef JS_TRACE_LOGGING
+    js::Vector<CodeOffsetLabel, 0, SystemAllocPolicy> patchableTraceLoggers_;
+    js::Vector<CodeOffsetLabel, 0, SystemAllocPolicy> patchableTLScripts_;
+#endif
 
     // When profiling is enabled, this is the instrumentation manager which
     // maintains state of what script is currently being generated (for inline
@@ -249,6 +259,8 @@ class CodeGeneratorShared : public LInstructionVisitor
     template <typename T>
     inline size_t allocateCache(const T &cache) {
         size_t index = allocateCache(cache, sizeof(mozilla::AlignedStorage2<T>));
+        if (masm.oom())
+            return SIZE_MAX;
         // Use the copy constructor on the allocated space.
         JS_ASSERT(index == cacheList_.back());
         new (&runtimeData_[index]) T(cache);
@@ -260,7 +272,7 @@ class CodeGeneratorShared : public LInstructionVisitor
     // false on failure.
     bool encode(LRecoverInfo *recover);
     bool encode(LSnapshot *snapshot);
-    bool encodeAllocations(LSnapshot *snapshot, MResumePoint *resumePoint, uint32_t *startIndex);
+    bool encodeAllocation(LSnapshot *snapshot, MDefinition *def, uint32_t *startIndex);
 
     // Attempts to assign a BailoutId to a snapshot, if one isn't already set.
     // If the bailout table is full, this returns false, which is not a fatal
@@ -297,7 +309,7 @@ class CodeGeneratorShared : public LInstructionVisitor
     void emitPreBarrier(Address address, MIRType type);
 
     inline bool isNextBlock(LBlock *block) {
-        return (current->mir()->id() + 1 == block->mir()->id());
+        return current->mir()->id() + 1 == block->mir()->id();
     }
 
   public:
@@ -351,6 +363,10 @@ class CodeGeneratorShared : public LInstructionVisitor
     inline void restoreLive(LInstruction *ins);
     inline void restoreLiveIgnore(LInstruction *ins, RegisterSet reg);
 
+    // Save/restore all registers that are both live and volatile.
+    inline void saveLiveVolatile(LInstruction *ins);
+    inline void restoreLiveVolatile(LInstruction *ins);
+
     template <typename T>
     void pushArg(const T &t) {
         masm.Push(t);
@@ -391,6 +407,7 @@ class CodeGeneratorShared : public LInstructionVisitor
 
     bool addCache(LInstruction *lir, size_t cacheIndex);
     size_t addCacheLocations(const CacheLocationList &locs, size_t *numLocs);
+    ReciprocalMulConstants computeDivisionConstants(int d);
 
   protected:
     bool addOutOfLineCode(OutOfLineCode *code);
@@ -418,6 +435,8 @@ class CodeGeneratorShared : public LInstructionVisitor
 
     bool visitOutOfLineTruncateSlow(OutOfLineTruncateSlow *ool);
 
+    bool omitOverRecursedCheck() const;
+
   public:
     bool callTraceLIR(uint32_t blockIndex, LInstruction *lir, const char *bailoutName = nullptr);
 
@@ -439,6 +458,26 @@ class CodeGeneratorShared : public LInstructionVisitor
     OutOfLinePropagateAbortPar *oolPropagateAbortPar(LInstruction *lir);
     virtual bool visitOutOfLineAbortPar(OutOfLineAbortPar *ool) = 0;
     virtual bool visitOutOfLinePropagateAbortPar(OutOfLinePropagateAbortPar *ool) = 0;
+
+#ifdef JS_TRACE_LOGGING
+  protected:
+    bool emitTracelogScript(bool isStart);
+    bool emitTracelogTree(bool isStart, uint32_t textId);
+
+  public:
+    bool emitTracelogScriptStart() {
+        return emitTracelogScript(/* isStart =*/ true);
+    }
+    bool emitTracelogScriptStop() {
+        return emitTracelogScript(/* isStart =*/ false);
+    }
+    bool emitTracelogStartEvent(uint32_t textId) {
+        return emitTracelogTree(/* isStart =*/ true, textId);
+    }
+    bool emitTracelogStopEvent(uint32_t textId) {
+        return emitTracelogTree(/* isStart =*/ false, textId);
+    }
+#endif
 };
 
 // An out-of-line path is generated at the end of the function.

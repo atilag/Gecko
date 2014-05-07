@@ -10,9 +10,11 @@
 #include "nsSVGElement.h"
 
 class nsSVGLength2;
-class nsIDOMSVGLength;
 
 namespace mozilla {
+
+class DOMSVGLength;
+
 namespace dom {
 
 class SVGAnimatedLength MOZ_FINAL : public nsWrapperCache
@@ -29,10 +31,9 @@ public:
 
   // WebIDL
   nsSVGElement* GetParentObject() { return mSVGElement; }
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
-  already_AddRefed<nsIDOMSVGLength> BaseVal();
-  already_AddRefed<nsIDOMSVGLength> AnimVal();
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  already_AddRefed<DOMSVGLength> BaseVal();
+  already_AddRefed<DOMSVGLength> AnimVal();
 
 protected:
   nsSVGLength2* mVal; // kept alive because it belongs to content

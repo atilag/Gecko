@@ -953,13 +953,13 @@ nsCSSValue::AppendToString(nsCSSProperty aProperty, nsAString& aResult,
     switch(aProperty) {
 
 
-    case eCSSProperty_text_combine_horizontal:
-      if (intValue <= NS_STYLE_TEXT_COMBINE_HORIZ_ALL) {
+    case eCSSProperty_text_combine_upright:
+      if (intValue <= NS_STYLE_TEXT_COMBINE_UPRIGHT_ALL) {
         AppendASCIItoUTF16(nsCSSProps::LookupPropertyValue(aProperty, intValue),
                            aResult);
-      } else if (intValue == NS_STYLE_TEXT_COMBINE_HORIZ_DIGITS_2) {
+      } else if (intValue == NS_STYLE_TEXT_COMBINE_UPRIGHT_DIGITS_2) {
         aResult.AppendLiteral("digits 2");
-      } else if (intValue == NS_STYLE_TEXT_COMBINE_HORIZ_DIGITS_3) {
+      } else if (intValue == NS_STYLE_TEXT_COMBINE_UPRIGHT_DIGITS_3) {
         aResult.AppendLiteral("digits 3");
       } else {
         aResult.AppendLiteral("digits 4");
@@ -1032,12 +1032,11 @@ nsCSSValue::AppendToString(nsCSSProperty aProperty, nsAString& aResult,
 
     case eCSSProperty_grid_auto_flow:
       nsStyleUtil::AppendBitmaskCSSValue(aProperty, intValue,
-                                         NS_STYLE_GRID_AUTO_FLOW_NONE,
+                                         NS_STYLE_GRID_AUTO_FLOW_STACK,
                                          NS_STYLE_GRID_AUTO_FLOW_DENSE,
                                          aResult);
       break;
 
-    case eCSSProperty_grid_auto_position:
     case eCSSProperty_grid_column_start:
     case eCSSProperty_grid_column_end:
     case eCSSProperty_grid_row_start:
@@ -1048,8 +1047,8 @@ nsCSSValue::AppendToString(nsCSSProperty aProperty, nsAString& aResult,
 
     case eCSSProperty_touch_action:
       nsStyleUtil::AppendBitmaskCSSValue(aProperty, intValue,
-                                         NS_STYLE_TOUCH_ACTION_PAN_X,
-                                         NS_STYLE_TOUCH_ACTION_PAN_Y,
+                                         NS_STYLE_TOUCH_ACTION_NONE,
+                                         NS_STYLE_TOUCH_ACTION_MANIPULATION,
                                          aResult);
       break;
 
@@ -1326,10 +1325,6 @@ nsCSSValue::AppendToString(nsCSSProperty aProperty, nsAString& aResult,
       nsStyleUtil::ComputeFunctionalAlternates(list, altValues);
       nsStyleUtil::SerializeFunctionalAlternates(altValues, out);
       aResult.Append(out);
-    } else if (eCSSProperty_grid_auto_position == aProperty) {
-      GetPairValue().mXValue.AppendToString(aProperty, aResult, aSerialization);
-      aResult.AppendLiteral(" / ");
-      GetPairValue().mYValue.AppendToString(aProperty, aResult, aSerialization);
     } else {
       GetPairValue().AppendToString(aProperty, aResult, aSerialization);
     }
@@ -1708,6 +1703,13 @@ AppendGridTemplateToString(const nsCSSValueList* val,
     } else {
       // <track-size>
       val->mValue.AppendToString(aProperty, aResult, aSerialization);
+      if (!isSubgrid &&
+          val->mNext &&
+          val->mNext->mValue.GetUnit() == eCSSUnit_Null &&
+          !val->mNext->mNext) {
+        // Break out of the loop early to avoid a trailing space.
+        break;
+      }
     }
 
     val = val->mNext;
@@ -2409,6 +2411,6 @@ size_t
 mozilla::css::GridTemplateAreasValue::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 {
   size_t n = mNamedAreas.SizeOfExcludingThis(aMallocSizeOf);
-  n += mTemplates.SizeOfIncludingThis(aMallocSizeOf);
+  n += mTemplates.SizeOfExcludingThis(aMallocSizeOf);
   return n;
 }

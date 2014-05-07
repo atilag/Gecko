@@ -37,14 +37,14 @@ namespace layers {
 class GrallocTextureClientOGL : public BufferTextureClient
 {
 public:
-  GrallocTextureClientOGL(GrallocBufferActor* aActor,
+  GrallocTextureClientOGL(MaybeMagicGrallocBufferHandle buffer,
                           gfx::IntSize aSize,
                           gfx::BackendType aMoz2dBackend,
-                          TextureFlags aFlags = TEXTURE_FLAGS_DEFAULT);
+                          TextureFlags aFlags = TextureFlags::DEFAULT);
   GrallocTextureClientOGL(ISurfaceAllocator* aAllocator,
                           gfx::SurfaceFormat aFormat,
                           gfx::BackendType aMoz2dBackend,
-                          TextureFlags aFlags = TEXTURE_FLAGS_DEFAULT);
+                          TextureFlags aFlags = TextureFlags::DEFAULT);
 
   ~GrallocTextureClientOGL();
 
@@ -60,23 +60,21 @@ public:
 
   virtual bool ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor) MOZ_OVERRIDE;
 
-  virtual bool UpdateSurface(gfxASurface* aSurface) MOZ_OVERRIDE;
-
   virtual TextureClientData* DropTextureData() MOZ_OVERRIDE;
 
   virtual void SetReleaseFenceHandle(FenceHandle aReleaseFenceHandle) MOZ_OVERRIDE;
 
   virtual void WaitReleaseFence() MOZ_OVERRIDE;
 
-  void InitWith(GrallocBufferActor* aActor, gfx::IntSize aSize);
+  void InitWith(MaybeMagicGrallocBufferHandle aDesc, gfx::IntSize aSize);
 
   void SetTextureFlags(TextureFlags aFlags) { AddFlags(aFlags); }
 
   gfx::IntSize GetSize() const MOZ_OVERRIDE { return mSize; }
 
-  android::GraphicBuffer* GetGraphicBuffer()
+  android::sp<android::GraphicBuffer> GetGraphicBuffer()
   {
-    return mGraphicBuffer.get();
+    return mGraphicBuffer;
   }
 
   android::PixelFormat GetPixelFormat()
@@ -87,8 +85,6 @@ public:
   virtual uint8_t* GetBuffer() const MOZ_OVERRIDE;
 
   virtual TemporaryRef<gfx::DrawTarget> GetAsDrawTarget() MOZ_OVERRIDE;
-
-  virtual already_AddRefed<gfxASurface> GetAsSurface() MOZ_OVERRIDE;
 
   virtual bool AllocateForSurface(gfx::IntSize aSize,
                                   TextureAllocationFlags aFlags = ALLOC_DEFAULT) MOZ_OVERRIDE;
@@ -124,7 +120,7 @@ protected:
   /**
    * Unfortunately, until bug 879681 is fixed we need to use a GrallocBufferActor.
    */
-  GrallocBufferActor* mGrallocActor;
+  MaybeMagicGrallocBufferHandle mGrallocHandle;
 
   android::sp<android::GraphicBuffer> mGraphicBuffer;
 

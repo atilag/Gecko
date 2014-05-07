@@ -114,7 +114,7 @@ class Operand
     }
 };
 
-class AssemblerX86Shared
+class AssemblerX86Shared : public AssemblerShared
 {
   protected:
     struct RelativePatch {
@@ -131,7 +131,6 @@ class AssemblerX86Shared
 
     Vector<CodeLabel, 0, SystemAllocPolicy> codeLabels_;
     Vector<RelativePatch, 8, SystemAllocPolicy> jumps_;
-    AsmJSAbsoluteLinkVector asmJSAbsoluteLinks_;
     CompactBufferWriter jumpRelocations_;
     CompactBufferWriter dataRelocations_;
     CompactBufferWriter preBarriers_;
@@ -291,13 +290,6 @@ class AssemblerX86Shared
     }
     CodeLabel codeLabel(size_t i) {
         return codeLabels_[i];
-    }
-
-    size_t numAsmJSAbsoluteLinks() const {
-        return asmJSAbsoluteLinks_.length();
-    }
-    const AsmJSAbsoluteLink &asmJSAbsoluteLink(size_t i) const {
-        return asmJSAbsoluteLinks_[i];
     }
 
     // Size of the instruction stream, in bytes.
@@ -781,14 +773,16 @@ class AssemblerX86Shared
         masm.int3();
     }
 
+#ifdef DEBUG
     static bool HasSSE2() {
-        return JSC::MacroAssembler::getSSEState() >= JSC::MacroAssembler::HasSSE2;
+        return JSC::MacroAssembler::isSSE2Present();
     }
+#endif
     static bool HasSSE3() {
-        return JSC::MacroAssembler::getSSEState() >= JSC::MacroAssembler::HasSSE3;
+        return JSC::MacroAssembler::isSSE3Present();
     }
     static bool HasSSE41() {
-        return JSC::MacroAssembler::getSSEState() >= JSC::MacroAssembler::HasSSE4_1;
+        return JSC::MacroAssembler::isSSE41Present();
     }
 
     // The below cmpl methods switch the lhs and rhs when it invokes the
@@ -948,6 +942,18 @@ class AssemblerX86Shared
             MOZ_ASSUME_UNREACHABLE("unexpected operand kind");
         }
     }
+    void subl(const Register &src, const Operand &dest) {
+        switch (dest.kind()) {
+          case Operand::REG:
+            masm.subl_rr(src.code(), dest.reg());
+            break;
+          case Operand::MEM_REG_DISP:
+            masm.subl_rm(src.code(), dest.disp(), dest.base());
+            break;
+          default:
+            MOZ_ASSUME_UNREACHABLE("unexpected operand kind");
+        }
+    }
     void orl(const Register &reg, const Register &dest) {
         masm.orl_rr(reg.code(), dest.code());
     }
@@ -1050,11 +1056,17 @@ class AssemblerX86Shared
             MOZ_ASSUME_UNREACHABLE("unexpected operand kind");
         }
     }
+    void imull(const Register &multiplier) {
+        masm.imull_r(multiplier.code());
+    }
     void imull(Imm32 imm, const Register &dest) {
         masm.imull_i32r(dest.code(), imm.value, dest.code());
     }
     void imull(const Register &src, const Register &dest) {
         masm.imull_rr(src.code(), dest.code());
+    }
+    void imull(Imm32 imm, const Register &src, const Register &dest) {
+        masm.imull_i32r(src.code(), imm.value, dest.code());
     }
     void imull(const Operand &src, const Register &dest) {
         switch (src.kind()) {
@@ -1344,7 +1356,7 @@ class AssemblerX86Shared
     void pcmpeqw(const FloatRegister &lhs, const FloatRegister &rhs) {
         JS_ASSERT(HasSSE2());
         masm.pcmpeqw_rr(rhs.code(), lhs.code());
-    }    
+    }
     void movd(const Register &src, const FloatRegister &dest) {
         JS_ASSERT(HasSSE2());
         masm.movd_rr(src.code(), dest.code());

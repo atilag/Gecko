@@ -18,7 +18,6 @@
 #include "nsString.h"
 #include "nsGkAtoms.h"
 #include "nsObjCExceptions.h"
-#include "nsHashtable.h"
 #include "nsThreadUtils.h"
 
 #include "nsIContent.h"
@@ -42,7 +41,7 @@ static nsIContent* sUpdateItemContent = nullptr;
 static nsIContent* sPrefItemContent   = nullptr;
 static nsIContent* sQuitItemContent   = nullptr;
 
-NS_IMPL_ISUPPORTS1(nsNativeMenuServiceX, nsINativeMenuService)
+NS_IMPL_ISUPPORTS(nsNativeMenuServiceX, nsINativeMenuService)
 
 NS_IMETHODIMP nsNativeMenuServiceX::CreateNativeMenuBar(nsIWidget* aParent, nsIContent* aMenuBarNode)
 {

@@ -72,7 +72,7 @@ nsXULTooltipListener::~nsXULTooltipListener()
   }
 }
 
-NS_IMPL_ISUPPORTS1(nsXULTooltipListener, nsIDOMEventListener)
+NS_IMPL_ISUPPORTS(nsXULTooltipListener, nsIDOMEventListener)
 
 void
 nsXULTooltipListener::MouseOut(nsIDOMEvent* aEvent)
@@ -522,7 +522,7 @@ nsXULTooltipListener::HideTooltip()
   if (currentTooltip) {
     nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
     if (pm)
-      pm->HidePopup(currentTooltip, false, false, false);
+      pm->HidePopup(currentTooltip, false, false, false, false);
   }
 #endif
 

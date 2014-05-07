@@ -10,6 +10,7 @@
  */
 
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/MemoryReporting.h"
 
 #include "nsStyleSet.h"
@@ -27,7 +28,6 @@
 #include "nsRuleProcessorData.h"
 #include "nsTransitionManager.h"
 #include "nsAnimationManager.h"
-#include "nsEventStates.h"
 #include "nsStyleSheetService.h"
 #include "mozilla/dom/Element.h"
 #include "GeckoProfiler.h"
@@ -38,7 +38,7 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
-NS_IMPL_ISUPPORTS1(nsEmptyStyleRule, nsIStyleRule)
+NS_IMPL_ISUPPORTS(nsEmptyStyleRule, nsIStyleRule)
 
 /* virtual */ void
 nsEmptyStyleRule::MapRuleInfoInto(nsRuleData* aRuleData)
@@ -54,7 +54,7 @@ nsEmptyStyleRule::List(FILE* out, int32_t aIndent) const
 }
 #endif
 
-NS_IMPL_ISUPPORTS1(nsInitialStyleRule, nsIStyleRule)
+NS_IMPL_ISUPPORTS(nsInitialStyleRule, nsIStyleRule)
 
 /* virtual */ void
 nsInitialStyleRule::MapRuleInfoInto(nsRuleData* aRuleData)
@@ -104,7 +104,7 @@ nsInitialStyleRule::List(FILE* out, int32_t aIndent) const
 }
 #endif
 
-NS_IMPL_ISUPPORTS1(nsDisableTextZoomStyleRule, nsIStyleRule)
+NS_IMPL_ISUPPORTS(nsDisableTextZoomStyleRule, nsIStyleRule)
 
 /* virtual */ void
 nsDisableTextZoomStyleRule::MapRuleInfoInto(nsRuleData* aRuleData)
@@ -794,12 +794,13 @@ nsStyleSet::GetContext(nsStyleContext* aParentContext,
 
   if (!result) {
     result = NS_NewStyleContext(aParentContext, aPseudoTag, aPseudoType,
-                                aRuleNode, aFlags & eSkipFlexItemStyleFixup);
+                                aRuleNode,
+                                aFlags & eSkipFlexOrGridItemStyleFixup);
     if (aVisitedRuleNode) {
       nsRefPtr<nsStyleContext> resultIfVisited =
         NS_NewStyleContext(parentIfVisited, aPseudoTag, aPseudoType,
                            aVisitedRuleNode,
-                           aFlags & eSkipFlexItemStyleFixup);
+                           aFlags & eSkipFlexOrGridItemStyleFixup);
       if (!parentIfVisited) {
         mRoots.AppendElement(resultIfVisited);
       }
@@ -1214,8 +1215,8 @@ nsStyleSet::ResolveStyleFor(Element* aElement,
                             HasState(NS_EVENT_STATE_VISITED)) {
     flags |= eIsVisitedLink;
   }
-  if (aTreeMatchContext.mSkippingFlexItemStyleFixup) {
-    flags |= eSkipFlexItemStyleFixup;
+  if (aTreeMatchContext.mSkippingFlexOrGridItemStyleFixup) {
+    flags |= eSkipFlexOrGridItemStyleFixup;
   }
 
   return GetContext(aParentContext, ruleNode, visitedRuleNode,
@@ -1378,10 +1379,11 @@ nsStyleSet::ResolvePseudoElementStyle(Element* aParentElement,
       aType == nsCSSPseudoElements::ePseudo_after) {
     flags |= eDoAnimation;
   } else {
-    // Flex containers don't expect to have any pseudo-element children aside
-    // from ::before and ::after.  So if we have such a child, we're not
-    // actually in a flex container, and we should skip flex-item style fixup.
-    flags |= eSkipFlexItemStyleFixup;
+    // Flex and grid containers don't expect to have any pseudo-element children
+    // aside from ::before and ::after.  So if we have such a child, we're not
+    // actually in a flex/grid container, and we should skip flex/grid item
+    // style fixup.
+    flags |= eSkipFlexOrGridItemStyleFixup;
   }
 
   return GetContext(aParentContext, ruleNode, visitedRuleNode,
@@ -1449,10 +1451,11 @@ nsStyleSet::ProbePseudoElementStyle(Element* aParentElement,
       aType == nsCSSPseudoElements::ePseudo_after) {
     flags |= eDoAnimation;
   } else {
-    // Flex containers don't expect to have any pseudo-element children aside
-    // from ::before and ::after.  So if we have such a child, we're not
-    // actually in a flex container, and we should skip flex-item style fixup.
-    flags |= eSkipFlexItemStyleFixup;
+    // Flex and grid containers don't expect to have any pseudo-element children
+    // aside from ::before and ::after.  So if we have such a child, we're not
+    // actually in a flex/grid container, and we should skip flex/grid item
+    // style fixup.
+    flags |= eSkipFlexOrGridItemStyleFixup;
   }
 
   nsRefPtr<nsStyleContext> result =
@@ -1856,11 +1859,11 @@ nsStyleSet::ReparentStyleContext(nsStyleContext* aStyleContext,
   }
 
   if (aElement && aElement->IsRootOfAnonymousSubtree()) {
-    // For anonymous subtree roots, don't tweak "display" value based on
-    // whether or not the parent is styled as a flex container. (If the parent
+    // For anonymous subtree roots, don't tweak "display" value based on whether
+    // or not the parent is styled as a flex/grid container. (If the parent
     // has anonymous-subtree kids, then we know it's not actually going to get
-    // a flex container frame, anyway.)
-    flags |= eSkipFlexItemStyleFixup;
+    // a flex/grid container frame, anyway.)
+    flags |= eSkipFlexOrGridItemStyleFixup;
   }
 
   return GetContext(aNewParentContext, ruleNode, visitedRuleNode,
@@ -1870,7 +1873,7 @@ nsStyleSet::ReparentStyleContext(nsStyleContext* aStyleContext,
 
 struct MOZ_STACK_CLASS StatefulData : public StateRuleProcessorData {
   StatefulData(nsPresContext* aPresContext, Element* aElement,
-               nsEventStates aStateMask, TreeMatchContext& aTreeMatchContext)
+               EventStates aStateMask, TreeMatchContext& aTreeMatchContext)
     : StateRuleProcessorData(aPresContext, aElement, aStateMask,
                              aTreeMatchContext),
       mHint(nsRestyleHint(0))
@@ -1880,7 +1883,7 @@ struct MOZ_STACK_CLASS StatefulData : public StateRuleProcessorData {
 
 struct MOZ_STACK_CLASS StatefulPseudoElementData : public PseudoElementStateRuleProcessorData {
   StatefulPseudoElementData(nsPresContext* aPresContext, Element* aElement,
-               nsEventStates aStateMask, nsCSSPseudoElements::Type aPseudoType,
+               EventStates aStateMask, nsCSSPseudoElements::Type aPseudoType,
                TreeMatchContext& aTreeMatchContext, Element* aPseudoElement)
     : PseudoElementStateRuleProcessorData(aPresContext, aElement, aStateMask,
                                           aPseudoType, aTreeMatchContext,
@@ -1905,7 +1908,7 @@ static bool SheetHasDocumentStateStyle(nsIStyleRuleProcessor* aProcessor,
 bool
 nsStyleSet::HasDocumentStateDependentStyle(nsPresContext* aPresContext,
                                            nsIContent*    aContent,
-                                           nsEventStates  aStateMask)
+                                           EventStates    aStateMask)
 {
   if (!aContent || !aContent->IsElement())
     return false;
@@ -1941,7 +1944,7 @@ static bool SheetHasStatefulPseudoElementStyle(nsIStyleRuleProcessor* aProcessor
 nsRestyleHint
 nsStyleSet::HasStateDependentStyle(nsPresContext*       aPresContext,
                                    Element*             aElement,
-                                   nsEventStates        aStateMask)
+                                   EventStates          aStateMask)
 {
   TreeMatchContext treeContext(false, nsRuleWalker::eLinksVisitedOrUnvisited,
                                aElement->OwnerDoc());
@@ -1956,7 +1959,7 @@ nsStyleSet::HasStateDependentStyle(nsPresContext* aPresContext,
                                    Element* aElement,
                                    nsCSSPseudoElements::Type aPseudoType,
                                    Element* aPseudoElement,
-                                   nsEventStates aStateMask)
+                                   EventStates aStateMask)
 {
   TreeMatchContext treeContext(false, nsRuleWalker::eLinksVisitedOrUnvisited,
                                aElement->OwnerDoc());

@@ -23,7 +23,7 @@
 #include "nsIDOMHTMLSelectElement.h"
 #include "nsNodeInfoManager.h"
 #include "nsCOMPtr.h"
-#include "nsEventStates.h"
+#include "mozilla/EventStates.h"
 #include "nsContentCreatorFunctions.h"
 #include "mozAutoDocUpdate.h"
 #include "nsTextNode.h"
@@ -51,8 +51,8 @@ HTMLOptionElement::~HTMLOptionElement()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED1(HTMLOptionElement, nsGenericHTMLElement,
-                             nsIDOMHTMLOptionElement)
+NS_IMPL_ISUPPORTS_INHERITED(HTMLOptionElement, nsGenericHTMLElement,
+                            nsIDOMHTMLOptionElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLOptionElement)
 
@@ -299,10 +299,10 @@ HTMLOptionElement::UnbindFromTree(bool aDeep, bool aNullParent)
   UpdateState(false);
 }
 
-nsEventStates
+EventStates
 HTMLOptionElement::IntrinsicState() const
 {
-  nsEventStates state = nsGenericHTMLElement::IntrinsicState();
+  EventStates state = nsGenericHTMLElement::IntrinsicState();
   if (Selected()) {
     state |= NS_EVENT_STATE_CHECKED;
   }
@@ -428,9 +428,9 @@ HTMLOptionElement::CopyInnerTo(Element* aDest)
 }
 
 JSObject*
-HTMLOptionElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+HTMLOptionElement::WrapNode(JSContext* aCx)
 {
-  return HTMLOptionElementBinding::Wrap(aCx, aScope, this);
+  return HTMLOptionElementBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

@@ -20,13 +20,14 @@ class MediaEngineTabVideoSource : public MediaEngineVideoSource, nsIDOMEventList
 
     virtual void GetName(nsAString_internal&);
     virtual void GetUUID(nsAString_internal&);
-    virtual nsresult Allocate(const mozilla::MediaEnginePrefs&);
+    virtual nsresult Allocate(const VideoTrackConstraintsN &,
+                              const mozilla::MediaEnginePrefs&);
     virtual nsresult Deallocate();
     virtual nsresult Start(mozilla::SourceMediaStream*, mozilla::TrackID);
     virtual nsresult Snapshot(uint32_t, nsIDOMFile**);
     virtual void NotifyPull(mozilla::MediaStreamGraph*, mozilla::SourceMediaStream*, mozilla::TrackID, mozilla::StreamTime, mozilla::TrackTicks&);
     virtual nsresult Stop(mozilla::SourceMediaStream*, mozilla::TrackID);
-    virtual nsresult Config(bool, uint32_t, bool, uint32_t, bool, uint32_t);
+    virtual nsresult Config(bool, uint32_t, bool, uint32_t, bool, uint32_t, int32_t);
     virtual bool IsFake();
     void Draw();
 

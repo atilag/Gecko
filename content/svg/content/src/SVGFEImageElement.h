@@ -29,8 +29,7 @@ protected:
                                              already_AddRefed<nsINodeInfo>&& aNodeInfo));
   SVGFEImageElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
   virtual ~SVGFEImageElement();
-  virtual JSObject* WrapNode(JSContext *aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
 
 public:
   virtual bool SubregionIsUnionOfRegions() MOZ_OVERRIDE { return false; }
@@ -60,7 +59,7 @@ public:
                               nsIContent* aBindingParent,
                               bool aCompileEventHandlers) MOZ_OVERRIDE;
   virtual void UnbindFromTree(bool aDeep, bool aNullParent) MOZ_OVERRIDE;
-  virtual nsEventStates IntrinsicState() const MOZ_OVERRIDE;
+  virtual EventStates IntrinsicState() const MOZ_OVERRIDE;
 
   NS_IMETHODIMP Notify(imgIRequest *aRequest, int32_t aType, const nsIntRect* aData) MOZ_OVERRIDE;
 

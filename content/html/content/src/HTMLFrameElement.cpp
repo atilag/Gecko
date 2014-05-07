@@ -24,8 +24,8 @@ HTMLFrameElement::~HTMLFrameElement()
 }
 
 
-NS_IMPL_ISUPPORTS_INHERITED1(HTMLFrameElement, nsGenericHTMLFrameElement,
-                             nsIDOMHTMLFrameElement)
+NS_IMPL_ISUPPORTS_INHERITED(HTMLFrameElement, nsGenericHTMLFrameElement,
+                            nsIDOMHTMLFrameElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLFrameElement)
 
@@ -81,9 +81,9 @@ HTMLFrameElement::ParseAttribute(int32_t aNamespaceID,
 }
 
 JSObject*
-HTMLFrameElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+HTMLFrameElement::WrapNode(JSContext* aCx)
 {
-  return HTMLFrameElementBinding::Wrap(aCx, aScope, this);
+  return HTMLFrameElementBinding::Wrap(aCx, this);
 }
 
 } // namespace mozilla

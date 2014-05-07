@@ -61,7 +61,7 @@ struct CallsiteCloneKey {
 };
 
 typedef HashMap<CallsiteCloneKey,
-                ReadBarriered<JSFunction>,
+                ReadBarrieredFunction,
                 CallsiteCloneKey,
                 SystemAllocPolicy> CallsiteCloneTable;
 
@@ -145,6 +145,7 @@ struct ThreadSafeContext : ContextFriendFields,
                            public MallocProvider<ThreadSafeContext>
 {
     friend struct StackBaseShape;
+    friend class Activation;
     friend UnownedBaseShape *BaseShape::lookupUnowned(ThreadSafeContext *cx,
                                                       const StackBaseShape &base);
     friend Shape *JSObject::lookupChildProperty(ThreadSafeContext *cx,
@@ -223,7 +224,7 @@ struct ThreadSafeContext : ContextFriendFields,
 
     inline js::Nursery &nursery() {
         JS_ASSERT(hasNursery());
-        return runtime_->gcNursery;
+        return runtime_->gc.nursery;
     }
 #endif
 
@@ -266,6 +267,9 @@ struct ThreadSafeContext : ContextFriendFields,
         return runtime_->onOutOfMemory(p, nbytes, maybeJSContext());
     }
 
+    /* Clear the pending exception (if any) due to OOM. */
+    void recoverFromOutOfMemory();
+
     inline void updateMallocCounter(size_t nbytes) {
         // Note: this is racy.
         runtime_->updateMallocCounter(zone_, nbytes);
@@ -286,7 +290,7 @@ struct ThreadSafeContext : ContextFriendFields,
     void *runtimeAddressForJit() { return runtime_; }
     void *stackLimitAddress(StackKind kind) { return &runtime_->mainThread.nativeStackLimit[kind]; }
     void *stackLimitAddressForJitCode(StackKind kind);
-    size_t gcSystemPageSize() { return runtime_->gcSystemPageSize; }
+    size_t gcSystemPageSize() { return runtime_->gc.pageAllocator.systemPageSize(); }
     bool signalHandlersInstalled() const { return runtime_->signalHandlersInstalled(); }
     bool jitSupportsFloatingPoint() const { return runtime_->jitSupportsFloatingPoint; }
 
@@ -347,6 +351,7 @@ class ExclusiveContext : public ThreadSafeContext
 #endif
 
     inline void enterCompartment(JSCompartment *c);
+    inline void enterNullCompartment();
     inline void leaveCompartment(JSCompartment *oldCompartment);
 
     void setWorkerThread(WorkerThread *workerThread);
@@ -403,6 +408,10 @@ struct JSContext : public js::ExclusiveContext,
 
     JSRuntime *runtime() const { return runtime_; }
     js::PerThreadData &mainThread() const { return runtime()->mainThread; }
+
+    static size_t offsetOfRuntime() {
+        return offsetof(JSContext, runtime_);
+    }
 
     friend class js::ExclusiveContext;
     friend class JS::AutoSaveExceptionState;
@@ -490,9 +499,6 @@ struct JSContext : public js::ExclusiveContext,
                                                JS_EndRequest. */
 #endif
 
-    /* Stored here to avoid passing it around as a parameter. */
-    unsigned               resolveFlags;
-
     /* Location to stash the iteration value between JSOP_MOREITER and JSOP_ITERNEXT. */
     js::Value           iterValue;
 
@@ -556,6 +562,8 @@ struct JSContext : public js::ExclusiveContext,
 
     MOZ_WARN_UNUSED_RESULT
     bool getPendingException(JS::MutableHandleValue rval);
+
+    bool isThrowingOutOfMemory();
 
     void setPendingException(js::Value v);
 
@@ -629,29 +637,6 @@ struct AutoResolving {
     AutoResolving       *const link;
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
-
-} /* namespace js */
-
-class JSAutoResolveFlags
-{
-  public:
-    JSAutoResolveFlags(JSContext *cx, unsigned flags
-                       MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : mContext(cx), mSaved(cx->resolveFlags)
-    {
-        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        cx->resolveFlags = flags;
-    }
-
-    ~JSAutoResolveFlags() { mContext->resolveFlags = mSaved; }
-
-  private:
-    JSContext *mContext;
-    unsigned mSaved;
-    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
-};
-
-namespace js {
 
 /*
  * Enumerate all contexts in a runtime.
@@ -1023,6 +1008,7 @@ bool intrinsic_ThrowError(JSContext *cx, unsigned argc, Value *vp);
 bool intrinsic_NewDenseArray(JSContext *cx, unsigned argc, Value *vp);
 
 bool intrinsic_UnsafePutElements(JSContext *cx, unsigned argc, Value *vp);
+bool intrinsic_DefineValueProperty(JSContext *cx, unsigned argc, Value *vp);
 bool intrinsic_UnsafeSetReservedSlot(JSContext *cx, unsigned argc, Value *vp);
 bool intrinsic_UnsafeGetReservedSlot(JSContext *cx, unsigned argc, Value *vp);
 bool intrinsic_HaveSameClass(JSContext *cx, unsigned argc, Value *vp);

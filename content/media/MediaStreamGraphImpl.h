@@ -10,14 +10,18 @@
 
 #include "mozilla/Monitor.h"
 #include "mozilla/TimeStamp.h"
+#include "nsIMemoryReporter.h"
 #include "nsIThread.h"
 #include "nsIRunnable.h"
 #include "Latency.h"
+#include "mozilla/WeakPtr.h"
 
 namespace mozilla {
 
 template <typename T>
 class LinkedList;
+
+class AudioMixer;
 
 /**
  * Assume we can run an iteration of the MediaStreamGraph loop in this much time
@@ -103,8 +107,12 @@ protected:
  * Currently we have one global instance per process, and one per each
  * OfflineAudioContext object.
  */
-class MediaStreamGraphImpl : public MediaStreamGraph {
+class MediaStreamGraphImpl : public MediaStreamGraph,
+                             public nsIMemoryReporter {
 public:
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIMEMORYREPORTER
+
   /**
    * Set aRealtime to true in order to create a MediaStreamGraph which provides
    * support for real-time audio and video.  Set it to false in order to create
@@ -112,8 +120,13 @@ public:
    * output.  Those objects currently only support audio, and are used to
    * implement OfflineAudioContext.  They do not support MediaStream inputs.
    */
-  explicit MediaStreamGraphImpl(bool aRealtime);
-  virtual ~MediaStreamGraphImpl();
+  explicit MediaStreamGraphImpl(bool aRealtime, TrackRate aSampleRate);
+
+  /**
+   * Unregisters memory reporting and deletes this instance. This should be
+   * called instead of calling the destructor directly.
+   */
+  void Destroy();
 
   // Main thread only.
   /**
@@ -323,9 +336,9 @@ public:
                                    MediaStream* aStream);
   /**
    * Queue audio (mix of stream audio and silence for blocked intervals)
-   * to the audio output stream.
+   * to the audio output stream. Returns the number of frames played.
    */
-  void PlayAudio(MediaStream* aStream, GraphTime aFrom, GraphTime aTo);
+  TrackTicks PlayAudio(MediaStream* aStream, GraphTime aFrom, GraphTime aTo);
   /**
    * Set the correct current video frame for stream aStream.
    */
@@ -378,6 +391,8 @@ public:
    * Resume all AudioStreams being written to by MediaStreams
    */
   void ResumeAllAudioOutputs();
+
+  TrackRate AudioSampleRate() { return mSampleRate; }
 
   // Data members
 
@@ -518,6 +533,13 @@ public:
    * The graph should stop processing at or after this time.
    */
   GraphTime mEndTime;
+
+  /**
+   * Sample rate at which this graph runs. For real time graphs, this is
+   * the rate of the audio mixer. For offline graphs, this is the rate specified
+   * at construction.
+   */
+  TrackRate mSampleRate;
   /**
    * True when another iteration of the control loop is required.
    */
@@ -571,6 +593,36 @@ public:
    * Hold a ref to the Latency logger
    */
   nsRefPtr<AsyncLatencyLogger> mLatencyLog;
+  /**
+   * If this is not null, all the audio output for the MSG will be mixed down.
+   */
+  nsAutoPtr<AudioMixer> mMixer;
+
+private:
+  virtual ~MediaStreamGraphImpl();
+
+  MOZ_DEFINE_MALLOC_SIZE_OF(MallocSizeOf)
+
+  /**
+   * Used to signal that a memory report has been requested.
+   */
+  Monitor mMemoryReportMonitor;
+  /**
+   * This class uses manual memory management, and all pointers to it are raw
+   * pointers. However, in order for it to implement nsIMemoryReporter, it needs
+   * to implement nsISupports and so be ref-counted. So it maintains a single
+   * nsRefPtr to itself, giving it a ref-count of 1 during its entire lifetime,
+   * and Destroy() nulls this self-reference in order to trigger self-deletion.
+   */
+  nsRefPtr<MediaStreamGraphImpl> mSelfRef;
+  /**
+   * Used to pass memory report information across threads.
+   */
+  nsTArray<AudioNodeSizes> mAudioStreamSizes;
+  /**
+   * Indicates that the MSG thread should gather data for a memory report.
+   */
+  bool mNeedsMemoryReport;
 };
 
 }

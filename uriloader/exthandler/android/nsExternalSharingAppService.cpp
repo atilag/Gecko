@@ -14,7 +14,7 @@
 
 using namespace mozilla;
 
-NS_IMPL_ISUPPORTS1(nsExternalSharingAppService, nsIExternalSharingAppService)
+NS_IMPL_ISUPPORTS(nsExternalSharingAppService, nsIExternalSharingAppService)
 
 nsExternalSharingAppService::nsExternalSharingAppService()
 {
@@ -31,7 +31,8 @@ nsExternalSharingAppService::ShareWithDefault(const nsAString & data,
 {
   NS_NAMED_LITERAL_STRING(sendAction, "android.intent.action.SEND");
   const nsString emptyString = EmptyString();
-  return GeckoAppShell::OpenUriExternal(data, mime, emptyString,emptyString, sendAction, title) ? NS_OK : NS_ERROR_FAILURE;
+  return mozilla::widget::android::GeckoAppShell::OpenUriExternal(data,
+           mime, emptyString,emptyString, sendAction, title) ? NS_OK : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP

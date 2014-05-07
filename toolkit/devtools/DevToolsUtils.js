@@ -5,10 +5,12 @@
 "use strict";
 
 /* General utilities used throughout devtools. */
-const { Ci, Cu } = require("chrome");
 
-let { Services } = Cu.import("resource://gre/modules/Services.jsm", {});
-let { setTimeout, clearTimeout } = Cu.import("resource://gre/modules/Timer.jsm", {});
+// hasChrome is provided as a global by the loader. It is true if we are running
+// on the main thread, and false if we are running on a worker thread.
+var { Ci, Cu } = require("chrome");
+var Services = require("Services");
+var { setTimeout } = require("Timer");
 
 /**
  * Turn the error |aError| into a string, without fail.
@@ -293,10 +295,46 @@ exports.isSafeJSObject = function isSafeJSObject(aObj) {
     return true; // aObj is not a cross-compartment wrapper.
   }
 
-  let principal = Services.scriptSecurityManager.getObjectPrincipal(aObj);
+  let principal = Cu.getObjectPrincipal(aObj);
   if (Services.scriptSecurityManager.isSystemPrincipal(principal)) {
     return true; // allow chrome objects
   }
 
   return Cu.isXrayWrapper(aObj);
 };
+
+exports.dumpn = function dumpn(str) {
+  if (exports.dumpn.wantLogging) {
+    dump("DBG-SERVER: " + str + "\n");
+  }
+}
+
+// We want wantLogging to be writable. The exports object is frozen by the
+// loader, so define it on dumpn instead.
+exports.dumpn.wantLogging = false;
+
+exports.dbg_assert = function dbg_assert(cond, e) {
+  if (!cond) {
+    return e;
+  }
+}
+
+
+/**
+ * Utility function for updating an object with the properties of another
+ * object.
+ *
+ * @param aTarget Object
+ *        The object being updated.
+ * @param aNewAttrs Object
+ *        The new attributes being set on the target.
+ */
+exports.update = function update(aTarget, aNewAttrs) {
+  for (let key in aNewAttrs) {
+    let desc = Object.getOwnPropertyDescriptor(aNewAttrs, key);
+
+    if (desc) {
+      Object.defineProperty(aTarget, key, desc);
+    }
+  }
+}

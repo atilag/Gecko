@@ -28,6 +28,7 @@
   UnwrapObject<prototypes::id::Interface##_workers,                           \
     mozilla::dom::Interface##Binding_workers::NativeType>(obj, value)
 
+using namespace mozilla;
 using namespace mozilla::dom;
 USING_WORKERS_NAMESPACE
 
@@ -49,31 +50,31 @@ WorkerGlobalScope::~WorkerGlobalScope()
 NS_IMPL_CYCLE_COLLECTION_CLASS(WorkerGlobalScope)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(WorkerGlobalScope,
-                                                  nsDOMEventTargetHelper)
+                                                  DOMEventTargetHelper)
   tmp->mWorkerPrivate->AssertIsOnWorkerThread();
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(WorkerGlobalScope,
-                                                nsDOMEventTargetHelper)
+                                                DOMEventTargetHelper)
   tmp->mWorkerPrivate->AssertIsOnWorkerThread();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(WorkerGlobalScope,
-                                               nsDOMEventTargetHelper)
+                                               DOMEventTargetHelper)
   tmp->mWorkerPrivate->AssertIsOnWorkerThread();
 
   tmp->mWorkerPrivate->TraceTimeouts(aCallbacks, aClosure);
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
-NS_IMPL_ADDREF_INHERITED(WorkerGlobalScope, nsDOMEventTargetHelper)
-NS_IMPL_RELEASE_INHERITED(WorkerGlobalScope, nsDOMEventTargetHelper)
+NS_IMPL_ADDREF_INHERITED(WorkerGlobalScope, DOMEventTargetHelper)
+NS_IMPL_RELEASE_INHERITED(WorkerGlobalScope, DOMEventTargetHelper)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(WorkerGlobalScope)
   NS_INTERFACE_MAP_ENTRY(nsIGlobalObject)
-NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
+NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
 JSObject*
-WorkerGlobalScope::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+WorkerGlobalScope::WrapObject(JSContext* aCx)
 {
   MOZ_CRASH("We should never get here!");
 }
@@ -296,9 +297,6 @@ DedicatedWorkerGlobalScope::WrapGlobalObject(JSContext* aCx)
   JS::CompartmentOptions options;
   mWorkerPrivate->CopyJSCompartmentOptions(options);
 
-  // We're wrapping the global, so the scope is undefined.
-  JS::Rooted<JSObject*> scope(aCx);
-
   return DedicatedWorkerGlobalScopeBinding_workers::Wrap(aCx, this, this,
                                                          options,
                                                          GetWorkerPrincipal());
@@ -336,9 +334,6 @@ SharedWorkerGlobalScope::WrapGlobalObject(JSContext* aCx)
 
   JS::CompartmentOptions options;
   mWorkerPrivate->CopyJSCompartmentOptions(options);
-
-  // We're wrapping the global, so the scope is undefined.
-  JS::Rooted<JSObject*> scope(aCx);
 
   return SharedWorkerGlobalScopeBinding_workers::Wrap(aCx, this, this, options,
                                                       GetWorkerPrincipal());

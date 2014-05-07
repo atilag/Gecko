@@ -9,6 +9,8 @@ import java.util.EnumSet;
 
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.ReaderModeUtils;
+import org.mozilla.gecko.Telemetry;
+import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.db.BrowserContract.ReadingListItems;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.db.BrowserDB.URLColumns;
@@ -105,12 +107,14 @@ public class ReadingListPanel extends HomeFragment {
                 String url = c.getString(c.getColumnIndexOrThrow(URLColumns.URL));
                 url = ReaderModeUtils.getAboutReaderForUrl(url);
 
+                Telemetry.sendUIEvent(TelemetryContract.Event.LOAD_URL);
+
                 // This item is a TwoLinePageRow, so we allow switch-to-tab.
                 mUrlOpenListener.onUrlOpen(url, EnumSet.of(OnUrlOpenListener.Flags.ALLOW_SWITCH_TO_TAB));
             }
         });
 
-        mList.setContextMenuInfoFactory(new HomeListView.ContextMenuInfoFactory() {
+        mList.setContextMenuInfoFactory(new HomeContextMenuInfo.Factory() {
             @Override
             public HomeContextMenuInfo makeInfoForCursor(View view, int position, long id, Cursor cursor) {
                 final HomeContextMenuInfo info = new HomeContextMenuInfo(view, position, id);
@@ -215,13 +219,13 @@ public class ReadingListPanel extends HomeFragment {
 
         @Override
         public void bindView(View view, Context context, Cursor cursor) {
-            final TwoLinePageRow row = (TwoLinePageRow) view;
+            final ReadingListRow row = (ReadingListRow) view;
             row.updateFromCursor(cursor);
         }
 
         @Override
         public View newView(Context context, Cursor cursor, ViewGroup parent) {
-            return LayoutInflater.from(parent.getContext()).inflate(R.layout.bookmark_item_row, parent, false);
+            return LayoutInflater.from(parent.getContext()).inflate(R.layout.reading_list_item_row, parent, false);
         }
     }
 

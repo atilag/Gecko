@@ -12,7 +12,7 @@
 #include "mozilla/gfx/Point.h"          // for IntSize
 #include "mozilla/layers/CompositorTypes.h"
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
-#include "mozilla/layers/TextureClient.h"  // for DeprecatedTextureClient, etc
+#include "mozilla/layers/TextureClient.h"  // for TextureClient, etc
 
 namespace mozilla {
 namespace gfx {
@@ -64,6 +64,16 @@ public:
     return nullptr;
   }
 
+  virtual gfx::SurfaceFormat GetFormat() const MOZ_OVERRIDE
+  {
+    return gfx::SurfaceFormat::UNKNOWN;
+  }
+
+  virtual bool AllocateForSurface(gfx::IntSize aSize, TextureAllocationFlags aFlags) MOZ_OVERRIDE
+  {
+    return false;
+  }
+
 protected:
   gl::SharedTextureHandle mHandle;
   gfx::IntSize mSize;
@@ -99,6 +109,16 @@ public:
   void InitWith(gfx::SurfaceStream* aStream);
 
   virtual gfx::IntSize GetSize() const { return gfx::IntSize(); }
+
+  virtual gfx::SurfaceFormat GetFormat() const MOZ_OVERRIDE
+  {
+    return gfx::SurfaceFormat::UNKNOWN;
+  }
+
+  virtual bool AllocateForSurface(gfx::IntSize aSize, TextureAllocationFlags aFlags) MOZ_OVERRIDE
+  {
+    return false;
+  }
 
 protected:
   bool mIsLocked;

@@ -11,10 +11,10 @@
 #include "js/RootingAPI.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/DOMEventTargetHelper.h"
 #include "nsAutoPtr.h"
 #include "nsCycleCollectionNoteChild.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsDOMEventTargetHelper.h"
 #include "nsISupports.h"
 #include "nsTArray.h"
 
@@ -30,7 +30,7 @@ namespace dom {
 
 class MediaSource;
 
-class SourceBufferList MOZ_FINAL : public nsDOMEventTargetHelper
+class SourceBufferList MOZ_FINAL : public DOMEventTargetHelper
 {
 public:
   /** WebIDL Methods. */
@@ -40,13 +40,14 @@ public:
   /** End WebIDL methods. */
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(SourceBufferList, nsDOMEventTargetHelper)
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(SourceBufferList,
+                                           DOMEventTargetHelper)
 
   explicit SourceBufferList(MediaSource* aMediaSource);
 
   MediaSource* GetParentObject() const;
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   // Append a SourceBuffer and fire "addsourcebuffer" at the list.
   void Append(SourceBuffer* aSourceBuffer);
@@ -75,6 +76,9 @@ public:
 
   // Evicts data for the given time range from each SourceBuffer in the list.
   void Evict(double aStart, double aEnd);
+
+  // Returns true if all SourceBuffers in the list contain data for the given time.
+  bool AllContainsTime(double aTime);
 
 private:
   friend class AsyncEventRunner<SourceBufferList>;

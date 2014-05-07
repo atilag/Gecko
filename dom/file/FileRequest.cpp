@@ -96,8 +96,8 @@ FileRequest::NotifyHelperCompleted(FileHelper* aFileHelper)
   return NS_OK;
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_1(FileRequest, DOMRequest,
-                                     mLockedFile)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(FileRequest, DOMRequest,
+                                   mLockedFile)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(FileRequest)
 NS_INTERFACE_MAP_END_INHERITING(DOMRequest)
@@ -107,12 +107,12 @@ NS_IMPL_RELEASE_INHERITED(FileRequest, DOMRequest)
 
 // virtual
 JSObject*
-FileRequest::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+FileRequest::WrapObject(JSContext* aCx)
 {
   if (mWrapAsDOMRequest) {
-    return DOMRequest::WrapObject(aCx, aScope);
+    return DOMRequest::WrapObject(aCx);
   }
-  return FileRequestBinding::Wrap(aCx, aScope, this);
+  return FileRequestBinding::Wrap(aCx, this);
 }
 
 LockedFile*

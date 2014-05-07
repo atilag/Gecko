@@ -9,6 +9,7 @@ DIRS += [
     'canvasdebugger',
     'commandline',
     'debugger',
+    'eyedropper',
     'fontinspector',
     'framework',
     'inspector',
@@ -24,6 +25,7 @@ DIRS += [
     'styleeditor',
     'styleinspector',
     'tilt',
+    'webaudioeditor',
     'webconsole',
 ]
 

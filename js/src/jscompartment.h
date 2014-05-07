@@ -10,10 +10,10 @@
 #include "mozilla/MemoryReporting.h"
 
 #include "builtin/TypedObject.h"
-#include "builtin/TypeRepresentation.h"
 #include "gc/Zone.h"
 #include "vm/GlobalObject.h"
 #include "vm/PIC.h"
+#include "vm/SavedStacks.h"
 
 namespace js {
 
@@ -141,7 +141,7 @@ struct JSCompartment
     friend struct JSRuntime;
     friend struct JSContext;
     friend class js::ExclusiveContext;
-    js::ReadBarriered<js::GlobalObject> global_;
+    js::ReadBarrieredGlobalObject global_;
 
     unsigned                     enterCompartmentDepth;
 
@@ -199,6 +199,8 @@ struct JSCompartment
   private:
     js::ObjectMetadataCallback   objectMetadataCallback;
 
+    js::SavedStacks              savedStacks_;
+
     js::WrapperMap               crossCompartmentWrappers;
 
   public:
@@ -206,9 +208,6 @@ struct JSCompartment
     int64_t                      lastAnimationTime;
 
     js::RegExpCompartment        regExps;
-
-    /* Set of all currently living type representations. */
-    js::TypeRepresentationHash   typeReprs;
 
     /*
      * For generational GC, record whether a write barrier has added this
@@ -228,7 +227,8 @@ struct JSCompartment
                                 size_t *shapesCompartmentTables,
                                 size_t *crossCompartmentWrappers,
                                 size_t *regexpCompartment,
-                                size_t *debuggeesSet);
+                                size_t *debuggeesSet,
+                                size_t *savedStacksSet);
 
     /*
      * Shared scope property tree, and arena-pool for allocating its nodes.
@@ -265,7 +265,7 @@ struct JSCompartment
      * Lazily initialized script source object to use for scripts cloned
      * from the self-hosting global.
      */
-    js::ReadBarriered<js::ScriptSourceObject> selfHostingScriptSource;
+    js::ReadBarrieredScriptSourceObject selfHostingScriptSource;
 
     /* During GC, stores the index of this compartment in rt->compartments. */
     unsigned                     gcIndex;
@@ -332,6 +332,7 @@ struct JSCompartment
         WrapperEnum(JSCompartment *c) : js::WrapperMap::Enum(c->crossCompartmentWrappers) {}
     };
 
+    void trace(JSTracer *trc);
     void markRoots(JSTracer *trc);
     bool isDiscardingJitCode(JSTracer *trc);
     void sweep(js::FreeOp *fop, bool releaseTypes);
@@ -344,6 +345,8 @@ struct JSCompartment
     bool callObjectMetadataCallback(JSContext *cx, JSObject **obj) const {
         return objectMetadataCallback(cx, obj);
     }
+
+    js::SavedStacks &savedStacks() { return savedStacks_; }
 
     void findOutgoingEdges(js::gc::ComponentFinder<JS::Zone> &finder);
 
@@ -398,18 +401,23 @@ struct JSCompartment
   private:
 
     /* This is called only when debugMode() has just toggled. */
-    void updateForDebugMode(js::FreeOp *fop, js::AutoDebugModeInvalidation &invalidate);
+    bool updateJITForDebugMode(JSContext *maybecx, js::AutoDebugModeInvalidation &invalidate);
 
   public:
     js::GlobalObjectSet &getDebuggees() { return debuggees; }
     bool addDebuggee(JSContext *cx, js::GlobalObject *global);
     bool addDebuggee(JSContext *cx, js::GlobalObject *global,
                      js::AutoDebugModeInvalidation &invalidate);
-    void removeDebuggee(js::FreeOp *fop, js::GlobalObject *global,
+    bool removeDebuggee(JSContext *cx, js::GlobalObject *global,
                         js::GlobalObjectSet::Enum *debuggeesEnum = nullptr);
-    void removeDebuggee(js::FreeOp *fop, js::GlobalObject *global,
+    bool removeDebuggee(JSContext *cx, js::GlobalObject *global,
                         js::AutoDebugModeInvalidation &invalidate,
                         js::GlobalObjectSet::Enum *debuggeesEnum = nullptr);
+    void removeDebuggeeUnderGC(js::FreeOp *fop, js::GlobalObject *global,
+                               js::GlobalObjectSet::Enum *debuggeesEnum = nullptr);
+    void removeDebuggeeUnderGC(js::FreeOp *fop, js::GlobalObject *global,
+                               js::AutoDebugModeInvalidation &invalidate,
+                               js::GlobalObjectSet::Enum *debuggeesEnum = nullptr);
     bool setDebugModeFromC(JSContext *cx, bool b,
                            js::AutoDebugModeInvalidation &invalidate);
 

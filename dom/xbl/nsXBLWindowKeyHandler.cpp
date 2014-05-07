@@ -22,12 +22,12 @@
 #include "nsPIDOMWindow.h"
 #include "nsIDocShell.h"
 #include "nsIPresShell.h"
+#include "mozilla/EventStateManager.h"
 #include "nsISelectionController.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h"
-#include "nsEventStateManager.h"
 #include "nsIEditor.h"
 #include "nsIHTMLEditor.h"
 #include "nsIDOMDocument.h"
@@ -67,7 +67,7 @@ public:
 const char nsXBLSpecialDocInfo::sHTMLBindingStr[] =
   "chrome://global/content/platformHTMLBindings.xml";
 
-NS_IMPL_ISUPPORTS1(nsXBLSpecialDocInfo, nsIObserver)
+NS_IMPL_ISUPPORTS(nsXBLSpecialDocInfo, nsIObserver)
 
 NS_IMETHODIMP
 nsXBLSpecialDocInfo::Observe(nsISupports* aSubject,
@@ -183,8 +183,8 @@ nsXBLWindowKeyHandler::~nsXBLWindowKeyHandler()
   }
 }
 
-NS_IMPL_ISUPPORTS1(nsXBLWindowKeyHandler,
-                   nsIDOMEventListener)
+NS_IMPL_ISUPPORTS(nsXBLWindowKeyHandler,
+                  nsIDOMEventListener)
 
 static void
 BuildHandlerChain(nsIContent* aContent, nsXBLPrototypeHandler** aResult)
@@ -331,7 +331,7 @@ nsXBLWindowKeyHandler::HandleEventOnCapture(nsIDOMKeyEvent* aEvent)
 
   nsCOMPtr<mozilla::dom::Element> originalTarget =
     do_QueryInterface(aEvent->GetInternalNSEvent()->originalTarget);
-  if (!nsEventStateManager::IsRemoteTarget(originalTarget)) {
+  if (!EventStateManager::IsRemoteTarget(originalTarget)) {
     return;
   }
 

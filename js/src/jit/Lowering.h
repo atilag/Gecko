@@ -17,8 +17,10 @@
 # include "jit/x64/Lowering-x64.h"
 #elif defined(JS_CODEGEN_ARM)
 # include "jit/arm/Lowering-arm.h"
+#elif defined(JS_CODEGEN_MIPS)
+# include "jit/mips/Lowering-mips.h"
 #else
-# error "CPU!"
+# error "Unknown architecture!"
 #endif
 
 namespace js {
@@ -95,8 +97,10 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitSetArgumentsObjectArg(MSetArgumentsObjectArg *ins);
     bool visitReturnFromCtor(MReturnFromCtor *ins);
     bool visitComputeThis(MComputeThis *ins);
+    bool visitLoadArrowThis(MLoadArrowThis *ins);
     bool visitCall(MCall *call);
     bool visitApplyArgs(MApplyArgs *apply);
+    bool visitArraySplice(MArraySplice *splice);
     bool visitBail(MBail *bail);
     bool visitAssertFloat32(MAssertFloat32 *ins);
     bool visitGetDynamicName(MGetDynamicName *ins);
@@ -153,6 +157,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitRegExpReplace(MRegExpReplace *ins);
     bool visitStringReplace(MStringReplace *ins);
     bool visitLambda(MLambda *ins);
+    bool visitLambdaArrow(MLambdaArrow *ins);
     bool visitLambdaPar(MLambdaPar *ins);
     bool visitImplicitThis(MImplicitThis *ins);
     bool visitSlots(MSlots *ins);
@@ -177,6 +182,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitTypedArrayElements(MTypedArrayElements *ins);
     bool visitNeuterCheck(MNeuterCheck *lir);
     bool visitTypedObjectElements(MTypedObjectElements *ins);
+    bool visitSetTypedObjectOffset(MSetTypedObjectOffset *ins);
     bool visitInitializedLength(MInitializedLength *ins);
     bool visitSetInitializedLength(MSetInitializedLength *ins);
     bool visitNot(MNot *ins);
@@ -207,6 +213,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitGuardClass(MGuardClass *ins);
     bool visitGuardObject(MGuardObject *ins);
     bool visitGuardString(MGuardString *ins);
+    bool visitGuardShapePolymorphic(MGuardShapePolymorphic *ins);
     bool visitAssertRange(MAssertRange *ins);
     bool visitCallGetProperty(MCallGetProperty *ins);
     bool visitDeleteProperty(MDeleteProperty *ins);
@@ -236,7 +243,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitInArray(MInArray *ins);
     bool visitInstanceOf(MInstanceOf *ins);
     bool visitCallInstanceOf(MCallInstanceOf *ins);
-    bool visitFunctionBoundary(MFunctionBoundary *ins);
+    bool visitProfilerStackOp(MProfilerStackOp *ins);
     bool visitIsCallable(MIsCallable *ins);
     bool visitHaveSameClass(MHaveSameClass *ins);
     bool visitHasClass(MHasClass *ins);
@@ -248,7 +255,6 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitAsmJSVoidReturn(MAsmJSVoidReturn *ins);
     bool visitAsmJSPassStackArg(MAsmJSPassStackArg *ins);
     bool visitAsmJSCall(MAsmJSCall *ins);
-    bool visitAsmJSCheckOverRecursed(MAsmJSCheckOverRecursed *ins);
     bool visitSetDOMProperty(MSetDOMProperty *ins);
     bool visitGetDOMProperty(MGetDOMProperty *ins);
     bool visitGetDOMMember(MGetDOMMember *ins);

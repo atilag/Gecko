@@ -441,12 +441,12 @@ IndexedDatabaseManager::DefineIndexedDB(JSContext* aCx,
   MOZ_ASSERT(factory, "This should never fail for chrome!");
 
   JS::Rooted<JS::Value> indexedDB(aCx);
-  if (!WrapNewBindingObject(aCx, aGlobal, factory, &indexedDB)) {
+  js::AssertSameCompartment(aCx, aGlobal);
+  if (!WrapNewBindingObject(aCx, factory, &indexedDB)) {
     return false;
   }
 
-  return JS_DefineProperty(aCx, aGlobal, IDB_STR, indexedDB, nullptr, nullptr,
-                           JSPROP_ENUMERATE);
+  return JS_DefineProperty(aCx, aGlobal, IDB_STR, indexedDB, JSPROP_ENUMERATE);
 }
 
 // static
@@ -607,7 +607,9 @@ IndexedDatabaseManager::AsyncDeleteFile(FileManager* aFileManager,
 
   // See if we're currently clearing the storages for this origin. If so then
   // we pretend that we've already deleted everything.
-  if (quotaManager->IsClearOriginPending(aFileManager->Origin())) {
+  if (quotaManager->IsClearOriginPending(
+                             aFileManager->Origin(),
+                             Nullable<PersistenceType>(aFileManager->Type()))) {
     return NS_OK;
   }
 
@@ -645,15 +647,15 @@ IndexedDatabaseManager::BlockAndGetFileReferences(
 
 NS_IMPL_ADDREF(IndexedDatabaseManager)
 NS_IMPL_RELEASE_WITH_DESTROY(IndexedDatabaseManager, Destroy())
-NS_IMPL_QUERY_INTERFACE2(IndexedDatabaseManager, nsIIndexedDatabaseManager,
-                                                 nsIObserver)
+NS_IMPL_QUERY_INTERFACE(IndexedDatabaseManager, nsIIndexedDatabaseManager,
+                        nsIObserver)
 
 NS_IMETHODIMP
 IndexedDatabaseManager::InitWindowless(JS::Handle<JS::Value> aGlobal, JSContext* aCx)
 {
   NS_ENSURE_TRUE(nsContentUtils::IsCallerChrome(), NS_ERROR_NOT_AVAILABLE);
 
-  JS::Rooted<JSObject*> global(aCx, JSVAL_TO_OBJECT(aGlobal));
+  JS::Rooted<JSObject*> global(aCx, aGlobal.toObjectOrNull());
   if (!(js::GetObjectClass(global)->flags & JSCLASS_DOM_GLOBAL)) {
     NS_WARNING("Passed object is not a global object!");
     return NS_ERROR_FAILURE;
@@ -810,8 +812,8 @@ AsyncDeleteFileRunnable::AsyncDeleteFileRunnable(FileManager* aFileManager,
 {
 }
 
-NS_IMPL_ISUPPORTS1(AsyncDeleteFileRunnable,
-                   nsIRunnable)
+NS_IMPL_ISUPPORTS(AsyncDeleteFileRunnable,
+                  nsIRunnable)
 
 NS_IMETHODIMP
 AsyncDeleteFileRunnable::Run()
@@ -884,8 +886,8 @@ GetFileReferencesHelper::DispatchAndReturnFileReferences(int32_t* aMemRefCnt,
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS1(GetFileReferencesHelper,
-                   nsIRunnable)
+NS_IMPL_ISUPPORTS(GetFileReferencesHelper,
+                  nsIRunnable)
 
 NS_IMETHODIMP
 GetFileReferencesHelper::Run()

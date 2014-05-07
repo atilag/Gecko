@@ -1,6 +1,6 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -672,12 +672,13 @@ public:
              * We reparent wrappers that have as their parent an inner window
              * whose outer has the new inner window as its current inner.
              */
-            JS::RootedObject parent(aCx, JS_GetParent(e.front().value()));
+            JS::RootedObject wrapper(aCx, e.front().value());
+            JS::RootedObject parent(aCx, JS_GetParent(wrapper));
             JS::RootedObject outer(aCx, JS_ObjectToOuterObject(aCx, parent));
             if (outer) {
                 JSObject *inner = JS_ObjectToInnerObject(aCx, outer);
                 if (inner == aNewInner && inner != parent)
-                    JS_SetParent(aCx, e.front().value(), aNewInner);
+                    JS_SetParent(aCx, wrapper, aNewInner);
             } else {
                 JS_ClearPendingException(aCx);
             }

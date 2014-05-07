@@ -125,6 +125,10 @@ struct SeerTelemetryAccumulators {
   Telemetry::AutoCounter<Telemetry::SEER_TOTAL_PRECONNECTS> mTotalPreconnects;
   Telemetry::AutoCounter<Telemetry::SEER_TOTAL_PRERESOLVES> mTotalPreresolves;
   Telemetry::AutoCounter<Telemetry::SEER_PREDICTIONS_CALCULATED> mPredictionsCalculated;
+  Telemetry::AutoCounter<Telemetry::SEER_LOAD_COUNT_IS_ZERO> mLoadCountZeroes;
+  Telemetry::AutoCounter<Telemetry::SEER_LOAD_COUNT_OVERFLOWS> mLoadCountOverflows;
+  Telemetry::AutoCounter<Telemetry::SEER_STARTUP_COUNT_IS_ZERO> mStartupCountZeroes;
+  Telemetry::AutoCounter<Telemetry::SEER_STARTUP_COUNT_OVERFLOWS> mStartupCountOverflows;
 };
 
 // Listener for the speculative DNS requests we'll fire off, which just ignores
@@ -145,7 +149,7 @@ public:
   { }
 };
 
-NS_IMPL_ISUPPORTS1(SeerDNSListener, nsIDNSListener);
+NS_IMPL_ISUPPORTS(SeerDNSListener, nsIDNSListener);
 
 NS_IMETHODIMP
 SeerDNSListener::OnLookupComplete(nsICancelable *request,
@@ -168,11 +172,11 @@ static PRLogModuleInfo *gSeerLog = nullptr;
 #define SEER_LOG(args)
 #endif
 
-NS_IMPL_ISUPPORTS4(Seer,
-                   nsINetworkSeer,
-                   nsIObserver,
-                   nsISpeculativeConnectionOverrider,
-                   nsIInterfaceRequestor)
+NS_IMPL_ISUPPORTS(Seer,
+                  nsINetworkSeer,
+                  nsIObserver,
+                  nsISpeculativeConnectionOverrider,
+                  nsIInterfaceRequestor)
 
 Seer::Seer()
   :mInitialized(false)
@@ -451,7 +455,7 @@ Seer::Init()
   NS_ENSURE_SUCCESS(rv, rv);
 
 #ifdef MOZ_NUWA_PROCESS
-  nsCOMPtr<NuwaMarkSeerThreadRunner> runner = new NuwaMarkSeerThreadRunner();
+  nsCOMPtr<nsIRunnable> runner = new NuwaMarkSeerThreadRunner();
   mIOThread->Dispatch(runner, NS_DISPATCH_NORMAL);
 #endif
 
@@ -653,6 +657,13 @@ Seer::EnsureInitStorage()
                            "last_startup = :startup_time;\n"),
         getter_AddRefs(stmt));
     NS_ENSURE_SUCCESS(rv, rv);
+
+    int32_t newStartupCount = mStartupCount + 1;
+    if (newStartupCount <= 0) {
+      SEER_LOG(("Seer::EnsureInitStorage startup count overflow\n"));
+      newStartupCount = mStartupCount;
+      ++mAccumulators->mStartupCountOverflows;
+    }
 
     rv = stmt->BindInt32ByName(NS_LITERAL_CSTRING("startup_count"),
                                mStartupCount + 1);
@@ -1296,10 +1307,18 @@ Seer::UpdateTopLevel(QueryType queryType, const TopLevelInfo &info, PRTime now)
   }
   mozStorageStatementScoper scope(stmt);
 
+  int32_t newLoadCount = info.loadCount + 1;
+  if (newLoadCount <= 0) {
+    SEER_LOG(("Seer::UpdateTopLevel type %d id %d load count overflow\n",
+              queryType, info.id));
+    newLoadCount = info.loadCount;
+    ++mAccumulators->mLoadCountOverflows;
+  }
+
   // First, let's update the page in the database, since loading a page
   // implicitly learns about the page.
   nsresult rv = stmt->BindInt32ByName(NS_LITERAL_CSTRING("load_count"),
-                                      info.loadCount + 1);
+                                      newLoadCount);
   RETURN_IF_FAILED(rv);
 
   rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("now"), now);
@@ -1321,6 +1340,12 @@ Seer::TryPredict(QueryType queryType, const TopLevelInfo &info, PRTime now,
                  SeerVerifierHandle &verifier, TimeStamp &predictStartTime)
 {
   MOZ_ASSERT(!NS_IsMainThread(), "TryPredict called on main thread.");
+
+  if (!info.loadCount) {
+    SEER_LOG(("Seer::TryPredict info.loadCount is zero!\n"));
+    ++mAccumulators->mLoadCountZeroes;
+    return false;
+  }
 
   int globalDegradation = CalculateGlobalDegradation(now, info.lastLoad);
 
@@ -1401,6 +1426,12 @@ bool
 Seer::WouldRedirect(const TopLevelInfo &info, PRTime now, UriInfo &newUri)
 {
   MOZ_ASSERT(!NS_IsMainThread(), "WouldRedirect called on main thread.");
+
+  if (!info.loadCount) {
+    SEER_LOG(("Seer::WouldRedirect info.loadCount is zero!\n"));
+    ++mAccumulators->mLoadCountZeroes;
+    return false;
+  }
 
   nsCOMPtr<mozIStorageStatement> stmt = mStatements.GetCachedStatement(
       NS_LITERAL_CSTRING("SELECT uri, origin, hits, last_hit "
@@ -1531,6 +1562,12 @@ Seer::PredictForStartup(SeerVerifierHandle &verifier,
                         TimeStamp &predictStartTime)
 {
   MOZ_ASSERT(!NS_IsMainThread(), "PredictForStartup called on main thread");
+
+  if (!mStartupCount) {
+    SEER_LOG(("Seer::PredictForStartup mStartupCount is zero!\n"));
+    ++mAccumulators->mStartupCountZeroes;
+    return;
+  }
 
   if (NS_FAILED(EnsureInitStorage())) {
     return;
@@ -2283,6 +2320,12 @@ Seer::GetDBFileSize()
 {
   MOZ_ASSERT(!NS_IsMainThread(), "GetDBFileSize called on main thread!");
 
+  nsresult rv = EnsureInitStorage();
+  if (NS_FAILED(rv)) {
+    SEER_LOG(("GetDBFileSize called without db available!"));
+    return 0;
+  }
+
   CommitTransaction();
 
   nsCOMPtr<mozIStorageStatement> countStmt = mStatements.GetCachedStatement(
@@ -2292,7 +2335,7 @@ Seer::GetDBFileSize()
   }
   mozStorageStatementScoper scopedCount(countStmt);
   bool hasRows;
-  nsresult rv = countStmt->ExecuteStep(&hasRows);
+  rv = countStmt->ExecuteStep(&hasRows);
   if (NS_FAILED(rv) || !hasRows) {
     return 0;
   }
@@ -2693,6 +2736,10 @@ nsresult
 SeerPredict(nsIURI *targetURI, nsIURI *sourceURI, SeerPredictReason reason,
             nsILoadContext *loadContext, nsINetworkSeerVerifier *verifier)
 {
+  if (!IsNullOrHttp(targetURI) || !IsNullOrHttp(sourceURI)) {
+    return NS_OK;
+  }
+
   nsCOMPtr<nsINetworkSeer> seer;
   nsresult rv = EnsureGlobalSeer(getter_AddRefs(seer));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2704,6 +2751,10 @@ nsresult
 SeerLearn(nsIURI *targetURI, nsIURI *sourceURI, SeerLearnReason reason,
           nsILoadContext *loadContext)
 {
+  if (!IsNullOrHttp(targetURI) || !IsNullOrHttp(sourceURI)) {
+    return NS_OK;
+  }
+
   nsCOMPtr<nsINetworkSeer> seer;
   nsresult rv = EnsureGlobalSeer(getter_AddRefs(seer));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2715,6 +2766,10 @@ nsresult
 SeerLearn(nsIURI *targetURI, nsIURI *sourceURI, SeerLearnReason reason,
           nsILoadGroup *loadGroup)
 {
+  if (!IsNullOrHttp(targetURI) || !IsNullOrHttp(sourceURI)) {
+    return NS_OK;
+  }
+
   nsCOMPtr<nsINetworkSeer> seer;
   nsresult rv = EnsureGlobalSeer(getter_AddRefs(seer));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2736,6 +2791,10 @@ nsresult
 SeerLearn(nsIURI *targetURI, nsIURI *sourceURI, SeerLearnReason reason,
           nsIDocument *document)
 {
+  if (!IsNullOrHttp(targetURI) || !IsNullOrHttp(sourceURI)) {
+    return NS_OK;
+  }
+
   nsCOMPtr<nsINetworkSeer> seer;
   nsresult rv = EnsureGlobalSeer(getter_AddRefs(seer));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2753,12 +2812,8 @@ nsresult
 SeerLearnRedirect(nsIURI *targetURI, nsIChannel *channel,
                   nsILoadContext *loadContext)
 {
-  nsCOMPtr<nsINetworkSeer> seer;
-  nsresult rv = EnsureGlobalSeer(getter_AddRefs(seer));
-  NS_ENSURE_SUCCESS(rv, rv);
-
   nsCOMPtr<nsIURI> sourceURI;
-  rv = channel->GetOriginalURI(getter_AddRefs(sourceURI));
+  nsresult rv = channel->GetOriginalURI(getter_AddRefs(sourceURI));
   NS_ENSURE_SUCCESS(rv, rv);
 
   bool sameUri;
@@ -2768,6 +2823,14 @@ SeerLearnRedirect(nsIURI *targetURI, nsIChannel *channel,
   if (sameUri) {
     return NS_OK;
   }
+
+  if (!IsNullOrHttp(targetURI) || !IsNullOrHttp(sourceURI)) {
+    return NS_OK;
+  }
+
+  nsCOMPtr<nsINetworkSeer> seer;
+  rv = EnsureGlobalSeer(getter_AddRefs(seer));
+  NS_ENSURE_SUCCESS(rv, rv);
 
   return seer->Learn(targetURI, sourceURI,
                      nsINetworkSeer::LEARN_LOAD_REDIRECT, loadContext);

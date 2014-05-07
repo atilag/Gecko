@@ -722,7 +722,7 @@ nsRefreshDriver::AdvanceTimeAndRefresh(int64_t aMilliseconds)
   mMostRecentRefreshEpochTime += aMilliseconds * 1000;
   mMostRecentRefresh += TimeDuration::FromMilliseconds((double) aMilliseconds);
 
-  mozilla::dom::AutoSystemCaller asc;
+  mozilla::dom::AutoNoJSAPI nojsapi;
   DoTick();
 }
 
@@ -829,6 +829,13 @@ nsRefreshDriver::EnsureTimerStarted(bool aAdjustingTimer)
   if (IsFrozen() || !mPresContext) {
     // If we don't want to start it now, or we've been disconnected.
     StopTimer();
+    return;
+  }
+
+  if (mPresContext->Document()->IsBeingUsedAsImage()) {
+    // Image documents receive ticks from clients' refresh drivers.
+    MOZ_ASSERT(!mActiveTimer,
+               "image document refresh driver should never have its own timer");
     return;
   }
 
@@ -990,7 +997,7 @@ nsRefreshDriver::ArrayFor(mozFlushType aFlushType)
  * nsISupports implementation
  */
 
-NS_IMPL_ISUPPORTS1(nsRefreshDriver, nsISupports)
+NS_IMPL_ISUPPORTS(nsRefreshDriver, nsISupports)
 
 /*
  * nsITimerCallback implementation

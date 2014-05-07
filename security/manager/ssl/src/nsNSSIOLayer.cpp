@@ -142,9 +142,9 @@ nsNSSSocketInfo::nsNSSSocketInfo(SharedSSLState& aState, uint32_t providerFlags)
   mTLSVersionRange.max = 0;
 }
 
-NS_IMPL_ISUPPORTS_INHERITED2(nsNSSSocketInfo, TransportSecurityInfo,
-                             nsISSLSocketControl,
-                             nsIClientAuthUserDecision)
+NS_IMPL_ISUPPORTS_INHERITED(nsNSSSocketInfo, TransportSecurityInfo,
+                            nsISSLSocketControl,
+                            nsIClientAuthUserDecision)
 
 NS_IMETHODIMP
 nsNSSSocketInfo::GetProviderFlags(uint32_t* aProviderFlags)
@@ -1374,7 +1374,7 @@ private:
 
 } // unnamed namespace
 
-NS_IMPL_ISUPPORTS1(PrefObserver, nsIObserver)
+NS_IMPL_ISUPPORTS(PrefObserver, nsIObserver)
 
 NS_IMETHODIMP
 PrefObserver::Observe(nsISupports* aSubject, const char* aTopic,
@@ -1875,7 +1875,6 @@ ClientAuthDataRunnable::RunOnTargetThread()
   mozilla::pkix::ScopedCERTCertList certList;
   CERTCertListNode* node;
   ScopedCERTCertNicknames nicknames;
-  char* extracted = nullptr;
   int keyError = 0; // used for private key retrieval error
   SSM_UserCertChoice certChoice;
   int32_t NumberOfCerts = 0;
@@ -2213,9 +2212,6 @@ loser:
 done:
   int error = PR_GetError();
 
-  if (extracted) {
-    PR_Free(extracted);
-  }
   if (arena) {
     PORT_FreeArena(arena, false);
   }

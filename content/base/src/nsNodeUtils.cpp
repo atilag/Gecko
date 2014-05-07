@@ -495,9 +495,6 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
           if (elm->MayHavePaintEventListener()) {
             window->SetHasPaintEventListeners();
           }
-          if (elm->MayHaveAudioAvailableEventListener()) {
-            window->SetHasAudioAvailableEventListeners();
-          }
           if (elm->MayHaveTouchEventListener()) {
             window->SetHasTouchEventListeners();
           }
@@ -536,6 +533,7 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
       JS::Rooted<JSObject*> wrapper(cx);
       if ((wrapper = aNode->GetWrapper())) {
         if (IsDOMObject(wrapper)) {
+          JSAutoCompartment ac(cx, wrapper);
           rv = ReparentWrapper(cx, wrapper);
         } else {
           nsIXPConnect *xpc = nsContentUtils::XPConnect();

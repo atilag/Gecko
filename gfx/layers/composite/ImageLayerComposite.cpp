@@ -15,7 +15,7 @@
 #include "mozilla/gfx/Rect.h"           // for Rect
 #include "mozilla/layers/Compositor.h"  // for Compositor
 #include "mozilla/layers/Effects.h"     // for EffectChain
-#include "mozilla/layers/TextureHost.h"  // for DeprecatedTextureHost, etc
+#include "mozilla/layers/TextureHost.h"  // for TextureHost, etc
 #include "mozilla/mozalloc.h"           // for operator delete
 #include "nsAString.h"
 #include "nsAutoPtr.h"                  // for nsRefPtr
@@ -51,9 +51,9 @@ bool
 ImageLayerComposite::SetCompositableHost(CompositableHost* aHost)
 {
   switch (aHost->GetType()) {
-    case BUFFER_IMAGE_SINGLE:
-    case BUFFER_IMAGE_BUFFERED:
-    case COMPOSITABLE_IMAGE:
+    case CompositableType::BUFFER_IMAGE_SINGLE:
+    case CompositableType::BUFFER_IMAGE_BUFFERED:
+    case CompositableType::IMAGE:
       mImageHost = aHost;
       return true;
     default:
@@ -120,10 +120,8 @@ ImageLayerComposite::ComputeEffectiveTransforms(const gfx::Matrix4x4& aTransform
   gfxRect sourceRect(0, 0, 0, 0);
   if (mImageHost &&
       mImageHost->IsAttached() &&
-      (mImageHost->GetDeprecatedTextureHost() || mImageHost->GetAsTextureHost())) {
-    IntSize size =
-      mImageHost->GetAsTextureHost() ? mImageHost->GetAsTextureHost()->GetSize()
-                                     : mImageHost->GetDeprecatedTextureHost()->GetSize();
+      mImageHost->GetAsTextureHost()) {
+    IntSize size = mImageHost->GetAsTextureHost()->GetSize();
     sourceRect.SizeTo(size.width, size.height);
     if (mScaleMode != ScaleMode::SCALE_NONE &&
         sourceRect.width != 0.0 && sourceRect.height != 0.0) {
@@ -166,8 +164,8 @@ nsACString&
 ImageLayerComposite::PrintInfo(nsACString& aTo, const char* aPrefix)
 {
   ImageLayer::PrintInfo(aTo, aPrefix);
-  aTo += "\n";
   if (mImageHost && mImageHost->IsAttached()) {
+    aTo += "\n";
     nsAutoCString pfx(aPrefix);
     pfx += "  ";
     mImageHost->PrintInfo(aTo, pfx.get());

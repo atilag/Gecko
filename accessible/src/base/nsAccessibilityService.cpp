@@ -152,12 +152,12 @@ nsAccessibilityService::~nsAccessibilityService()
 ////////////////////////////////////////////////////////////////////////////////
 // nsISupports
 
-NS_IMPL_ISUPPORTS_INHERITED4(nsAccessibilityService,
-                             DocManager,
-                             nsIAccessibilityService,
-                             nsIAccessibleRetrieval,
-                             nsIObserver,
-                             nsISelectionListener) // from SelectionManager
+NS_IMPL_ISUPPORTS_INHERITED(nsAccessibilityService,
+                            DocManager,
+                            nsIAccessibilityService,
+                            nsIAccessibleRetrieval,
+                            nsIObserver,
+                            nsISelectionListener) // from SelectionManager
 
 ////////////////////////////////////////////////////////////////////////////////
 // nsIObserver
@@ -256,7 +256,7 @@ private:
   nsCOMPtr<nsIContent> mContent;
 };
 
-NS_IMPL_ISUPPORTS1(PluginTimerCallBack, nsITimerCallback)
+NS_IMPL_ISUPPORTS(PluginTimerCallBack, nsITimerCallback)
 #endif
 
 already_AddRefed<Accessible>
@@ -1436,15 +1436,21 @@ nsAccessibilityService::CreateHTMLAccessibleByMarkup(nsIFrame* aFrame,
 
   if (tag == nsGkAtoms::abbr ||
       tag == nsGkAtoms::acronym ||
+      tag == nsGkAtoms::article ||
+      tag == nsGkAtoms::aside ||
       tag == nsGkAtoms::blockquote ||
       tag == nsGkAtoms::form ||
+      tag == nsGkAtoms::footer ||
+      tag == nsGkAtoms::header ||
       tag == nsGkAtoms::h1 ||
       tag == nsGkAtoms::h2 ||
       tag == nsGkAtoms::h3 ||
       tag == nsGkAtoms::h4 ||
       tag == nsGkAtoms::h5 ||
       tag == nsGkAtoms::h6 ||
-      tag == nsGkAtoms::q) {
+      tag == nsGkAtoms::nav ||
+      tag == nsGkAtoms::q ||
+      tag == nsGkAtoms::section) {
     nsRefPtr<Accessible> accessible =
       new HyperTextAccessibleWrap(aContent, document);
     return accessible.forget();

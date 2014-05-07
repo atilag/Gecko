@@ -17,6 +17,11 @@ XPCOMUtils.defineLazyServiceGetter(this, "uuidGenerator",
                                    "@mozilla.org/uuid-generator;1",
                                    "nsIUUIDGenerator");
 
+XPCOMUtils.defineLazyServiceGetter(this, "notificationStorage",
+                                   "@mozilla.org/notificationStorage;1",
+                                   "nsINotificationStorage");
+
+
 XPCOMUtils.defineLazyGetter(this, "cpmm", function() {
   return Cc["@mozilla.org/childprocessmessagemanager;1"]
            .getService(Ci.nsIMessageSender);
@@ -30,43 +35,61 @@ function debug(str) {
 // Alerts Service
 // -----------------------------------------------------------------------
 
+const kNotificationSystemMessageName = "notification";
+
+const kMessageAppNotificationSend    = "app-notification-send";
+const kMessageAppNotificationReturn  = "app-notification-return";
+const kMessageAlertNotificationSend  = "alert-notification-send";
+const kMessageAlertNotificationClose = "alert-notification-close";
+
+const kTopicAlertFinished      = "alertfinished";
+
 function AlertsService() {
-  cpmm.addMessageListener("app-notification-return", this);
+  Services.obs.addObserver(this, "xpcom-shutdown", false);
+  cpmm.addMessageListener(kMessageAppNotificationReturn, this);
 }
 
 AlertsService.prototype = {
   classID: Components.ID("{fe33c107-82a4-41d6-8c64-5353267e04c9}"),
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIAlertsService,
-                                         Ci.nsIAppNotificationService]),
+                                         Ci.nsIAppNotificationService,
+                                         Ci.nsIObserver]),
+
+  observe: function(aSubject, aTopic, aData) {
+    switch (aTopic) {
+      case "xpcom-shutdown":
+        Services.obs.removeObserver(this, "xpcom-shutdown");
+        cpmm.removeMessageListener(kMessageAppNotificationReturn, this);
+        break;
+    }
+  },
 
   // nsIAlertsService
-  showAlertNotification: function showAlertNotification(aImageUrl,
-                                                        aTitle,
-                                                        aText,
-                                                        aTextClickable,
-                                                        aCookie,
-                                                        aAlertListener,
-                                                        aName,
-                                                        aBidi,
-                                                        aLang) {
-    let browser = Services.wm.getMostRecentWindow("navigator:browser");
-    browser.AlertsHelper.showAlertNotification(aImageUrl, aTitle, aText,
-                                               aTextClickable, aCookie,
-                                               aAlertListener, aName, aBidi,
-                                               aLang);
+  showAlertNotification: function(aImageUrl, aTitle, aText, aTextClickable,
+                                  aCookie, aAlertListener, aName, aBidi,
+                                  aLang) {
+    cpmm.sendAsyncMessage(kMessageAlertNotificationSend, {
+      imageURL: aImageUrl,
+      title: aTitle,
+      text: aText,
+      clickable: aTextClickable,
+      cookie: aCookie,
+      listener: aAlertListener,
+      id: aName,
+      dir: aBidi,
+      lang: aLang
+    });
   },
 
   closeAlert: function(aName) {
-    let browser = Services.wm.getMostRecentWindow("navigator:browser");
-    browser.AlertsHelper.closeAlert(aName);
+    cpmm.sendAsyncMessage(kMessageAlertNotificationClose, {
+      name: aName
+    });
   },
 
   // nsIAppNotificationService
-  showAppNotification: function showAppNotification(aImageURL,
-                                                    aTitle,
-                                                    aText,
-                                                    aAlertListener,
-                                                    aDetails) {
+  showAppNotification: function(aImageURL, aTitle, aText, aAlertListener,
+                                aDetails) {
     let uid = (aDetails.id == "") ?
           "app-notif-" + uuidGenerator.generateUUID() : aDetails.id;
 
@@ -78,11 +101,12 @@ AlertsService.prototype = {
       imageURL: aImageURL,
       lang: aDetails.lang || undefined,
       id: aDetails.id || undefined,
+      dbId: aDetails.dbId || undefined,
       dir: aDetails.dir || undefined,
       tag: aDetails.tag || undefined
     };
 
-    cpmm.sendAsyncMessage("app-notification-send", {
+    cpmm.sendAsyncMessage(kMessageAppNotificationSend, {
       imageURL: aImageURL,
       title: aTitle,
       text: aText,
@@ -94,10 +118,10 @@ AlertsService.prototype = {
   // AlertsService.js custom implementation
   _listeners: [],
 
-  receiveMessage: function receiveMessage(aMessage) {
+  receiveMessage: function(aMessage) {
     let data = aMessage.data;
     let listener = this._listeners[data.uid];
-    if (aMessage.name !== "app-notification-return" || !listener) {
+    if (aMessage.name !== kMessageAppNotificationReturn || !listener) {
       return;
     }
 
@@ -110,22 +134,27 @@ AlertsService.prototype = {
       // notification via a system message containing the title/text/icon of
       // the notification so the app get a change to react.
       if (data.target) {
-        gSystemMessenger.sendMessage("notification", {
+        gSystemMessenger.sendMessage(kNotificationSystemMessageName, {
             title: listener.title,
             body: listener.text,
             imageURL: listener.imageURL,
             lang: listener.lang,
             dir: listener.dir,
             id: listener.id,
-            tag: listener.tag
+            tag: listener.tag,
+            dbId: listener.dbId
           },
           Services.io.newURI(data.target, null, null),
-          Services.io.newURI(listener.manifestURL, null, null));
+          Services.io.newURI(listener.manifestURL, null, null)
+        );
       }
     }
 
     // we're done with this notification
-    if (topic === "alertfinished") {
+    if (topic === kTopicAlertFinished) {
+      if (listener.dbId) {
+        notificationStorage.delete(listener.manifestURL, listener.dbId);
+      }
       delete this._listeners[data.uid];
     }
   }

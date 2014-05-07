@@ -29,8 +29,7 @@ public:
 
   IMPL_EVENT_HANDLER(audioprocess)
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   virtual void Connect(AudioNode& aDestination, uint32_t aOutput,
                        uint32_t aInput, ErrorResult& aRv) MOZ_OVERRIDE
@@ -88,7 +87,15 @@ public:
     return mNumberOfOutputChannels;
   }
 
-  using nsDOMEventTargetHelper::DispatchTrustedEvent;
+  using DOMEventTargetHelper::DispatchTrustedEvent;
+
+  virtual const char* NodeType() const
+  {
+    return "ScriptProcessorNode";
+  }
+
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
 
 private:
   nsAutoPtr<SharedBuffers> mSharedBuffers;

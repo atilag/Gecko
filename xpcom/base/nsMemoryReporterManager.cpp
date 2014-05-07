@@ -18,7 +18,7 @@
 #include "nsIObserverService.h"
 #include "nsIGlobalObject.h"
 #include "nsIXPConnect.h"
-#if defined(XP_LINUX) || defined(__FreeBSD__)
+#if defined(XP_LINUX) || defined(__FreeBSD__) || defined(XP_MACOSX)
 #include "nsMemoryInfoDumper.h"
 #endif
 #include "mozilla/Attributes.h"
@@ -120,7 +120,7 @@ public:
 "closed this process.");
   }
 };
-NS_IMPL_ISUPPORTS1(ResidentUniqueReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(ResidentUniqueReporter, nsIMemoryReporter)
 
 #elif defined(__DragonFly__) || defined(__FreeBSD__) \
     || defined(__NetBSD__) || defined(__OpenBSD__) \
@@ -513,7 +513,7 @@ public:
       "memory.");
   }
 };
-NS_IMPL_ISUPPORTS1(VsizeMaxContiguousReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(VsizeMaxContiguousReporter, nsIMemoryReporter)
 #endif
 
 #ifdef HAVE_PRIVATE_REPORTER
@@ -535,7 +535,7 @@ public:
 "pages that have been written to.");
   }
 };
-NS_IMPL_ISUPPORTS1(PrivateReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(PrivateReporter, nsIMemoryReporter)
 #endif
 
 #ifdef HAVE_VSIZE_AND_RESIDENT_REPORTERS
@@ -562,7 +562,7 @@ public:
 "resources used by the process.");
   }
 };
-NS_IMPL_ISUPPORTS1(VsizeReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(VsizeReporter, nsIMemoryReporter)
 
 class ResidentReporter MOZ_FINAL : public nsIMemoryReporter
 {
@@ -586,7 +586,7 @@ public:
 "time.");
     }
 };
-NS_IMPL_ISUPPORTS1(ResidentReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(ResidentReporter, nsIMemoryReporter)
 
 #endif  // HAVE_VSIZE_AND_RESIDENT_REPORTERS
 
@@ -624,7 +624,7 @@ public:
 "they impact performance much less than hard page faults.");
   }
 };
-NS_IMPL_ISUPPORTS1(PageFaultsSoftReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(PageFaultsSoftReporter, nsIMemoryReporter)
 
 static nsresult
 PageFaultsHardDistinguishedAmount(int64_t* aAmount)
@@ -664,7 +664,7 @@ public:
 "second.");
   }
 };
-NS_IMPL_ISUPPORTS1(PageFaultsHardReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(PageFaultsHardReporter, nsIMemoryReporter)
 
 #endif  // HAVE_PAGE_FAULT_REPORTERS
 
@@ -755,7 +755,7 @@ public:
     return NS_OK;
   }
 };
-NS_IMPL_ISUPPORTS1(JemallocHeapReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(JemallocHeapReporter, nsIMemoryReporter)
 
 #endif  // HAVE_JEMALLOC_STATS
 
@@ -780,7 +780,7 @@ public:
       "Memory used by the dynamic and static atoms tables.");
   }
 };
-NS_IMPL_ISUPPORTS1(AtomTablesReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(AtomTablesReporter, nsIMemoryReporter)
 
 #ifdef MOZ_DMD
 
@@ -799,15 +799,15 @@ public:
     dmd::SizeOf(&sizes);
 
 #define REPORT(_path, _amount, _desc)                                         \
-    do {                                                                      \
-      nsresult rv;                                                            \
-      rv = aHandleReport->Callback(EmptyCString(), NS_LITERAL_CSTRING(_path), \
-                                   KIND_HEAP, UNITS_BYTES, _amount,           \
-                                   NS_LITERAL_CSTRING(_desc), aData);         \
-      if (NS_WARN_IF(NS_FAILED(rv))) {                                        \
-        return rv;                                                            \
-      }                                                                       \
-    } while (0)
+  do {                                                                        \
+    nsresult rv;                                                              \
+    rv = aHandleReport->Callback(EmptyCString(), NS_LITERAL_CSTRING(_path),   \
+                                 KIND_HEAP, UNITS_BYTES, _amount,             \
+                                 NS_LITERAL_CSTRING(_desc), aData);           \
+    if (NS_WARN_IF(NS_FAILED(rv))) {                                          \
+      return rv;                                                              \
+    }                                                                         \
+  } while (0)
 
     REPORT("explicit/dmd/stack-traces/used",
            sizes.mStackTracesUsed,
@@ -832,7 +832,7 @@ public:
     return NS_OK;
   }
 };
-NS_IMPL_ISUPPORTS1(DMDReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(DMDReporter, nsIMemoryReporter)
 
 } // namespace dmd
 } // namespace mozilla
@@ -843,7 +843,7 @@ NS_IMPL_ISUPPORTS1(DMDReporter, nsIMemoryReporter)
  ** nsMemoryReporterManager implementation
  **/
 
-NS_IMPL_ISUPPORTS1(nsMemoryReporterManager, nsIMemoryReporterManager)
+NS_IMPL_ISUPPORTS(nsMemoryReporterManager, nsIMemoryReporterManager)
 
 NS_IMETHODIMP
 nsMemoryReporterManager::Init()
@@ -886,7 +886,7 @@ nsMemoryReporterManager::Init()
   RegisterStrongReporter(new mozilla::dmd::DMDReporter());
 #endif
 
-#if defined(XP_LINUX) || defined(__FreeBSD__)
+#if defined(XP_LINUX) || defined(__FreeBSD__) || defined(XP_MACOSX)
   nsMemoryInfoDumper::Initialize();
 #endif
 
@@ -1047,9 +1047,10 @@ nsMemoryReporterManager::StartGettingReports()
   // Get reports for this process.
   GetReportsForThisProcessExtended(s->mHandleReport, s->mHandleReportData,
                                    s->mDMDDumpIdent);
+  s->mParentDone = true;
 
-  // If there are no child processes, we can finish up immediately.
-  return (s->mNumChildProcesses == 0)
+  // If there are no remaining child processes, we can finish up immediately.
+  return (s->mNumChildProcessesCompleted >= s->mNumChildProcesses)
     ? FinishReporting()
     : NS_OK;
 }
@@ -1185,7 +1186,8 @@ nsMemoryReporterManager::HandleChildReports(
   MEMORY_REPORTING_LOG("HandleChildReports (aGen=%u): completed child %d\n",
                        aGeneration, s->mNumChildProcessesCompleted);
 
-  if (s->mNumChildProcessesCompleted == s->mNumChildProcesses) {
+  if (s->mNumChildProcessesCompleted >= s->mNumChildProcesses &&
+      s->mParentDone) {
     s->mTimer->Cancel();
     FinishReporting();
   }
@@ -1195,15 +1197,24 @@ nsMemoryReporterManager::HandleChildReports(
 nsMemoryReporterManager::TimeoutCallback(nsITimer* aTimer, void* aData)
 {
   nsMemoryReporterManager* mgr = static_cast<nsMemoryReporterManager*>(aData);
+  GetReportsState* s = mgr->mGetReportsState;
 
   MOZ_ASSERT(mgr->mGetReportsState);
   MEMORY_REPORTING_LOG("TimeoutCallback (s->gen=%u)\n",
-                       mgr->mGetReportsState->mGeneration);
+                       s->mGeneration);
 
   // We don't bother sending any kind of cancellation message to the child
   // processes that haven't reported back.
 
-  mgr->FinishReporting();
+  if (s->mParentDone) {
+    mgr->FinishReporting();
+  } else {
+    // This is unlikely -- the timeout expired during MinimizeMemoryUsage.
+    MEMORY_REPORTING_LOG("Timeout expired before parent report started!");
+    // Let the parent continue with its report, but ensure that
+    // StartGettingReports gives up immediately after that.
+    s->mNumChildProcesses = s->mNumChildProcessesCompleted;
+  }
 }
 
 nsresult
@@ -1424,7 +1435,7 @@ public:
   }
 };
 
-NS_IMPL_ISUPPORTS1(ExplicitCallback, nsIHandleReportCallback)
+NS_IMPL_ISUPPORTS(ExplicitCallback, nsIHandleReportCallback)
 
 NS_IMETHODIMP
 nsMemoryReporterManager::GetExplicit(int64_t* aAmount)
@@ -1495,6 +1506,18 @@ nsMemoryReporterManager::GetResidentFast(int64_t* aAmount)
 #else
   *aAmount = 0;
   return NS_ERROR_NOT_AVAILABLE;
+#endif
+}
+
+/*static*/
+int64_t nsMemoryReporterManager::ResidentFast()
+{
+#ifdef HAVE_VSIZE_AND_RESIDENT_REPORTERS
+  int64_t amount;
+  ResidentFastDistinguishedAmount(&amount);
+  return amount;
+#else
+  return 0;
 #endif
 }
 
@@ -1721,14 +1744,14 @@ nsMemoryReporterManager::SizeOfTab(nsIDOMWindow* aTopWindow,
   TimeStamp t3 = TimeStamp::Now();
 
   *aTotalSize = 0;
-  #define DO(aN, n) { *aN = (n); *aTotalSize += (n); }
+#define DO(aN, n) { *aN = (n); *aTotalSize += (n); }
   DO(aJSObjectsSize, jsObjectsSize);
   DO(aJSStringsSize, jsStringsSize);
   DO(aJSOtherSize,   jsOtherSize);
   DO(aDomSize,       jsPrivateSize + domSize);
   DO(aStyleSize,     styleSize);
   DO(aOtherSize,     otherSize);
-  #undef DO
+#undef DO
 
   *aJSMilliseconds    = (t2 - t1).ToMilliseconds();
   *aNonJSMilliseconds = (t3 - t2).ToMilliseconds();
@@ -1858,7 +1881,7 @@ public:
   }
 };
 
-NS_IMPL_ISUPPORTS1(DoNothingCallback, nsIHandleReportCallback)
+NS_IMPL_ISUPPORTS(DoNothingCallback, nsIHandleReportCallback)
 
 void
 RunReportersForThisProcess()

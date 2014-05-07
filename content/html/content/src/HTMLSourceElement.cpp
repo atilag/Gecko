@@ -21,8 +21,8 @@ HTMLSourceElement::~HTMLSourceElement()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED1(HTMLSourceElement, nsGenericHTMLElement,
-                             nsIDOMHTMLSourceElement)
+NS_IMPL_ISUPPORTS_INHERITED(HTMLSourceElement, nsGenericHTMLElement,
+                            nsIDOMHTMLSourceElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLSourceElement)
 
@@ -65,9 +65,9 @@ HTMLSourceElement::BindToTree(nsIDocument *aDocument,
 }
 
 JSObject*
-HTMLSourceElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+HTMLSourceElement::WrapNode(JSContext* aCx)
 {
-  return HTMLSourceElementBinding::Wrap(aCx, aScope, this);
+  return HTMLSourceElementBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

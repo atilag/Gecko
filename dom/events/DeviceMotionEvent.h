@@ -21,21 +21,15 @@ public:
   DeviceRotationRate(DeviceMotionEvent* aOwner,
                      Nullable<double> aAlpha, Nullable<double> aBeta,
                      Nullable<double> aGamma);
-  DeviceRotationRate(double aAlpha, double aBeta, double aGamma)
-  {
-    DeviceRotationRate(nullptr, Nullable<double>(aAlpha),
-                       Nullable<double>(aBeta), Nullable<double>(aGamma));
-  }
 
   DeviceMotionEvent* GetParentObject() const
   {
     return mOwner;
   }
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
   {
-    return DeviceRotationRateBinding::Wrap(aCx, aScope, this);
+    return DeviceRotationRateBinding::Wrap(aCx, this);
   }
 
   Nullable<double> GetAlpha() const { return mAlpha; }
@@ -59,21 +53,15 @@ public:
   DeviceAcceleration(DeviceMotionEvent* aOwner,
                      Nullable<double> aX, Nullable<double> aY,
                      Nullable<double> aZ);
-  DeviceAcceleration(double aX, double aY, double aZ)
-  {
-    DeviceAcceleration(nullptr, Nullable<double>(aX),
-                       Nullable<double>(aY), Nullable<double>(aZ));
-  }
 
   DeviceMotionEvent* GetParentObject() const
   {
     return mOwner;
   }
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
   {
-    return DeviceAccelerationBinding::Wrap(aCx, aScope, this);
+    return DeviceAccelerationBinding::Wrap(aCx, this);
   }
 
   Nullable<double> GetX() const { return mX; }
@@ -106,10 +94,9 @@ public:
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(DeviceMotionEvent, Event)
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
   {
-    return DeviceMotionEventBinding::Wrap(aCx, aScope, this);
+    return DeviceMotionEventBinding::Wrap(aCx, this);
   }
 
   DeviceAcceleration* GetAcceleration() const

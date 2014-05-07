@@ -66,9 +66,7 @@
 #include "nsAccessibilityService.h"
 #include "nsIWritablePropertyBag2.h"
 #endif
-#ifdef IBMBIDI
 #include "nsBidiUtils.h"
-#endif
 
 using namespace mozilla;
 using namespace mozilla::layout;
@@ -247,9 +245,7 @@ nsTreeBodyFrame::CalcMaxRowWidth()
   nsTreeColumn* col;
 
   nsRefPtr<nsRenderingContext> rc =
-    PresContext()->PresShell()->GetReferenceRenderingContext();
-  if (!rc)
-    return 0;
+    PresContext()->PresShell()->CreateReferenceRenderingContext();
 
   for (int32_t row = 0; row < mRowCount; ++row) {
     rowWidth = 0;
@@ -1177,9 +1173,7 @@ nsTreeBodyFrame::GetCoordsForCellItem(int32_t aRow, nsITreeColumn* aCol, const n
     AdjustForBorderPadding(cellContext, cellRect);
 
     nsRefPtr<nsRenderingContext> rc =
-      presContext->PresShell()->GetReferenceRenderingContext();
-    if (!rc)
-      return NS_ERROR_OUT_OF_MEMORY;
+      presContext->PresShell()->CreateReferenceRenderingContext();
 
     // Now we'll start making our way across the cell, starting at the edge of 
     // the cell and proceeding until we hit the right edge. |cellX| is the 
@@ -1520,9 +1514,7 @@ nsTreeBodyFrame::GetItemWithinCellAt(nscoord aX, const nsRect& aCellRect,
 
   nsPresContext* presContext = PresContext();
   nsRefPtr<nsRenderingContext> rc =
-    presContext->PresShell()->GetReferenceRenderingContext();
-  if (!rc)
-    return nsCSSAnonBoxes::moztreecell;
+    presContext->PresShell()->CreateReferenceRenderingContext();
 
   if (aColumn->IsPrimary()) {
     // If we're the primary column, we have indentation and a twisty.
@@ -1775,8 +1767,7 @@ nsTreeBodyFrame::IsCellCropped(int32_t aRow, nsITreeColumn* aCol, bool *_retval)
     return NS_ERROR_INVALID_ARG;
 
   nsRefPtr<nsRenderingContext> rc =
-    PresContext()->PresShell()->GetReferenceRenderingContext();
-  NS_ENSURE_TRUE(rc, NS_ERROR_FAILURE);
+    PresContext()->PresShell()->CreateReferenceRenderingContext();
 
   rv = GetCellWidth(aRow, col, rc, desiredSize, currentSize);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2206,6 +2197,7 @@ nsTreeBodyFrame::GetImage(int32_t aRowIndex, nsTreeColumn* aCol, bool aUseContex
                                                 doc->GetDocumentURI(),
                                                 imgNotificationObserver,
                                                 nsIRequest::LOAD_NORMAL,
+                                                EmptyString(),
                                                 getter_AddRefs(imageRequest));
         NS_ENSURE_SUCCESS(rv, rv);
                                   

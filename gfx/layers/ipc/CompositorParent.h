@@ -62,8 +62,8 @@ private:
   uint64_t mLayersId;
 };
 
-class CompositorParent : public PCompositorParent,
-                         public ShadowLayersManager
+class CompositorParent MOZ_FINAL : public PCompositorParent,
+                                   public ShadowLayersManager
 {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(CompositorParent)
 
@@ -71,8 +71,6 @@ public:
   CompositorParent(nsIWidget* aWidget,
                    bool aUseExternalSurfaceSize = false,
                    int aSurfaceWidth = -1, int aSurfaceHeight = -1);
-
-  virtual ~CompositorParent();
 
   // IToplevelProtocol::CloneToplevel()
   virtual IToplevelProtocol*
@@ -130,6 +128,12 @@ public:
 
   virtual void ScheduleComposition();
   void NotifyShadowTreeTransaction(uint64_t aId, bool aIsFirstPaint, bool aScheduleComposite);
+
+  /**
+   * Check rotation info and schedule a rendering task if needed.
+   * Only can be called from compositor thread.
+   */
+  void ScheduleRotationOnCompositorThread(const TargetConfig& aTargetConfig, bool aIsFirstPaint);
 
   /**
    * Returns the unique layer tree identifier that corresponds to the root
@@ -231,7 +235,10 @@ public:
    */
   static bool IsInCompositorThread();
 
-protected:
+private:
+  // Private destructor, to discourage deletion outside of Release():
+  virtual ~CompositorParent();
+
   virtual PLayerTransactionParent*
     AllocPLayerTransactionParent(const nsTArray<LayersBackend>& aBackendHints,
                                  const uint64_t& aId,
@@ -245,7 +252,6 @@ protected:
 
   void SetEGLSurfaceSize(int width, int height);
 
-private:
   void InitializeLayerManager(const nsTArray<LayersBackend>& aBackendHints);
   void PauseComposition();
   void ResumeComposition();
@@ -300,6 +306,8 @@ private:
    */
   bool CanComposite();
 
+  void DidComposite();
+
   nsRefPtr<LayerManagerComposite> mLayerManager;
   nsRefPtr<Compositor> mCompositor;
   RefPtr<AsyncCompositionManager> mCompositionManager;
@@ -327,6 +335,8 @@ private:
   CancelableTask* mForceCompositionTask;
 
   nsRefPtr<APZCTreeManager> mApzcTreeManager;
+
+  bool mWantDidCompositeEvent;
 
   DISALLOW_EVIL_CONSTRUCTORS(CompositorParent);
 };

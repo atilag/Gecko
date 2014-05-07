@@ -404,8 +404,8 @@ nsWindow::ReleaseGlobals()
   }
 }
 
-NS_IMPL_ISUPPORTS_INHERITED1(nsWindow, nsBaseWidget,
-                             nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS_INHERITED(nsWindow, nsBaseWidget,
+                            nsISupportsWeakReference)
 
 void
 nsWindow::CommonCreate(nsIWidget *aParent, bool aListenForResizes)
@@ -2138,7 +2138,7 @@ nsWindow::OnExposeEvent(cairo_t *cr)
             CreateDrawTargetForSurface(surf, intSize));
     } else if (gfxPlatform::GetPlatform()->
                    SupportsAzureContentForType(BackendType::SKIA) &&
-               surf->GetType() != gfxSurfaceType::Image) {
+               surf->GetType() == gfxSurfaceType::Image) {
        gfxImageSurface* imgSurf = static_cast<gfxImageSurface*>(surf);
        SurfaceFormat format = ImageFormatToSurfaceFormat(imgSurf->Format());
        IntSize intSize(surf->GetSize().width, surf->GetSize().height);
@@ -2220,7 +2220,7 @@ nsWindow::OnExposeEvent(cairo_t *cr)
         }
     }
 #  ifdef MOZ_HAVE_SHMIMAGE
-    if (nsShmImage::UseShm() && MOZ_LIKELY(!mIsDestroyed)) {
+    if (mShmImage && MOZ_LIKELY(!mIsDestroyed)) {
 #if (MOZ_WIDGET_GTK == 2)
         mShmImage->Put(mGdkWindow, exposeRegion.mRects, exposeRegion.mRectsEnd);
 #else

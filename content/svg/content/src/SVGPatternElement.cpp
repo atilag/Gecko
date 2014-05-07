@@ -17,9 +17,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGPatternElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+SVGPatternElement::WrapNode(JSContext *aCx)
 {
-  return SVGPatternElementBinding::Wrap(aCx, aScope, this);
+  return SVGPatternElementBinding::Wrap(aCx, this);
 }
 
 //--------------------- Patterns ------------------------
@@ -138,10 +138,13 @@ NS_IMETHODIMP_(bool)
 SVGPatternElement::IsAttributeMapped(const nsIAtom* name) const
 {
   static const MappedAttributeEntry* const map[] = {
+    sColorMap,
     sFEFloodMap,
+    sFillStrokeMap,
     sFiltersMap,
     sFontSpecificationMap,
     sGradientStopMap,
+    sGraphicsMap,
     sLightingEffectsMap,
     sMarkersMap,
     sTextContentElementsMap,

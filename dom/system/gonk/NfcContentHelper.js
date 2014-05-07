@@ -54,7 +54,7 @@ const NFC_IPC_MSG_NAMES = [
   "NFC:CheckP2PRegistrationResponse",
   "NFC:PeerEvent",
   "NFC:NotifySendFileStatusResponse",
-  "NFC:SendFileResponse"
+  "NFC:ConfigResponse"
 ];
 
 XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
@@ -99,10 +99,6 @@ NfcContentHelper.prototype = {
   _requestMap: null,
   peerEventsCallbackMap: null,
 
-  /* TODO: Bug 815526: This is a limitation when a DOMString is used in sequences of Moz DOM Objects.
-   *       Strings such as 'type', 'id' 'payload' will not be acccessible to NfcWorker.
-   *       Therefore this function exists till the bug is addressed.
-   */
   encodeNDEFRecords: function encodeNDEFRecords(records) {
     let encodedRecords = [];
     for (let i = 0; i < records.length; i++) {
@@ -318,10 +314,55 @@ NfcContentHelper.prototype = {
     });
   },
 
+  startPoll: function startPoll(window) {
+    if (window == null) {
+      throw Components.Exception("Can't get window object",
+                                  Cr.NS_ERROR_UNEXPECTED);
+    }
+
+    let request = Services.DOMRequest.createRequest(window);
+    let requestId = btoa(this.getRequestId(request));
+    this._requestMap[requestId] = window;
+
+    cpmm.sendAsyncMessage("NFC:StartPoll",
+                          {requestId: requestId});
+    return request;
+  },
+
+  stopPoll: function stopPoll(window) {
+    if (window == null) {
+      throw Components.Exception("Can't get window object",
+                                  Cr.NS_ERROR_UNEXPECTED);
+    }
+
+    let request = Services.DOMRequest.createRequest(window);
+    let requestId = btoa(this.getRequestId(request));
+    this._requestMap[requestId] = window;
+
+    cpmm.sendAsyncMessage("NFC:StopPoll",
+                          {requestId: requestId});
+    return request;
+  },
+
+  powerOff: function powerOff(window) {
+    if (window == null) {
+      throw Components.Exception("Can't get window object",
+                                  Cr.NS_ERROR_UNEXPECTED);
+    }
+
+    let request = Services.DOMRequest.createRequest(window);
+    let requestId = btoa(this.getRequestId(request));
+    this._requestMap[requestId] = window;
+
+    cpmm.sendAsyncMessage("NFC:PowerOff",
+                          {requestId: requestId});
+    return request;
+  },
+
   // nsIObserver
   observe: function observe(subject, topic, data) {
     if (topic == "xpcom-shutdown") {
-      this.removeMessageListener();
+      this.destroyDOMRequestHelper();
       Services.obs.removeObserver(this, "xpcom-shutdown");
       cpmm = null;
     }
@@ -366,13 +407,20 @@ NfcContentHelper.prototype = {
       case "NFC:GetDetailsNDEFResponse":
         this.handleGetDetailsNDEFResponse(result);
         break;
+      case "NFC:CheckP2PRegistrationResponse":
+        this.handleCheckP2PRegistrationResponse(result);
+        break;
       case "NFC:ConnectResponse": // Fall through.
       case "NFC:CloseResponse":
       case "NFC:WriteNDEFResponse":
       case "NFC:MakeReadOnlyNDEFResponse":
-      case "NFC:CheckP2PRegistrationResponse":
       case "NFC:NotifySendFileStatusResponse":
-        this.fireRequestSuccess(atob(result.requestId), result);
+      case "NFC:ConfigResponse":
+        if (result.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
+          this.fireRequestError(atob(result.requestId), result.status);
+        } else {
+          this.fireRequestSuccess(atob(result.requestId), result);
+        }
         break;
       case "NFC:PeerEvent":
         let callback = this.peerEventsCallbackMap[result.event];
@@ -421,6 +469,13 @@ NfcContentHelper.prototype = {
     let requestId = atob(result.requestId);
     let result = new GetDetailsNDEFResponse(result);
     this.fireRequestSuccess(requestId, result);
+  },
+
+  handleCheckP2PRegistrationResponse: function handleCheckP2PRegistrationResponse(result) {
+    // Privilaged status API. Always fire success to avoid using exposed props.
+    // The receiver must check the boolean mapped status code to handle.
+    let requestId = atob(result.requestId);
+    this.fireRequestSuccess(requestId, result.status == NFC.GECKO_NFC_ERROR_SUCCESS);
   },
 };
 

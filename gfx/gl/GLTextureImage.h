@@ -79,8 +79,6 @@ public:
                        GLenum aWrapMode,
                        TextureImage::Flags aFlags = TextureImage::NoFlags);
 
-    virtual ~TextureImage() {}
-
     /**
      * Returns a gfxASurface for updating |aRegion| of the client's
      * image if successul, nullptr if not.  |aRegion|'s bounds must fit
@@ -125,7 +123,7 @@ public:
      * The Image may contain several textures for different regions (tiles).
      * These functions iterate over each sub texture image tile.
      */
-    virtual void BeginTileIteration() {
+    virtual void BeginBigImageIteration() {
     }
 
     virtual bool NextTile() {
@@ -135,12 +133,12 @@ public:
     // Function prototype for a tile iteration callback. Returning false will
     // cause iteration to be interrupted (i.e. the corresponding NextTile call
     // will return false).
-    typedef bool (* TileIterationCallback)(TextureImage* aImage,
+    typedef bool (* BigImageIterationCallback)(TextureImage* aImage,
                                            int aTileNumber,
                                            void* aCallbackData);
 
     // Sets a callback to be called every time NextTile is called.
-    virtual void SetIterationCallback(TileIterationCallback aCallback,
+    virtual void SetIterationCallback(BigImageIterationCallback aCallback,
                                       void* aCallbackData) {
     }
 
@@ -236,6 +234,9 @@ protected:
     TextureImage(const gfx::IntSize& aSize,
                  GLenum aWrapMode, ContentType aContentType,
                  Flags aFlags = NoFlags);
+
+    // Protected destructor, to discourage deletion outside of Release():
+    virtual ~TextureImage() {}
 
     virtual gfx::IntRect GetSrcTileRect();
 
@@ -334,9 +335,9 @@ public:
     virtual void EndUpdate();
     virtual void Resize(const gfx::IntSize& aSize);
     virtual uint32_t GetTileCount();
-    virtual void BeginTileIteration();
+    virtual void BeginBigImageIteration();
     virtual bool NextTile();
-    virtual void SetIterationCallback(TileIterationCallback aCallback,
+    virtual void SetIterationCallback(BigImageIterationCallback aCallback,
                                       void* aCallbackData);
     virtual gfx::IntRect GetTileRect();
     virtual GLuint GetTextureID() {
@@ -350,7 +351,7 @@ protected:
     virtual gfx::IntRect GetSrcTileRect();
 
     unsigned int mCurrentImage;
-    TileIterationCallback mIterationCallback;
+    BigImageIterationCallback mIterationCallback;
     void* mIterationCallbackData;
     nsTArray< nsRefPtr<TextureImage> > mImages;
     bool mInUpdate;

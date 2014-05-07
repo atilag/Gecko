@@ -12,7 +12,7 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(DOMPoint, mParent)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(DOMPoint, mParent)
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(DOMPoint, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(DOMPoint, Release)
@@ -37,7 +37,7 @@ DOMPoint::Constructor(const GlobalObject& aGlobal, double aX, double aY,
 }
 
 JSObject*
-DOMPoint::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+DOMPoint::WrapObject(JSContext* aCx)
 {
-  return DOMPointBinding::Wrap(aCx, aScope, this);
+  return DOMPointBinding::Wrap(aCx, this);
 }

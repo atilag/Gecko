@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/EventStates.h"
 
 #include "mozilla/dom/SVGImageElement.h"
 #include "mozilla/gfx/2D.h"
@@ -23,9 +24,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGImageElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+SVGImageElement::WrapNode(JSContext *aCx)
 {
-  return SVGImageElementBinding::Wrap(aCx, aScope, this);
+  return SVGImageElementBinding::Wrap(aCx, this);
 }
 
 nsSVGElement::LengthInfo SVGImageElement::sLengthInfo[4] =
@@ -44,11 +45,11 @@ nsSVGElement::StringInfo SVGImageElement::sStringInfo[1] =
 //----------------------------------------------------------------------
 // nsISupports methods
 
-NS_IMPL_ISUPPORTS_INHERITED6(SVGImageElement, SVGImageElementBase,
-                             nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement,
-                             imgINotificationObserver,
-                             nsIImageLoadingContent, imgIOnloadBlocker)
+NS_IMPL_ISUPPORTS_INHERITED(SVGImageElement, SVGImageElementBase,
+                            nsIDOMNode, nsIDOMElement,
+                            nsIDOMSVGElement,
+                            imgINotificationObserver,
+                            nsIImageLoadingContent, imgIOnloadBlocker)
 
 //----------------------------------------------------------------------
 // Implementation
@@ -203,7 +204,7 @@ SVGImageElement::UnbindFromTree(bool aDeep, bool aNullParent)
   SVGImageElementBase::UnbindFromTree(aDeep, aNullParent);
 }
 
-nsEventStates
+EventStates
 SVGImageElement::IntrinsicState() const
 {
   return SVGImageElementBase::IntrinsicState() |

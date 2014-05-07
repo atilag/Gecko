@@ -19,8 +19,6 @@
 #include "DeviceStorageFileDescriptor.h"
 #include "CameraControlListener.h"
 
-class DeviceStorageFileDescriptor;
-
 namespace mozilla {
 
 namespace layers {
@@ -36,31 +34,37 @@ public:
   virtual void AddListener(CameraControlListener* aListener) MOZ_OVERRIDE;
   virtual void RemoveListener(CameraControlListener* aListener) MOZ_OVERRIDE;
 
+  // See ICameraControl.h for these methods' return values.
   virtual nsresult Start(const Configuration* aConfig = nullptr) MOZ_OVERRIDE;
   virtual nsresult Stop() MOZ_OVERRIDE;
-
   virtual nsresult SetConfiguration(const Configuration& aConfig) MOZ_OVERRIDE;
   virtual nsresult StartPreview() MOZ_OVERRIDE;
   virtual nsresult StopPreview() MOZ_OVERRIDE;
-  virtual nsresult AutoFocus(bool aCancelExistingCall) MOZ_OVERRIDE;
+  virtual nsresult AutoFocus() MOZ_OVERRIDE;
+  virtual nsresult StartFaceDetection() MOZ_OVERRIDE;
+  virtual nsresult StopFaceDetection() MOZ_OVERRIDE;
   virtual nsresult TakePicture() MOZ_OVERRIDE;
   virtual nsresult StartRecording(DeviceStorageFileDescriptor* aFileDescriptor,
                                   const StartRecordingOptions* aOptions) MOZ_OVERRIDE;
   virtual nsresult StopRecording() MOZ_OVERRIDE;
+  virtual nsresult ResumeContinuousFocus() MOZ_OVERRIDE;
 
   already_AddRefed<RecorderProfileManager> GetRecorderProfileManager();
   uint32_t GetCameraId() { return mCameraId; }
 
   virtual void Shutdown() MOZ_OVERRIDE;
 
+  // Event handlers called directly from outside this class.
   void OnShutter();
   void OnClosed();
-  void OnError(CameraControlListener::CameraErrorContext aContext,
-               CameraControlListener::CameraError aError);
+  void OnUserError(CameraControlListener::UserContext aContext, nsresult aError);
+  void OnSystemError(CameraControlListener::SystemContext aContext, nsresult aError);
+  void OnAutoFocusMoving(bool aIsMoving);
 
 protected:
   // Event handlers.
   void OnAutoFocusComplete(bool aAutoFocusSucceeded);
+  void OnFacesDetected(const nsTArray<Face>& aFaces);
   void OnTakePictureComplete(uint8_t* aData, uint32_t aLength, const nsAString& aMimeType);
 
   bool OnNewPreviewFrame(layers::Image* aImage, uint32_t aWidth, uint32_t aHeight);
@@ -92,18 +96,37 @@ protected:
   class ControlMessage;
   class ListenerMessage;
 
+  nsresult Dispatch(ControlMessage* aMessage);
+
+  // Asynchronous method implementations, invoked on the Camera Thread.
+  //
+  // Return values:
+  //  - NS_OK on success;
+  //  - NS_ERROR_INVALID_ARG if one or more arguments is invalid;
+  //  - NS_ERROR_NOT_INITIALIZED if the underlying hardware is not initialized,
+  //      failed to initialize (in the case of StartImpl()), or has been stopped;
+  //      for StartRecordingImpl(), this indicates that no recorder has been
+  //      configured (either by calling StartImpl() or SetConfigurationImpl());
+  //  - NS_ERROR_ALREADY_INITIALIZED if the underlying hardware is already
+  //      initialized;
+  //  - NS_ERROR_NOT_IMPLEMENTED if the method is not implemented;
+  //  - NS_ERROR_FAILURE on general failures.
   virtual nsresult StartImpl(const Configuration* aConfig = nullptr) = 0;
   virtual nsresult StopImpl() = 0;
   virtual nsresult SetConfigurationImpl(const Configuration& aConfig) = 0;
   virtual nsresult StartPreviewImpl() = 0;
   virtual nsresult StopPreviewImpl() = 0;
-  virtual nsresult AutoFocusImpl(bool aCancelExistingCall) = 0;
+  virtual nsresult AutoFocusImpl() = 0;
+  virtual nsresult StartFaceDetectionImpl() = 0;
+  virtual nsresult StopFaceDetectionImpl() = 0;
   virtual nsresult TakePictureImpl() = 0;
   virtual nsresult StartRecordingImpl(DeviceStorageFileDescriptor* aFileDescriptor,
                                       const StartRecordingOptions* aOptions) = 0;
   virtual nsresult StopRecordingImpl() = 0;
+  virtual nsresult ResumeContinuousFocusImpl() = 0;
   virtual nsresult PushParametersImpl() = 0;
   virtual nsresult PullParametersImpl() = 0;
+
   virtual already_AddRefed<RecorderProfileManager> GetRecorderProfileManagerImpl() = 0;
 
   void OnShutterInternal();

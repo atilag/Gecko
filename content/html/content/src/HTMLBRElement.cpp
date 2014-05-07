@@ -26,8 +26,8 @@ HTMLBRElement::~HTMLBRElement()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED1(HTMLBRElement, nsGenericHTMLElement,
-                             nsIDOMHTMLBRElement)
+NS_IMPL_ISUPPORTS_INHERITED(HTMLBRElement, nsGenericHTMLElement,
+                            nsIDOMHTMLBRElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLBRElement)
 
@@ -95,9 +95,9 @@ HTMLBRElement::GetAttributeMappingFunction() const
 }
 
 JSObject*
-HTMLBRElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+HTMLBRElement::WrapNode(JSContext *aCx)
 {
-  return HTMLBRElementBinding::Wrap(aCx, aScope, this);
+  return HTMLBRElementBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

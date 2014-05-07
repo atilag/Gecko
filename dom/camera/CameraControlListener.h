@@ -22,11 +22,14 @@ public:
     MOZ_COUNT_CTOR(CameraControlListener);
   }
 
+protected:
+  // Protected destructor, to discourage deletion outside of Release():
   virtual ~CameraControlListener()
   {
     MOZ_COUNT_DTOR(CameraControlListener);
   }
 
+public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(CameraControlListener);
 
   enum HardwareState
@@ -75,32 +78,38 @@ public:
   virtual void OnConfigurationChange(const CameraListenerConfiguration& aConfiguration) { }
 
   virtual void OnAutoFocusComplete(bool aAutoFocusSucceeded) { }
+  virtual void OnAutoFocusMoving(bool aIsMoving) { }
   virtual void OnTakePictureComplete(uint8_t* aData, uint32_t aLength, const nsAString& aMimeType) { }
+  virtual void OnFacesDetected(const nsTArray<ICameraControl::Face>& aFaces) { }
 
-  enum CameraErrorContext
+  enum UserContext
   {
     kInStartCamera,
     kInStopCamera,
     kInAutoFocus,
+    kInStartFaceDetection,
+    kInStopFaceDetection,
     kInTakePicture,
     kInStartRecording,
     kInStopRecording,
     kInSetConfiguration,
     kInStartPreview,
     kInStopPreview,
+    kInSetPictureSize,
+    kInSetThumbnailSize,
+    kInResumeContinuousFocus,
     kInUnspecified
   };
-  enum CameraError
+  // Error handler for problems arising due to user-initiated actions.
+  virtual void OnUserError(UserContext aContext, nsresult aError) { }
+
+  enum SystemContext
   {
-    kErrorApiFailed,
-    kErrorInitFailed,
-    kErrorInvalidConfiguration,
-    kErrorServiceFailed,
-    kErrorSetPictureSizeFailed,
-    kErrorSetThumbnailSizeFailed,
-    kErrorUnknown
+    kSystemService
   };
-  virtual void OnError(CameraErrorContext aContext, CameraError aError) { }
+  // Error handler for problems arising due to system failures, not triggered
+  // by something the CameraControl API user did.
+  virtual void OnSystemError(SystemContext aContext, nsresult aError) { }
 };
 
 } // namespace mozilla

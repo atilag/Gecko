@@ -10,7 +10,6 @@
 #include "ReadbackProcessor.h"          // for ReadbackProcessor::Update, etc
 #include "RenderTrace.h"                // for RenderTraceInvalidateEnd, etc
 #include "BasicLayersImpl.h"            // for AutoMaskData, etc
-#include "gfxASurface.h"                // for gfxASurface, etc
 #include "gfxContext.h"                 // for gfxContext, etc
 #include "gfxRect.h"                    // for gfxRect
 #include "gfxUtils.h"                   // for gfxUtils
@@ -123,8 +122,8 @@ BasicThebesLayer::PaintThebes(gfxContext* aContext,
 
   // Pull out the mask surface and transform here, because the mask
   // is internal to basic layers
-  AutoMaskData mask;
-  gfxASurface* maskSurface = nullptr;
+  AutoMoz2DMaskData mask;
+  SourceSurface* maskSurface = nullptr;
   Matrix maskTransform;
   if (GetMaskData(aMaskLayer, &mask)) {
     maskSurface = mask.GetSurface();
@@ -186,7 +185,7 @@ BasicThebesLayer::Validate(LayerManager::DrawThebesLayerCallback aCallback,
     mContentClient->BeginPaintBuffer(this, flags);
   mValidRegion.Sub(mValidRegion, state.mRegionToInvalidate);
 
-  if (DrawTarget* target = mContentClient->BorrowDrawTargetForPainting(this, state)) {
+  if (DrawTarget* target = mContentClient->BorrowDrawTargetForPainting(state)) {
     // The area that became invalid and is visible needs to be repainted
     // (this could be the whole visible area if our buffer switched
     // from RGB to RGBA, because we might need to repaint with

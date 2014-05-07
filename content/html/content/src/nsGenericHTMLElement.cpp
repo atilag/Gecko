@@ -7,6 +7,8 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
+#include "mozilla/EventStateManager.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Likely.h"
 
@@ -60,7 +62,6 @@
 #include "nsString.h"
 #include "nsUnicharUtils.h"
 #include "nsGkAtoms.h"
-#include "nsEventStateManager.h"
 #include "nsIDOMEvent.h"
 #include "nsDOMCSSDeclaration.h"
 #include "nsITextControlFrame.h"
@@ -188,14 +189,14 @@ private:
   nsRefPtr<nsGenericHTMLElement> mElement;
 };
 
-NS_IMPL_CYCLE_COLLECTION_1(nsGenericHTMLElementTearoff, mElement)
+NS_IMPL_CYCLE_COLLECTION(nsGenericHTMLElementTearoff, mElement)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsGenericHTMLElementTearoff)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsGenericHTMLElementTearoff)
 
 NS_INTERFACE_TABLE_HEAD(nsGenericHTMLElementTearoff)
-  NS_INTERFACE_TABLE_INHERITED1(nsGenericHTMLElementTearoff,
-                                nsIDOMElementCSSInlineStyle)
+  NS_INTERFACE_TABLE_INHERITED(nsGenericHTMLElementTearoff,
+                               nsIDOMElementCSSInlineStyle)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsGenericHTMLElementTearoff)
 NS_INTERFACE_MAP_END_AGGREGATED(mElement)
 
@@ -507,10 +508,10 @@ nsGenericHTMLElement::UpdateEditableState(bool aNotify)
   nsStyledElement::UpdateEditableState(aNotify);
 }
 
-nsEventStates
+EventStates
 nsGenericHTMLElement::IntrinsicState() const
 {
-  nsEventStates state = nsGenericHTMLElementBase::IntrinsicState();
+  EventStates state = nsGenericHTMLElementBase::IntrinsicState();
 
   if (GetDirectionality() == eDir_RTL) {
     state |= NS_EVENT_STATE_RTL;
@@ -766,7 +767,7 @@ nsGenericHTMLElement::GetEventListenerManagerForAttr(nsIAtom* aAttrName,
 #define FORWARDED_EVENT(name_, id_, type_, struct_) \
        || nsGkAtoms::on##name_ == aAttrName
 #define WINDOW_EVENT FORWARDED_EVENT
-#include "nsEventNameList.h" // IWYU pragma: keep
+#include "mozilla/EventNameList.h" // IWYU pragma: keep
 #undef WINDOW_EVENT
 #undef FORWARDED_EVENT
 #undef EVENT
@@ -872,7 +873,7 @@ nsGenericHTMLElement::SetOn##name_(EventHandlerNonNull* handler)              \
                                                                               \
   return nsINode::SetOn##name_(handler);                                      \
 }
-#include "nsEventNameList.h" // IWYU pragma: keep
+#include "mozilla/EventNameList.h" // IWYU pragma: keep
 #undef ERROR_EVENT
 #undef FORWARDED_EVENT
 #undef EVENT
@@ -1923,9 +1924,9 @@ nsGenericHTMLFormElement::~nsGenericHTMLFormElement()
   NS_ASSERTION(!mForm, "mForm should be null at this point!");
 }
 
-NS_IMPL_ISUPPORTS_INHERITED1(nsGenericHTMLFormElement,
-                             nsGenericHTMLElement,
-                             nsIFormControl)
+NS_IMPL_ISUPPORTS_INHERITED(nsGenericHTMLFormElement,
+                            nsGenericHTMLElement,
+                            nsIFormControl)
 
 mozilla::dom::ParentObject
 nsGenericHTMLFormElement::GetParentObject() const
@@ -2300,13 +2301,13 @@ nsGenericHTMLFormElement::IsHTMLFocusable(bool aWithMouse,
   return false;
 }
 
-nsEventStates
+EventStates
 nsGenericHTMLFormElement::IntrinsicState() const
 {
   // If you add attribute-dependent states here, you need to add them them to
   // AfterSetAttr too.  And add them to AfterSetAttr for all subclasses that
   // implement IntrinsicState() and are affected by that attribute.
-  nsEventStates state = nsGenericHTMLElement::IntrinsicState();
+  EventStates state = nsGenericHTMLElement::IntrinsicState();
 
   if (CanBeDisabled()) {
     // :enabled/:disabled
@@ -2711,7 +2712,7 @@ nsGenericHTMLElement::RegUnRegAccessKey(bool aDoReg)
   nsPresContext *presContext = GetPresContext();
 
   if (presContext) {
-    nsEventStateManager *esm = presContext->EventStateManager();
+    EventStateManager* esm = presContext->EventStateManager();
 
     // Register or unregister as appropriate.
     if (aDoReg) {
@@ -3050,7 +3051,8 @@ nsGenericHTMLElement::GetItemValue(JSContext* aCx, JSObject* aScope,
 
   if (ItemScope()) {
     JS::Rooted<JS::Value> v(aCx);
-    if (!mozilla::dom::WrapObject(aCx, scope, this, &v)) {
+    JSAutoCompartment ac(aCx, scope);
+    if (!mozilla::dom::WrapObject(aCx, this, &v)) {
       aError.Throw(NS_ERROR_FAILURE);
       return JS::UndefinedValue();
     }
@@ -3152,6 +3154,7 @@ static nsIAtom** sPropertiesToTraverseAndUnlink[] =
     &nsGkAtoms::itemref,
     &nsGkAtoms::itemprop,
     &nsGkAtoms::sandbox,
+    &nsGkAtoms::sizes,
     nullptr
   };
 

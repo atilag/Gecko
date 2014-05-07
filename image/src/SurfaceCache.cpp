@@ -110,10 +110,11 @@ private:
  * A CachedSurface associates a surface with a key that uniquely identifies that
  * surface.
  */
-class CachedSurface : public RefCounted<CachedSurface>
+class CachedSurface
 {
 public:
-  MOZ_DECLARE_REFCOUNTED_TYPENAME(CachedSurface)
+  NS_INLINE_DECL_REFCOUNTING(CachedSurface)
+
   CachedSurface(DrawTarget*       aTarget,
                 const IntSize     aTargetSize,
                 const Cost        aCost,
@@ -156,10 +157,11 @@ private:
  * destroyed or invalidated. Since this will happen frequently, it makes sense
  * to make it cheap by storing the surfaces for each image separately.
  */
-class ImageSurfaceCache : public RefCounted<ImageSurfaceCache>
+class ImageSurfaceCache
 {
 public:
-  MOZ_DECLARE_REFCOUNTED_TYPENAME(ImageSurfaceCache)
+  NS_INLINE_DECL_REFCOUNTING(ImageSurfaceCache)
+
   typedef nsRefPtrHashtable<nsGenericHashKey<SurfaceKey>, CachedSurface> SurfaceTable;
 
   bool IsEmpty() const { return mSurfaces.Count() == 0; }
@@ -433,8 +435,8 @@ private:
   Cost                                                      mAvailableCost;
 };
 
-NS_IMPL_ISUPPORTS1(SurfaceCacheImpl, nsIMemoryReporter)
-NS_IMPL_ISUPPORTS1(SurfaceCacheImpl::MemoryPressureObserver, nsIObserver)
+NS_IMPL_ISUPPORTS(SurfaceCacheImpl, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(SurfaceCacheImpl::MemoryPressureObserver, nsIObserver)
 
 ///////////////////////////////////////////////////////////////////////////////
 // Public API

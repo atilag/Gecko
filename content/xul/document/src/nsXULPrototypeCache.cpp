@@ -22,7 +22,7 @@
 #include "nsNetUtil.h"
 #include "nsAppDirectoryServiceDefs.h"
 
-#include "js/Tracer.h"
+#include "js/TracingAPI.h"
 
 #include "mozilla/Preferences.h"
 #include "mozilla/scache/StartupCache.h"
@@ -80,7 +80,7 @@ nsXULPrototypeCache::~nsXULPrototypeCache()
 }
 
 
-NS_IMPL_ISUPPORTS1(nsXULPrototypeCache, nsIObserver)
+NS_IMPL_ISUPPORTS(nsXULPrototypeCache, nsIObserver)
 
 /* static */ nsXULPrototypeCache*
 nsXULPrototypeCache::GetInstance()

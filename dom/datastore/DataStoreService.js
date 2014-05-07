@@ -16,7 +16,7 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 Cu.import('resource://gre/modules/Services.jsm');
-Cu.import('resource://gre/modules/DataStore.jsm');
+Cu.import('resource://gre/modules/DataStoreImpl.jsm');
 Cu.import("resource://gre/modules/DataStoreDB.jsm");
 Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
 
@@ -308,7 +308,7 @@ DataStoreService.prototype = {
   getDataStoreCreate: function(aWindow, aResolve, aStores) {
     debug("GetDataStoreCreate");
 
-    let results = [];
+    let results = new aWindow.Array();
 
     if (!aStores.length) {
       aResolve(results);
@@ -342,7 +342,7 @@ DataStoreService.prototype = {
     debug("GetDataStoreResolve");
 
     let callbackPending = aStores.length;
-    let results = [];
+    let results = new aWindow.Array();
 
     if (!callbackPending) {
       aResolve(results);
@@ -352,10 +352,15 @@ DataStoreService.prototype = {
     for (let i = 0; i < aStores.length; ++i) {
       let obj = new DataStore(aWindow, aStores[i].name,
                               aStores[i].owner, aStores[i].readOnly);
-      let exposedObj = aWindow.DataStore._create(aWindow, obj);
-      obj.exposedObject = exposedObj;
 
-      results.push(exposedObj);
+      let storeImpl = aWindow.DataStoreImpl._create(aWindow, obj);
+
+      let exposedStore = new aWindow.DataStore();
+      exposedStore.setDataStoreImpl(storeImpl);
+
+      obj.exposedObject = exposedStore;
+
+      results.push(exposedStore);
 
       obj.retrieveRevisionId(
         function() {

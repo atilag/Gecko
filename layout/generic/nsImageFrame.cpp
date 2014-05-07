@@ -8,6 +8,7 @@
 #include "nsImageFrame.h"
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/MouseEvents.h"
 
 #include "nsCOMPtr.h"
@@ -48,7 +49,6 @@
 #include "nsCSSFrameConstructor.h"
 #include "nsIDOMRange.h"
 
-#include "nsEventStates.h"
 #include "nsError.h"
 #include "nsBidiUtils.h"
 #include "nsBidiPresUtils.h"
@@ -438,7 +438,7 @@ bool
 nsImageFrame::ShouldCreateImageFrameFor(Element* aElement,
                                         nsStyleContext* aStyleContext)
 {
-  nsEventStates state = aElement->State();
+  EventStates state = aElement->State();
   if (IMAGE_OK(state,
                HaveFixedSize(aStyleContext->StylePosition()))) {
     // Image is fine; do the image frame thing
@@ -868,7 +868,7 @@ nsImageFrame::Reflow(nsPresContext*          aPresContext,
   }
 
   aMetrics.SetOverflowAreasToDesiredBounds();
-  nsEventStates contentState = mContent->AsElement()->State();
+  EventStates contentState = mContent->AsElement()->State();
   bool imageOK = IMAGE_OK(contentState, true);
 
   // Determine if the size is available
@@ -1083,7 +1083,7 @@ public:
                      nsRenderingContext* aCtx) MOZ_OVERRIDE
   {
     nsImageFrame* f = static_cast<nsImageFrame*>(mFrame);
-    nsEventStates state = f->GetContent()->AsElement()->State();
+    EventStates state = f->GetContent()->AsElement()->State();
     f->DisplayAltFeedback(*aCtx,
                           mVisibleRect,
                           IMAGE_OK(state, true)
@@ -1157,7 +1157,7 @@ nsImageFrame::DisplayAltFeedback(nsRenderingContext& aRenderingContext,
     }
 
 
-    // If the image in question is loaded and decoded, draw it
+    // If the icon in question is loaded and decoded, draw it
     uint32_t imageStatus = 0;
     if (aRequest)
       aRequest->GetImageStatus(&imageStatus);
@@ -1424,7 +1424,7 @@ nsImageFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                               getter_AddRefs(currentRequest));
     }
 
-    nsEventStates contentState = mContent->AsElement()->State();
+    EventStates contentState = mContent->AsElement()->State();
     bool imageOK = IMAGE_OK(contentState, true);
 
     // XXX(seth): The SizeIsAvailable check here should not be necessary - the
@@ -1782,6 +1782,10 @@ nsImageFrame::List(FILE* out, const char* aPrefix, uint32_t aFlags) const
 int
 nsImageFrame::GetLogicalSkipSides(const nsHTMLReflowState* aReflowState) const
 {
+  if (MOZ_UNLIKELY(StyleBorder()->mBoxDecorationBreak ==
+                     NS_STYLE_BOX_DECORATION_BREAK_CLONE)) {
+    return 0;
+  }
   int skip = 0;
   if (nullptr != GetPrevInFlow()) {
     skip |= LOGICAL_SIDE_B_START;
@@ -1842,6 +1846,7 @@ nsImageFrame::LoadIcon(const nsAString& aSpec,
                        loadFlags,
                        nullptr,
                        nullptr,      /* channel policy not needed */
+                       EmptyString(),
                        aRequest);
 }
 
@@ -1915,8 +1920,8 @@ nsresult nsImageFrame::LoadIcons(nsPresContext *aPresContext)
   return rv;
 }
 
-NS_IMPL_ISUPPORTS2(nsImageFrame::IconLoad, nsIObserver,
-                   imgINotificationObserver)
+NS_IMPL_ISUPPORTS(nsImageFrame::IconLoad, nsIObserver,
+                  imgINotificationObserver)
 
 static const char* kIconLoadPrefs[] = {
   "browser.display.force_inline_alttext",
@@ -1991,7 +1996,7 @@ nsImageFrame::IconLoad::Notify(imgIRequest *aRequest, int32_t aType, const nsInt
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS1(nsImageListener, imgINotificationObserver)
+NS_IMPL_ISUPPORTS(nsImageListener, imgINotificationObserver)
 
 nsImageListener::nsImageListener(nsImageFrame *aFrame) :
   mFrame(aFrame)

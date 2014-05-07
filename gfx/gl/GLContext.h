@@ -27,7 +27,6 @@
 
 #include "GLDefs.h"
 #include "GLLibraryLoader.h"
-#include "gfxImageSurface.h"
 #include "gfx3DMatrix.h"
 #include "nsISupportsImpl.h"
 #include "plstr.h"
@@ -71,7 +70,6 @@ namespace mozilla {
         class GLBlitTextureImageHelper;
         class GLReadTexImageHelper;
         class SharedSurface_GL;
-        class GLDrawRectHelper;
     }
 
     namespace layers {
@@ -434,7 +432,7 @@ public:
     template<size_t N>
     static void InitializeExtensionsBitSet(std::bitset<N>& extensionsBitset, const char* extStr, const char** extList, bool verbose = false)
     {
-        char* exts = strdup(extStr);
+        char* exts = ::strdup(extStr);
 
         if (verbose)
             printf_stderr("Extensions: %s\n", exts);
@@ -2525,6 +2523,8 @@ public:
         return MakeCurrentImpl(aForce);
     }
 
+    virtual bool Init() = 0;
+
     virtual bool SetupLookupFunction() = 0;
 
     virtual void ReleaseSurface() {}
@@ -2726,13 +2726,11 @@ protected:
     ScopedDeletePtr<GLBlitHelper> mBlitHelper;
     ScopedDeletePtr<GLBlitTextureImageHelper> mBlitTextureImageHelper;
     ScopedDeletePtr<GLReadTexImageHelper> mReadTexImageHelper;
-    ScopedDeletePtr<GLDrawRectHelper> mDrawRectHelper;
 
 public:
     GLBlitHelper* BlitHelper();
     GLBlitTextureImageHelper* BlitTextureImageHelper();
     GLReadTexImageHelper* ReadTexImageHelper();
-    GLDrawRectHelper* DrawRectHelper();
 
     // Assumes shares are created by all sharing with the same global context.
     bool SharesWith(const GLContext* other) const {

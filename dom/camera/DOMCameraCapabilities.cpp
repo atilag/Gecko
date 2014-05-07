@@ -9,6 +9,7 @@
 #include "nsContentUtils.h"
 #include "mozilla/dom/CameraManagerBinding.h"
 #include "mozilla/dom/CameraCapabilitiesBinding.h"
+#include "Navigator.h"
 #include "CameraCommon.h"
 #include "ICameraControl.h"
 #include "CameraRecorderProfiles.h"
@@ -42,6 +43,13 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(CameraCapabilities)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
+/* static */
+bool
+CameraCapabilities::HasSupport(JSContext* aCx, JSObject* aGlobal)
+{
+  return Navigator::HasCameraSupport(aCx, aGlobal);
+}
+
 CameraCapabilities::CameraCapabilities(nsPIDOMWindow* aWindow)
   : mRecorderProfiles(JS::UndefinedValue())
   , mWindow(aWindow)
@@ -61,9 +69,9 @@ CameraCapabilities::~CameraCapabilities()
 }
 
 JSObject*
-CameraCapabilities::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+CameraCapabilities::WrapObject(JSContext* aCx)
 {
-  return CameraCapabilitiesBinding::Wrap(aCx, aScope, this);
+  return CameraCapabilitiesBinding::Wrap(aCx, this);
 }
 
 #define LOG_IF_ERROR(rv, param)                               \
@@ -149,6 +157,11 @@ CameraCapabilities::Populate(ICameraControl* aCameraControl)
   LOG_IF_ERROR(rv, CAMERA_PARAM_SUPPORTED_MAXMETERINGAREAS);
   mMaxMeteringAreas = areas < 0 ? 0 : areas;
 
+  int32_t faces;
+  rv = aCameraControl->Get(CAMERA_PARAM_SUPPORTED_MAXDETECTEDFACES, faces);
+  LOG_IF_ERROR(rv, CAMERA_PARAM_SUPPORTED_MAXDETECTEDFACES);
+  mMaxDetectedFaces = faces < 0 ? 0 : faces;
+
   rv = aCameraControl->Get(CAMERA_PARAM_SUPPORTED_MINEXPOSURECOMPENSATION, mMinExposureCompensation);
   LOG_IF_ERROR(rv, CAMERA_PARAM_SUPPORTED_MINEXPOSURECOMPENSATION);
 
@@ -167,11 +180,10 @@ CameraCapabilities::Populate(ICameraControl* aCameraControl)
     JS::Rooted<JSObject*> o(js);
     nsresult rv = mRecorderProfileManager->GetJsObject(js, o.address());
     if (NS_FAILED(rv)) {
-      DOM_CAMERA_LOGE("Failed to JS-objectify profile manager (%d)\n", rv);
-      return rv;
+      DOM_CAMERA_LOGE("Failed to JS-objectify profile manager (0x%x)\n", rv);
+    } else {
+      mRecorderProfiles = JS::ObjectValue(*o);
     }
-
-    mRecorderProfiles = JS::ObjectValue(*o);
   }
 
   // For now, always return success, since the presence or absence of capabilities
@@ -255,6 +267,12 @@ uint32_t
 CameraCapabilities::MaxMeteringAreas() const
 {
   return mMaxMeteringAreas;
+}
+
+uint32_t
+CameraCapabilities::MaxDetectedFaces() const
+{
+  return mMaxDetectedFaces;
 }
 
 double

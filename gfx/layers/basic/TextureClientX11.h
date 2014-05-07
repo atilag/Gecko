@@ -16,43 +16,36 @@ namespace layers {
 /**
  * A TextureClient implementation based on Xlib.
  */
-class TextureClientX11
- : public TextureClient,
-   public TextureClientSurface,
-   public TextureClientDrawTarget
+class TextureClientX11 : public TextureClient
 {
  public:
-  TextureClientX11(gfx::SurfaceFormat format, TextureFlags aFlags = TEXTURE_FLAGS_DEFAULT);
+  TextureClientX11(gfx::SurfaceFormat format, TextureFlags aFlags = TextureFlags::DEFAULT);
+
   ~TextureClientX11();
 
   // TextureClient
 
-  TextureClientSurface* AsTextureClientSurface() MOZ_OVERRIDE { return this; }
-  TextureClientDrawTarget* AsTextureClientDrawTarget() MOZ_OVERRIDE { return this; }
+  virtual bool IsAllocated() const MOZ_OVERRIDE;
 
-  bool IsAllocated() const MOZ_OVERRIDE;
-  bool ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor) MOZ_OVERRIDE;
-  TextureClientData* DropTextureData() MOZ_OVERRIDE;
-  gfx::IntSize GetSize() const {
-    return mSize;
-  }
+  virtual bool ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor) MOZ_OVERRIDE;
 
-  bool Lock(OpenMode aMode) MOZ_OVERRIDE;
-  void Unlock() MOZ_OVERRIDE;
-  bool IsLocked() const MOZ_OVERRIDE { return mLocked; }
+  virtual TextureClientData* DropTextureData() MOZ_OVERRIDE;
 
-  // TextureClientSurface
+  virtual gfx::IntSize GetSize() const MOZ_OVERRIDE { return mSize; }
 
-  bool UpdateSurface(gfxASurface* aSurface) MOZ_OVERRIDE;
-  already_AddRefed<gfxASurface> GetAsSurface() MOZ_OVERRIDE;
-  bool AllocateForSurface(gfx::IntSize aSize, TextureAllocationFlags flags) MOZ_OVERRIDE;
+  virtual bool Lock(OpenMode aMode) MOZ_OVERRIDE;
 
-  // TextureClientDrawTarget
+  virtual void Unlock() MOZ_OVERRIDE;
 
-  TemporaryRef<gfx::DrawTarget> GetAsDrawTarget() MOZ_OVERRIDE;
-  gfx::SurfaceFormat GetFormat() const {
-    return mFormat;
-  }
+  virtual bool IsLocked() const MOZ_OVERRIDE { return mLocked; }
+
+  virtual bool AllocateForSurface(gfx::IntSize aSize, TextureAllocationFlags flags) MOZ_OVERRIDE;
+
+  virtual bool CanExposeDrawTarget() const MOZ_OVERRIDE { return true; }
+
+  virtual TemporaryRef<gfx::DrawTarget> GetAsDrawTarget() MOZ_OVERRIDE;
+
+  virtual gfx::SurfaceFormat GetFormat() const { return mFormat; }
 
   virtual bool HasInternalBuffer() const MOZ_OVERRIDE { return false; }
 

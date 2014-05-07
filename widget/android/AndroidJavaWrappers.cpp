@@ -62,6 +62,11 @@ jfieldID AndroidGeckoEvent::jScreenOrientationField = 0;
 jfieldID AndroidGeckoEvent::jByteBufferField = 0;
 jfieldID AndroidGeckoEvent::jWidthField = 0;
 jfieldID AndroidGeckoEvent::jHeightField = 0;
+jfieldID AndroidGeckoEvent::jIDField = 0;
+jfieldID AndroidGeckoEvent::jGamepadButtonField = 0;
+jfieldID AndroidGeckoEvent::jGamepadButtonPressedField = 0;
+jfieldID AndroidGeckoEvent::jGamepadButtonValueField = 0;
+jfieldID AndroidGeckoEvent::jGamepadValuesField = 0;
 jfieldID AndroidGeckoEvent::jPrefNamesField = 0;
 
 jclass AndroidGeckoEvent::jDomKeyLocationClass = 0;
@@ -167,6 +172,11 @@ AndroidGeckoEvent::InitGeckoEventClass(JNIEnv *jEnv)
     jByteBufferField = getField("mBuffer", "Ljava/nio/ByteBuffer;");
     jWidthField = getField("mWidth", "I");
     jHeightField = getField("mHeight", "I");
+    jIDField = getField("mID", "I");
+    jGamepadButtonField = getField("mGamepadButton", "I");
+    jGamepadButtonPressedField = getField("mGamepadButtonPressed", "Z");
+    jGamepadButtonValueField = getField("mGamepadButtonValue", "F");
+    jGamepadValuesField = getField("mGamepadValues", "[F");
     jPrefNamesField = getField("mPrefNames", "[Ljava/lang/String;");
 
     // Init GeckoEvent.DomKeyLocation enum
@@ -586,6 +596,26 @@ AndroidGeckoEvent::Init(JNIEnv *jenv, jobject jobj)
             break;
         }
 
+        case GAMEPAD_ADDREMOVE: {
+            mID = jenv->GetIntField(jobj, jIDField);
+            break;
+        }
+
+        case GAMEPAD_DATA: {
+            mID = jenv->GetIntField(jobj, jIDField);
+            if (mAction == ACTION_GAMEPAD_BUTTON) {
+                mGamepadButton = jenv->GetIntField(jobj, jGamepadButtonField);
+                mGamepadButtonPressed = jenv->GetBooleanField(jobj, jGamepadButtonPressedField);
+                mGamepadButtonValue = jenv->GetFloatField(jobj, jGamepadButtonValueField);
+            } else if (mAction == ACTION_GAMEPAD_AXES) {
+                // Flags is a bitfield of valid entries in gamepadvalues
+                mFlags = jenv->GetIntField(jobj, jFlagsField);
+                mCount = jenv->GetIntField(jobj, jCountField);
+                ReadFloatArray(mGamepadValues, jenv, jGamepadValuesField, mCount);
+            }
+            break;
+        }
+
         case PREFERENCES_OBSERVE:
         case PREFERENCES_GET: {
             ReadStringArray(mPrefNames, jenv, jPrefNamesField);
@@ -862,7 +892,7 @@ AndroidLayerRendererFrame::Dispose(JNIEnv *env)
     wrapped_obj = 0;
 }
 
-NS_IMPL_ISUPPORTS1(nsAndroidDisplayport, nsIAndroidDisplayport)
+NS_IMPL_ISUPPORTS(nsAndroidDisplayport, nsIAndroidDisplayport)
 
 bool
 AndroidLayerRendererFrame::BeginDrawing(AutoLocalJNIFrame *jniFrame)

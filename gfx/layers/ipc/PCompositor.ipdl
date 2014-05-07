@@ -6,7 +6,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 include LayersSurfaces;
-include protocol PGrallocBuffer;
 include protocol PLayerTransaction;
 include "mozilla/GfxMessageUtils.h";
 include "nsRegion.h";
@@ -39,6 +38,11 @@ intr protocol PCompositor
 child:
   // The child should invalidate everything so that the whole window is redrawn.
   async InvalidateAll();
+
+  // The compositor completed a layers transaction. id is the layers id
+  // of the child layer tree that was composited (or 0 when notifying
+  // the root layer tree).
+  async DidComposite(uint64_t id);
 
 parent:
 

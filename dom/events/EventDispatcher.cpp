@@ -707,6 +707,9 @@ EventDispatcher::CreateEvent(EventTarget* aOwner,
     case NS_WHEEL_EVENT:
       return NS_NewDOMWheelEvent(aDOMEvent, aOwner, aPresContext,
                                  aEvent->AsWheelEvent());
+    case NS_EDITOR_INPUT_EVENT:
+      return NS_NewDOMInputEvent(aDOMEvent, aOwner, aPresContext,
+                                 aEvent->AsEditorInputEvent());
     case NS_DRAG_EVENT:
       return NS_NewDOMDragEvent(aDOMEvent, aOwner, aPresContext,
                                 aEvent->AsDragEvent());
@@ -816,8 +819,6 @@ EventDispatcher::CreateEvent(EventTarget* aOwner,
     return NS_NewDOMScrollAreaEvent(aDOMEvent, aOwner, aPresContext, nullptr);
   if (aEventType.LowerCaseEqualsLiteral("popstateevent"))
     return NS_NewDOMPopStateEvent(aDOMEvent, aOwner, aPresContext, nullptr);
-  if (aEventType.LowerCaseEqualsLiteral("mozaudioavailableevent"))
-    return NS_NewDOMAudioAvailableEvent(aDOMEvent, aOwner, aPresContext, nullptr);
   if (aEventType.LowerCaseEqualsLiteral("closeevent"))
     return NS_NewDOMCloseEvent(aDOMEvent, aOwner, aPresContext, nullptr);
   if (aEventType.LowerCaseEqualsLiteral("touchevent") &&

@@ -49,7 +49,7 @@ public:
   uint16_t mSearchResult;
 };
 
-NS_IMPL_ISUPPORTS1(nsFileResult, nsIAutoCompleteResult)
+NS_IMPL_ISUPPORTS(nsFileResult, nsIAutoCompleteResult)
 
 nsFileResult::nsFileResult(const nsAString& aSearchString,
                            const nsAString& aSearchParam):
@@ -172,6 +172,11 @@ NS_IMETHODIMP nsFileResult::GetImageAt(int32_t index, nsAString & aImage)
   aImage.Truncate();
   return NS_OK;
 }
+NS_IMETHODIMP nsFileResult::GetFinalCompleteValueAt(int32_t index,
+                                                    nsAString & aValue)
+{
+  return GetValueAt(index, aValue);
+}
 
 NS_IMETHODIMP nsFileResult::RemoveValueAt(int32_t rowIndex, bool removeFromDb)
 {
@@ -185,7 +190,7 @@ public:
   NS_DECL_NSIAUTOCOMPLETESEARCH
 };
 
-NS_IMPL_ISUPPORTS1(nsFileComplete, nsIAutoCompleteSearch)
+NS_IMPL_ISUPPORTS(nsFileComplete, nsIAutoCompleteSearch)
 
 NS_IMETHODIMP
 nsFileComplete::StartSearch(const nsAString& aSearchString,
@@ -300,7 +305,7 @@ nsFileView::Init()
 
 // nsISupports implementation
 
-NS_IMPL_ISUPPORTS2(nsFileView, nsITreeView, nsIFileView)
+NS_IMPL_ISUPPORTS(nsFileView, nsITreeView, nsIFileView)
 
 // nsIFileView implementation
 

@@ -20,7 +20,7 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef assembler_jit_ExecutableAllocator_h
@@ -73,6 +73,10 @@ extern  "C" void sync_instruction_memory(caddr_t v, u_int len);
 #define INITIAL_PROTECTION_FLAGS (PROT_READ | PROT_WRITE | PROT_EXEC)
 #endif
 
+namespace JSC {
+  enum CodeKind { ION_CODE = 0, BASELINE_CODE, REGEXP_CODE, OTHER_CODE };
+}
+
 #if ENABLE_ASSEMBLER
 
 //#define DEBUG_STRESS_JSC_ALLOCATOR
@@ -84,8 +88,6 @@ namespace JS {
 namespace JSC {
 
   class ExecutableAllocator;
-
-  enum CodeKind { ION_CODE = 0, BASELINE_CODE, REGEXP_CODE, OTHER_CODE };
 
   // These are reference-counted. A new one starts with a count of 1.
   class ExecutablePool {
@@ -298,7 +300,7 @@ private:
 
         if ((std::numeric_limits<size_t>::max() - granularity) <= request)
             return OVERSIZE_ALLOCATION;
-        
+
         // Round up to next page boundary
         size_t size = request + (granularity - 1);
         size = size & ~(granularity - 1);

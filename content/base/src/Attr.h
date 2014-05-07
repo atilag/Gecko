@@ -56,7 +56,7 @@ public:
 
   // nsIAttribute interface
   void SetMap(nsDOMAttributeMap *aMap) MOZ_OVERRIDE;
-  nsIContent *GetContent() const MOZ_OVERRIDE;
+  Element* GetElement() const;
   nsresult SetOwnerDocument(nsIDocument* aDocument) MOZ_OVERRIDE;
 
   // nsINode interface
@@ -69,7 +69,7 @@ public:
                                  bool aNotify) MOZ_OVERRIDE;
   virtual void RemoveChildAt(uint32_t aIndex, bool aNotify) MOZ_OVERRIDE;
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
-  virtual already_AddRefed<nsIURI> GetBaseURI() const MOZ_OVERRIDE;
+  virtual already_AddRefed<nsIURI> GetBaseURI(bool aTryUseXHRDocBaseURI = false) const MOZ_OVERRIDE;
 
   static void Initialize();
   static void Shutdown();
@@ -80,8 +80,7 @@ public:
   virtual nsIDOMNode* AsDOMNode() { return this; }
 
   // WebIDL
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   // XPCOM GetName() is OK
   // XPCOM GetValue() is OK
@@ -99,14 +98,13 @@ public:
 protected:
   virtual Element* GetNameSpaceElement()
   {
-    return GetContentInternal();
+    return GetElement();
   }
 
   static bool sInitialized;
 
 private:
   already_AddRefed<nsIAtom> GetNameAtom(nsIContent* aContent);
-  Element* GetContentInternal() const;
 
   nsString mValue;
 };

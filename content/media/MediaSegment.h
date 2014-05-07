@@ -118,6 +118,16 @@ public:
    */
   virtual void Clear() = 0;
 
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
+  {
+    return 0;
+  }
+
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
+
 protected:
   MediaSegment(Type aType) : mDuration(0), mType(aType)
   {
@@ -245,6 +255,20 @@ public:
   }
 #endif
 
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    size_t amount = mChunks.SizeOfExcludingThis(aMallocSizeOf);
+    for (size_t i = 0; i < mChunks.Length(); i++) {
+      amount += mChunks[i].SizeOfExcludingThisIfUnshared(aMallocSizeOf);
+    }
+    return amount;
+  }
+
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
+
 protected:
   MediaSegmentBase(Type aType) : MediaSegment(aType) {}
 
@@ -267,9 +291,8 @@ protected:
   void AppendSliceInternal(const MediaSegmentBase<C, Chunk>& aSource,
                            TrackTicks aStart, TrackTicks aEnd)
   {
-    NS_ASSERTION(aStart <= aEnd, "Endpoints inverted");
-    NS_WARN_IF_FALSE(aStart >= 0 && aEnd <= aSource.mDuration,
-                     "Slice out of range");
+    MOZ_ASSERT(aStart <= aEnd, "Endpoints inverted");
+    MOZ_ASSERT(aStart >= 0 && aEnd <= aSource.mDuration, "Slice out of range");
     mDuration += aEnd - aStart;
     TrackTicks offset = 0;
     for (uint32_t i = 0; i < aSource.mChunks.Length() && offset < aEnd; ++i) {

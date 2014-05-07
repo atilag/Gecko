@@ -30,15 +30,15 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(TouchList)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(TouchList, mParent, mPoints)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(TouchList, mParent, mPoints)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(TouchList)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(TouchList)
 
 JSObject*
-TouchList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+TouchList::WrapObject(JSContext* aCx)
 {
-  return TouchListBinding::Wrap(aCx, aScope, this);
+  return TouchListBinding::Wrap(aCx, this);
 }
 
 // static
@@ -83,10 +83,10 @@ TouchEvent::TouchEvent(EventTarget* aOwner,
   }
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_3(TouchEvent, UIEvent,
-                                     mTouches,
-                                     mTargetTouches,
-                                     mChangedTouches)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(TouchEvent, UIEvent,
+                                   mTouches,
+                                   mTargetTouches,
+                                   mChangedTouches)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(TouchEvent)
 NS_INTERFACE_MAP_END_INHERITING(UIEvent)

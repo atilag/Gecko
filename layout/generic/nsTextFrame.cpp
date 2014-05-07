@@ -1774,14 +1774,10 @@ GetFontGroupForFrame(nsIFrame* aFrame, float aFontSizeInflation,
 }
 
 static already_AddRefed<gfxContext>
-GetReferenceRenderingContext(nsTextFrame* aTextFrame, nsRenderingContext* aRC)
+CreateReferenceThebesContext(nsTextFrame* aTextFrame)
 {
-  nsRefPtr<nsRenderingContext> tmp = aRC;
-  if (!tmp) {
-    tmp = aTextFrame->PresContext()->PresShell()->GetReferenceRenderingContext();
-    if (!tmp)
-      return nullptr;
-  }
+  nsRefPtr<nsRenderingContext> tmp =
+    aTextFrame->PresContext()->PresShell()->CreateReferenceRenderingContext();
 
   nsRefPtr<gfxContext> ctx = tmp->ThebesContext();
   return ctx.forget();
@@ -1795,7 +1791,7 @@ GetHyphenTextRun(gfxTextRun* aTextRun, gfxContext* aContext, nsTextFrame* aTextF
 {
   nsRefPtr<gfxContext> ctx = aContext;
   if (!ctx) {
-    ctx = GetReferenceRenderingContext(aTextFrame, nullptr);
+    ctx = CreateReferenceThebesContext(aTextFrame);
   }
   if (!ctx)
     return nullptr;
@@ -2558,7 +2554,7 @@ nsTextFrame::EnsureTextRun(TextRunType aWhichTextRun,
   } else {
     nsRefPtr<gfxContext> ctx = aReferenceContext;
     if (!ctx) {
-      ctx = GetReferenceRenderingContext(this, nullptr);
+      ctx = CreateReferenceThebesContext(this);
     }
     if (ctx) {
       BuildTextRuns(ctx, this, aLineContainer, aLine, aWhichTextRun);
@@ -2840,7 +2836,7 @@ public:
   }
 
   virtual already_AddRefed<gfxContext> GetContext() {
-    return GetReferenceRenderingContext(GetFrame(), nullptr);
+    return CreateReferenceThebesContext(GetFrame());
   }
 
   virtual uint32_t GetAppUnitsPerDevUnit() {
@@ -3976,10 +3972,8 @@ nsContinuingTextFrame::Init(nsIContent* aContent,
   // NOTE: bypassing nsTextFrame::Init!!!
   nsFrame::Init(aContent, aParent, aPrevInFlow);
 
-#ifdef IBMBIDI
   nsTextFrame* nextContinuation =
     static_cast<nsTextFrame*>(aPrevInFlow->GetNextContinuation());
-#endif // IBMBIDI
   // Hook the frame into the flow
   SetPrevInFlow(aPrevInFlow);
   aPrevInFlow->SetNextInFlow(this);
@@ -4003,7 +3997,6 @@ nsContinuingTextFrame::Init(nsIContent* aContent,
       }
     }
   }
-#ifdef IBMBIDI
   if (aPrevInFlow->GetStateBits() & NS_FRAME_IS_BIDI) {
     FramePropertyTable *propTable = PresContext()->PropertyTable();
     // Get all the properties from the prev-in-flow first to take
@@ -4032,7 +4025,6 @@ nsContinuingTextFrame::Init(nsIContent* aContent,
     }
     mState |= NS_FRAME_IS_BIDI;
   } // prev frame is bidi
-#endif // IBMBIDI
 }
 
 void
@@ -4441,7 +4433,6 @@ nsTextFrame::CharacterDataChanged(CharacterDataChangeInfo* aInfo)
 nsTextFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
 {
   nsFrame::DidSetStyleContext(aOldStyleContext);
-  ClearTextRuns();
 }
 
 class nsDisplayTextGeometry : public nsDisplayItemGenericGeometry

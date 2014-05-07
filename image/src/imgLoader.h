@@ -221,6 +221,9 @@ public:
   NS_DECL_IMGICACHE
   NS_DECL_NSIOBSERVER
 
+  static imgLoader* Singleton();
+  static imgLoader* PBSingleton();
+
   imgLoader();
   virtual ~imgLoader();
 
@@ -252,6 +255,7 @@ public:
                      nsLoadFlags aLoadFlags,
                      nsISupports *aCacheKey,
                      nsIChannelPolicy *aPolicy,
+                     const nsAString& initiatorType,
                      imgRequestProxy **_retval);
   nsresult LoadImageWithChannel(nsIChannel *channel,
                                 imgINotificationObserver *aObserver,

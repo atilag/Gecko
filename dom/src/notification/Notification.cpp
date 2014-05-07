@@ -23,6 +23,7 @@
 #include "nsDOMJSUtils.h"
 #include "nsIScriptSecurityManager.h"
 #include "mozilla/dom/PermissionMessageUtils.h"
+#include "mozilla/Services.h"
 #include "nsContentPermissionHelper.h"
 #ifdef MOZ_B2G
 #include "nsIDOMDesktopNotification.h"
@@ -73,12 +74,11 @@ public:
                                                                        aTitle,
                                                                        options);
     JSAutoCompartment ac(aCx, mGlobal);
-    JS::Rooted<JSObject*> scope(aCx, mGlobal);
-    JS::Rooted<JSObject*> element(aCx, notification->WrapObject(aCx, scope));
+    JS::Rooted<JSObject*> element(aCx, notification->WrapObject(aCx));
     NS_ENSURE_TRUE(element, NS_ERROR_FAILURE);
 
-    if (!JS_DefineElement(aCx, mNotifications, mCount++,
-                          JS::ObjectValue(*element), nullptr, nullptr, 0)) {
+    JS::Rooted<JSObject*> notifications(aCx, mNotifications);
+    if (!JS_DefineElement(aCx, notifications, mCount++, element, 0)) {
       return NS_ERROR_FAILURE;
     }
     return NS_OK;
@@ -213,7 +213,7 @@ protected:
 
 uint32_t Notification::sCount = 0;
 
-NS_IMPL_CYCLE_COLLECTION_1(NotificationPermissionRequest, mWindow)
+NS_IMPL_CYCLE_COLLECTION(NotificationPermissionRequest, mWindow)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(NotificationPermissionRequest)
   NS_INTERFACE_MAP_ENTRY(nsIContentPermissionRequest)
@@ -372,7 +372,7 @@ NotificationPermissionRequest::Recv__delete__(const bool& aAllow,
   return true;
 }
 
-NS_IMPL_ISUPPORTS1(NotificationTask, nsIRunnable)
+NS_IMPL_ISUPPORTS(NotificationTask, nsIRunnable)
 
 NS_IMETHODIMP
 NotificationTask::Run()
@@ -390,7 +390,7 @@ NotificationTask::Run()
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS1(NotificationObserver, nsIObserver)
+NS_IMPL_ISUPPORTS(NotificationObserver, nsIObserver)
 
 NS_IMETHODIMP
 NotificationObserver::Observe(nsISupports* aSubject, const char* aTopic,
@@ -419,7 +419,7 @@ Notification::Notification(const nsAString& aID, const nsAString& aTitle, const 
                            NotificationDirection aDir, const nsAString& aLang,
                            const nsAString& aTag, const nsAString& aIconUrl,
 			   nsPIDOMWindow* aWindow)
-  : nsDOMEventTargetHelper(aWindow),
+  : DOMEventTargetHelper(aWindow),
     mID(aID), mTitle(aTitle), mBody(aBody), mDir(aDir), mLang(aLang),
     mTag(aTag), mIconUrl(aIconUrl), mIsClosed(false)
 {
@@ -579,6 +579,7 @@ Notification::ShowInternal()
         ops.mTextClickable = true;
         ops.mManifestURL = manifestUrl;
         ops.mId = alertName;
+        ops.mDbId = mID;
         ops.mDir = DirectionToString(mDir);
         ops.mLang = mLang;
         ops.mTag = mTag;
@@ -674,7 +675,7 @@ Notification::GetPermissionInternal(nsISupports* aGlobal, ErrorResult& aRv)
   uint32_t permission = nsIPermissionManager::UNKNOWN_ACTION;
 
   nsCOMPtr<nsIPermissionManager> permissionManager =
-    do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
+    services::GetPermissionManager();
 
   permissionManager->TestPermissionFromPrincipal(principal,
                                                  "desktop-notification",
@@ -736,9 +737,9 @@ Notification::Get(const GlobalObject& aGlobal,
 }
 
 JSObject*
-Notification::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+Notification::WrapObject(JSContext* aCx)
 {
-  return mozilla::dom::NotificationBinding::Wrap(aCx, aScope, this);
+  return mozilla::dom::NotificationBinding::Wrap(aCx, this);
 }
 
 void

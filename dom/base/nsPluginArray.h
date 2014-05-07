@@ -33,8 +33,7 @@ public:
   virtual ~nsPluginArray();
 
   nsPIDOMWindow* GetParentObject() const;
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   // nsPluginArray registers itself as an observer with a weak reference.
   // This can't be done in the constructor, because at that point its
@@ -53,8 +52,9 @@ public:
   void Refresh(bool aReloadDocuments);
   nsPluginElement* IndexedGetter(uint32_t aIndex, bool &aFound);
   nsPluginElement* NamedGetter(const nsAString& aName, bool &aFound);
+  bool NameIsEnumerable(const nsAString& aName);
   uint32_t Length();
-  void GetSupportedNames(nsTArray< nsString >& aRetval);
+  void GetSupportedNames(unsigned, nsTArray<nsString>& aRetval);
 
 private:
   bool AllowPlugins() const;
@@ -85,8 +85,7 @@ public:
   nsPluginElement(nsPIDOMWindow* aWindow, nsPluginTag* aPluginTag);
 
   nsPIDOMWindow* GetParentObject() const;
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   nsPluginTag* PluginTag() const
   {
@@ -103,8 +102,9 @@ public:
   nsMimeType* NamedItem(const nsAString& name);
   nsMimeType* IndexedGetter(uint32_t index, bool &found);
   nsMimeType* NamedGetter(const nsAString& name, bool &found);
+  bool NameIsEnumerable(const nsAString& aName);
   uint32_t Length();
-  void GetSupportedNames(nsTArray< nsString >& retval);
+  void GetSupportedNames(unsigned, nsTArray<nsString>& retval);
 
   nsTArray<nsRefPtr<nsMimeType> >& MimeTypes();
 

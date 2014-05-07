@@ -146,7 +146,7 @@ public:
 private:
   nsRefPtr<nsEditorSpellCheck> mSpellCheck;
 };
-NS_IMPL_ISUPPORTS1(DictionaryFetcher, nsIContentPrefCallback2)
+NS_IMPL_ISUPPORTS(DictionaryFetcher, nsIContentPrefCallback2)
 
 NS_IMETHODIMP
 DictionaryFetcher::Fetch(nsIEditor* aEditor)
@@ -244,10 +244,10 @@ NS_INTERFACE_MAP_BEGIN(nsEditorSpellCheck)
   NS_INTERFACE_MAP_ENTRIES_CYCLE_COLLECTION(nsEditorSpellCheck)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_3(nsEditorSpellCheck,
-                           mEditor,
-                           mSpellChecker,
-                           mTxtSrvFilter)
+NS_IMPL_CYCLE_COLLECTION(nsEditorSpellCheck,
+                         mEditor,
+                         mSpellChecker,
+                         mTxtSrvFilter)
 
 nsEditorSpellCheck::nsEditorSpellCheck()
   : mSuggestedWordIndex(0)
@@ -752,6 +752,12 @@ nsEditorSpellCheck::DictionaryFetched(DictionaryFetcher* aFetcher)
 
   // otherwise, get language from preferences
   nsAutoString preferedDict(Preferences::GetLocalizedString("spellchecker.dictionary"));
+  // Replace '_' with '-' in case the user has an underscore stored in their
+  // pref, see bug 992118 for how this could have happened.
+  int32_t underScore = preferedDict.FindChar('_');
+  if (underScore != -1) {
+    preferedDict.Replace(underScore, 1, '-');
+  }
   if (dictName.IsEmpty()) {
     dictName.Assign(preferedDict);
   }
@@ -844,6 +850,11 @@ nsEditorSpellCheck::DictionaryFetched(DictionaryFetcher* aFetcher)
         int32_t dot_pos = lang.FindChar('.');
         if (dot_pos != -1) {
           lang = Substring(lang, 0, dot_pos - 1);
+        }
+        // Replace '_' with '-'
+        int32_t underScore = lang.FindChar('_');
+        if (underScore != -1) {
+          lang.Replace(underScore, 1, '-');
         }
         rv = SetCurrentDictionary(lang);
       }

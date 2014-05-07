@@ -19,6 +19,7 @@ import org.mozilla.gecko.home.PanelLayout.PanelView;
 
 import android.content.Context;
 import android.database.Cursor;
+import android.util.Log;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.GridView;
@@ -30,6 +31,9 @@ public class PanelGridView extends GridView
     private final ViewConfig viewConfig;
     private final PanelViewAdapter adapter;
     private PanelViewItemHandler itemHandler;
+    private OnItemOpenListener itemOpenListener;
+    private HomeContextMenuInfo mContextMenuInfo;
+    private HomeContextMenuInfo.Factory mContextMenuInfoFactory;
 
     public PanelGridView(Context context, ViewConfig viewConfig) {
         super(context, null, R.attr.panelGridViewStyle);
@@ -41,6 +45,25 @@ public class PanelGridView extends GridView
         setAdapter(adapter);
 
         setOnItemClickListener(new PanelGridItemClickListener());
+        setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
+            @Override
+            public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
+                Cursor cursor = (Cursor) parent.getItemAtPosition(position);
+                if (cursor == null || mContextMenuInfoFactory == null) {
+                    mContextMenuInfo = null;
+                    return false;
+                }
+
+                mContextMenuInfo = mContextMenuInfoFactory.makeInfoForCursor(view, position, id, cursor);
+                return showContextMenuForChild(PanelGridView.this);
+            }
+        });
+    }
+
+    @Override
+    public void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        itemHandler.setOnItemOpenListener(itemOpenListener);
     }
 
     @Override
@@ -51,12 +74,14 @@ public class PanelGridView extends GridView
 
     @Override
     public void setDataset(Cursor cursor) {
+        Log.d(LOGTAG, "Setting dataset: " + viewConfig.getDatasetId());
         adapter.swapCursor(cursor);
     }
 
     @Override
     public void setOnItemOpenListener(OnItemOpenListener listener) {
         itemHandler.setOnItemOpenListener(listener);
+        itemOpenListener = listener;
     }
 
     @Override
@@ -70,5 +95,15 @@ public class PanelGridView extends GridView
         public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
             itemHandler.openItemAtPosition(adapter.getCursor(), position);
         }
+    }
+
+    @Override
+    public HomeContextMenuInfo getContextMenuInfo() {
+        return mContextMenuInfo;
+    }
+
+    @Override
+    public void setContextMenuInfoFactory(HomeContextMenuInfo.Factory factory) {
+        mContextMenuInfoFactory = factory;
     }
 }

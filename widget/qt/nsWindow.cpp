@@ -60,8 +60,6 @@
 #include "nsAutoPtr.h"
 
 #include "gfxQtPlatform.h"
-#include "gfxContext.h"
-#include "gfxImageSurface.h"
 
 #include "nsIDOMWheelEvent.h"
 
@@ -71,7 +69,6 @@
 #include "keysym2ucs.h"
 #endif
 
-#include "gfxUtils.h"
 #include "Layers.h"
 #include "GLContextProvider.h"
 
@@ -1649,7 +1646,7 @@ InitKeyEvent(WidgetKeyboardEvent &aEvent, QKeyEvent *aQEvent)
     aEvent.pluginEvent = (void *)aQEvent;
 }
 
-NS_IMPL_ISUPPORTS_INHERITED1(nsWindow, nsBaseWidget, nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS_INHERITED(nsWindow, nsBaseWidget, nsISupportsWeakReference)
 
 
 
@@ -1786,18 +1783,6 @@ nsWindow::GetScreenBounds(nsIntRect &aRect)
          mBounds.width, mBounds.height,
          aRect.width, aRect.height));
     return NS_OK;
-}
-
-NS_IMETHODIMP
-nsWindow::SetForegroundColor(const nscolor &aColor)
-{
-    return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
-nsWindow::SetBackgroundColor(const nscolor &aColor)
-{
-    return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP

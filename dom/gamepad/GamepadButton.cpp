@@ -16,12 +16,12 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(GamepadButton)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(GamepadButton, mParent)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(GamepadButton, mParent)
 
 /* virtual */ JSObject*
-GamepadButton::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+GamepadButton::WrapObject(JSContext* aCx)
 {
-  return GamepadButtonBinding::Wrap(aCx, aScope, this);
+  return GamepadButtonBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

@@ -18,6 +18,8 @@ include w3c-css/received/reftest.list
 # relative and absolute positioning
 include abs-pos/reftest.list
 
+include async-scrolling/reftest.list
+
 # backgrounds/
 include backgrounds/reftest.list
 
@@ -53,6 +55,9 @@ include css-animations/reftest.list
 
 # blending/
 include css-blending/reftest.list
+
+# Tests for the css-break spec
+include css-break/reftest.list
 
 # css calc() tests
 include css-calc/reftest.list
@@ -152,6 +157,9 @@ include first-line/reftest.list
 
 # flexbox (display: flex, display: inline-flex)
 include flexbox/reftest.list
+
+# CSS Grid (display: grid, display: inline-grid)
+include css-grid/reftest.list
 
 # floats/
 include floats/reftest.list
@@ -309,6 +317,8 @@ include text-transform/reftest.list
 # theme (osx)
 include ../../toolkit/themes/osx/reftests/reftest.list
 
+include ../../toolkit/content/tests/reftests/reftest.list
+
 # -moz-transform/
 include transform/reftest.list
 
@@ -318,7 +328,9 @@ include transform-3d/reftest.list
 # unicode/ (verify that we don't do expend effort doing unicode-aware case checks)
 include unicode/reftest.list
 
-# webcomonents/
+include view-source/reftest.list
+
+# webcomponents/
 include webcomponents/reftest.list
 
 # widget/
@@ -332,9 +344,6 @@ include xul-document-load/reftest.list
 
 # xul/
 include xul/reftest.list
-
-# webcomonents/
-include webcomponents/reftest.list
 
 # xul
 include ../xul/reftest/reftest.list
@@ -356,7 +365,7 @@ include ../../editor/reftests/reftest.list
 # box-sizing
 include box-sizing/reftest.list
 
-# invalidation - only run on B2G
+# invalidation
 include invalidation/reftest.list
 
 # encodings

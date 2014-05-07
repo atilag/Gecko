@@ -33,14 +33,15 @@ public:
 class TextTrack;
 class TextTrackCue;
 
-class TextTrackManager
+class TextTrackManager MOZ_FINAL : public nsIDOMEventListener
 {
 public:
-  NS_DECL_CYCLE_COLLECTION_NATIVE_CLASS(TextTrackManager)
-  NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(TextTrackManager);
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_CLASS(TextTrackManager)
+
+  NS_DECL_NSIDOMEVENTLISTENER
 
   TextTrackManager(HTMLMediaElement *aMediaElement);
-  ~TextTrackManager();
 
   TextTrackList* TextTracks() const;
   already_AddRefed<TextTrack> AddTextTrack(TextTrackKind aKind,
@@ -88,11 +89,10 @@ public:
 
   void PopulatePendingList();
 
+  void AddListeners();
+
   // The HTMLMediaElement that this TextTrackManager manages the TextTracks of.
-  // This is a weak reference as the life time of TextTrackManager is dependent
-  // on the HTMLMediaElement, so it should not be trying to hold the
-  // HTMLMediaElement alive.
-  HTMLMediaElement* mMediaElement;
+  nsRefPtr<HTMLMediaElement> mMediaElement;
 private:
   // List of the TextTrackManager's owning HTMLMediaElement's TextTracks.
   nsRefPtr<TextTrackList> mTextTracks;

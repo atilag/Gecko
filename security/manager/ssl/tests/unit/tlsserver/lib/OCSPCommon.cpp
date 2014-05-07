@@ -50,19 +50,41 @@ GetOCSPResponseForType(OCSPResponseType aORT, CERTCertificate *aCert,
     }
   }
   // XXX CERT_FindCertIssuer uses the old, deprecated path-building logic
-  context.issuerCert = CERT_FindCertIssuer(aCert, now, certUsageSSLCA);
-  if (!context.issuerCert) {
+  ScopedCERTCertificate issuerCert(CERT_FindCertIssuer(aCert, now,
+                                                       certUsageSSLCA));
+  if (!issuerCert) {
     PrintPRError("CERT_FindCertIssuer failed");
     return nullptr;
   }
-  if (aORT == ORTGoodOtherCA) {
-    context.signerCert = PK11_FindCertFromNickname(aAdditionalCertName,
-                                                   nullptr);
-    if (!context.signerCert) {
+  context.issuerNameDER = &issuerCert->derSubject;
+  context.issuerSPKI = &issuerCert->subjectPublicKeyInfo;
+  ScopedCERTCertificate signerCert;
+  if (aORT == ORTGoodOtherCA || aORT == ORTDelegatedIncluded ||
+      aORT == ORTDelegatedIncludedLast || aORT == ORTDelegatedMissing ||
+      aORT == ORTDelegatedMissingMultiple) {
+    signerCert = PK11_FindCertFromNickname(aAdditionalCertName, nullptr);
+    if (!signerCert) {
       PrintPRError("PK11_FindCertFromNickname failed");
       return nullptr;
     }
   }
+
+  const SECItem* certs[5] = { nullptr, nullptr, nullptr, nullptr, nullptr };
+
+  if (aORT == ORTDelegatedIncluded) {
+    certs[0] = &signerCert->derCert;
+    context.certs = certs;
+  }
+  if (aORT == ORTDelegatedIncludedLast || aORT == ORTDelegatedMissingMultiple) {
+    certs[0] = &issuerCert->derCert;
+    certs[1] = &context.cert->derCert;
+    certs[2] = &issuerCert->derCert;
+    if (aORT != ORTDelegatedMissingMultiple) {
+      certs[3] = &signerCert->derCert;
+    }
+    context.certs = certs;
+  }
+
   switch (aORT) {
     case ORTMalformed:
       context.responseStatus = 1;
@@ -127,9 +149,17 @@ GetOCSPResponseForType(OCSPResponseType aORT, CERTCertificate *aCert,
     extension.next = nullptr;
     context.extensions = &extension;
   }
+  if (aORT == ORTEmptyExtensions) {
+    context.includeEmptyExtensions = true;
+  }
 
-  if (!context.signerCert) {
-    context.signerCert = CERT_DupCertificate(context.issuerCert.get());
+  if (!signerCert) {
+    signerCert = CERT_DupCertificate(issuerCert.get());
+  }
+  context.signerPrivateKey = PK11_FindKeyByAnyCert(signerCert.get(), nullptr);
+  if (!context.signerPrivateKey) {
+    PrintPRError("PK11_FindKeyByAnyCert failed");
+    return nullptr;
   }
 
   SECItem* response = CreateEncodedOCSPResponse(context);
@@ -139,8 +169,12 @@ GetOCSPResponseForType(OCSPResponseType aORT, CERTCertificate *aCert,
   }
 
   SECItemArray* arr = SECITEM_AllocArray(aArena, nullptr, 1);
-  arr->items[0].data = response ? response->data : nullptr;
-  arr->items[0].len = response ? response->len : 0;
+  if (!arr) {
+    PrintPRError("SECITEM_AllocArray failed");
+    return nullptr;
+  }
+  arr->items[0].data = response->data;
+  arr->items[0].len = response->len;
 
   return arr;
 }

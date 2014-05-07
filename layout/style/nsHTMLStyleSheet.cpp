@@ -21,7 +21,7 @@
 #include "nsMappedAttributes.h"
 #include "nsGkAtoms.h"
 #include "nsPresContext.h"
-#include "nsEventStates.h"
+#include "mozilla/EventStates.h"
 #include "nsIDocument.h"
 #include "nsIPresShell.h"
 #include "nsStyleConsts.h"
@@ -38,7 +38,7 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
-NS_IMPL_ISUPPORTS1(nsHTMLStyleSheet::HTMLColorRule, nsIStyleRule)
+NS_IMPL_ISUPPORTS(nsHTMLStyleSheet::HTMLColorRule, nsIStyleRule)
 
 /* virtual */ void
 nsHTMLStyleSheet::HTMLColorRule::MapRuleInfoInto(nsRuleData* aRuleData)
@@ -61,7 +61,7 @@ nsHTMLStyleSheet::HTMLColorRule::List(FILE* out, int32_t aIndent) const
 #endif
 
  
-NS_IMPL_ISUPPORTS1(nsHTMLStyleSheet::GenericTableRule, nsIStyleRule)
+NS_IMPL_ISUPPORTS(nsHTMLStyleSheet::GenericTableRule, nsIStyleRule)
 
 #ifdef DEBUG
 /* virtual */ void
@@ -98,7 +98,7 @@ nsHTMLStyleSheet::TableQuirkColorRule::MapRuleInfoInto(nsRuleData* aRuleData)
 }
 
 
-NS_IMPL_ISUPPORTS1(nsHTMLStyleSheet::LangRule, nsIStyleRule)
+NS_IMPL_ISUPPORTS(nsHTMLStyleSheet::LangRule, nsIStyleRule)
 
 /* virtual */ void
 nsHTMLStyleSheet::LangRule::MapRuleInfoInto(nsRuleData* aRuleData)
@@ -246,7 +246,7 @@ nsHTMLStyleSheet::~nsHTMLStyleSheet()
     PL_DHashTableFinish(&mMappedAttrTable);
 }
 
-NS_IMPL_ISUPPORTS1(nsHTMLStyleSheet, nsIStyleRuleProcessor)
+NS_IMPL_ISUPPORTS(nsHTMLStyleSheet, nsIStyleRuleProcessor)
 
 /* virtual */ void
 nsHTMLStyleSheet::RulesMatching(ElementRuleProcessorData* aData)
@@ -258,7 +258,8 @@ nsHTMLStyleSheet::RulesMatching(ElementRuleProcessorData* aData)
     // if we have anchor colors, check if this is an anchor with an href
     if (tag == nsGkAtoms::a) {
       if (mLinkRule || mVisitedRule || mActiveRule) {
-        nsEventStates state = nsCSSRuleProcessor::GetContentStateForVisitedHandling(
+        EventStates state =
+          nsCSSRuleProcessor::GetContentStateForVisitedHandling(
                                   aData->mElement,
                                   aData->mTreeMatchContext,
                                   aData->mTreeMatchContext.VisitedHandling(),

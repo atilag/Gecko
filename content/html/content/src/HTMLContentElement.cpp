@@ -31,9 +31,9 @@ HTMLContentElement::~HTMLContentElement()
 {
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_1(HTMLContentElement,
-                                     nsGenericHTMLElement,
-                                     mMatchedNodes)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(HTMLContentElement,
+                                   nsGenericHTMLElement,
+                                   mMatchedNodes)
 
 NS_IMPL_ADDREF_INHERITED(HTMLContentElement, Element)
 NS_IMPL_RELEASE_INHERITED(HTMLContentElement, Element)
@@ -44,9 +44,9 @@ NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElement)
 NS_IMPL_ELEMENT_CLONE(HTMLContentElement)
 
 JSObject*
-HTMLContentElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+HTMLContentElement::WrapNode(JSContext *aCx)
 {
-  return HTMLContentElementBinding::Wrap(aCx, aScope, this);
+  return HTMLContentElementBinding::Wrap(aCx, this);
 }
 
 nsresult
@@ -242,10 +242,10 @@ HTMLContentElement::GetDistributedNodes()
   return list.forget();
 }
 
-NS_IMPL_CYCLE_COLLECTION_2(DistributedContentList, mParent, mDistributedNodes)
+NS_IMPL_CYCLE_COLLECTION(DistributedContentList, mParent, mDistributedNodes)
 
 NS_INTERFACE_TABLE_HEAD(DistributedContentList)
-  NS_INTERFACE_TABLE1(DistributedContentList, nsINodeList)
+  NS_INTERFACE_TABLE(DistributedContentList, nsINodeList)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(DistributedContentList)
 NS_INTERFACE_MAP_END
 
@@ -315,8 +315,8 @@ DistributedContentList::IndexOf(nsIContent* aContent)
 }
 
 JSObject*
-DistributedContentList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+DistributedContentList::WrapObject(JSContext* aCx)
 {
-  return NodeListBinding::Wrap(aCx, aScope, this);
+  return NodeListBinding::Wrap(aCx, this);
 }
 

@@ -50,12 +50,12 @@ GetImgLog()
 }
 #endif
 
-NS_IMPL_ISUPPORTS6(imgRequest,
-                   nsIStreamListener, nsIRequestObserver,
-                   nsIThreadRetargetableStreamListener,
-                   nsIChannelEventSink,
-                   nsIInterfaceRequestor,
-                   nsIAsyncVerifyRedirectCallback)
+NS_IMPL_ISUPPORTS(imgRequest,
+                  nsIStreamListener, nsIRequestObserver,
+                  nsIThreadRetargetableStreamListener,
+                  nsIChannelEventSink,
+                  nsIInterfaceRequestor,
+                  nsIAsyncVerifyRedirectCallback)
 
 imgRequest::imgRequest(imgLoader* aLoader)
  : mLoader(aLoader)
@@ -625,7 +625,7 @@ NS_IMETHODIMP imgRequest::OnStartRequest(nsIRequest *aRequest, nsISupports *ctxt
   nsCOMPtr<nsIThreadRetargetableRequest> retargetable =
     do_QueryInterface(aRequest);
   if (httpChannel && retargetable &&
-      !(mIsMultiPartChannel && mImage)) {
+      ImageFactory::CanRetargetOnDataAvailable(mURI, mIsMultiPartChannel)) {
     nsAutoCString mimeType;
     nsresult rv = httpChannel->GetContentType(mimeType);
     if (NS_SUCCEEDED(rv) && !mimeType.EqualsLiteral(IMAGE_SVG_XML)) {

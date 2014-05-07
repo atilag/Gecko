@@ -1,16 +1,11 @@
 package org.mozilla.gecko.tests;
 
-import org.mozilla.gecko.*;
+import org.mozilla.gecko.Actions;
 
 /* This patch tests the Master Password feature first by enabling the password,
 then testing it on a login page and finally disabling the password */
 public class testMasterPassword extends PixelTest {
     Device dev;
-
-    @Override
-    protected int getTestType() {
-        return TEST_MOCHITEST;
-    }
 
     public void testMasterPassword() {
         blockForGeckoReady();
@@ -146,7 +141,7 @@ public class testMasterPassword extends PixelTest {
         // Look for the 'Settings' menu if this device/OS uses it
         selectSettingsItem("Privacy", "Clear private data");
 
-        waitForText("Browsing & download history"); // Make sure the Clear private data pop-up is displayed
+        waitForText("Browsing history"); // Make sure the Clear private data pop-up is displayed
         Actions.EventExpecter clearPrivateDataEventExpecter = mActions.expectGeckoEvent("Sanitize:Finished");
         if (mSolo.searchText("Clear data") && !mSolo.searchText("Cookies")) {
             mSolo.clickOnText("^Clear data$");
@@ -154,7 +149,7 @@ public class testMasterPassword extends PixelTest {
         } else { // For some reason the pop-up was not opened
             if (mSolo.searchText("Cookies")) {
                 mSolo.clickOnText("^Clear private data$");
-                waitForText("Browsing & download history"); // Make sure the Clear private data pop-up is displayed
+                waitForText("Browsing history"); // Make sure the Clear private data pop-up is displayed
                 mSolo.clickOnText("^Clear data$");
                 clearPrivateDataEventExpecter.blockForEvent();
             } else {

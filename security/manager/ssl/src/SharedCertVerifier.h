@@ -11,25 +11,29 @@
 
 namespace mozilla { namespace psm {
 
-class SharedCertVerifier : public mozilla::psm::CertVerifier,
-                           public mozilla::AtomicRefCounted<SharedCertVerifier>
+class SharedCertVerifier : public mozilla::psm::CertVerifier
 {
+protected:
+  ~SharedCertVerifier();
+
 public:
-  MOZ_DECLARE_REFCOUNTED_TYPENAME(SharedCertVerifier)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SharedCertVerifier)
+
   SharedCertVerifier(implementation_config ic,
 #ifndef NSS_NO_LIBPKIX
                      missing_cert_download_config ac, crl_download_config cdc,
 #endif
                      ocsp_download_config odc, ocsp_strict_config osc,
-                     ocsp_get_config ogc)
+                     ocsp_get_config ogc,
+                     pinning_enforcement_config pinningEnforcementLevel)
     : mozilla::psm::CertVerifier(ic,
 #ifndef NSS_NO_LIBPKIX
                                  ac, cdc,
 #endif
-                                 odc, osc, ogc)
+                                 odc, osc, ogc,
+                                 pinningEnforcementLevel)
   {
   }
-  ~SharedCertVerifier();
 };
 
 } } // namespace mozilla::psm

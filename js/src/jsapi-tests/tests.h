@@ -54,7 +54,7 @@ class JSAPITest
 
     JSRuntime *rt;
     JSContext *cx;
-    JSObject *global;
+    JS::Heap<JSObject *> global;
     bool knownFail;
     JSAPITestString msgs;
     JSCompartment *oldCompartment;
@@ -74,8 +74,9 @@ class JSAPITest
             JS_LeaveCompartment(cx, oldCompartment);
             oldCompartment = nullptr;
         }
+        global = nullptr;
         if (cx) {
-            JS_RemoveObjectRoot(cx, &global);
+            JS::RemoveObjectRoot(cx, &global);
             JS_LeaveCompartment(cx, nullptr);
             JS_EndRequest(cx);
             JS_DestroyContext(cx);
@@ -96,7 +97,7 @@ class JSAPITest
 
 #define EVAL(s, vp) do { if (!evaluate(s, __FILE__, __LINE__, vp)) return false; } while (false)
 
-    bool evaluate(const char *bytes, const char *filename, int lineno, jsval *vp);
+    bool evaluate(const char *bytes, const char *filename, int lineno, JS::MutableHandleValue vp);
 
     JSAPITestString jsvalToSource(JS::HandleValue v) {
         JSString *str = JS_ValueToSource(cx, v);
@@ -229,7 +230,9 @@ class JSAPITest
         static const JSClass c = {
             "global", JSCLASS_GLOBAL_FLAGS,
             JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
-            JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub
+            JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, nullptr,
+            nullptr, nullptr, nullptr,
+            JS_GlobalObjectTraceHook
         };
         return &c;
     }

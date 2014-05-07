@@ -6,7 +6,6 @@
 #include "CanvasLayerD3D10.h"
 
 #include "../d3d9/Nv3DVUtils.h"
-#include "gfxImageSurface.h"
 #include "gfxWindowsSurface.h"
 #include "gfxWindowsPlatform.h"
 #include "SurfaceStream.h"
@@ -118,10 +117,15 @@ CanvasLayerD3D10::UpdateSurface()
     return;
   }
 
+  if (!mTexture) {
+    return;
+  }
+
   if (mGLContext) {
     SharedSurface_GL* surf = mGLContext->RequestFrame();
-    if (!surf)
-        return;
+    if (!surf) {
+      return;
+    }
 
     switch (surf->Type()) {
       case SharedSurfaceType::EGLSurfaceANGLE: {
@@ -145,9 +149,10 @@ CanvasLayerD3D10::UpdateSurface()
         DataSourceSurface* frameData = shareSurf->GetData();
         // Scope for DrawTarget, so it's destroyed before Unmap.
         {
+          IntSize boundsSize(mBounds.width, mBounds.height);
           RefPtr<DrawTarget> mapDt = Factory::CreateDrawTargetForData(BackendType::CAIRO,
                                                                       (uint8_t*)map.pData,
-                                                                      frameData->GetSize(),
+                                                                      boundsSize,
                                                                       map.RowPitch,
                                                                       SurfaceFormat::B8G8R8A8);
 

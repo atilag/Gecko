@@ -61,7 +61,7 @@ private:
   nsRefPtr<Link> mDeathGrip;
 };
 
-NS_IMPL_ISUPPORTS1(
+NS_IMPL_ISUPPORTS(
   mock_Link,
   mozilla::dom::Link
 )
@@ -153,7 +153,7 @@ URLSearchParams::~URLSearchParams()
 }
 
 JSObject*
-URLSearchParams::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+URLSearchParams::WrapObject(JSContext* aCx)
 {
   return nullptr;
 }

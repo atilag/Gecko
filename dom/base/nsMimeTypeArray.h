@@ -27,8 +27,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsMimeTypeArray)
 
   nsPIDOMWindow* GetParentObject() const;
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   void Refresh();
 
@@ -37,8 +36,9 @@ public:
   nsMimeType* NamedItem(const nsAString& name);
   nsMimeType* IndexedGetter(uint32_t index, bool &found);
   nsMimeType* NamedGetter(const nsAString& name, bool &found);
+  bool NameIsEnumerable(const nsAString& name);
   uint32_t Length();
-  void GetSupportedNames(nsTArray< nsString >& retval);
+  void GetSupportedNames(unsigned, nsTArray< nsString >& retval);
 
 protected:
   void EnsurePluginMimeTypes();
@@ -70,8 +70,7 @@ public:
   virtual ~nsMimeType();
 
   nsPIDOMWindow* GetParentObject() const;
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   const nsString& Type() const
   {

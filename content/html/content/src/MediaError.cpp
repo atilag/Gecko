@@ -11,7 +11,7 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(MediaError, mParent)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(MediaError, mParent)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(MediaError)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(MediaError)
 
@@ -37,9 +37,9 @@ NS_IMETHODIMP MediaError::GetCode(uint16_t* aCode)
 }
 
 JSObject*
-MediaError::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+MediaError::WrapObject(JSContext* aCx)
 {
-  return MediaErrorBinding::Wrap(aCx, aScope, this);
+  return MediaErrorBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

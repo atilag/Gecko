@@ -9,7 +9,8 @@
 }
 
 /* SCROLLBOX */
-#newtab-scrollbox:not([page-disabled]) {
+#newtab-scrollbox:not([page-disabled]),
+#newtab-scrollbox:not([page-disabled]) #newtab-margin-bottom {
   color: rgb(0,0,0);
   background-color: hsl(0,0%,95%);
 }
@@ -120,7 +121,7 @@
 .newtab-site[type=affiliate] .newtab-thumbnail,
 .newtab-site[type=organic] .newtab-thumbnail,
 .newtab-site[type=sponsored] .newtab-thumbnail {
-  background-position: top center;
+  background-position: center center;
   background-size: auto;
 }
 
@@ -182,4 +183,8 @@
 
 .newtab-control-sponsored:hover {
   background-position: -265px -1px;
+}
+
+.newtab-control-sponsored[panelShown] {
+  background-position: -281px -1px;
 }

@@ -168,7 +168,7 @@ nsObserverService::CollectReports(nsIHandleReportCallback* aHandleReport,
 // nsObserverService Implementation
 
 
-NS_IMPL_ISUPPORTS3(
+NS_IMPL_ISUPPORTS(
     nsObserverService,
     nsIObserverService,
     nsObserverService,
@@ -222,7 +222,7 @@ nsObserverService::Create(nsISupports* outer, const nsIID& aIID, void* *aInstanc
 
 #define NS_ENSURE_VALIDCALL \
     if (!NS_IsMainThread()) {                                     \
-        NS_ERROR("Using observer service off the main thread!");  \
+        MOZ_CRASH("Using observer service off the main thread!"); \
         return NS_ERROR_UNEXPECTED;                               \
     }                                                             \
     if (mShuttingDown) {                                          \

@@ -37,7 +37,7 @@
 #include <stdio.h> // for FILE definition
 #include "nsChangeHint.h"
 #include "nsRefPtrHashtable.h"
-#include "nsEventStates.h"
+#include "nsClassHashtable.h"
 #include "nsPresArena.h"
 #include "nsIImageLoadingContent.h"
 #include "nsMargin.h"
@@ -67,7 +67,6 @@ class nsISelection;
 template<class E> class nsCOMArray;
 class nsWeakFrame;
 class nsIScrollableFrame;
-class gfxASurface;
 class gfxContext;
 class nsIDOMEvent;
 class nsDisplayList;
@@ -95,11 +94,12 @@ struct nsArenaMemoryStats;
 typedef short SelectionType;
 
 namespace mozilla {
-class Selection;
+class EventStates;
 
 namespace dom {
 class Element;
 class Touch;
+class Selection;
 class ShadowRoot;
 } // namespace dom
 
@@ -132,10 +132,10 @@ typedef struct CapturingContentInfo {
   nsIContent* mContent;
 } CapturingContentInfo;
 
-//bccc1c01-5123-4f49-9572-c0bf506b6418
+//61e60df7-128a-4cdd-a684-5f0bd2ceb61f
 #define NS_IPRESSHELL_IID \
-{ 0xbccc1c01, 0x5123, 0x4f49, \
-  {0x95, 0x72, 0xc0, 0xbf, 0x50, 0x6b, 0x64, 0x18}}
+{ 0x61e60df7, 0x128a, 0x4cdd, \
+  {0xa6, 0x84, 0x5f, 0x0b, 0xd2, 0xce, 0xb6, 0x1f}}
 
 // debug VerifyReflow flags
 #define VERIFY_REFLOW_ON                    0x01
@@ -564,9 +564,9 @@ public:
   /**
    * Get a reference rendering context. This is a context that should not
    * be rendered to, but is suitable for measuring text and performing
-   * other non-rendering operations.
+   * other non-rendering operations. Guaranteed to return non-null.
    */
-  virtual already_AddRefed<nsRenderingContext> GetReferenceRenderingContext() = 0;
+  virtual already_AddRefed<nsRenderingContext> CreateReferenceRenderingContext() = 0;
 
   /**
    * Informs the pres shell that the document is now at the anchor with
@@ -775,7 +775,7 @@ public:
     */
   int16_t GetSelectionFlags() const { return mSelectionFlags; }
 
-  virtual mozilla::Selection* GetCurrentSelection(SelectionType aType) = 0;
+  virtual mozilla::dom::Selection* GetCurrentSelection(SelectionType aType) = 0;
 
   /**
     * Interface to dispatch events via the presshell
@@ -897,7 +897,7 @@ public:
    */
   virtual void ContentStateChanged(nsIDocument* aDocument,
                                    nsIContent* aContent,
-                                   nsEventStates aStateMask) = 0;
+                                   mozilla::EventStates aStateMask) = 0;
 
   /**
    * See if reflow verification is enabled. To enable reflow verification add
@@ -1162,6 +1162,32 @@ public:
 
   static nsRefPtrHashtable<nsUint32HashKey, mozilla::dom::Touch>* gCaptureTouchList;
   static bool gPreventMouseEvents;
+
+  // Keeps a map between pointerId and element that currently capturing pointer
+  // with such pointerId. If pointerId is absent in this map then nobody is
+  // capturing it.
+  static nsRefPtrHashtable<nsUint32HashKey, nsIContent>* gPointerCaptureList;
+
+  struct PointerInfo
+  {
+    bool      mActiveState;
+    uint16_t  mPointerType;
+    PointerInfo(bool aActiveState, uint16_t aPointerType) :
+      mActiveState(aActiveState), mPointerType(aPointerType) {}
+  };
+  // Keeps information about pointers such as pointerId, activeState, pointerType
+  static nsClassHashtable<nsUint32HashKey, PointerInfo>* gActivePointersIds;
+
+  static void DispatchGotOrLostPointerCaptureEvent(bool aIsGotCapture,
+                                                    uint32_t aPointerId,
+                                                    nsIContent* aCaptureTarget);
+  static void SetPointerCapturingContent(uint32_t aPointerId, nsIContent* aContent);
+  static void ReleasePointerCapturingContent(uint32_t aPointerId, nsIContent* aContent);
+  static nsIContent* GetPointerCapturingContent(uint32_t aPointerId);
+
+  // GetPointerInfo returns true if pointer with aPointerId is situated in device, false otherwise.
+  // aActiveState is additional information, which shows state of pointer like button state for mouse.
+  static bool GetPointerInfo(uint32_t aPointerId, bool& aActiveState);
 
   /**
    * When capturing content is set, it traps all mouse events and retargets

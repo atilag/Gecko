@@ -48,8 +48,6 @@ class Thread;
 
 typedef void* EGLSurface;
 
-using namespace mozilla::widget::android;
-
 namespace mozilla {
 
 namespace hal {
@@ -181,7 +179,7 @@ public:
         jthrowable e = aEnv->ExceptionOccurred();
         MOZ_ASSERT(e);
         aEnv->ExceptionClear();
-        GeckoAppShell::HandleUncaughtException(nullptr, e);
+        mozilla::widget::android::GeckoAppShell::HandleUncaughtException(nullptr, e);
         // Should be dead by now...
         MOZ_CRASH("Failed to handle uncaught exception");
     }
@@ -197,15 +195,15 @@ public:
     bool GetThreadNameJavaProfiling(uint32_t aThreadId, nsCString & aResult);
     bool GetFrameNameJavaProfiling(uint32_t aThreadId, uint32_t aSampleId, uint32_t aFrameId, nsCString & aResult);
 
-    nsresult CaptureThumbnail(nsIDOMWindow *window, int32_t bufW, int32_t bufH, int32_t tabId, jobject buffer);
+    nsresult CaptureThumbnail(nsIDOMWindow *window, int32_t bufW, int32_t bufH, int32_t tabId, jobject buffer, bool &shouldStore);
     void GetDisplayPort(bool aPageSizeUpdate, bool aIsBrowserContentDisplayed, int32_t tabId, nsIAndroidViewport* metrics, nsIAndroidDisplayport** displayPort);
     void ContentDocumentChanged();
     bool IsContentDocumentDisplayed();
 
-    bool ProgressiveUpdateCallback(bool aHasPendingNewThebesContent, const LayerRect& aDisplayPort, float aDisplayResolution, bool aDrawingCritical, ParentLayerRect& aCompositionBounds, CSSToParentLayerScale& aZoom);
+    bool ProgressiveUpdateCallback(bool aHasPendingNewThebesContent, const LayerRect& aDisplayPort, float aDisplayResolution, bool aDrawingCritical, mozilla::ParentLayerRect& aCompositionBounds, mozilla::CSSToParentLayerScale& aZoom);
 
     void SetLayerClient(JNIEnv* env, jobject jobj);
-    GeckoLayerClient* GetLayerClient() { return mLayerClient; }
+    mozilla::widget::android::GeckoLayerClient* GetLayerClient() { return mLayerClient; }
 
     bool GetHandlersForURL(const nsAString& aURL,
                            nsIMutableArray* handlersArray = nullptr,
@@ -281,8 +279,8 @@ public:
 
     bool LockWindow(void *window, unsigned char **bits, int *width, int *height, int *format, int *stride);
     bool UnlockWindow(void *window);
-    
-    void HandleGeckoMessage(const nsAString& message);
+
+    void HandleGeckoMessage(JSContext* cx, JS::HandleObject message);
 
     bool InitCamera(const nsCString& contentType, uint32_t camera, uint32_t *width, uint32_t *height, uint32_t *fps);
 
@@ -356,7 +354,7 @@ protected:
     JNIEnv *mJNIEnv;
     pthread_t mThread;
 
-    GeckoLayerClient *mLayerClient;
+    mozilla::widget::android::GeckoLayerClient *mLayerClient;
 
     // the android.telephony.SmsMessage class
     jclass mAndroidSmsMessageClass;
@@ -397,7 +395,7 @@ protected:
     jclass jLayerView;
 
     jfieldID jEGLSurfacePointerField;
-    GLController *mGLControllerObj;
+    mozilla::widget::android::GLController *mGLControllerObj;
 
     // some convinient types to have around
     jclass jStringClass;
@@ -421,14 +419,14 @@ protected:
     void (* Region_set)(void* region, void* rect);
 
 private:
-    NativePanZoomController* mNativePanZoomController;
+    mozilla::widget::android::NativePanZoomController* mNativePanZoomController;
     // This will always be accessed from one thread (the APZC "controller"
     // thread, which is the Java UI thread), so we don't need to do locking
     // to touch it
     nsTArray<DelayedTask*> mDelayedTaskQueue;
 
 public:
-    NativePanZoomController* SetNativePanZoomController(jobject obj);
+    mozilla::widget::android::NativePanZoomController* SetNativePanZoomController(jobject obj);
     // GeckoContentController methods
     void RequestContentRepaint(const mozilla::layers::FrameMetrics& aFrameMetrics) MOZ_OVERRIDE;
     void AcknowledgeScrollUpdate(const mozilla::layers::FrameMetrics::ViewID& aScrollId,

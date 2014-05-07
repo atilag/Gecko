@@ -76,6 +76,9 @@ const MMI_MAX_LENGTH_SHORT_CODE = 2;
 
 const MMI_END_OF_USSD = "#";
 
+// Should match the value we set in dom/telephony/TelephonyCommon.h
+const OUTGOING_PLACEHOLDER_CALL_INDEX = 0xffffffff;
+
 let RILQUIRKS_CALLSTATE_EXTRA_UINT32;
 // This may change at runtime since in RIL v6 and later, we get the version
 // number via the UNSOLICITED_RIL_CONNECTED parcel.
@@ -92,6 +95,9 @@ let RILQUIRKS_SEND_STK_PROFILE_DOWNLOAD;
 
 // Ril quirk to attach data registration on demand.
 let RILQUIRKS_DATA_REGISTRATION_ON_DEMAND;
+
+// Ril quirk to control the uicc subscription.
+let RILQUIRKS_SUBSCRIPTION_CONTROL;
 
 function BufObject(aContext) {
   this.context = aContext;
@@ -221,6 +227,8 @@ function RilObject(aContext) {
   this.v5Legacy = RILQUIRKS_V5_LEGACY;
   this.cellBroadcastDisabled = RIL_CELLBROADCAST_DISABLED;
   this.clirMode = RIL_CLIR_MODE;
+
+  this._hasHangUpPendingOutgoingCall = false;
 }
 RilObject.prototype = {
   context: null,
@@ -415,6 +423,11 @@ RilObject.prototype = {
       MMI: cbmmi || null
     };
     this.mergedCellBroadcastConfig = null;
+
+    /**
+     * True if the pending outgoing call is hung up by user.
+     */
+    this._hasHangUpPendingOutgoingCall = false;
   },
 
   /**
@@ -1285,7 +1298,7 @@ RilObject.prototype = {
     Buf.sendParcel();
   },
 
-/**
+  /**
    * Exchange APDU data on an open Logical UICC channel
    */
   iccExchangeAPDU: function(options) {
@@ -1327,6 +1340,23 @@ RilObject.prototype = {
     Buf.newParcel(REQUEST_SIM_CLOSE_CHANNEL, options);
     Buf.writeInt32(1);
     Buf.writeInt32(options.channel);
+    Buf.sendParcel();
+  },
+
+  /**
+   * Enable/Disable UICC subscription
+   */
+  setUiccSubscription: function(options) {
+    if (DEBUG) {
+      this.context.debug("setUiccSubscription: " + JSON.stringify(options));
+    }
+
+    let Buf = this.context.Buf;
+    Buf.newParcel(REQUEST_SET_UICC_SUBSCRIPTION, options);
+    Buf.writeInt32(this.context.clientId);
+    Buf.writeInt32(options.appIndex);
+    Buf.writeInt32(this.context.clientId);
+    Buf.writeInt32(options.enabled ? 1 : 0);
     Buf.sendParcel();
   },
 
@@ -1495,6 +1525,11 @@ RilObject.prototype = {
   },
 
   sendDialRequest: function(options) {
+    // Always succeed.
+    options.success = true;
+    this.sendChromeMessage(options);
+    this._createPendingOutgoingCall(options);
+
     let Buf = this.context.Buf;
     Buf.newParcel(options.request, options);
     Buf.writeString(options.number);
@@ -1536,20 +1571,34 @@ RilObject.prototype = {
       return;
     }
 
-    let Buf = this.context.Buf;
-    switch (call.state) {
-      case CALL_STATE_ACTIVE:
-      case CALL_STATE_DIALING:
-      case CALL_STATE_ALERTING:
-        Buf.newParcel(REQUEST_HANGUP);
-        Buf.writeInt32(1);
-        Buf.writeInt32(options.callIndex);
-        Buf.sendParcel();
-        break;
-      case CALL_STATE_HOLDING:
-        Buf.simpleRequest(REQUEST_HANGUP_WAITING_OR_BACKGROUND);
-        break;
+    let callIndex = call.callIndex;
+    if (callIndex === OUTGOING_PLACEHOLDER_CALL_INDEX) {
+      if (DEBUG) this.context.debug("Hang up pending outgoing call.");
+      this._hasHangUpPendingOutgoingCall = true;
+      this._removeVoiceCall(call, GECKO_CALL_ERROR_NORMAL_CALL_CLEARING);
+      return;
     }
+
+    call.hangUpLocal = true;
+
+    if (call.state === CALL_STATE_HOLDING) {
+      this.sendHangUpBackgroundRequest(callIndex);
+    } else {
+      this.sendHangUpRequest(callIndex);
+    }
+  },
+
+  sendHangUpRequest: function(callIndex) {
+    let Buf = this.context.Buf;
+    Buf.newParcel(REQUEST_HANGUP);
+    Buf.writeInt32(1);
+    Buf.writeInt32(callIndex);
+    Buf.sendParcel();
+  },
+
+  sendHangUpBackgroundRequest: function(callIndex) {
+    let Buf = this.context.Buf;
+    Buf.simpleRequest(REQUEST_HANGUP_WAITING_OR_BACKGROUND);
   },
 
   /**
@@ -1609,6 +1658,8 @@ RilObject.prototype = {
     if (!call) {
       return;
     }
+
+    call.hangUpLocal = true;
 
     let Buf = this.context.Buf;
     if (this._isCdma) {
@@ -1829,8 +1880,19 @@ RilObject.prototype = {
   },
 
   setCellBroadcastSearchList: function(options) {
+    let getSearchListStr = function(aSearchList) {
+      if (typeof aSearchList === "string" || aSearchList instanceof String) {
+        return aSearchList;
+      }
+
+      // TODO: Set search list for CDMA/GSM individually. Bug 990926
+      let prop = this._isCdma ? "cdma" : "gsm";
+
+      return aSearchList && aSearchList[prop];
+    }.bind(this);
+
     try {
-      let str = options.searchListStr;
+      let str = getSearchListStr(options.searchList);
       this.cellBroadcastConfigs.MMI = this._convertCellBroadcastSearchList(str);
       options.success = true;
     } catch (e) {
@@ -3141,14 +3203,30 @@ RilObject.prototype = {
    * Process ICC status.
    */
   _processICCStatus: function(iccStatus) {
+    // If |_waitingRadioTech| is true, we should not get app information because
+    // the |_isCdma| flag is not ready yet. Otherwise we may use wrong index to
+    // get app information, especially for the case that icc card has both cdma
+    // and gsm subscription.
+    if (this._waitingRadioTech) {
+      return;
+    }
+
     this.iccStatus = iccStatus;
     let newCardState;
     let index = this._isCdma ? iccStatus.cdmaSubscriptionAppIndex :
                                iccStatus.gsmUmtsSubscriptionAppIndex;
-    let app = iccStatus.apps[index];
+
+    if (RILQUIRKS_SUBSCRIPTION_CONTROL && index === -1) {
+      // Should enable uicc scription.
+      for (let i = 0; i < iccStatus.apps.length; i++) {
+        this.setUiccSubscription({appIndex: i, enabled: true});
+      }
+      return;
+    }
 
     // When |iccStatus.cardState| is not CARD_STATE_PRESENT or have incorrect
     // app information, we can not get iccId. So treat ICC as undetected.
+    let app = iccStatus.apps[index];
     if (iccStatus.cardState !== CARD_STATE_PRESENT || !app) {
       if (this.cardState !== GECKO_CARDSTATE_UNDETECTED) {
         this.operator = null;
@@ -3701,37 +3779,32 @@ RilObject.prototype = {
   _processCalls: function(newCalls) {
     let conferenceChanged = false;
     let clearConferenceRequest = false;
+    let pendingOutgoingCall = null;
 
     // Go through the calls we currently have on file and see if any of them
     // changed state. Remove them from the newCalls map as we deal with them
     // so that only new calls remain in the map after we're done.
     for each (let currentCall in this.currentCalls) {
+      if (currentCall.callIndex == OUTGOING_PLACEHOLDER_CALL_INDEX) {
+        pendingOutgoingCall = currentCall;
+        continue;
+      }
+
       let newCall;
       if (newCalls) {
         newCall = newCalls[currentCall.callIndex];
         delete newCalls[currentCall.callIndex];
       }
 
+      // Call is no longer reported by the radio. Remove from our map and send
+      // disconnected state change.
       if (!newCall) {
-        // Call is no longer reported by the radio. Remove from our map and
-        // send disconnected state change.
-
         if (this.currentConference.participants[currentCall.callIndex]) {
           conferenceChanged = true;
-          currentCall.isConference = false;
-          delete this.currentConference.participants[currentCall.callIndex];
-          delete this.currentCalls[currentCall.callIndex];
-          // We don't query the fail cause here as it triggers another asynchrouns
-          // request that leads to a problem of updating all conferece participants
-          // in one task.
-          this._handleDisconnectedCall(currentCall);
-        } else {
-          delete this.currentCalls[currentCall.callIndex];
-          this.getFailCauseCode((function(call, failCause) {
-            call.failCause = failCause;
-            this._handleDisconnectedCall(call);
-          }).bind(this, currentCall));
         }
+        this._removeVoiceCall(currentCall,
+                              currentCall.hangUpLocal ?
+                                GECKO_CALL_ERROR_NORMAL_CALL_CLEARING : null);
         continue;
       }
 
@@ -3820,38 +3893,40 @@ RilObject.prototype = {
       }
     }
 
-    // Go through any remaining calls that are new to us.
-    for each (let newCall in newCalls) {
-      if (newCall.isVoice) {
-        // Format international numbers appropriately.
-        if (newCall.number &&
-            newCall.toa == TOA_INTERNATIONAL &&
-            newCall.number[0] != "+") {
-          newCall.number = "+" + newCall.number;
-        }
-
-        if (newCall.state == CALL_STATE_INCOMING) {
-          newCall.isOutgoing = false;
-        } else if (newCall.state == CALL_STATE_DIALING) {
-          newCall.isOutgoing = true;
-        }
-
-        // Set flag for outgoing emergency call.
-        newCall.isEmergency = newCall.isOutgoing &&
-                              this._isEmergencyNumber(newCall.number);
-
-        // Add to our map.
-        if (newCall.isMpty) {
-          conferenceChanged = true;
-          newCall.isConference = true;
-          this.currentConference.participants[newCall.callIndex] = newCall;
-        } else {
-          newCall.isConference = false;
-        }
-        this._handleChangedCallState(newCall);
-        this.currentCalls[newCall.callIndex] = newCall;
+    if (pendingOutgoingCall) {
+      if (!newCalls || Object.keys(newCalls).length === 0) {
+        // We don't get a successful call for pendingOutgoingCall.
+        this._removePendingOutgoingCall(GECKO_CALL_ERROR_UNSPECIFIED);
+      } else {
+        // Only remove it from currentCalls map. Will use the new call to
+        // replace the placeholder.
+        delete this.currentCalls[OUTGOING_PLACEHOLDER_CALL_INDEX];
       }
     }
+
+    // Go through any remaining calls that are new to us.
+    for each (let newCall in newCalls) {
+      if (!newCall.isVoice) {
+        continue;
+      }
+
+      if (newCall.isMpty) {
+        conferenceChanged = true;
+      }
+
+      if (this._hasHangUpPendingOutgoingCall &&
+          (newCall.state === CALL_STATE_DIALING ||
+           newCall.state === CALL_STATE_ALERTING)) {
+        // Receive a new outgoing call which is already hung up by user.
+        if (DEBUG) this.context.debug("Pending outgoing call is hung up by user.");
+        this._hasHangUpPendingOutgoingCall = false;
+        this.sendHangUpRequest(newCall.callIndex);
+      } else {
+        this._addNewVoiceCall(newCall);
+      }
+    }
+
+    this._hasHangUpPendingOutgoingCall = false;
 
     if (clearConferenceRequest) {
       this._hasConferenceRequest = false;
@@ -3859,6 +3934,76 @@ RilObject.prototype = {
     if (conferenceChanged) {
       this._ensureConference();
     }
+  },
+
+  _addNewVoiceCall: function(newCall) {
+    // Format international numbers appropriately.
+    if (newCall.number && newCall.toa == TOA_INTERNATIONAL &&
+        newCall.number[0] != "+") {
+      newCall.number = "+" + newCall.number;
+    }
+
+    if (newCall.state == CALL_STATE_INCOMING) {
+      newCall.isOutgoing = false;
+    } else if (newCall.state == CALL_STATE_DIALING) {
+      newCall.isOutgoing = true;
+    }
+
+    // Set flag for outgoing emergency call.
+    newCall.isEmergency = newCall.isOutgoing &&
+      this._isEmergencyNumber(newCall.number);
+
+    // Set flag for conference.
+    newCall.isConference = newCall.isMpty ? true : false;
+
+    // Add to our map.
+    if (newCall.isMpty) {
+      this.currentConference.participants[newCall.callIndex] = newCall;
+    }
+    this._handleChangedCallState(newCall);
+    this.currentCalls[newCall.callIndex] = newCall;
+  },
+
+  _removeVoiceCall: function(removedCall, failCause) {
+    if (this.currentConference.participants[removedCall.callIndex]) {
+      removedCall.isConference = false;
+      delete this.currentConference.participants[removedCall.callIndex];
+      delete this.currentCalls[removedCall.callIndex];
+      // We don't query the fail cause here as it triggers another asynchrouns
+      // request that leads to a problem of updating all conferece participants
+      // in one task.
+      this._handleDisconnectedCall(removedCall);
+    } else {
+      delete this.currentCalls[removedCall.callIndex];
+      if (failCause) {
+        removedCall.failCause = failCause;
+        this._handleDisconnectedCall(removedCall);
+      } else {
+        this.getFailCauseCode((function(call, failCause) {
+          call.failCause = failCause;
+          this._handleDisconnectedCall(call);
+        }).bind(this, removedCall));
+      }
+    }
+  },
+
+  _createPendingOutgoingCall: function(options) {
+    if (DEBUG) this.context.debug("Create a pending outgoing call.");
+    this._addNewVoiceCall({
+      number: options.number,
+      state: CALL_STATE_DIALING,
+      callIndex: OUTGOING_PLACEHOLDER_CALL_INDEX
+    });
+  },
+
+  _removePendingOutgoingCall: function(failCause) {
+    let call = this.currentCalls[OUTGOING_PLACEHOLDER_CALL_INDEX];
+    if (!call) {
+      return;
+    }
+
+    if (DEBUG) this.context.debug("Remove pending outgoing call.");
+    this._removeVoiceCall(call, failCause);
   },
 
   _ensureConference: function() {
@@ -4259,7 +4404,7 @@ RilObject.prototype = {
         this.getIMEI();
         this.getIMEISV();
       }
-       this.getICCStatus();
+      this.getICCStatus();
     }
   },
 
@@ -5257,16 +5402,15 @@ RilObject.prototype[REQUEST_GET_CURRENT_CALLS] = function REQUEST_GET_CURRENT_CA
   this._processCalls(calls);
 };
 RilObject.prototype[REQUEST_DIAL] = function REQUEST_DIAL(length, options) {
-  options.success = (options.rilRequestError === 0);
-  if (options.success) {
-    this.sendChromeMessage(options);
-  } else {
-    this.getFailCauseCode((function(options, failCause) {
-      options.errorMsg = failCause;
-      this.sendChromeMessage(options);
-    }).bind(this, options));
+  // We already return a successful response before. Don't respond it again!
+  if (options.rilRequestError) {
+    this.getFailCauseCode((function(failCause) {
+      this._removePendingOutgoingCall(failCause);
+      this._hasHangUpPendingOutgoingCall = false;
+    }).bind(this));
   }
 };
+RilObject.prototype[REQUEST_DIAL_EMERGENCY_CALL] = RilObject.prototype[REQUEST_DIAL];
 RilObject.prototype[REQUEST_GET_IMSI] = function REQUEST_GET_IMSI(length, options) {
   if (options.rilRequestError) {
     return;
@@ -6183,7 +6327,7 @@ RilObject.prototype[REQUEST_CDMA_SUBSCRIPTION] = function REQUEST_CDMA_SUBSCRIPT
   // The result[1] is Home SID. (Already be handled in readCDMAHome())
   // The result[2] is Home NID. (Already be handled in readCDMAHome())
   // The result[3] is MIN.
-  // The result[4] is PRL version.
+  this.iccInfo.prlVersion = parseInt(result[4], 10);
 
   this.context.ICCUtilsHelper.handleICCInfoChange();
 };
@@ -6227,6 +6371,8 @@ RilObject.prototype[REQUEST_GET_SMSC_ADDRESS] = function REQUEST_GET_SMSC_ADDRES
 RilObject.prototype[REQUEST_SET_SMSC_ADDRESS] = null;
 RilObject.prototype[REQUEST_REPORT_SMS_MEMORY_STATUS] = null;
 RilObject.prototype[REQUEST_REPORT_STK_SERVICE_IS_RUNNING] = null;
+RilObject.prototype[REQUEST_CDMA_GET_SUBSCRIPTION_SOURCE] = null;
+RilObject.prototype[REQUEST_ISIM_AUTHENTICATION] = null;
 RilObject.prototype[REQUEST_ACKNOWLEDGE_INCOMING_GSM_SMS_WITH_PDU] = null;
 RilObject.prototype[REQUEST_STK_SEND_ENVELOPE_WITH_STATUS] = function REQUEST_STK_SEND_ENVELOPE_WITH_STATUS(length, options) {
   if (options.rilRequestError) {
@@ -6266,6 +6412,8 @@ RilObject.prototype[REQUEST_VOICE_RADIO_TECH] = function REQUEST_VOICE_RADIO_TEC
   let radioTech = this.context.Buf.readInt32List();
   this._processRadioTech(radioTech[0]);
 };
+RilObject.prototype[REQUEST_SET_UICC_SUBSCRIPTION] = null;
+RilObject.prototype[REQUEST_GET_UICC_SUBSCRIPTION] = null;
 RilObject.prototype[REQUEST_GET_UNLOCK_RETRY_COUNT] = function REQUEST_GET_UNLOCK_RETRY_COUNT(length, options) {
   options.success = (options.rilRequestError === 0);
   if (!options.success) {
@@ -6414,6 +6562,7 @@ RilObject.prototype[UNSOLICITED_ON_USSD] = function UNSOLICITED_ON_USSD() {
                           message: message,
                           sessionEnded: !this._ussdSession});
 };
+RilObject.prototype[UNSOLICITED_ON_USSD_REQUEST] = null;
 RilObject.prototype[UNSOLICITED_NITZ_TIME_RECEIVED] = function UNSOLICITED_NITZ_TIME_RECEIVED() {
   let dateString = this.context.Buf.readString();
 
@@ -6578,6 +6727,14 @@ RilObject.prototype[UNSOLICITED_CDMA_INFO_REC] = function UNSOLICITED_CDMA_INFO_
 RilObject.prototype[UNSOLICITED_OEM_HOOK_RAW] = null;
 RilObject.prototype[UNSOLICITED_RINGBACK_TONE] = null;
 RilObject.prototype[UNSOLICITED_RESEND_INCALL_MUTE] = null;
+RilObject.prototype[UNSOLICITED_CDMA_SUBSCRIPTION_SOURCE_CHANGED] = null;
+RilObject.prototype[UNSOLICITED_CDMA_PRL_CHANGED] = function UNSOLICITED_CDMA_PRL_CHANGED(length) {
+  let version = this.context.Buf.readInt32List()[0];
+  if (version !== this.iccInfo.prlVersion) {
+    this.iccInfo.prlVersion = version;
+    this.context.ICCUtilsHelper.handleICCInfoChange();
+  }
+};
 RilObject.prototype[UNSOLICITED_EXIT_EMERGENCY_CALLBACK_MODE] = function UNSOLICITED_EXIT_EMERGENCY_CALLBACK_MODE() {
   this._handleChangedEmergencyCbMode(false);
 };
@@ -6601,6 +6758,7 @@ RilObject.prototype[UNSOLICITED_RIL_CONNECTED] = function UNSOLICITED_RIL_CONNEC
   // Reset radio in the case that b2g restart (or crash).
   this.setRadioEnabled({enabled: false});
 };
+RilObject.prototype[UNSOLICITED_VOICE_RADIO_TECH_CHANGED] = null;
 
 /**
  * This object exposes the functionality to parse and serialize PDU strings
@@ -13498,7 +13656,7 @@ ICCUtilsHelperObject.prototype = {
     let iccInfo = RIL.iccInfo;
     let pnnEntry;
 
-    if (!mcc || !mnc || !lac) {
+    if (!mcc || !mnc || lac == null || lac < 0) {
       return null;
     }
 
@@ -14591,6 +14749,7 @@ let ContextPool = {
     RILQUIRKS_HAVE_QUERY_ICC_LOCK_RETRY_COUNT = quirks.haveQueryIccLockRetryCount;
     RILQUIRKS_SEND_STK_PROFILE_DOWNLOAD = quirks.sendStkProfileDownload;
     RILQUIRKS_DATA_REGISTRATION_ON_DEMAND = quirks.dataRegistrationOnDemand;
+    RILQUIRKS_SUBSCRIPTION_CONTROL = quirks.subscriptionControl;
   },
 
   registerClient: function(aOptions) {

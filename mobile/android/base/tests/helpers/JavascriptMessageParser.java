@@ -24,18 +24,32 @@ public final class JavascriptMessageParser {
     public static final String EVENT_TYPE = "Robocop:JS";
 
     // Messages matching this pattern are handled specially.  Messages not
-    // matching this pattern are still printed.
+    // matching this pattern are still printed. This pattern should be able
+    // to handle having multiple lines in a message.
     private static final Pattern testMessagePattern =
-        Pattern.compile("\n+TEST-(.*) \\| (.*) \\| (.*)\n*");
+        Pattern.compile("TEST-([A-Z\\-]+) \\| (.*?) \\| (.*)", Pattern.DOTALL);
 
     private final Assert asserter;
     // Used to help print stack traces neatly.
     private String lastTestName = "";
     // Have we seen a message saying the test is finished?
     private boolean testFinishedMessageSeen = false;
+    private final boolean endOnAssertionFailure;
 
-    public JavascriptMessageParser(final Assert asserter) {
+    /**
+     * Constructs a message parser for test result messages sent from JavaScript. When seeing an
+     * assertion failure, the message parser can use the given {@link org.mozilla.gecko.Assert}
+     * instance to immediately end the test (typically if the underlying JS framework is not able
+     * to end the test itself) or to swallow the Errors - this functionality is determined by the
+     * <code>endOnAssertionFailure</code> parameter.
+     *
+     * @param asserter The Assert instance to which test results should be passed.
+     * @param endOnAssertionFailure
+     *        true if the test should end if we see a JS assertion failure, false otherwise.
+     */
+    public JavascriptMessageParser(final Assert asserter, final boolean endOnAssertionFailure) {
         this.asserter = asserter;
+        this.endOnAssertionFailure = endOnAssertionFailure;
     }
 
     public boolean isTestFinished() {
@@ -43,7 +57,7 @@ public final class JavascriptMessageParser {
     }
 
     public void logMessage(final String str) {
-        final Matcher m = testMessagePattern.matcher(str);
+        final Matcher m = testMessagePattern.matcher(str.trim());
 
         if (m.matches()) {
             final String type = m.group(1);
@@ -60,8 +74,15 @@ public final class JavascriptMessageParser {
                 try {
                     asserter.ok(false, name, message);
                 } catch (AssertionFailedError e) {
-                    // Swallow this exception.  We want to see all the
-                    // Javascript failures, not die on the very first one!
+                    // Above, we call the assert, allowing it to log.
+                    // Now we can end the test, if applicable.
+                    if (this.endOnAssertionFailure) {
+                        throw e;
+                    }
+                    // Otherwise, swallow the Error. The JS framework we're
+                    // logging messages from is likely capable of ending tests
+                    // when it needs to, and we want to see all of its failures,
+                    // not just the first one!
                 }
             } else if ("KNOWN-FAIL".equals(type)) {
                 asserter.todo(false, name, message);

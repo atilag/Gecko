@@ -29,8 +29,7 @@ protected:
   SVGAElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
   friend nsresult (::NS_NewSVGAElement(nsIContent **aResult,
                                        already_AddRefed<nsINodeInfo>&& aNodeInfo));
-  virtual JSObject* WrapNode(JSContext *cx,
-                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *cx) MOZ_OVERRIDE;
 
 public:
   NS_DECL_ISUPPORTS_INHERITED
@@ -53,7 +52,7 @@ public:
   virtual bool IsLink(nsIURI** aURI) const MOZ_OVERRIDE;
   virtual void GetLinkTarget(nsAString& aTarget) MOZ_OVERRIDE;
   virtual already_AddRefed<nsIURI> GetHrefURI() const MOZ_OVERRIDE;
-  virtual nsEventStates IntrinsicState() const MOZ_OVERRIDE;
+  virtual EventStates IntrinsicState() const MOZ_OVERRIDE;
   nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
                    const nsAString& aValue, bool aNotify)
   {

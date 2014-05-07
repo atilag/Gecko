@@ -8,22 +8,17 @@ package org.mozilla.gecko.toolbar;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.animation.PropertyAnimator;
 import org.mozilla.gecko.animation.PropertyAnimator.PropertyAnimationListener;
-import org.mozilla.gecko.animation.ViewHelper;
 import org.mozilla.gecko.toolbar.BrowserToolbar.OnCommitListener;
 import org.mozilla.gecko.toolbar.BrowserToolbar.OnDismissListener;
 import org.mozilla.gecko.toolbar.BrowserToolbar.OnFilterListener;
-import org.mozilla.gecko.toolbar.ToolbarEditText.OnTextTypeChangeListener;
-import org.mozilla.gecko.toolbar.ToolbarEditText.TextType;
-import org.mozilla.gecko.widget.GeckoLinearLayout;
+import org.mozilla.gecko.widget.ThemedLinearLayout;
 
 import android.content.Context;
 import android.util.AttributeSet;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
-import android.view.View.OnFocusChangeListener;
 import android.view.inputmethod.InputMethodManager;
-import android.widget.ImageButton;
 
 /**
 * {@code ToolbarEditLayout} is the UI for when the toolbar is in
@@ -31,12 +26,10 @@ import android.widget.ImageButton;
 * and its matching 'go' button which changes depending on the
 * current type of text in the entry.
 */
-public class ToolbarEditLayout extends GeckoLinearLayout {
+public class ToolbarEditLayout extends ThemedLinearLayout {
 
     private final ToolbarEditText mEditText;
-    private final ImageButton mGo;
 
-    private OnCommitListener mCommitListener;
     private OnFocusChangeListener mFocusChangeListener;
 
     public ToolbarEditLayout(Context context, AttributeSet attrs) {
@@ -45,28 +38,11 @@ public class ToolbarEditLayout extends GeckoLinearLayout {
         setOrientation(HORIZONTAL);
 
         LayoutInflater.from(context).inflate(R.layout.toolbar_edit_layout, this);
-        mGo = (ImageButton) findViewById(R.id.go);
         mEditText = (ToolbarEditText) findViewById(R.id.url_edit_text);
     }
 
     @Override
     public void onAttachedToWindow() {
-        mGo.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (mCommitListener != null) {
-                    mCommitListener.onCommit();
-                }
-            }
-        });
-
-        mEditText.setOnTextTypeChangeListener(new OnTextTypeChangeListener() {
-            @Override
-            public void onTextTypeChange(ToolbarEditText editText, TextType textType) {
-                updateGoButton(textType);
-            }
-        });
-
         mEditText.setOnFocusChangeListener(new OnFocusChangeListener() {
             @Override
             public void onFocusChange(View v, boolean hasFocus) {
@@ -85,8 +61,6 @@ public class ToolbarEditLayout extends GeckoLinearLayout {
     @Override
     public void setEnabled(boolean enabled) {
         super.setEnabled(enabled);
-
-        mGo.setEnabled(enabled);
         mEditText.setEnabled(enabled);
     }
 
@@ -96,36 +70,13 @@ public class ToolbarEditLayout extends GeckoLinearLayout {
         mEditText.setPrivateMode(isPrivate);
     }
 
-    private void updateGoButton(TextType textType) {
-        if (textType == TextType.EMPTY) {
-            mGo.setVisibility(View.GONE);
-            return;
-        }
-
-        mGo.setVisibility(View.VISIBLE);
-
-        final int imageResource;
-        final String contentDescription;
-
-        if (textType == TextType.SEARCH_QUERY) {
-            imageResource = R.drawable.ic_url_bar_search;
-            contentDescription = getContext().getString(R.string.search);
-        } else {
-            imageResource = R.drawable.ic_url_bar_go;
-            contentDescription = getContext().getString(R.string.go);
-        }
-
-        mGo.setImageResource(imageResource);
-        mGo.setContentDescription(contentDescription);
-    }
-
     private void showSoftInput() {
         InputMethodManager imm =
                (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
         imm.showSoftInput(mEditText, InputMethodManager.SHOW_IMPLICIT);
     }
 
-    void prepareShowAnimation(PropertyAnimator animator) {
+    void prepareShowAnimation(final PropertyAnimator animator) {
         if (animator == null) {
             mEditText.requestFocus();
             showSoftInput();
@@ -135,20 +86,17 @@ public class ToolbarEditLayout extends GeckoLinearLayout {
         animator.addPropertyAnimationListener(new PropertyAnimationListener() {
             @Override
             public void onPropertyAnimationStart() {
-                ViewHelper.setAlpha(mGo, 0.0f);
                 mEditText.requestFocus();
             }
 
             @Override
             public void onPropertyAnimationEnd() {
-                ViewHelper.setAlpha(mGo, 1.0f);
                 showSoftInput();
             }
         });
     }
 
     void setOnCommitListener(OnCommitListener listener) {
-        mCommitListener = listener;
         mEditText.setOnCommitListener(listener);
     }
 

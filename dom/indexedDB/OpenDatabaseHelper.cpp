@@ -924,7 +924,7 @@ public:
   }
 };
 
-NS_IMPL_ISUPPORTS1(CompressDataBlobsFunction, mozIStorageFunction)
+NS_IMPL_ISUPPORTS(CompressDataBlobsFunction, mozIStorageFunction)
 
 nsresult
 UpgradeSchemaFrom8To9_0(mozIStorageConnection* aConnection)
@@ -1182,7 +1182,7 @@ public:
   }
 };
 
-NS_IMPL_ISUPPORTS1(EncodeKeysFunction, mozIStorageFunction)
+NS_IMPL_ISUPPORTS(EncodeKeysFunction, mozIStorageFunction)
 
 nsresult
 UpgradeSchemaFrom11_0To12_0(mozIStorageConnection* aConnection)
@@ -1709,7 +1709,7 @@ private:
 
 } // anonymous namespace
 
-NS_IMPL_ISUPPORTS1(OpenDatabaseHelper, nsIRunnable)
+NS_IMPL_ISUPPORTS(OpenDatabaseHelper, nsIRunnable)
 
 nsresult
 OpenDatabaseHelper::Init()
@@ -2146,7 +2146,8 @@ OpenDatabaseHelper::StartSetVersion()
   NS_ASSERTION(quotaManager, "This should never be null!");
 
   rv = quotaManager->AcquireExclusiveAccess(
-             mDatabase, mDatabase->Origin(), helper,
+             mDatabase, mDatabase->Origin(),
+             Nullable<PersistenceType>(mDatabase->Type()), helper,
              &VersionChangeEventsRunnable::QueueVersionChange<SetVersionHelper>,
              helper);
   IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
@@ -2176,7 +2177,8 @@ OpenDatabaseHelper::StartDelete()
   NS_ASSERTION(quotaManager, "This should never be null!");
 
   rv = quotaManager->AcquireExclusiveAccess(
-         mDatabase, mDatabase->Origin(), helper,
+         mDatabase, mDatabase->Origin(),
+         Nullable<PersistenceType>(mDatabase->Type()), helper,
          &VersionChangeEventsRunnable::QueueVersionChange<DeleteDatabaseHelper>,
          helper);
   IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);

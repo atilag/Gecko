@@ -6,27 +6,30 @@
 
 "use strict";
 
-let Cc = Components.classes;
-let Ci = Components.interfaces;
-let Cu = Components.utils;
+const { Cc, Ci, Cu } = require("chrome");
+const Debugger = require("Debugger");
+const { DebuggerServer, ActorPool } = require("devtools/server/main");
+const { EnvironmentActor, LongStringActor, ObjectActor, ThreadActor } = require("devtools/server/actors/script");
+const { update } = require("devtools/toolkit/DevToolsUtils");
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-
-let devtools = Cu.import("resource://gre/modules/devtools/Loader.jsm", {}).devtools;
 
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
                                   "resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyGetter(this, "NetworkMonitor", () => {
-  return devtools.require("devtools/toolkit/webconsole/network-monitor")
+  return require("devtools/toolkit/webconsole/network-monitor")
          .NetworkMonitor;
 });
 XPCOMUtils.defineLazyGetter(this, "NetworkMonitorChild", () => {
-  return devtools.require("devtools/toolkit/webconsole/network-monitor")
+  return require("devtools/toolkit/webconsole/network-monitor")
          .NetworkMonitorChild;
 });
 XPCOMUtils.defineLazyGetter(this, "ConsoleProgressListener", () => {
-  return devtools.require("devtools/toolkit/webconsole/network-monitor")
+  return require("devtools/toolkit/webconsole/network-monitor")
          .ConsoleProgressListener;
+});
+XPCOMUtils.defineLazyGetter(this, "events", () => {
+  return require("sdk/event/core");
 });
 
 for (let name of ["WebConsoleUtils", "ConsoleServiceListener",
@@ -37,13 +40,12 @@ for (let name of ["WebConsoleUtils", "ConsoleServiceListener",
       if (prop == "WebConsoleUtils") {
         prop = "Utils";
       }
-      return devtools.require("devtools/toolkit/webconsole/utils")[prop];
+      return require("devtools/toolkit/webconsole/utils")[prop];
     }.bind(null, name),
     configurable: true,
     enumerable: true
   });
 }
-
 
 /**
  * The WebConsoleActor implements capabilities needed for the Web Console
@@ -237,8 +239,8 @@ WebConsoleActor.prototype =
   set evalWindow(aWindow) {
     this._evalWindow = aWindow;
 
-    if (!this._progressListenerActive && this.parentActor._progressListener) {
-      this.parentActor._progressListener.once("will-navigate", this._onWillNavigate);
+    if (!this._progressListenerActive) {
+      events.on(this.parentActor, "will-navigate", this._onWillNavigate);
       this._progressListenerActive = true;
     }
   },
@@ -508,9 +510,8 @@ WebConsoleActor.prototype =
     let messageManager = null;
 
     if (this._parentIsContentActor) {
-      // Filter network requests by appId on Firefox OS devices.
       appId = this.parentActor.docShell.appId;
-      messageManager = this.parentActor._chromeGlobal;
+      messageManager = this.parentActor.messageManager;
     }
 
     while (aRequest.listeners.length > 0) {
@@ -534,9 +535,10 @@ WebConsoleActor.prototype =
           break;
         case "NetworkActivity":
           if (!this.networkMonitor) {
-            if (appId && messageManager) {
+            if (appId || messageManager) {
               this.networkMonitor =
-                new NetworkMonitorChild(appId, messageManager, this);
+                new NetworkMonitorChild(appId, messageManager,
+                                        this.parentActor.actorID, this);
             }
             else {
               this.networkMonitor = new NetworkMonitor({ window: window }, this);
@@ -1313,10 +1315,15 @@ WebConsoleActor.prototype =
     delete result.wrappedJSObject;
     delete result.ID;
     delete result.innerID;
+    delete result.consoleID;
 
     result.arguments = Array.map(aMessage.arguments || [], (aObj) => {
       let dbgObj = this.makeDebuggeeValue(aObj, true);
       return this.createValueGrip(dbgObj);
+    });
+
+    result.styles = Array.map(aMessage.styles || [], (aString) => {
+      return this.createValueGrip(aString);
     });
 
     return result;
@@ -1370,10 +1377,13 @@ WebConsoleActor.prototype =
    * The "will-navigate" progress listener. This is used to clear the current
    * eval scope.
    */
-  _onWillNavigate: function WCA__onWillNavigate()
+  _onWillNavigate: function WCA__onWillNavigate({ window, isTopLevel })
   {
-    this._evalWindow = null;
-    this._progressListenerActive = false;
+    if (isTopLevel) {
+      this._evalWindow = null;
+      events.off(this.parentActor, "will-navigate", this._onWillNavigate);
+      this._progressListenerActive = false;
+    }
   },
 };
 
@@ -1389,6 +1399,91 @@ WebConsoleActor.prototype.requestTypes =
   setPreferences: WebConsoleActor.prototype.onSetPreferences,
   sendHTTPRequest: WebConsoleActor.prototype.onSendHTTPRequest
 };
+
+
+/**
+ * The AddonConsoleActor implements capabilities needed for the add-on web
+ * console feature.
+ *
+ * @constructor
+ * @param object aAddon
+ *        The add-on that this console watches.
+ * @param object aConnection
+ *        The connection to the client, DebuggerServerConnection.
+ * @param object aParentActor
+ *        The parent BrowserAddonActor actor.
+ */
+function AddonConsoleActor(aAddon, aConnection, aParentActor)
+{
+  this.addon = aAddon;
+  WebConsoleActor.call(this, aConnection, aParentActor);
+}
+
+AddonConsoleActor.prototype = Object.create(WebConsoleActor.prototype);
+
+update(AddonConsoleActor.prototype, {
+  constructor: AddonConsoleActor,
+
+  actorPrefix: "addonConsole",
+
+  /**
+   * The add-on that this console watches.
+   */
+  addon: null,
+
+  /**
+   * The main add-on JS global
+   */
+  get window() {
+    return this.parentActor.global;
+  },
+
+  /**
+   * Destroy the current AddonConsoleActor instance.
+   */
+  disconnect: function ACA_disconnect()
+  {
+    WebConsoleActor.prototype.disconnect.call(this);
+    this.addon = null;
+  },
+
+  /**
+   * Handler for the "startListeners" request.
+   *
+   * @param object aRequest
+   *        The JSON request object received from the Web Console client.
+   * @return object
+   *         The response object which holds the startedListeners array.
+   */
+  onStartListeners: function ACA_onStartListeners(aRequest)
+  {
+    let startedListeners = [];
+
+    while (aRequest.listeners.length > 0) {
+      let listener = aRequest.listeners.shift();
+      switch (listener) {
+        case "ConsoleAPI":
+          if (!this.consoleAPIListener) {
+            this.consoleAPIListener =
+              new ConsoleAPIListener(null, this, "addon/" + this.addon.id);
+            this.consoleAPIListener.init();
+          }
+          startedListeners.push(listener);
+          break;
+      }
+    }
+    return {
+      startedListeners: startedListeners,
+      nativeConsoleAPI: true,
+      traits: this.traits,
+    };
+  },
+});
+
+AddonConsoleActor.prototype.requestTypes = Object.create(WebConsoleActor.prototype.requestTypes);
+AddonConsoleActor.prototype.requestTypes.startListeners = AddonConsoleActor.prototype.onStartListeners;
+
+exports.AddonConsoleActor = AddonConsoleActor;
 
 /**
  * Creates an actor for a network event.
@@ -1824,6 +1919,12 @@ NetworkEventActor.prototype.requestTypes =
   "getEventTimings": NetworkEventActor.prototype.onGetEventTimings,
 };
 
-DebuggerServer.addTabActor(WebConsoleActor, "consoleActor");
-DebuggerServer.addGlobalActor(WebConsoleActor, "consoleActor");
+exports.register = function(handle) {
+  handle.addGlobalActor(WebConsoleActor, "consoleActor");
+  handle.addTabActor(WebConsoleActor, "consoleActor");
+};
 
+exports.unregister = function(handle) {
+  handle.removeGlobalActor(WebConsoleActor, "consoleActor");
+  handle.removeTabActor(WebConsoleActor, "consoleActor");
+};

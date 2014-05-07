@@ -21,8 +21,8 @@ HTMLPreElement::~HTMLPreElement()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED1(HTMLPreElement, nsGenericHTMLElement,
-                             nsIDOMHTMLPreElement)
+NS_IMPL_ISUPPORTS_INHERITED(HTMLPreElement, nsGenericHTMLElement,
+                            nsIDOMHTMLPreElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLPreElement)
 
@@ -83,9 +83,9 @@ HTMLPreElement::GetAttributeMappingFunction() const
 }
 
 JSObject*
-HTMLPreElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+HTMLPreElement::WrapNode(JSContext *aCx)
 {
-  return HTMLPreElementBinding::Wrap(aCx, aScope, this);
+  return HTMLPreElementBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

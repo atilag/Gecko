@@ -10,7 +10,6 @@
 #include "mozilla/gfx/MacIOSurface.h"
 #include "mozilla/gfx/Point.h"
 #include "mozilla/layers/TextureClient.h"
-#include "gfxImageSurface.h"
 
 namespace mozilla {
 
@@ -27,27 +26,6 @@ public:
   }
 
   virtual ISharedImage* AsSharedImage() MOZ_OVERRIDE { return this; }
-
-  virtual already_AddRefed<gfxASurface> DeprecatedGetAsSurface() {
-    mSurface->Lock();
-    size_t bytesPerRow = mSurface->GetBytesPerRow();
-    size_t ioWidth = mSurface->GetDevicePixelWidth();
-    size_t ioHeight = mSurface->GetDevicePixelHeight();
-
-    unsigned char* ioData = (unsigned char*)mSurface->GetBaseAddress();
-
-    nsRefPtr<gfxImageSurface> imgSurface =
-      new gfxImageSurface(gfxIntSize(ioWidth, ioHeight), gfxImageFormat::ARGB32);
-
-    for (size_t i = 0; i < ioHeight; i++) {
-      memcpy(imgSurface->Data() + i * imgSurface->Stride(),
-             ioData + i * bytesPerRow, ioWidth * 4);
-    }
-
-    mSurface->Unlock();
-
-    return imgSurface.forget();
-  }
 
   virtual TemporaryRef<gfx::SourceSurface> GetAsSourceSurface();
 

@@ -9,7 +9,7 @@ const Ci = Components.interfaces;
 const Cr = Components.results;
 const Cu = Components.utils;
 
-this.EXPORTED_SYMBOLS = [];
+this.EXPORTED_SYMBOLS = ["XPIProvider"];
 
 Components.utils.import("resource://gre/modules/Services.jsm");
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -35,6 +35,10 @@ XPCOMUtils.defineLazyModuleGetter(this, "Task",
                                   "resource://gre/modules/Task.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "OS",
                                   "resource://gre/modules/osfile.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "BrowserToolboxProcess",
+                                  "resource:///modules/devtools/ToolboxProcess.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "ConsoleAPI",
+                                  "resource://gre/modules/devtools/Console.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this,
                                    "ChromeRegistry",
@@ -1545,7 +1549,7 @@ function makeSafe(aFunction) {
   }
 }
 
-var XPIProvider = {
+this.XPIProvider = {
   // An array of known install locations
   installLocations: null,
   // A dictionary of known install locations by name
@@ -1664,7 +1668,8 @@ var XPIProvider = {
 
     // XXX Convert to Set(), once it gets stable with stable iterators
     let enabled = Object.create(null);
-    for (let a of this.enabledAddons.split(",")) {
+    let enabledAddons = this.enabledAddons || "";
+    for (let a of enabledAddons.split(",")) {
       a = decodeURIComponent(a.split(":")[0]);
       enabled[a] = null;
     }
@@ -1758,23 +1763,6 @@ var XPIProvider = {
    *         if it is a new profile or the version is unknown
    */
   startup: function XPI_startup(aAppChanged, aOldAppVersion, aOldPlatformVersion) {
-    logger.debug("startup");
-    this.runPhase = XPI_STARTING;
-    this.installs = [];
-    this.installLocations = [];
-    this.installLocationsByName = {};
-    // Hook for tests to detect when saving database at shutdown time fails
-    this._shutdownError = null;
-    // Clear this at startup for xpcshell test restarts
-    this._telemetryDetails = {};
-    // Clear the set of enabled experiments (experiments disabled by default).
-    this._enabledExperiments = new Set();
-    // Register our details structure with AddonManager
-    AddonManagerPrivate.setTelemetryDetails("XPI", this._telemetryDetails);
-
-
-    AddonManagerPrivate.recordTimestamp("XPI_startup_begin");
-
     function addDirectoryInstallLocation(aName, aKey, aPaths, aScope, aLocked) {
       try {
         var dir = FileUtils.getDir(aKey, aPaths);
@@ -1811,6 +1799,22 @@ var XPIProvider = {
     }
 
     try {
+      AddonManagerPrivate.recordTimestamp("XPI_startup_begin");
+
+      logger.debug("startup");
+      this.runPhase = XPI_STARTING;
+      this.installs = [];
+      this.installLocations = [];
+      this.installLocationsByName = {};
+      // Hook for tests to detect when saving database at shutdown time fails
+      this._shutdownError = null;
+      // Clear this at startup for xpcshell test restarts
+      this._telemetryDetails = {};
+      // Clear the set of enabled experiments (experiments disabled by default).
+      this._enabledExperiments = new Set();
+      // Register our details structure with AddonManager
+      AddonManagerPrivate.setTelemetryDetails("XPI", this._telemetryDetails);
+
       let hasRegistry = ("nsIWindowsRegKey" in Ci);
 
       let enabledScopes = Prefs.getIntPref(PREF_EM_ENABLED_SCOPES,
@@ -1870,6 +1874,14 @@ var XPIProvider = {
       Services.prefs.addObserver(PREF_EM_MIN_COMPAT_PLATFORM_VERSION, this, false);
       Services.obs.addObserver(this, NOTIFICATION_FLUSH_PERMISSIONS, false);
 
+      try {
+        BrowserToolboxProcess.on("connectionchange",
+                                 this.onDebugConnectionChange.bind(this));
+      }
+      catch (e) {
+        // BrowserToolboxProcess is not available in all applications
+      }
+
       let flushCaches = this.checkForChanges(aAppChanged, aOldAppVersion,
                                              aOldPlatformVersion);
 
@@ -1901,6 +1913,11 @@ var XPIProvider = {
       }
 
       this.enabledAddons = Prefs.getCharPref(PREF_EM_ENABLED_ADDONS, "");
+
+      // Invalidate the URI mappings now that |enabledAddons| was updated.
+      // |_ensureMappings()| will re-create the mappings when needed.
+      delete this._uriMappings;
+
       if ("nsICrashReporter" in Ci &&
           Services.appinfo instanceof Ci.nsICrashReporter) {
         // Annotate the crash report with relevant add-on information.
@@ -3850,6 +3867,15 @@ var XPIProvider = {
     }
   },
 
+  onDebugConnectionChange: function(aEvent, aWhat, aConnection) {
+    if (aWhat != "opened")
+      return;
+
+    for (let id of Object.keys(this.bootstrapScopes)) {
+      aConnection.setAddonOptions(id, { global: this.bootstrapScopes[id] });
+    }
+  },
+
   /**
    * Notified when a preference we're interested in has changed.
    *
@@ -4102,6 +4128,9 @@ var XPIProvider = {
       for (let feature of features)
         this.bootstrapScopes[aId][feature] = gGlobalScope[feature];
 
+      // Define a console for the add-on
+      this.bootstrapScopes[aId]["console"] = new ConsoleAPI({ consoleID: "addon/" + aId });
+
       // As we don't want our caller to control the JS version used for the
       // bootstrap file, we run loadSubScript within the context of the
       // sandbox with the latest JS version set explicitly.
@@ -4113,6 +4142,13 @@ var XPIProvider = {
     }
     catch (e) {
       logger.warn("Error loading bootstrap.js for " + aId, e);
+    }
+
+    try {
+      BrowserToolboxProcess.setAddonOptions(aId, { global: this.bootstrapScopes[aId] });
+    }
+    catch (e) {
+      // BrowserToolboxProcess is not available in all applications
     }
   },
 
@@ -4128,6 +4164,13 @@ var XPIProvider = {
     delete this.bootstrappedAddons[aId];
     this.persistBootstrappedAddons();
     this.addAddonsToCrashReporter();
+
+    try {
+      BrowserToolboxProcess.setAddonOptions(aId, { global: null });
+    }
+    catch (e) {
+      // BrowserToolboxProcess is not available in all applications
+    }
   },
 
   /**
@@ -6284,9 +6327,11 @@ function AddonWrapper(aAddon) {
 
   ["sourceURI", "releaseNotesURI"].forEach(function(aProp) {
     this.__defineGetter__(aProp, function AddonWrapper_URIPropertyGetter() {
-      let target = chooseValue(aAddon, aProp)[0];
+      let [target, fromRepo] = chooseValue(aAddon, aProp);
       if (!target)
         return null;
+      if (fromRepo)
+        return target;
       return NetUtil.newURI(target);
     });
   }, this);

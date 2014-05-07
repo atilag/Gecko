@@ -23,7 +23,7 @@ namespace js {
  * and saved versions. If deserialization fails, the data should be
  * invalidated if possible.
  */
-static const uint32_t XDR_BYTECODE_VERSION = uint32_t(0xb973c0de - 169);
+static const uint32_t XDR_BYTECODE_VERSION = uint32_t(0xb973c0de - 172);
 
 class XDRBuffer {
   public:
@@ -95,11 +95,10 @@ class XDRState {
     XDRBuffer buf;
 
   protected:
-    JSPrincipals *principals_;
     JSPrincipals *originPrincipals_;
 
     XDRState(JSContext *cx)
-      : buf(cx), principals_(nullptr), originPrincipals_(nullptr) {
+      : buf(cx), originPrincipals_(nullptr) {
     }
 
   public:
@@ -256,7 +255,7 @@ class XDREncoder : public XDRState<XDR_ENCODE> {
 class XDRDecoder : public XDRState<XDR_DECODE> {
   public:
     XDRDecoder(JSContext *cx, const void *data, uint32_t length,
-               JSPrincipals *principals, JSPrincipals *originPrincipals);
+               JSPrincipals *originPrincipals);
 
 };
 

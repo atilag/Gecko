@@ -84,12 +84,9 @@ extern PRThread *gSocketThread;
 #define DONOTTRACK_HEADER_ENABLED "privacy.donottrackheader.enabled"
 #define DONOTTRACK_HEADER_VALUE   "privacy.donottrackheader.value"
 #define DONOTTRACK_VALUE_UNSET    2
-#ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
-#define TELEMETRY_ENABLED        "toolkit.telemetry.enabledPreRelease"
-#else
 #define TELEMETRY_ENABLED        "toolkit.telemetry.enabled"
-#endif
 #define ALLOW_EXPERIMENTS        "network.allow-experiments"
+#define SAFE_HINT_HEADER_VALUE   "safeHint.enabled"
 
 #define UA_PREF(_pref) UA_PREF_PREFIX _pref
 #define HTTP_PREF(_pref) HTTP_PREF_PREFIX _pref
@@ -176,6 +173,7 @@ nsHttpHandler::nsHttpHandler()
     , mEnablePersistentHttpsCaching(false)
     , mDoNotTrackEnabled(false)
     , mDoNotTrackValue(1)
+    , mSafeHintEnabled(false)
     , mTelemetryEnabled(false)
     , mAllowExperiments(true)
     , mHandlerActive(false)
@@ -274,6 +272,7 @@ nsHttpHandler::Init()
         prefBranch->AddObserver(TELEMETRY_ENABLED, this, true);
         prefBranch->AddObserver(HTTP_PREF("tcp_keepalive.short_lived_connections"), this, true);
         prefBranch->AddObserver(HTTP_PREF("tcp_keepalive.long_lived_connections"), this, true);
+        prefBranch->AddObserver(SAFE_HINT_HEADER_VALUE, this, true);
         PrefsChanged(prefBranch, nullptr);
     }
 
@@ -421,6 +420,11 @@ nsHttpHandler::AddStandardRequestHeaders(nsHttpHeaderArray *request)
       if (NS_FAILED(rv)) return rv;
     }
 
+    // add the "Send Hint" header
+    if (mSafeHintEnabled) {
+      rv = request->SetHeader(nsHttp::Prefer, NS_LITERAL_CSTRING("safe"));
+      if (NS_FAILED(rv)) return rv;
+    }
     return NS_OK;
 }
 
@@ -1297,6 +1301,15 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         }
     }
 
+    // Hint option
+    if (PREF_CHANGED(SAFE_HINT_HEADER_VALUE)) {
+        cVar = false;
+        rv = prefs->GetBoolPref(SAFE_HINT_HEADER_VALUE, &cVar);
+        if (NS_SUCCEEDED(rv)) {
+            mSafeHintEnabled = cVar;
+        }
+    }
+
     // toggle to true anytime a token bucket related pref is changed.. that
     // includes telemetry and allow-experiments because of the abtest profile
     bool requestTokenBucketUpdated = false;
@@ -1570,13 +1583,13 @@ nsHttpHandler::SetAcceptEncodings(const char *aAcceptEncodings)
 // nsHttpHandler::nsISupports
 //-----------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS6(nsHttpHandler,
-                   nsIHttpProtocolHandler,
-                   nsIProxiedProtocolHandler,
-                   nsIProtocolHandler,
-                   nsIObserver,
-                   nsISupportsWeakReference,
-                   nsISpeculativeConnect)
+NS_IMPL_ISUPPORTS(nsHttpHandler,
+                  nsIHttpProtocolHandler,
+                  nsIProxiedProtocolHandler,
+                  nsIProtocolHandler,
+                  nsIObserver,
+                  nsISupportsWeakReference,
+                  nsISpeculativeConnect)
 
 //-----------------------------------------------------------------------------
 // nsHttpHandler::nsIProtocolHandler
@@ -1901,8 +1914,11 @@ nsHttpHandler::SpeculativeConnect(nsIURI *aURI,
     if (NS_FAILED(rv))
         return rv;
 
+    nsAutoCString username;
+    aURI->GetUsername(username);
+
     nsHttpConnectionInfo *ci =
-        new nsHttpConnectionInfo(host, port, nullptr, usingSSL);
+        new nsHttpConnectionInfo(host, port, username, nullptr, usingSSL);
 
     return SpeculativeConnect(ci, aCallbacks);
 }
@@ -1954,12 +1970,12 @@ nsHttpHandler::TickleWifi(nsIInterfaceRequestor *cb)
 // nsHttpsHandler implementation
 //-----------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS5(nsHttpsHandler,
-                   nsIHttpProtocolHandler,
-                   nsIProxiedProtocolHandler,
-                   nsIProtocolHandler,
-                   nsISupportsWeakReference,
-                   nsISpeculativeConnect)
+NS_IMPL_ISUPPORTS(nsHttpsHandler,
+                  nsIHttpProtocolHandler,
+                  nsIProxiedProtocolHandler,
+                  nsIProtocolHandler,
+                  nsISupportsWeakReference,
+                  nsISpeculativeConnect)
 
 nsresult
 nsHttpsHandler::Init()

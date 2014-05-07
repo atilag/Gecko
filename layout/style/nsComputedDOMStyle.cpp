@@ -289,7 +289,7 @@ nsComputedDOMStyle::Shutdown()
 }
 
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(nsComputedDOMStyle, mContent)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsComputedDOMStyle, mContent)
 
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(nsComputedDOMStyle)
   return tmp->IsBlack();
@@ -2074,16 +2074,6 @@ nsComputedDOMStyle::DoGetBackgroundImage()
 }
 
 CSSValue*
-nsComputedDOMStyle::DoGetBackgroundInlinePolicy()
-{
-  nsROCSSPrimitiveValue *val = new nsROCSSPrimitiveValue;
-  val->SetIdent(nsCSSProps::ValueToKeywordEnum(
-                  StyleBackground()->mBackgroundInlinePolicy,
-                  nsCSSProps::kBackgroundInlinePolicyKTable));
-  return val;
-}
-
-CSSValue*
 nsComputedDOMStyle::DoGetBackgroundBlendMode()
 {
   return GetBackgroundList(&nsStyleBackground::Layer::mBlendMode,
@@ -2408,7 +2398,7 @@ nsComputedDOMStyle::DoGetGridAutoFlow()
   nsAutoString str;
   nsStyleUtil::AppendBitmaskCSSValue(eCSSProperty_grid_auto_flow,
                                      StylePosition()->mGridAutoFlow,
-                                     NS_STYLE_GRID_AUTO_FLOW_NONE,
+                                     NS_STYLE_GRID_AUTO_FLOW_STACK,
                                      NS_STYLE_GRID_AUTO_FLOW_DENSE,
                                      str);
   nsROCSSPrimitiveValue* val = new nsROCSSPrimitiveValue;
@@ -2475,24 +2465,6 @@ nsComputedDOMStyle::GetGridLine(const nsStyleGridLine& aGridLine)
 
   NS_ASSERTION(valueList->Length() > 0,
                "Should have appended at least one value");
-  return valueList;
-}
-
-CSSValue*
-nsComputedDOMStyle::DoGetGridAutoPosition()
-{
-  nsDOMCSSValueList* valueList = GetROCSSValueList(false);
-
-  valueList->AppendCSSValue(
-    GetGridLine(StylePosition()->mGridAutoPositionColumn));
-
-  nsROCSSPrimitiveValue* slash = new nsROCSSPrimitiveValue;
-  slash->SetString(NS_LITERAL_STRING("/"));
-  valueList->AppendCSSValue(slash);
-
-  valueList->AppendCSSValue(
-    GetGridLine(StylePosition()->mGridAutoPositionRow));
-
   return valueList;
 }
 
@@ -2981,6 +2953,16 @@ nsComputedDOMStyle::GetCSSShadowArray(nsCSSShadowArray* aArray,
 }
 
 CSSValue*
+nsComputedDOMStyle::DoGetBoxDecorationBreak()
+{
+  nsROCSSPrimitiveValue* val = new nsROCSSPrimitiveValue;
+  val->SetIdent(
+    nsCSSProps::ValueToKeywordEnum(StyleBorder()->mBoxDecorationBreak,
+                                   nsCSSProps::kBoxDecorationBreakKTable));
+  return val;
+}
+
+CSSValue*
 nsComputedDOMStyle::DoGetBoxShadow()
 {
   return GetCSSShadowArray(StyleBorder()->mBoxShadow,
@@ -3125,18 +3107,18 @@ nsComputedDOMStyle::DoGetTextAlignLast()
 }
 
 CSSValue*
-nsComputedDOMStyle::DoGetTextCombineHorizontal()
+nsComputedDOMStyle::DoGetTextCombineUpright()
 {
   nsROCSSPrimitiveValue *val = new nsROCSSPrimitiveValue;
-  uint8_t tch = StyleText()->mTextCombineHorizontal;
+  uint8_t tch = StyleText()->mTextCombineUpright;
 
-  if (tch <= NS_STYLE_TEXT_COMBINE_HORIZ_ALL) {
+  if (tch <= NS_STYLE_TEXT_COMBINE_UPRIGHT_ALL) {
     val->SetIdent(
       nsCSSProps::ValueToKeywordEnum(tch,
-                                     nsCSSProps::kTextCombineHorizontalKTable));
-  } else if (tch <= NS_STYLE_TEXT_COMBINE_HORIZ_DIGITS_2) {
+                                     nsCSSProps::kTextCombineUprightKTable));
+  } else if (tch <= NS_STYLE_TEXT_COMBINE_UPRIGHT_DIGITS_2) {
     val->SetString(NS_LITERAL_STRING("digits 2"));
-  } else if (tch <= NS_STYLE_TEXT_COMBINE_HORIZ_DIGITS_3) {
+  } else if (tch <= NS_STYLE_TEXT_COMBINE_UPRIGHT_DIGITS_3) {
     val->SetString(NS_LITERAL_STRING("digits 3"));
   } else {
     val->SetString(NS_LITERAL_STRING("digits 4"));
@@ -4063,20 +4045,14 @@ nsComputedDOMStyle::DoGetTouchAction()
 
   int32_t intValue = StyleDisplay()->mTouchAction;
 
-  // None and Auto values aren't allowed to be in conjunction with
-  // other values.
-  if (NS_STYLE_TOUCH_ACTION_AUTO == intValue) {
-    val->SetIdent(eCSSKeyword_auto);
-  } else if (NS_STYLE_TOUCH_ACTION_NONE == intValue) {
-    val->SetIdent(eCSSKeyword_none);
-  } else {
-    nsAutoString valueStr;
-    nsStyleUtil::AppendBitmaskCSSValue(eCSSProperty_touch_action,
-      intValue, NS_STYLE_TOUCH_ACTION_PAN_X,
-      NS_STYLE_TOUCH_ACTION_PAN_Y, valueStr);
-    val->SetString(valueStr);
-  }
-
+  // None and Auto and Manipulation values aren't allowed
+  // to be in conjunction with other values.
+  // But there are all checks in CSSParserImpl::ParseTouchAction
+  nsAutoString valueStr;
+  nsStyleUtil::AppendBitmaskCSSValue(eCSSProperty_touch_action, intValue,
+    NS_STYLE_TOUCH_ACTION_NONE, NS_STYLE_TOUCH_ACTION_MANIPULATION,
+    valueStr);
+  val->SetString(valueStr);
   return val;
 }
 
@@ -5596,7 +5572,8 @@ nsComputedDOMStyle::DoGetCustomProperty(const nsAString& aPropertyName)
   const nsStyleVariables* variables = StyleVariables();
 
   nsString variableValue;
-  const nsAString& name = Substring(aPropertyName, 4);
+  const nsAString& name = Substring(aPropertyName,
+                                    CSS_CUSTOM_NAME_PREFIX_LENGTH);
   if (!variables->mVariables.Get(name, variableValue)) {
     return nullptr;
   }

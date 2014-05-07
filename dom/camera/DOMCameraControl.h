@@ -28,6 +28,8 @@ namespace dom {
   class CameraCapabilities;
   class CameraPictureOptions;
   class CameraStartRecordingOptions;
+  class CameraRegion;
+  class CameraSize;
   template<typename T> class Optional;
 }
 class ErrorResult;
@@ -39,6 +41,13 @@ class nsDOMCameraControl MOZ_FINAL : public DOMMediaStream
 public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsDOMCameraControl, DOMMediaStream)
   NS_DECL_ISUPPORTS_INHERITED
+
+  // Because this header's filename doesn't match its C++ or DOM-facing
+  // classname, we can't rely on the [Func="..."] WebIDL tag to implicitly
+  // include the right header for us; instead we must explicitly include a
+  // HasSupport() method in each header. We can get rid of these with the
+  // Great Renaming proposed in bug 983177.
+  static bool HasSupport(JSContext* aCx, JSObject* aGlobal);
 
   nsDOMCameraControl(uint32_t aCameraId,
                      const dom::CameraConfiguration& aInitialConfig,
@@ -63,10 +72,6 @@ public:
   void SetFocusMode(const nsAString& aMode, ErrorResult& aRv);
   double GetZoom(ErrorResult& aRv);
   void SetZoom(double aZoom, ErrorResult& aRv);
-  JS::Value GetMeteringAreas(JSContext* aCx, ErrorResult& aRv);
-  void SetMeteringAreas(JSContext* aCx, JS::Handle<JS::Value> aAreas, ErrorResult& aRv);
-  JS::Value GetFocusAreas(JSContext* aCx, ErrorResult& aRv);
-  void SetFocusAreas(JSContext* aCx, JS::Handle<JS::Value> aAreas, ErrorResult& aRv);
   JS::Value GetPictureSize(JSContext* aCx, ErrorResult& aRv);
   void SetPictureSize(JSContext* aCx, JS::Handle<JS::Value> aSize, ErrorResult& aRv);
   JS::Value GetThumbnailSize(JSContext* aCx, ErrorResult& aRv);
@@ -83,23 +88,37 @@ public:
   void SetIsoMode(const nsAString& aMode, ErrorResult& aRv);
 
   // Unsolicited event handlers.
-  already_AddRefed<dom::CameraShutterCallback> GetOnShutter();
+  dom::CameraShutterCallback* GetOnShutter();
   void SetOnShutter(dom::CameraShutterCallback* aCb);
-  already_AddRefed<dom::CameraClosedCallback> GetOnClosed();
+  dom::CameraClosedCallback* GetOnClosed();
   void SetOnClosed(dom::CameraClosedCallback* aCb);
-  already_AddRefed<dom::CameraRecorderStateChange> GetOnRecorderStateChange();
+  dom::CameraRecorderStateChange* GetOnRecorderStateChange();
   void SetOnRecorderStateChange(dom::CameraRecorderStateChange* aCb);
-  already_AddRefed<dom::CameraPreviewStateChange> GetOnPreviewStateChange();
+  dom::CameraPreviewStateChange* GetOnPreviewStateChange();
   void SetOnPreviewStateChange(dom::CameraPreviewStateChange* aCb);
+  dom::CameraAutoFocusMovingCallback* GetOnAutoFocusMoving();
+  void SetOnAutoFocusMoving(dom::CameraAutoFocusMovingCallback* aCb);
+  dom::CameraFaceDetectionCallback* GetOnFacesDetected();
+  void SetOnFacesDetected(dom::CameraFaceDetectionCallback* aCb);
 
   // Methods.
   void SetConfiguration(const dom::CameraConfiguration& aConfiguration,
                         const dom::Optional<dom::OwningNonNull<dom::CameraSetConfigurationCallback> >& aOnSuccess,
                         const dom::Optional<dom::OwningNonNull<dom::CameraErrorCallback> >& aOnError,
                         ErrorResult& aRv);
+  void GetMeteringAreas(nsTArray<dom::CameraRegion>& aAreas, ErrorResult& aRv);
+  void SetMeteringAreas(const dom::Optional<dom::Sequence<dom::CameraRegion> >& aAreas, ErrorResult& aRv);
+  void GetFocusAreas(nsTArray<dom::CameraRegion>& aAreas, ErrorResult& aRv);
+  void SetFocusAreas(const dom::Optional<dom::Sequence<dom::CameraRegion> >& aAreas, ErrorResult& aRv);
+  void GetPictureSize(dom::CameraSize& aSize, ErrorResult& aRv);
+  void SetPictureSize(const dom::CameraSize& aSize, ErrorResult& aRv);
+  void GetThumbnailSize(dom::CameraSize& aSize, ErrorResult& aRv);
+  void SetThumbnailSize(const dom::CameraSize& aSize, ErrorResult& aRv);
   void AutoFocus(dom::CameraAutoFocusCallback& aOnSuccess,
                  const dom::Optional<dom::OwningNonNull<dom::CameraErrorCallback> >& aOnError,
                  ErrorResult& aRv);
+  void StartFaceDetection(ErrorResult& aRv);
+  void StopFaceDetection(ErrorResult& aRv);
   void TakePicture(const dom::CameraPictureOptions& aOptions,
                    dom::CameraTakePictureCallback& aOnSuccess,
                    const dom::Optional<dom::OwningNonNull<dom::CameraErrorCallback> >& aOnError,
@@ -115,13 +134,14 @@ public:
   void ReleaseHardware(const dom::Optional<dom::OwningNonNull<dom::CameraReleaseCallback> >& aOnSuccess,
                        const dom::Optional<dom::OwningNonNull<dom::CameraErrorCallback> >& aOnError,
                        ErrorResult& aRv);
+  void ResumeContinuousFocus(ErrorResult& aRv);
 
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
 protected:
   virtual ~nsDOMCameraControl();
 
-  class DOMCameraConfiguration : public dom::CameraConfiguration
+  class DOMCameraConfiguration MOZ_FINAL : public dom::CameraConfiguration
   {
   public:
     NS_INLINE_DECL_REFCOUNTING(DOMCameraConfiguration)
@@ -133,7 +153,8 @@ protected:
     uint32_t mMaxFocusAreas;
     uint32_t mMaxMeteringAreas;
 
-  protected:
+  private:
+    // Private destructor, to discourage deletion outside of Release():
     ~DOMCameraConfiguration();
   };
 
@@ -143,14 +164,16 @@ protected:
   void OnCreatedFileDescriptor(bool aSucceeded);
 
   void OnAutoFocusComplete(bool aAutoFocusSucceeded);
+  void OnAutoFocusMoving(bool aIsMoving);
   void OnTakePictureComplete(nsIDOMBlob* aPicture);
+  void OnFacesDetected(const nsTArray<ICameraControl::Face>& aFaces);
 
   void OnHardwareStateChange(DOMCameraControlListener::HardwareState aState);
   void OnPreviewStateChange(DOMCameraControlListener::PreviewState aState);
   void OnRecorderStateChange(CameraControlListener::RecorderState aState, int32_t aStatus, int32_t aTrackNum);
   void OnConfigurationChange(DOMCameraConfiguration* aConfiguration);
   void OnShutter();
-  void OnError(CameraControlListener::CameraErrorContext aContext, const nsAString& mError);
+  void OnUserError(CameraControlListener::UserContext aContext, nsresult aError);
 
   bool IsWindowStillActive();
 
@@ -161,8 +184,8 @@ protected:
   // An agent used to join audio channel service.
   nsCOMPtr<nsIAudioChannelAgent> mAudioChannelAgent;
 
-  nsresult Set(JSContext* aCx, uint32_t aKey, const JS::Value& aValue, uint32_t aLimit);
-  nsresult Get(JSContext* aCx, uint32_t aKey, JS::Value* aValue);
+  nsresult Set(uint32_t aKey, const dom::Optional<dom::Sequence<dom::CameraRegion> >& aValue, uint32_t aLimit);
+  nsresult Get(uint32_t aKey, nsTArray<dom::CameraRegion>& aValue);
 
   nsRefPtr<DOMCameraConfiguration>              mCurrentConfiguration;
   nsRefPtr<dom::CameraCapabilities>             mCapabilities;
@@ -186,6 +209,8 @@ protected:
   nsRefPtr<dom::CameraClosedCallback>           mOnClosedCb;
   nsRefPtr<dom::CameraRecorderStateChange>      mOnRecorderStateChangeCb;
   nsRefPtr<dom::CameraPreviewStateChange>       mOnPreviewStateChangeCb;
+  nsRefPtr<dom::CameraAutoFocusMovingCallback>  mOnAutoFocusMovingCb;
+  nsRefPtr<dom::CameraFaceDetectionCallback>    mOnFacesDetectedCb;
 
   // Camera event listener; we only need this weak reference so that
   //  we can remove the listener from the camera when we're done

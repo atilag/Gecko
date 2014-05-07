@@ -12,12 +12,12 @@
 #include "nsEventShell.h"
 #include "Role.h"
 
-#include "nsEventStateManager.h"
 #include "nsFocusManager.h"
+#include "mozilla/EventStateManager.h"
 #include "mozilla/dom/Element.h"
 
-namespace dom = mozilla::dom;
-using namespace mozilla::a11y;
+namespace mozilla {
+namespace a11y {
 
 FocusManager::FocusManager()
 {
@@ -364,6 +364,11 @@ FocusManager::ProcessFocusEvent(AccEvent* aEvent)
     logging::FocusNotificationTarget("fire focus event", "Target", target);
 #endif
 
+  // Reset cached caret value. The cache will be updated upon processing the
+  // next caret move event. This ensures that we will return the correct caret
+  // offset before the caret move event is handled.
+  SelectionMgr()->ResetCaretOffset();
+
   nsRefPtr<AccEvent> focusEvent =
     new AccEvent(nsIAccessibleEvent::EVENT_FOCUS, target, aEvent->FromUserInput());
   nsEventShell::FireEvent(focusEvent);
@@ -394,8 +399,9 @@ FocusManager::FocusedDOMNode() const
   // residing in chrome process because it means an element in content process
   // keeps the focus.
   if (focusedElm) {
-    if (nsEventStateManager::IsRemoteTarget(focusedElm))
+    if (EventStateManager::IsRemoteTarget(focusedElm)) {
       return nullptr;
+    }
     return focusedElm;
   }
 
@@ -410,3 +416,6 @@ FocusManager::FocusedDOMDocument() const
   nsINode* focusedNode = FocusedDOMNode();
   return focusedNode ? focusedNode->OwnerDoc() : nullptr;
 }
+
+} // namespace a11y
+} // namespace mozilla

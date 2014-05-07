@@ -9,10 +9,13 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import org.mozilla.gecko.GeckoAppShell;
+import org.mozilla.gecko.db.BrowserContract;
 import org.mozilla.gecko.db.BrowserContract.HomeItems;
 import org.mozilla.gecko.db.DBUtils;
+import org.mozilla.gecko.db.HomeProvider;
 import org.mozilla.gecko.home.HomeConfig.PanelConfig;
 import org.mozilla.gecko.home.HomePager.OnUrlOpenListener;
+import org.mozilla.gecko.home.PanelLayout.ContextMenuRegistry;
 import org.mozilla.gecko.home.PanelLayout.DatasetHandler;
 import org.mozilla.gecko.home.PanelLayout.DatasetRequest;
 import org.mozilla.gecko.util.GeckoEventListener;
@@ -24,6 +27,7 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.database.Cursor;
+import android.net.Uri;
 import android.os.Bundle;
 import android.support.v4.app.LoaderManager;
 import android.support.v4.app.LoaderManager.LoaderCallbacks;
@@ -53,8 +57,7 @@ import android.widget.FrameLayout;
  * See {@code PanelLayout} for more details on how {@code DynamicPanel}
  * receives dataset requests and delivers them back to the {@code PanelLayout}.
  */
-public class DynamicPanel extends HomeFragment
-                          implements GeckoEventListener {
+public class DynamicPanel extends HomeFragment {
     private static final String LOGTAG = "GeckoDynamicPanel";
 
     // Dataset ID to be used by the loader
@@ -151,7 +154,6 @@ public class DynamicPanel extends HomeFragment
         }
 
         mPanelAuthCache.setOnChangeListener(new PanelAuthChangeListener());
-        GeckoAppShell.registerEventListener("HomePanels:RefreshDataset", this);
     }
 
     @Override
@@ -162,7 +164,6 @@ public class DynamicPanel extends HomeFragment
         mPanelAuthLayout = null;
 
         mPanelAuthCache.setOnChangeListener(null);
-        GeckoAppShell.unregisterEventListener("HomePanels:RefreshDataset", this);
 
         if (mAuthStateTask != null) {
             mAuthStateTask.cancel(true);
@@ -226,10 +227,18 @@ public class DynamicPanel extends HomeFragment
      * Lazily creates layout for panel data.
      */
     private void createPanelLayout() {
+        final ContextMenuRegistry contextMenuRegistry = new ContextMenuRegistry() {
+            @Override
+            public void register(View view) {
+                registerForContextMenu(view);
+            }
+        };
+
         switch(mPanelConfig.getLayoutType()) {
             case FRAME:
                 final PanelDatasetHandler datasetHandler = new PanelDatasetHandler();
-                mPanelLayout = new FramePanelLayout(getActivity(), mPanelConfig, datasetHandler, mUrlOpenListener);
+                mPanelLayout = new FramePanelLayout(getActivity(), mPanelConfig, datasetHandler,
+                        mUrlOpenListener, contextMenuRegistry);
                 break;
 
             default:
@@ -286,69 +295,6 @@ public class DynamicPanel extends HomeFragment
         mUIMode = mode;
     }
 
-    @Override
-    public void handleMessage(String event, final JSONObject message) {
-        if (event.equals("HomePanels:RefreshDataset")) {
-            ThreadUtils.postToUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    handleDatasetRefreshRequest(message);
-                }
-            });
-        }
-    }
-
-    private static int generateLoaderId(String datasetId) {
-        return datasetId.hashCode();
-    }
-
-    /**
-     * Handles a dataset refresh request from Gecko. This is usually
-     * triggered by a HomeStorage.save() call in an add-on.
-     */
-    private void handleDatasetRefreshRequest(JSONObject message) {
-        final String datasetId;
-        try {
-            datasetId = message.getString("datasetId");
-        } catch (JSONException e) {
-            Log.e(LOGTAG, "Failed to handle dataset refresh", e);
-            return;
-        }
-
-        Log.d(LOGTAG, "Refresh request for dataset: " + datasetId);
-
-        final int loaderId = generateLoaderId(datasetId);
-
-        final LoaderManager lm = getLoaderManager();
-        final Loader<?> loader = (Loader<?>) lm.getLoader(loaderId);
-
-        // Only restart a loader if there's already an active one
-        // for the given dataset ID. Do nothing otherwise.
-        if (loader != null) {
-            final PanelDatasetLoader datasetLoader = (PanelDatasetLoader) loader;
-            final DatasetRequest request = datasetLoader.getRequest();
-
-            // Ensure the refresh request doesn't affect the view's filter
-            // stack (i.e. use DATASET_LOAD type) but keep the current
-            // dataset ID and filter.
-            final DatasetRequest newRequest =
-                   new DatasetRequest(DatasetRequest.Type.DATASET_LOAD,
-                                      request.getDatasetId(),
-                                      request.getFilterDetail());
-
-            restartDatasetLoader(newRequest);
-        }
-    }
-
-    private void restartDatasetLoader(DatasetRequest request) {
-        final Bundle bundle = new Bundle();
-        bundle.putParcelable(DATASET_REQUEST, request);
-
-        // Ensure one loader per dataset
-        final int loaderId = generateLoaderId(request.getDatasetId());
-        getLoaderManager().restartLoader(loaderId, bundle, mLoaderCallbacks);
-    }
-
     /**
      * Used by the PanelLayout to make load and reset requests to
      * the holding fragment.
@@ -364,19 +310,22 @@ public class DynamicPanel extends HomeFragment
                 return;
             }
 
-            restartDatasetLoader(request);
+            final Bundle bundle = new Bundle();
+            bundle.putParcelable(DATASET_REQUEST, request);
+
+            getLoaderManager().restartLoader(request.getViewIndex(),
+                                             bundle, mLoaderCallbacks);
         }
 
         @Override
-        public void resetDataset(String datasetId) {
-            Log.d(LOGTAG, "Resetting dataset: " + datasetId);
+        public void resetDataset(int viewIndex) {
+            Log.d(LOGTAG, "Resetting dataset: " + viewIndex);
 
             final LoaderManager lm = getLoaderManager();
-            final int loaderId = generateLoaderId(datasetId);
 
             // Release any resources associated with the dataset if
             // it's currently loaded in memory.
-            final Loader<?> datasetLoader = lm.getLoader(loaderId);
+            final Loader<?> datasetLoader = lm.getLoader(viewIndex);
             if (datasetLoader != null) {
                 datasetLoader.reset();
             }
@@ -387,7 +336,7 @@ public class DynamicPanel extends HomeFragment
      * Cursor loader for the panel datasets.
      */
     private static class PanelDatasetLoader extends SimpleCursorLoader {
-        private final DatasetRequest mRequest;
+        private DatasetRequest mRequest;
 
         public PanelDatasetLoader(Context context, DatasetRequest request) {
             super(context);
@@ -399,6 +348,21 @@ public class DynamicPanel extends HomeFragment
         }
 
         @Override
+        public void onContentChanged() {
+            // Ensure the refresh request doesn't affect the view's filter
+            // stack (i.e. use DATASET_LOAD type) but keep the current
+            // dataset ID and filter.
+            final DatasetRequest newRequest =
+                   new DatasetRequest(mRequest.getViewIndex(),
+                                      DatasetRequest.Type.DATASET_LOAD,
+                                      mRequest.getDatasetId(),
+                                      mRequest.getFilterDetail());
+
+            mRequest = newRequest;
+            super.onContentChanged();
+        }
+
+        @Override
         public Cursor loadCursor() {
             final ContentResolver cr = getContext().getContentResolver();
 
@@ -407,15 +371,21 @@ public class DynamicPanel extends HomeFragment
 
             // Null represents the root filter
             if (mRequest.getFilter() == null) {
-                selection = DBUtils.concatenateWhere(HomeItems.DATASET_ID + " = ?", HomeItems.FILTER + " IS NULL");
-                selectionArgs = new String[] { mRequest.getDatasetId() };
+                selection = HomeItems.FILTER + " IS NULL";
+                selectionArgs = null;
             } else {
-                selection = DBUtils.concatenateWhere(HomeItems.DATASET_ID + " = ?", HomeItems.FILTER + " = ?");
-                selectionArgs = new String[] { mRequest.getDatasetId(), mRequest.getFilter() };
+                selection = HomeItems.FILTER + " = ?";
+                selectionArgs = new String[] { mRequest.getFilter() };
             }
 
-            // XXX: You can use CONTENT_FAKE_URI for development to pull items from fake_home_items.json.
-            return cr.query(HomeItems.CONTENT_URI, null, selection, selectionArgs, null);
+            final Uri queryUri = HomeItems.CONTENT_URI.buildUpon()
+                                                      .appendQueryParameter(BrowserContract.PARAM_DATASET_ID,
+                                                                            mRequest.getDatasetId())
+                                                      .build();
+
+            // XXX: You can use HomeItems.CONTENT_FAKE_URI for development
+            // to pull items from fake_home_items.json.
+            return cr.query(queryUri, null, selection, selectionArgs, null);
         }
     }
 
@@ -434,8 +404,8 @@ public class DynamicPanel extends HomeFragment
         @Override
         public void onLoadFinished(Loader<Cursor> loader, Cursor cursor) {
             final DatasetRequest request = getRequestFromLoader(loader);
-
             Log.d(LOGTAG, "Finished loader for request: " + request);
+
             if (mPanelLayout != null) {
                 mPanelLayout.deliverDataset(request, cursor);
             }
@@ -445,8 +415,9 @@ public class DynamicPanel extends HomeFragment
         public void onLoaderReset(Loader<Cursor> loader) {
             final DatasetRequest request = getRequestFromLoader(loader);
             Log.d(LOGTAG, "Resetting loader for request: " + request);
+
             if (mPanelLayout != null) {
-                mPanelLayout.releaseDataset(request.getDatasetId());
+                mPanelLayout.releaseDataset(request.getViewIndex());
             }
         }
 

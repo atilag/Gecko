@@ -16,7 +16,6 @@
 #include "nsGlobalWindow.h"
 #include "nsIDocument.h"
 #include "nsFocusManager.h"
-#include "nsEventStateManager.h"
 #include "nsFrameManager.h"
 #include "nsRefreshDriver.h"
 #include "mozilla/dom/Touch.h"
@@ -34,6 +33,7 @@
 #include "nsJSEnvironment.h"
 #include "nsJSUtils.h"
 
+#include "mozilla/EventStateManager.h"
 #include "mozilla/MiscEvents.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/TextEvents.h"
@@ -42,7 +42,6 @@
 #include "nsViewManager.h"
 
 #include "nsIDOMHTMLCanvasElement.h"
-#include "gfxImageSurface.h"
 #include "nsLayoutUtils.h"
 #include "nsComputedDOMStyle.h"
 #include "nsIPresShell.h"
@@ -67,6 +66,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/file/FileHandle.h"
 #include "mozilla/dom/FileHandleBinding.h"
+#include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/IDBFactoryBinding.h"
 #include "mozilla/dom/indexedDB/IndexedDatabaseManager.h"
 #include "mozilla/dom/quota/PersistenceType.h"
@@ -86,6 +86,7 @@
 #include "nsIInterfaceRequestorUtils.h"
 #include "GeckoProfiler.h"
 #include "mozilla/Preferences.h"
+#include "nsIContentIterator.h"
 
 #ifdef XP_WIN
 #undef GetClassName
@@ -404,7 +405,8 @@ nsDOMWindowUtils::SetDisplayPortMarginsForElement(float aLeftMargin,
                                                   float aTopMargin,
                                                   float aRightMargin,
                                                   float aBottomMargin,
-                                                  uint32_t aAlignment,
+                                                  uint32_t aAlignmentX,
+                                                  uint32_t aAlignmentY,
                                                   nsIDOMElement* aElement,
                                                   uint32_t aPriority)
 {
@@ -431,12 +433,6 @@ nsDOMWindowUtils::SetDisplayPortMarginsForElement(float aLeftMargin,
     return NS_ERROR_INVALID_ARG;
   }
 
-  DisplayPortMarginsPropertyData* currentData =
-    static_cast<DisplayPortMarginsPropertyData*>(content->GetProperty(nsGkAtoms::DisplayPortMargins));
-  if (currentData && currentData->mPriority > aPriority) {
-    return NS_OK;
-  }
-
   // Note order change of arguments between our function signature and
   // LayerMargin constructor.
   LayerMargin displayportMargins(aTopMargin,
@@ -444,21 +440,8 @@ nsDOMWindowUtils::SetDisplayPortMarginsForElement(float aLeftMargin,
                                  aBottomMargin,
                                  aLeftMargin);
 
-  content->SetProperty(nsGkAtoms::DisplayPortMargins,
-                       new DisplayPortMarginsPropertyData(displayportMargins, aAlignment, aPriority),
-                       nsINode::DeleteProperty<DisplayPortMarginsPropertyData>);
-
-  nsIFrame* rootScrollFrame = presShell->GetRootScrollFrame();
-  if (rootScrollFrame && content == rootScrollFrame->GetContent()) {
-    // We are setting a root displayport for a document.
-    // The pres shell needs a special flag set.
-    presShell->SetIgnoreViewportScrolling(true);
-  }
-
-  nsIFrame* rootFrame = presShell->FrameManager()->GetRootFrame();
-  if (rootFrame) {
-    rootFrame->SchedulePaint();
-  }
+  nsLayoutUtils::SetDisplayPortMargins(content, presShell, displayportMargins,
+                                       aAlignmentX, aAlignmentY, aPriority);
 
   return NS_OK;
 }
@@ -494,8 +477,7 @@ nsDOMWindowUtils::SetDisplayPortBaseForElement(int32_t aX,
     return NS_ERROR_INVALID_ARG;
   }
 
-  content->SetProperty(nsGkAtoms::DisplayPortBase, new nsRect(aX, aY, aWidth, aHeight),
-                       nsINode::DeleteProperty<nsRect>);
+  nsLayoutUtils::SetDisplayPortBase(content, nsRect(aX, aY, aWidth, aHeight));
 
   return NS_OK;
 }
@@ -556,8 +538,17 @@ nsDOMWindowUtils::SetResolution(float aXResolution, float aYResolution)
   }
 
   nsIPresShell* presShell = GetPresShell();
-  return presShell ? presShell->SetResolution(aXResolution, aYResolution)
-                   : NS_ERROR_FAILURE;
+  if (!presShell) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsIScrollableFrame* sf = presShell->GetRootScrollFrameAsScrollable();
+  if (sf) {
+    sf->SetResolution(gfxSize(aXResolution, aYResolution));
+    presShell->SetResolution(aXResolution, aYResolution);
+  }
+
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -568,13 +559,38 @@ nsDOMWindowUtils::GetResolution(float* aXResolution, float* aYResolution)
   }
 
   nsIPresShell* presShell = GetPresShell();
+  if (!presShell) {
+    return NS_ERROR_FAILURE;
+  }
 
-  if (presShell) {
+  nsIScrollableFrame* sf = presShell->GetRootScrollFrameAsScrollable();
+  if (sf) {
+    const gfxSize& res = sf->GetResolution();
+    *aXResolution = res.width;
+    *aYResolution = res.height;
+  } else {
     *aXResolution = presShell->GetXResolution();
     *aYResolution = presShell->GetYResolution();
-    return NS_OK;
   }
-  return NS_ERROR_FAILURE;
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetIsHistoryRestored(bool* aIsHistoryRestored) {
+  if (!nsContentUtils::IsCallerChrome()) {
+    return NS_ERROR_DOM_SECURITY_ERR;
+  }
+
+  nsIPresShell* presShell = GetPresShell();
+  if (!presShell) {
+    return NS_ERROR_FAILURE;
+  }
+
+  const nsIScrollableFrame* sf = presShell->GetRootScrollFrameAsScrollable();
+  *aIsHistoryRestored = sf && sf->DidHistoryRestore();
+
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1488,6 +1504,18 @@ nsDOMWindowUtils::CycleCollect(nsICycleCollectorListener *aListener,
 }
 
 NS_IMETHODIMP
+nsDOMWindowUtils::RunNextCollectorTimer()
+{
+  if (!nsContentUtils::IsCallerChrome()) {
+    return NS_ERROR_DOM_SECURITY_ERR;
+  }
+
+  nsJSContext::RunNextCollectorTimer();
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDOMWindowUtils::SendSimpleGestureEvent(const nsAString& aType,
                                          float aX,
                                          float aY,
@@ -1594,6 +1622,91 @@ nsDOMWindowUtils::NodesFromRect(float aX, float aY,
 
   return doc->NodesFromRectHelper(aX, aY, aTopSize, aRightSize, aBottomSize, aLeftSize, 
                                   aIgnoreRootScrollFrame, aFlushLayout, aReturn);
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetTranslationNodes(nsIDOMNode* aRoot,
+                                      nsITranslationNodeList** aRetVal)
+{
+  if (!nsContentUtils::IsCallerChrome()) {
+    return NS_ERROR_DOM_SECURITY_ERR;
+  }
+
+  NS_ENSURE_ARG_POINTER(aRetVal);
+  nsCOMPtr<nsIContent> root = do_QueryInterface(aRoot);
+  NS_ENSURE_STATE(root);
+  nsCOMPtr<nsIDocument> doc = GetDocument();
+  NS_ENSURE_STATE(doc);
+
+  if (root->OwnerDoc() != doc) {
+    return NS_ERROR_DOM_WRONG_DOCUMENT_ERR;
+  }
+
+  nsTHashtable<nsPtrHashKey<nsIContent>> translationNodesHash(1000);
+  nsRefPtr<nsTranslationNodeList> list = new nsTranslationNodeList;
+
+  uint32_t limit = 15000;
+
+  // We begin iteration with content->GetNextNode because we want to explictly
+  // skip the root tag from being a translation node.
+  nsIContent* content = root;
+  while ((limit > 0) && (content = content->GetNextNode(root))) {
+    if (!content->IsHTML()) {
+      continue;
+    }
+
+    nsIAtom* localName = content->Tag();
+
+    // Skip elements that usually contain non-translatable text content.
+    if (localName == nsGkAtoms::script ||
+        localName == nsGkAtoms::iframe ||
+        localName == nsGkAtoms::frameset ||
+        localName == nsGkAtoms::frame ||
+        localName == nsGkAtoms::code ||
+        localName == nsGkAtoms::noscript ||
+        localName == nsGkAtoms::style) {
+      continue;
+    }
+
+    // An element is a translation node if it contains
+    // at least one text node that has meaningful data
+    // for translation
+    for (nsIContent* child = content->GetFirstChild();
+         child;
+         child = child->GetNextSibling()) {
+
+      if (child->HasTextForTranslation()) {
+        translationNodesHash.PutEntry(content);
+
+        bool isBlockFrame = false;
+        nsIFrame* frame = content->GetPrimaryFrame();
+        if (frame) {
+          isBlockFrame = frame->IsFrameOfType(nsIFrame::eBlockFrame);
+        }
+
+        bool isTranslationRoot = isBlockFrame;
+        if (!isBlockFrame) {
+          // If an element is not a block element, it still
+          // can be considered a translation root if the parent
+          // of this element didn't make into the list of nodes
+          // to be translated.
+          bool parentInList = false;
+          nsIContent* parent = content->GetParent();
+          if (parent) {
+            parentInList = translationNodesHash.Contains(parent);
+          }
+          isTranslationRoot = !parentInList;
+        }
+
+        list->AppendElement(content->AsDOMNode(), isTranslationRoot);
+        --limit;
+        break;
+      }
+    }
+  }
+
+  *aRetVal = list.forget().take();
+  return NS_OK;
 }
 
 static TemporaryRef<DataSourceSurface>
@@ -2107,6 +2220,7 @@ NS_IMETHODIMP
 nsDOMWindowUtils::SendQueryContentEvent(uint32_t aType,
                                         uint32_t aOffset, uint32_t aLength,
                                         int32_t aX, int32_t aY,
+                                        uint32_t aAdditionalFlags,
                                         nsIQueryContentEventResult **aResult)
 {
   *aResult = nullptr;
@@ -2145,9 +2259,13 @@ nsDOMWindowUtils::SendQueryContentEvent(uint32_t aType,
   nsCOMPtr<nsIWidget> targetWidget = widget;
   LayoutDeviceIntPoint pt(aX, aY);
 
+  bool useNativeLineBreak =
+    !(aAdditionalFlags & QUERY_CONTENT_FLAG_USE_XP_LINE_BREAK);
+
   if (aType == QUERY_CHARACTER_AT_POINT) {
     // Looking for the widget at the point.
     WidgetQueryContentEvent dummyEvent(true, NS_QUERY_CONTENT_STATE, widget);
+    dummyEvent.mUseNativeLineBreak = useNativeLineBreak;
     InitEvent(dummyEvent, &pt);
     nsIFrame* popupFrame =
       nsLayoutUtils::GetPopupFrameForEventCoordinates(presContext->GetRootPresContext(), &dummyEvent);
@@ -2177,13 +2295,16 @@ nsDOMWindowUtils::SendQueryContentEvent(uint32_t aType,
 
   switch (aType) {
     case NS_QUERY_TEXT_CONTENT:
-      queryEvent.InitForQueryTextContent(aOffset, aLength);
+      queryEvent.InitForQueryTextContent(aOffset, aLength, useNativeLineBreak);
       break;
     case NS_QUERY_CARET_RECT:
-      queryEvent.InitForQueryCaretRect(aOffset);
+      queryEvent.InitForQueryCaretRect(aOffset, useNativeLineBreak);
       break;
     case NS_QUERY_TEXT_RECT:
-      queryEvent.InitForQueryTextRect(aOffset, aLength);
+      queryEvent.InitForQueryTextRect(aOffset, aLength, useNativeLineBreak);
+      break;
+    default:
+      queryEvent.mUseNativeLineBreak = useNativeLineBreak;
       break;
   }
 
@@ -2201,7 +2322,7 @@ nsDOMWindowUtils::SendQueryContentEvent(uint32_t aType,
 NS_IMETHODIMP
 nsDOMWindowUtils::SendSelectionSetEvent(uint32_t aOffset,
                                         uint32_t aLength,
-                                        bool aReverse,
+                                        uint32_t aAdditionalFlags,
                                         bool *aResult)
 {
   *aResult = false;
@@ -2221,7 +2342,9 @@ nsDOMWindowUtils::SendSelectionSetEvent(uint32_t aOffset,
 
   selectionEvent.mOffset = aOffset;
   selectionEvent.mLength = aLength;
-  selectionEvent.mReversed = aReverse;
+  selectionEvent.mReversed = (aAdditionalFlags & SELECTION_SET_FLAG_REVERSE);
+  selectionEvent.mUseNativeLineBreak =
+    !(aAdditionalFlags & SELECTION_SET_FLAG_USE_XP_LINE_BREAK);
 
   nsEventStatus status;
   nsresult rv = widget->DispatchEvent(&selectionEvent, status);
@@ -2280,11 +2403,11 @@ nsDOMWindowUtils::GetClassName(JS::Handle<JS::Value> aObject, JSContext* aCx,
   }
 
   // Our argument must be a non-null object.
-  if (JSVAL_IS_PRIMITIVE(aObject)) {
+  if (aObject.isPrimitive()) {
     return NS_ERROR_XPC_BAD_CONVERT_JS;
   }
 
-  *aName = NS_strdup(JS_GetClass(JSVAL_TO_OBJECT(aObject))->name);
+  *aName = NS_strdup(JS_GetClass(aObject.toObjectOrNull())->name);
   NS_ABORT_IF_FALSE(*aName, "NS_strdup should be infallible.");
   return NS_OK;
 }
@@ -2776,7 +2899,7 @@ nsDOMWindowUtils::GetCursorType(int16_t *aCursor)
 
   bool isSameDoc = false;
   do {
-    if (nsEventStateManager::sMouseOverDocument == doc) {
+    if (EventStateManager::sMouseOverDocument == doc) {
       isSameDoc = true;
       break;
     }
@@ -2970,6 +3093,17 @@ nsDOMWindowUtils::CheckAndClearPaintedState(nsIDOMElement* aElement, bool* aResu
     return NS_OK;
   }
 
+  // Get the outermost frame for the content node, so that we can test
+  // canvasframe invalidations by observing the documentElement.
+  for (;;) {
+    nsIFrame* parentFrame = frame->GetParent();
+    if (parentFrame && parentFrame->GetContent() == content) {
+      frame = parentFrame;
+    } else {
+      break;
+    }
+  }
+
   *aResult = frame->CheckAndClearPaintedState();
   return NS_OK;
 }
@@ -3047,10 +3181,9 @@ GetFileOrBlob(const nsAString& aName, JS::Handle<JS::Value> aBlobParts,
   nsDOMMultipartFile* domFile =
     static_cast<nsDOMMultipartFile*>(static_cast<nsIDOMFile*>(file.get()));
 
-  JS::AutoValueVector args(aCx);
-  MOZ_ALWAYS_TRUE(args.resize(2));
-  args[0] = aBlobParts;
-  args[1] = aParameters;
+  JS::AutoValueArray<2> args(aCx);
+  args[0].set(aBlobParts);
+  args[1].set(aParameters);
 
   rv = domFile->InitBlob(aCx, aOptionalArgCount, args.begin(), GetXPConnectNative);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -3107,8 +3240,8 @@ nsDOMWindowUtils::GetFileId(JS::Handle<JS::Value> aFile, JSContext* aCx,
     return NS_ERROR_DOM_SECURITY_ERR;
   }
 
-  if (!JSVAL_IS_PRIMITIVE(aFile)) {
-    JSObject* obj = JSVAL_TO_OBJECT(aFile);
+  if (!aFile.isPrimitive()) {
+    JSObject* obj = aFile.toObjectOrNull();
 
     file::FileHandle* fileHandle;
     if (NS_SUCCEEDED(UNWRAP_OBJECT(FileHandle, obj, fileHandle))) {
@@ -3592,7 +3725,7 @@ nsDOMWindowUtils::GetIsHandlingUserInput(bool* aHandlingUserInput)
     return NS_ERROR_DOM_SECURITY_ERR;
   }
 
-  *aHandlingUserInput = nsEventStateManager::IsHandlingUserInput();
+  *aHandlingUserInput = EventStateManager::IsHandlingUserInput();
 
   return NS_OK;
 }
@@ -3624,6 +3757,12 @@ nsDOMWindowUtils::GetIsParentWindowMainWidgetVisible(bool* aIsVisible)
   nsCOMPtr<nsIWidget> parentWidget;
   nsIDocShell *docShell = window->GetDocShell();
   if (docShell) {
+    if (TabChild *tabChild = TabChild::GetFrom(docShell)) {
+      if (!tabChild->SendIsParentWindowMainWidgetVisible(aIsVisible))
+        return NS_ERROR_FAILURE;
+      return NS_OK;
+    }
+
     nsCOMPtr<nsIDocShellTreeOwner> parentTreeOwner;
     docShell->GetTreeOwner(getter_AddRefs(parentTreeOwner));
     nsCOMPtr<nsIBaseWindow> parentWindow(do_GetInterface(parentTreeOwner));
@@ -3876,4 +4015,48 @@ nsDOMWindowUtils::SetAudioVolume(float aVolume)
   NS_ENSURE_STATE(window);
 
   return window->SetAudioVolume(aVolume);
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::XpconnectArgument(nsIDOMWindowUtils* aThis)
+{
+  // Do nothing.
+  return NS_OK;
+}
+
+NS_INTERFACE_MAP_BEGIN(nsTranslationNodeList)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+  NS_INTERFACE_MAP_ENTRY(nsITranslationNodeList)
+NS_INTERFACE_MAP_END
+
+NS_IMPL_ADDREF(nsTranslationNodeList)
+NS_IMPL_RELEASE(nsTranslationNodeList)
+
+NS_IMETHODIMP
+nsTranslationNodeList::Item(uint32_t aIndex, nsIDOMNode** aRetVal)
+{
+  NS_ENSURE_ARG_POINTER(aRetVal);
+  NS_IF_ADDREF(*aRetVal = mNodes.SafeElementAt(aIndex));
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsTranslationNodeList::IsTranslationRootAtIndex(uint32_t aIndex, bool* aRetVal)
+{
+  NS_ENSURE_ARG_POINTER(aRetVal);
+  if (aIndex >= mLength) {
+    *aRetVal = false;
+    return NS_OK;
+  }
+
+  *aRetVal = mNodeIsRoot.ElementAt(aIndex);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsTranslationNodeList::GetLength(uint32_t* aRetVal)
+{
+  NS_ENSURE_ARG_POINTER(aRetVal);
+  *aRetVal = mLength;
+  return NS_OK;
 }

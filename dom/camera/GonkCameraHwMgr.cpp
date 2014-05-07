@@ -79,6 +79,10 @@ GonkCameraHardware::postData(int32_t aMsgType, const sp<IMemory>& aDataPtr, came
       }
       break;
 
+    case CAMERA_MSG_PREVIEW_METADATA:
+      OnFacesDetected(mTarget, metadata);
+      break;
+
     default:
       DOM_CAMERA_LOGE("Unhandled data callback event %d\n", aMsgType);
       break;
@@ -98,12 +102,18 @@ GonkCameraHardware::notify(int32_t aMsgType, int32_t ext1, int32_t ext2)
       OnAutoFocusComplete(mTarget, !!ext1);
       break;
 
+#if ANDROID_VERSION >= 16
+    case CAMERA_MSG_FOCUS_MOVE:
+      OnAutoFocusMoving(mTarget, !!ext1);
+      break;
+#endif
+
     case CAMERA_MSG_SHUTTER:
       OnShutter(mTarget);
       break;
 
     case CAMERA_MSG_ERROR:
-      OnError(mTarget, CameraControlListener::kErrorServiceFailed, ext1, ext2);
+      OnSystemError(mTarget, CameraControlListener::kSystemService, ext1, ext2);
       break;
 
     default:
@@ -138,7 +148,7 @@ GonkCameraHardware::Init()
   int rv = Camera::getCameraInfo(mCameraId, &info);
   if (rv != 0) {
     DOM_CAMERA_LOGE("%s: failed to get CameraInfo mCameraId %d\n", __func__, mCameraId);
-    return NS_ERROR_FAILURE;
+    return NS_ERROR_NOT_INITIALIZED;
    }
 
   mRawSensorOrientation = info.orientation;
@@ -174,6 +184,13 @@ GonkCameraHardware::Init()
   mCamera->setPreviewTexture(mNativeWindow->getBufferQueue());
 #else
   mCamera->setPreviewTexture(mNativeWindow);
+#endif
+
+#if ANDROID_VERSION >= 16
+  rv = mCamera->sendCommand(CAMERA_CMD_ENABLE_FOCUS_MOVE_MSG, 1, 0);
+  if (rv != OK) {
+    NS_WARNING("Failed to send command CAMERA_CMD_ENABLE_FOCUS_MOVE_MSG");
+  }
 #endif
 
 #endif
@@ -275,11 +292,43 @@ GonkCameraHardware::AutoFocus()
   return mCamera->autoFocus();
 }
 
-void
+int
 GonkCameraHardware::CancelAutoFocus()
 {
   DOM_CAMERA_LOGI("%s\n", __func__);
-  mCamera->cancelAutoFocus();
+  return mCamera->cancelAutoFocus();
+}
+
+int
+GonkCameraHardware::StartFaceDetection()
+{
+  DOM_CAMERA_LOGI("%s\n", __func__);
+  int rv = INVALID_OPERATION;
+
+#if ANDROID_VERSION >= 15
+  rv = mCamera->sendCommand(CAMERA_CMD_START_FACE_DETECTION, CAMERA_FACE_DETECTION_HW, 0);
+#endif
+  if (rv != OK) {
+    DOM_CAMERA_LOGE("Start face detection failed with status %d", rv);
+  }
+
+  return rv;
+}
+
+int
+GonkCameraHardware::StopFaceDetection()
+{
+  DOM_CAMERA_LOGI("%s\n", __func__);
+  int rv = INVALID_OPERATION;
+
+#if ANDROID_VERSION >= 15
+  rv = mCamera->sendCommand(CAMERA_CMD_STOP_FACE_DETECTION, 0, 0);
+#endif
+  if (rv != OK) {
+    DOM_CAMERA_LOGE("Stop face detection failed with status %d", rv);
+  }
+
+  return rv;
 }
 
 int

@@ -106,7 +106,7 @@ MessagePump::Run(MessagePump::Delegate* aDelegate)
     // get here if the normal Gecko event loop has been awoken above.
     // Bug 750713
     if (MOZ_LIKELY(AndroidBridge::HasEnv())) {
-        did_work |= GeckoAppShell::PumpMessageLoop();
+        did_work |= mozilla::widget::android::GeckoAppShell::PumpMessageLoop();
     }
 #endif
 
@@ -211,7 +211,7 @@ MessagePump::DoDelayedWork(base::MessagePump::Delegate* aDelegate)
   }
 }
 
-NS_IMPL_ISUPPORTS2(DoWorkRunnable, nsIRunnable, nsITimerCallback)
+NS_IMPL_ISUPPORTS(DoWorkRunnable, nsIRunnable, nsITimerCallback)
 
 NS_IMETHODIMP
 DoWorkRunnable::Run()

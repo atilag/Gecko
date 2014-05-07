@@ -21,8 +21,7 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(ConvolverNode, AudioNode);
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   AudioBuffer* GetBuffer(JSContext* aCx) const
   {
@@ -54,6 +53,14 @@ public:
     }
     AudioNode::SetChannelCountModeValue(aMode, aRv);
   }
+
+  virtual const char* NodeType() const
+  {
+    return "ConvolverNode";
+  }
+
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
 
 private:
   nsRefPtr<AudioBuffer> mBuffer;

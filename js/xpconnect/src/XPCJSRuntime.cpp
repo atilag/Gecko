@@ -40,6 +40,7 @@
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/WindowBinding.h"
+#include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
 #include "AccessCheck.h"
 #include "nsGlobalWindow.h"
@@ -84,11 +85,10 @@ const char* const XPCJSRuntime::mStrings[] = {
 
 /***************************************************************************/
 
-struct CX_AND_XPCRT_Data
-{
-    JSContext* cx;
-    XPCJSRuntime* rt;
-};
+static mozilla::Atomic<bool> sDiscardSystemSource(false);
+
+bool
+xpc::ShouldDiscardSystemSource() { return sDiscardSystemSource; }
 
 static void * const UNMARK_ONLY = nullptr;
 static void * const UNMARK_AND_SWEEP = (void *)1;
@@ -588,6 +588,14 @@ GetJunkScopeGlobal()
 }
 
 JSObject *
+GetCompilationScope()
+{
+    XPCJSRuntime *self = nsXPConnect::GetRuntimeInstance();
+    NS_ENSURE_TRUE(self, nullptr);
+    return self->GetCompilationScope();
+}
+
+JSObject *
 GetSafeJSContextGlobal()
 {
     return XPCJSRuntime::Get()->GetJSContextStack()->GetSafeJSContextGlobal();
@@ -1058,7 +1066,7 @@ class Watchdog
             AutoLockWatchdog lock(this);
 
             mThread = PR_CreateThread(PR_USER_THREAD, WatchdogMain, this,
-                                      PR_PRIORITY_NORMAL, PR_LOCAL_THREAD,
+                                      PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD,
                                       PR_UNJOINABLE_THREAD, 0);
             if (!mThread)
                 NS_RUNTIMEABORT("PR_CreateThread failed!");
@@ -1250,7 +1258,7 @@ class WatchdogManager : public nsIObserver
     PRTime mTimestamps[TimestampCount];
 };
 
-NS_IMPL_ISUPPORTS1(WatchdogManager, nsIObserver)
+NS_IMPL_ISUPPORTS(WatchdogManager, nsIObserver)
 
 AutoLockWatchdog::AutoLockWatchdog(Watchdog *aWatchdog) : mWatchdog(aWatchdog)
 {
@@ -1397,6 +1405,19 @@ XPCJSRuntime::InterruptCallback(JSContext *cx)
     // running in a non-DOM scope, we have to just let it keep running.
     RootedObject global(cx, JS::CurrentGlobalOrNull(cx));
     nsRefPtr<nsGlobalWindow> win = WindowOrNull(global);
+    if (!win && IsSandbox(global)) {
+        // If this is a sandbox associated with a DOMWindow via a
+        // sandboxPrototype, use that DOMWindow. This supports GreaseMonkey
+        // and JetPack content scripts.
+        JS::Rooted<JSObject*> proto(cx);
+        if (!JS_GetPrototype(cx, global, &proto))
+            return false;
+        if (proto && IsSandboxPrototypeProxy(proto) &&
+            (proto = js::CheckedUnwrap(proto, /* stopAtOuter = */ false)))
+        {
+            win = WindowGlobalOrNull(proto);
+        }
+    }
     if (!win)
         return true;
 
@@ -1538,6 +1559,8 @@ ReloadPrefsCallback(const char *pref, void *data)
     bool useBaselineEager = Preferences::GetBool(JS_OPTIONS_DOT_STR
                                                  "baselinejit.unsafe_eager_compilation");
     bool useIonEager = Preferences::GetBool(JS_OPTIONS_DOT_STR "ion.unsafe_eager_compilation");
+
+    sDiscardSystemSource = Preferences::GetBool(JS_OPTIONS_DOT_STR "discardSystemSource");
 
     JS::RuntimeOptionsRef(rt).setBaseline(useBaseline)
                              .setIon(useIon)
@@ -1717,7 +1740,7 @@ class JSMainRuntimeTemporaryPeakReporter MOZ_FINAL : public nsIMemoryReporter
     }
 };
 
-NS_IMPL_ISUPPORTS1(JSMainRuntimeTemporaryPeakReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(JSMainRuntimeTemporaryPeakReporter, nsIMemoryReporter)
 
 // The REPORT* macros do an unconditional report.  The ZCREPORT* macros are for
 // compartments and zones; they aggregate any entries smaller than
@@ -2148,6 +2171,12 @@ ReportCompartmentStats(const JS::CompartmentStats &cStats,
             "the GC heap.");
     }
 
+    if (cStats.objectsExtra.nonHeapElementsMapped > 0) {
+        REPORT_BYTES(cJSPathPrefix + NS_LITERAL_CSTRING("objects/non-heap/elements/mapped"),
+            KIND_NONHEAP, cStats.objectsExtra.nonHeapElementsMapped,
+            "Memory-mapped array buffer elements.");
+    }
+
     REPORT_BYTES(cJSPathPrefix + NS_LITERAL_CSTRING("objects/non-heap/code/asm.js"),
         KIND_NONHEAP, cStats.objectsExtra.nonHeapCodeAsmJS,
         "AOT-compiled asm.js code.");
@@ -2487,7 +2516,7 @@ class JSMainRuntimeCompartmentsReporter MOZ_FINAL : public nsIMemoryReporter
     }
 };
 
-NS_IMPL_ISUPPORTS1(JSMainRuntimeCompartmentsReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(JSMainRuntimeCompartmentsReporter, nsIMemoryReporter)
 
 MOZ_DEFINE_MALLOC_SIZE_OF(OrphanMallocSizeOf)
 
@@ -2957,17 +2986,17 @@ ReadSourceFromFilename(JSContext *cx, const char *filename, jschar **src, size_t
         ptr += bytesRead;
     }
 
-    nsString decoded;
     rv = nsScriptLoader::ConvertToUTF16(scriptChannel, buf, rawLen, EmptyString(),
-                                        nullptr, decoded);
+                                        nullptr, *src, *len);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    // Copy to JS engine.
-    *len = decoded.Length();
-    *src = static_cast<jschar *>(JS_malloc(cx, decoded.Length()*sizeof(jschar)));
     if (!*src)
         return NS_ERROR_FAILURE;
-    memcpy(*src, decoded.get(), decoded.Length()*sizeof(jschar));
+
+    // Historically this method used JS_malloc() which updates the GC memory
+    // accounting.  Since ConvertToUTF16() now uses js_malloc() instead we
+    // update the accounting manually after the fact.
+    JS_updateMallocCounter(cx, *len);
 
     return NS_OK;
 }
@@ -3025,7 +3054,8 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
    mWrappedJSRoots(nullptr),
    mObjectHolderRoots(nullptr),
    mWatchdogManager(new WatchdogManager(MOZ_THIS_IN_INITIALIZER_LIST())),
-   mJunkScope(nullptr),
+   mJunkScope(MOZ_THIS_IN_INITIALIZER_LIST()->Runtime(), nullptr),
+   mCompilationScope(MOZ_THIS_IN_INITIALIZER_LIST()->Runtime(), nullptr),
    mAsyncSnowWhiteFreer(new AsyncFreeSnowWhite())
 {
     DOM_InitInterfaces();
@@ -3457,24 +3487,38 @@ XPCJSRuntime::GetJunkScope()
     if (!mJunkScope) {
         AutoSafeJSContext cx;
         SandboxOptions options;
-        options.sandboxName.AssignASCII("XPConnect Junk Compartment");
+        options.sandboxName.AssignLiteral("XPConnect Junk Compartment");
         RootedValue v(cx);
         nsresult rv = CreateSandboxObject(cx, &v, nsContentUtils::GetSystemPrincipal(), options);
         NS_ENSURE_SUCCESS(rv, nullptr);
 
         mJunkScope = js::UncheckedUnwrap(&v.toObject());
-        JS_AddNamedObjectRoot(cx, &mJunkScope, "XPConnect Junk Compartment");
     }
     return mJunkScope;
 }
 
-void
-XPCJSRuntime::DeleteJunkScope()
+JSObject *
+XPCJSRuntime::GetCompilationScope()
 {
-    if(!mJunkScope)
-        return;
+    if (!mCompilationScope) {
+        AutoSafeJSContext cx;
+        SandboxOptions options;
+        options.sandboxName.AssignLiteral("XPConnect Compilation Compartment");
+        options.invisibleToDebugger = true;
+        options.discardSource = ShouldDiscardSystemSource();
+        RootedValue v(cx);
+        nsresult rv = CreateSandboxObject(cx, &v, /* principal = */ nullptr, options);
+        NS_ENSURE_SUCCESS(rv, nullptr);
 
-    AutoSafeJSContext cx;
-    JS_RemoveObjectRoot(cx, &mJunkScope);
+        mCompilationScope = js::UncheckedUnwrap(&v.toObject());
+    }
+    return mCompilationScope;
+}
+
+
+void
+XPCJSRuntime::DeleteSingletonScopes()
+{
     mJunkScope = nullptr;
+    mCompilationScope = nullptr;
 }

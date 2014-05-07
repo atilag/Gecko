@@ -98,7 +98,7 @@ private:
 };
 
 // ISuuports implementation for nsTokenEventRunnable
-NS_IMPL_ISUPPORTS1(nsTokenEventRunnable, nsIRunnable)
+NS_IMPL_ISUPPORTS(nsTokenEventRunnable, nsIRunnable)
 
 nsTokenEventRunnable::nsTokenEventRunnable(const nsAString& aType,
                                            const nsAString& aTokenName)
@@ -875,7 +875,7 @@ private:
   CipherSuiteChangeObserver() {}
 };
 
-NS_IMPL_ISUPPORTS1(CipherSuiteChangeObserver, nsIObserver)
+NS_IMPL_ISUPPORTS(CipherSuiteChangeObserver, nsIObserver)
 
 // static
 StaticRefPtr<CipherSuiteChangeObserver> CipherSuiteChangeObserver::sObserver;
@@ -972,7 +972,7 @@ void nsNSSComponent::setValidationOptions(bool isInitialSetting,
     = CertVerifier::classic;
 
   // The mozilla::pkix pref overrides the libpkix pref
-  if (Preferences::GetBool("security.use_mozillapkix_verification", false)) {
+  if (Preferences::GetBool("security.use_mozillapkix_verification", true)) {
     certVerifierImplementation = CertVerifier::mozillapkix;
   } else {
 #ifndef NSS_NO_LIBPKIX
@@ -994,6 +994,24 @@ void nsNSSComponent::setValidationOptions(bool isInitialSetting,
     }
   }
 
+  CertVerifier::pinning_enforcement_config
+    pinningEnforcementLevel = CertVerifier::pinningDisabled;
+  int prefPinningEnforcementLevel = Preferences::GetInt("security.cert_pinning.enforcement_level",
+                                                         pinningEnforcementLevel);
+  switch (prefPinningEnforcementLevel) {
+    case 0:
+      pinningEnforcementLevel = CertVerifier::pinningDisabled;
+      break;
+    case 1:
+      pinningEnforcementLevel = CertVerifier::pinningAllowUserCAMITM;
+      break;
+    case 2:
+      pinningEnforcementLevel = CertVerifier::pinningStrict;
+      break;
+    default:
+      pinningEnforcementLevel = CertVerifier::pinningDisabled;
+  }
+
   CertVerifier::ocsp_download_config odc;
   CertVerifier::ocsp_strict_config osc;
   CertVerifier::ocsp_get_config ogc;
@@ -1007,7 +1025,7 @@ void nsNSSComponent::setValidationOptions(bool isInitialSetting,
       crlDownloading ?
         CertVerifier::crl_download_allowed : CertVerifier::crl_local_only,
 #endif
-      odc, osc, ogc);
+      odc, osc, ogc, pinningEnforcementLevel);
 
   // mozilla::pkix has its own OCSP cache, so disable the NSS cache
   // if appropriate.
@@ -1365,12 +1383,12 @@ nsNSSComponent::Init()
 }
 
 // nsISupports Implementation for the class
-NS_IMPL_ISUPPORTS5(nsNSSComponent,
-                   nsISignatureVerifier,
-                   nsIEntropyCollector,
-                   nsINSSComponent,
-                   nsIObserver,
-                   nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(nsNSSComponent,
+                  nsISignatureVerifier,
+                  nsIEntropyCollector,
+                  nsINSSComponent,
+                  nsIObserver,
+                  nsISupportsWeakReference)
 
 
 // Callback functions for decoder. For now, use empty/default functions.
@@ -1630,7 +1648,8 @@ nsNSSComponent::Observe(nsISupports* aSubject, const char* aTopic,
                || prefName.Equals("security.OCSP.GET.enabled")
                || prefName.Equals("security.ssl.enable_ocsp_stapling")
                || prefName.Equals("security.use_mozillapkix_verification")
-               || prefName.Equals("security.use_libpkix_verification")) {
+               || prefName.Equals("security.use_libpkix_verification")
+               || prefName.Equals("security.cert_pinning.enforcement_level")) {
       MutexAutoLock lock(mutex);
       setValidationOptions(false, lock);
     } else if (prefName.Equals("network.ntlm.send-lm-response")) {
@@ -1859,7 +1878,7 @@ GetDefaultCertVerifier()
 
 } } // namespace mozilla::psm
 
-NS_IMPL_ISUPPORTS1(PipUIContext, nsIInterfaceRequestor)
+NS_IMPL_ISUPPORTS(PipUIContext, nsIInterfaceRequestor)
 
 PipUIContext::PipUIContext()
 {

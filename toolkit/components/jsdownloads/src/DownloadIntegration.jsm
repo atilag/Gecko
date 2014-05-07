@@ -284,10 +284,7 @@ this.DownloadIntegration = {
       // Now get the path for this storage area.
       if (preferredStorageName) {
         let volume = volumeService.getVolumeByName(preferredStorageName);
-        if (volume &&
-            volume.isMediaPresent &&
-            !volume.isMountLocked &&
-            !volume.isSharing) {
+        if (volume && volume.state === Ci.nsIVolume.STATE_MOUNTED){
           directoryPath = OS.Path.join(volume.mountPoint, "downloads");
           yield OS.File.makeDir(directoryPath, { ignoreExisting: true });
         }
@@ -791,7 +788,13 @@ this.DownloadIntegration = {
 
     if (this.dontOpenFileAndFolder) {
       deferred.then((value) => { this._deferTestShowDir.resolve("success"); },
-                    (error) => { this._deferTestShowDir.reject(error); });
+                    (error) => {
+                      // Ensure that _deferTestShowDir has at least one consumer
+                      // for the error, otherwise the error will be reported as
+                      // uncaught.
+                      this._deferTestShowDir.promise.then(null, function() {});
+                      this._deferTestShowDir.reject(error);
+                    });
     }
 
     return deferred;

@@ -18,6 +18,7 @@
 #ifndef mozilla_pkix__pkixder_h
 #define mozilla_pkix__pkixder_h
 
+#include "pkix/enumclass.h"
 #include "pkix/nullptr.h"
 
 #include "prerror.h"
@@ -61,7 +62,7 @@ enum Result
   Success = 0
 };
 
-enum EmptyAllowed { MayBeEmpty = 0, MustNotBeEmpty = 1 };
+MOZILLA_PKIX_ENUM_CLASS EmptyAllowed { No = 0, Yes = 1 };
 
 Result Fail(PRErrorCode errorCode);
 
@@ -93,9 +94,9 @@ public:
     return Success;
   }
 
-  Result Expect(const uint8_t* expected, size_t expectedLen)
+  Result Expect(const uint8_t* expected, uint16_t expectedLen)
   {
-    if (input + expectedLen > end) {
+    if (EnsureLength(expectedLen) != Success) {
       return Fail(SEC_ERROR_BAD_DER);
     }
     if (memcmp(input, expected, expectedLen)) {
@@ -132,7 +133,7 @@ public:
 
   Result Skip(uint16_t len)
   {
-    if (input + len > end) {
+    if (EnsureLength(len) != Success) {
       return Fail(SEC_ERROR_BAD_DER);
     }
     input += len;
@@ -141,7 +142,7 @@ public:
 
   Result Skip(uint16_t len, Input& skippedInput)
   {
-    if (input + len > end) {
+    if (EnsureLength(len) != Success) {
       return Fail(SEC_ERROR_BAD_DER);
     }
     if (skippedInput.Init(input, len) != Success) {
@@ -153,7 +154,7 @@ public:
 
   Result Skip(uint16_t len, SECItem& skippedItem)
   {
-    if (input + len > end) {
+    if (EnsureLength(len) != Success) {
       return Fail(SEC_ERROR_BAD_DER);
     }
     skippedItem.type = siBuffer;
@@ -168,26 +169,38 @@ public:
     input = end;
   }
 
+  Result EnsureLength(uint16_t len)
+  {
+    if (input + len > end) {
+      return Fail(SEC_ERROR_BAD_DER);
+    }
+    return Success;
+  }
+
   bool AtEnd() const { return input == end; }
 
   class Mark
   {
   private:
     friend class Input;
-    explicit Mark(const uint8_t* mark) : mMark(mark) { }
-    const uint8_t* const mMark;
+    Mark(const Input& input, const uint8_t* mark) : input(input), mark(mark) { }
+    const Input& input;
+    const uint8_t* const mark;
     void operator=(const Mark&) /* = delete */;
   };
 
-  Mark GetMark() const { return Mark(input); }
+  Mark GetMark() const { return Mark(*this, input); }
 
-  void GetSECItem(SECItemType type, const Mark& mark, /*out*/ SECItem& item)
+  Result GetSECItem(SECItemType type, const Mark& mark, /*out*/ SECItem& item)
   {
-    PR_ASSERT(mark.mMark < input);
+    if (&mark.input != this || mark.mark > input) {
+      PR_NOT_REACHED("invalid mark");
+      return Fail(SEC_ERROR_INVALID_ARGS);
+    }
     item.type = type;
-    item.data = const_cast<uint8_t*>(mark.mMark);
-    // TODO: bounds check
-    item.len = input - mark.mMark;
+    item.data = const_cast<uint8_t*>(mark.mark);
+    item.len = static_cast<decltype(item.len)>(input - mark.mark);
+    return Success;
   }
 
 private:
@@ -315,7 +328,7 @@ NestedOf(Input& input, uint8_t outerTag, uint8_t innerTag,
   }
 
   if (inner.AtEnd()) {
-    if (mayBeEmpty != MayBeEmpty) {
+    if (mayBeEmpty != EmptyAllowed::Yes) {
       return Fail(SEC_ERROR_BAD_DER);
     }
     return Success;
@@ -367,8 +380,7 @@ Boolean(Input& input, /*out*/ bool& value)
     case 0: value = false; return Success;
     case 0xFF: value = true; return Success;
     default:
-      PR_SetError(SEC_ERROR_BAD_DER, 0);
-      return Failure;
+      return Fail(SEC_ERROR_BAD_DER);
   }
 }
 
@@ -409,7 +421,7 @@ GeneralizedTime(Input& input, PRTime& time)
   if (ExpectTagAndGetLength(input, GENERALIZED_TIME, length) != Success) {
     return Failure;
   }
-  if (input.Skip(length, encoded)) {
+  if (input.Skip(length, encoded) != Success) {
     return Failure;
   }
   if (DER_GeneralizedTimeToTime(&time, &encoded) != SECSuccess) {
@@ -456,7 +468,7 @@ Null(Input& input)
   return ExpectTagAndLength(input, NULLTag, 0);
 }
 
-template <size_t Len>
+template <uint8_t Len>
 Result
 OID(Input& input, const uint8_t (&expectedOid)[Len])
 {

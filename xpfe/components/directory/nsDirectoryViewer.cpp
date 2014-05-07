@@ -55,7 +55,6 @@
 
 using namespace mozilla;
 
-static const int FORMAT_HTML = 2;
 static const int FORMAT_XUL = 3;
 
 //----------------------------------------------------------------------
@@ -84,7 +83,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsHTTPIndex)
     NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIHTTPIndex)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_1(nsHTTPIndex, mInner)
+NS_IMPL_CYCLE_COLLECTION(nsHTTPIndex, mInner)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsHTTPIndex)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsHTTPIndex)
 
@@ -1255,7 +1254,7 @@ nsDirectoryViewerFactory::~nsDirectoryViewerFactory()
 }
 
 
-NS_IMPL_ISUPPORTS1(nsDirectoryViewerFactory, nsIDocumentLoaderFactory)
+NS_IMPL_ISUPPORTS(nsDirectoryViewerFactory, nsIDocumentLoaderFactory)
 
 
 

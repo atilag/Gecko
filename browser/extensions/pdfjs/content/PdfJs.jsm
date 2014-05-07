@@ -34,8 +34,6 @@ const PDF_CONTENT_TYPE = 'application/pdf';
 
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 Cu.import('resource://gre/modules/Services.jsm');
-Cu.import('resource://pdf.js/PdfStreamConverter.jsm');
-Cu.import('resource://pdf.js/PdfRedirector.jsm');
 
 let Svc = {};
 XPCOMUtils.defineLazyServiceGetter(Svc, 'mime',
@@ -62,7 +60,15 @@ function getIntPref(aPref, aDefaultValue) {
 }
 
 function initializeDefaultPreferences() {
-  Cu.import('resource://pdf.js/default_preferences.js');
+
+var DEFAULT_PREFERENCES = {
+  showPreviousViewOnLoad: true,
+  defaultZoomValue: '',
+  ifAvailableShowOutlineOnLoad: false,
+  enableHandToolOnLoad: false,
+  enableWebGL: false
+};
+
 
   var defaultBranch = Services.prefs.getDefaultBranch(PREF_PREFIX + '.');
   var defaultValue;
@@ -130,14 +136,18 @@ let PdfJs = {
   },
 
   _migrate: function migrate() {
-    const VERSION = 1;
+    const VERSION = 2;
     var currentVersion = getIntPref(PREF_MIGRATION_VERSION, 0);
     if (currentVersion >= VERSION) {
       return;
     }
     // Make pdf.js the default pdf viewer on the first migration.
-    if (currentVersion < 2) {
+    if (currentVersion < 1) {
       this._becomeHandler();
+    }
+    if (currentVersion < 2) {
+      // cleaning up of unused database preference (see #3994)
+      Services.prefs.clearUserPref(PREF_PREFIX + '.database');
     }
     Services.prefs.setIntPref(PREF_MIGRATION_VERSION, VERSION);
   },
@@ -246,10 +256,13 @@ let PdfJs = {
       return;
 
     this._pdfStreamConverterFactory = new Factory();
+    Cu.import('resource://pdf.js/PdfStreamConverter.jsm');
     this._pdfStreamConverterFactory.register(PdfStreamConverter);
 
     this._pdfRedirectorFactory = new Factory();
+    Cu.import('resource://pdf.js/PdfRedirector.jsm');
     this._pdfRedirectorFactory.register(PdfRedirector);
+
     Svc.pluginHost.registerPlayPreviewMimeType(PDF_CONTENT_TYPE, true,
       'data:application/x-moz-playpreview-pdfjs;,');
 
@@ -261,12 +274,16 @@ let PdfJs = {
       return;
 
     this._pdfStreamConverterFactory.unregister();
+    Cu.unload('resource://pdf.js/PdfStreamConverter.jsm');
     delete this._pdfStreamConverterFactory;
 
     this._pdfRedirectorFactory.unregister();
+    Cu.unload('resource://pdf.js/PdfRedirector.jsm');
     delete this._pdfRedirectorFactory;
+
     Svc.pluginHost.unregisterPlayPreviewMimeType(PDF_CONTENT_TYPE);
 
     this._registered = false;
   }
 };
+

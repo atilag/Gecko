@@ -96,9 +96,7 @@ nsContainerFrame::AppendFrames(ChildListID  aListID,
                                nsFrameList& aFrameList)
 {
   if (aListID != kPrincipalList) {
-#ifdef IBMBIDI
     if (aListID != kNoReflowPrincipalList)
-#endif
     {
       NS_ERROR("unexpected child list");
       return NS_ERROR_INVALID_ARG;
@@ -108,9 +106,7 @@ nsContainerFrame::AppendFrames(ChildListID  aListID,
     mFrames.AppendFrames(this, aFrameList);
 
     // Ask the parent frame to reflow me.
-#ifdef IBMBIDI
     if (aListID == kPrincipalList)
-#endif
     {
       PresContext()->PresShell()->
         FrameNeedsReflow(this, nsIPresShell::eTreeChange,
@@ -129,9 +125,7 @@ nsContainerFrame::InsertFrames(ChildListID aListID,
                "inserting after sibling frame with different parent");
 
   if (aListID != kPrincipalList) {
-#ifdef IBMBIDI
     if (aListID != kNoReflowPrincipalList)
-#endif
     {
       NS_ERROR("unexpected child list");
       return NS_ERROR_INVALID_ARG;
@@ -141,9 +135,7 @@ nsContainerFrame::InsertFrames(ChildListID aListID,
     // Insert frames after aPrevFrame
     mFrames.InsertFrames(this, aPrevFrame, aFrameList);
 
-#ifdef IBMBIDI
     if (aListID == kPrincipalList)
-#endif
     {
       PresContext()->PresShell()->
         FrameNeedsReflow(this, nsIPresShell::eTreeChange,
@@ -158,9 +150,7 @@ nsContainerFrame::RemoveFrame(ChildListID aListID,
                               nsIFrame* aOldFrame)
 {
   if (aListID != kPrincipalList) {
-#ifdef IBMBIDI
     if (kNoReflowPrincipalList != aListID)
-#endif
     {
       NS_ERROR("unexpected child list");
       return NS_ERROR_INVALID_ARG;
@@ -171,11 +161,9 @@ nsContainerFrame::RemoveFrame(ChildListID aListID,
   // Request a reflow on the parent frames involved unless we were explicitly
   // told not to (kNoReflowPrincipalList).
   bool generateReflowCommand = true;
-#ifdef IBMBIDI
   if (kNoReflowPrincipalList == aListID) {
     generateReflowCommand = false;
   }
-#endif
   nsIPresShell* shell = PresContext()->PresShell();
   nsContainerFrame* lastParent = nullptr;
   while (aOldFrame) {
@@ -849,12 +837,31 @@ nsContainerFrame::DoInlineIntrinsicWidth(nsRenderingContext *aRenderingContext,
   // This frame is a first-in-flow, but it might have a previous bidi
   // continuation, in which case that continuation should handle the startSide
   // border.
+  // For box-decoration-break:clone we setup clonePBM = startPBM + endPBM and
+  // add that to each line.  For box-decoration-break:slice clonePBM is zero.
+  nscoord clonePBM = 0; // PBM = PaddingBorderMargin
+  const bool sliceBreak =
+    styleBorder->mBoxDecorationBreak == NS_STYLE_BOX_DECORATION_BREAK_SLICE;
   if (!GetPrevContinuation()) {
-    aData->currentLine +=
+    nscoord startPBM =
       // clamp negative calc() to 0
       std::max(GetCoord(stylePadding->mPadding.Get(startSide), 0), 0) +
       styleBorder->GetComputedBorderWidth(startSide) +
       GetCoord(styleMargin->mMargin.Get(startSide), 0);
+    if (MOZ_LIKELY(sliceBreak)) {
+      aData->currentLine += startPBM;
+    } else {
+      clonePBM = startPBM;
+    }
+  }
+
+  nscoord endPBM =
+    // clamp negative calc() to 0
+    std::max(GetCoord(stylePadding->mPadding.Get(endSide), 0), 0) +
+    styleBorder->GetComputedBorderWidth(endSide) +
+    GetCoord(styleMargin->mMargin.Get(endSide), 0);
+  if (MOZ_UNLIKELY(!sliceBreak)) {
+    clonePBM += endPBM;
   }
 
   const nsLineList_iterator* savedLine = aData->line;
@@ -863,6 +870,9 @@ nsContainerFrame::DoInlineIntrinsicWidth(nsRenderingContext *aRenderingContext,
   nsContainerFrame *lastInFlow;
   for (nsContainerFrame *nif = this; nif;
        nif = static_cast<nsContainerFrame*>(nif->GetNextInFlow())) {
+    if (aData->currentLine == 0) {
+      aData->currentLine = clonePBM;
+    }
     for (nsIFrame *kid = nif->mFrames.FirstChild(); kid;
          kid = kid->GetNextSibling()) {
       if (aType == nsLayoutUtils::MIN_WIDTH)
@@ -891,12 +901,8 @@ nsContainerFrame::DoInlineIntrinsicWidth(nsRenderingContext *aRenderingContext,
   // We reached the last-in-flow, but it might have a next bidi
   // continuation, in which case that continuation should handle
   // the endSide border.
-  if (!lastInFlow->GetNextContinuation()) {
-    aData->currentLine +=
-      // clamp negative calc() to 0
-      std::max(GetCoord(stylePadding->mPadding.Get(endSide), 0), 0) +
-      styleBorder->GetComputedBorderWidth(endSide) +
-      GetCoord(styleMargin->mMargin.Get(endSide), 0);
+  if (MOZ_LIKELY(!lastInFlow->GetNextContinuation() && sliceBreak)) {
+    aData->currentLine += endPBM;
   }
 }
 

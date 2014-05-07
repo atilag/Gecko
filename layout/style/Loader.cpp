@@ -302,8 +302,8 @@ static const char* const gStateStrings[] = {
 /********************************
  * SheetLoadData implementation *
  ********************************/
-NS_IMPL_ISUPPORTS3(SheetLoadData, nsIUnicharStreamLoaderObserver, nsIRunnable,
-                   nsIThreadObserver)
+NS_IMPL_ISUPPORTS(SheetLoadData, nsIUnicharStreamLoaderObserver, nsIRunnable,
+                  nsIThreadObserver)
 
 SheetLoadData::SheetLoadData(Loader* aLoader,
                              const nsSubstring& aTitle,
@@ -1546,6 +1546,16 @@ Loader::LoadSheet(SheetLoadData* aLoadData, StyleSheetState aSheetState)
     nsCOMPtr<nsIURI> referrerURI = aLoadData->GetReferrerURI();
     if (referrerURI)
       httpChannel->SetReferrer(referrerURI);
+
+    // Set the initiator type
+    nsCOMPtr<nsITimedChannel> timedChannel(do_QueryInterface(httpChannel));
+    if (timedChannel) {
+      if (aLoadData->mParentData) {
+        timedChannel->SetInitiatorType(NS_LITERAL_STRING("css"));
+      } else {
+        timedChannel->SetInitiatorType(NS_LITERAL_STRING("link"));
+      }
+    }
   }
 
   // Now tell the channel we expect text/css data back....  We do

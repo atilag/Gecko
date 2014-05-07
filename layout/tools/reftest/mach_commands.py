@@ -206,7 +206,8 @@ class ReftestRunner(MozbuildObject):
         return reftest.run_remote_reftests(parser, options, args)
 
     def run_desktop_test(self, test_file=None, filter=None, suite=None,
-            debugger=None, parallel=False, e10s=False):
+            debugger=None, parallel=False, shuffle=False,
+            e10s=False, this_chunk=None, total_chunks=None):
         """Runs a reftest.
 
         test_file is a path to a test file. It can be a relative path from the
@@ -223,6 +224,8 @@ class ReftestRunner(MozbuildObject):
         debugger to run.
 
         parallel indicates whether tests should be run in parallel or not.
+
+        shuffle indicates whether to run tests in random order.
         """
 
         if suite not in ('reftest', 'reftest-ipc', 'crashtest', 'crashtest-ipc'):
@@ -248,8 +251,17 @@ class ReftestRunner(MozbuildObject):
         if parallel:
             extra_args.append('--run-tests-in-parallel')
 
+        if shuffle:
+            extra_args.append('--shuffle')
+
         if e10s:
             extra_args.append('--e10s')
+
+        if this_chunk:
+            extra_args.append('--this-chunk=%s' % this_chunk)
+
+        if total_chunks:
+            extra_args.append('--total-chunks=%s' % total_chunks)
 
         if extra_args:
             args = [os.environ.get(b'EXTRA_TEST_ARGS', '')]
@@ -282,9 +294,21 @@ def ReftestCommand(func):
         help='Run tests in parallel.')
     func = parallel(func)
 
+    shuffle = CommandArgument('--shuffle', action='store_true',
+        help='Run tests in random order.')
+    func = shuffle(func)
+
     e10s = CommandArgument('--e10s', action='store_true',
-                           help='Use content processes.')
+        help='Use content processes.')
     func = e10s(func)
+
+    totalChunks = CommandArgument('--total-chunks',
+        help = 'How many chunks to split the tests up into.')
+    func = totalChunks(func)
+
+    thisChunk = CommandArgument('--this-chunk',
+        help = 'Which chunk to run between 1 and --total-chunks.')
+    func = thisChunk(func)
 
     return func
 
@@ -312,13 +336,17 @@ def B2GCommand(func):
         help='Emulator resolution of the format \'<width>x<height>\'')
     func = emulator_res(func)
 
-    emulator = CommandArgument('--emulator', default='arm',
-        help='Architecture of emulator to use: x86 or arm')
-    func = emulator(func)
-
     marionette = CommandArgument('--marionette', default=None,
         help='host:port to use when connecting to Marionette')
     func = marionette(func)
+
+    totalChunks = CommandArgument('--total-chunks', dest='totalChunks',
+        help = 'How many chunks to split the tests up into.')
+    func = totalChunks(func)
+
+    thisChunk = CommandArgument('--this-chunk', dest='thisChunk',
+        help = 'Which chunk to run between 1 and --total-chunks.')
+    func = thisChunk(func)
 
     path = CommandArgument('test_file', default=None, nargs='?',
         metavar='TEST',
@@ -364,7 +392,7 @@ class MachCommands(MachCommandBase):
 # they should be modified to work with all devices.
 def is_emulator(cls):
     """Emulator needs to be configured."""
-    return cls.device_name in ('emulator', 'emulator-jb')
+    return cls.device_name.startswith('emulator')
 
 
 @CommandProvider
@@ -397,6 +425,13 @@ class B2GCommands(MachCommandBase):
         return self._run_reftest(test_file, suite='crashtest', **kwargs)
 
     def _run_reftest(self, test_file=None, suite=None, **kwargs):
+        if self.device_name:
+            if self.device_name.startswith('emulator'):
+                emulator = 'arm'
+                if 'x86' in self.device_name:
+                    emulator = 'x86'
+                kwargs['emulator'] = emulator
+
         reftest = self._spawn(ReftestRunner)
         return reftest.run_b2g_test(self.b2g_home, self.xre_path,
             test_file, suite=suite, **kwargs)

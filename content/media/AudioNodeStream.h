@@ -155,6 +155,12 @@ public:
   double DestinationTimeFromTicks(AudioNodeStream* aDestination,
                                   TrackTicks aPosition);
 
+  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
+  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
+
+  void SizeOfAudioNodesIncludingThis(MallocSizeOf aMallocSizeOf,
+                                     AudioNodeSizes& aUsage) const;
+
 protected:
   void AdvanceOutputSegment();
   void FinishOutput();
@@ -165,7 +171,7 @@ protected:
                          nsTArray<const void*>& aOutputChannels,
                          nsTArray<float>& aDownmixBuffer);
 
-  uint32_t ComputeFinalOuputChannelCount(uint32_t aInputChannelCount);
+  uint32_t ComputedNumberOfChannels(uint32_t aInputChannelCount);
   void ObtainInputBlock(AudioChunk& aTmpChunk, uint32_t aPortIndex);
 
   // The engine that will generate output for this node.

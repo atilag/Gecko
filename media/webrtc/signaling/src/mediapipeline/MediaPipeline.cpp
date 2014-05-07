@@ -23,8 +23,9 @@
 #include "ImageTypes.h"
 #include "ImageContainer.h"
 #include "VideoUtils.h"
-#ifdef MOZ_WIDGET_GONK
+#ifdef WEBRTC_GONK
 #include "GrallocImages.h"
+#include "mozilla/layers/GrallocTextureClient.h"
 #endif
 #endif
 
@@ -37,8 +38,10 @@
 #include "transportlayerdtls.h"
 #include "transportlayerice.h"
 #include "runnable_utils.h"
-#include "gfxImageSurface.h"
 #include "libyuv/convert.h"
+#ifdef MOZILLA_INTERNAL_API
+#include "mozilla/PeerIdentity.h"
+#endif
 #include "mozilla/gfx/Point.h"
 #include "mozilla/gfx/Types.h"
 
@@ -650,8 +653,32 @@ nsresult MediaPipelineTransmit::Init() {
     listener_->direct_connect_ = true;
   }
 
+#ifndef MOZILLA_INTERNAL_API
+  // this enables the unit tests that can't fiddle with principals and the like
+  listener_->SetEnabled(true);
+#endif
+
   return MediaPipeline::Init();
 }
+
+#ifdef MOZILLA_INTERNAL_API
+void MediaPipelineTransmit::UpdateSinkIdentity_m(nsIPrincipal* principal,
+                                                 const PeerIdentity* sinkIdentity) {
+  ASSERT_ON_THREAD(main_thread_);
+  bool enableStream = principal->Subsumes(domstream_->GetPrincipal());
+  if (!enableStream) {
+    // first try didn't work, but there's a chance that this is still available
+    // if our stream is bound to a peerIdentity, and the peer connection (our
+    // sink) is bound to the same identity, then we can enable the stream
+    PeerIdentity* streamIdentity = domstream_->GetPeerIdentity();
+    if (sinkIdentity && streamIdentity) {
+      enableStream = (*sinkIdentity == *streamIdentity);
+    }
+  }
+
+  listener_->SetEnabled(enableStream);
+}
+#endif
 
 nsresult MediaPipelineTransmit::TransportReady_s(TransportInfo &info) {
   ASSERT_ON_THREAD(sts_thread_);
@@ -661,7 +688,6 @@ nsresult MediaPipelineTransmit::TransportReady_s(TransportInfo &info) {
   // Should not be set for a transmitter
   MOZ_ASSERT(!possible_bundle_rtp_);
   if (&info == &rtp_) {
-    // TODO(ekr@rtfm.com): Move onto MSG thread.
     listener_->SetActive(true);
   }
 
@@ -935,6 +961,7 @@ NewData(MediaStreamGraph* graph, TrackID tid,
       // Ignore data in case we have a muxed stream
       return;
     }
+
     AudioSegment* audio = const_cast<AudioSegment *>(
         static_cast<const AudioSegment *>(&media));
 
@@ -950,6 +977,7 @@ NewData(MediaStreamGraph* graph, TrackID tid,
       // Ignore data in case we have a muxed stream
       return;
     }
+
     VideoSegment* video = const_cast<VideoSegment *>(
         static_cast<const VideoSegment *>(&media));
 
@@ -972,7 +1000,7 @@ void MediaPipelineTransmit::PipelineListener::ProcessAudioChunk(
   // TODO(ekr@rtfm.com): Do more than one channel
   nsAutoArrayPtr<int16_t> samples(new int16_t[chunk.mDuration]);
 
-  if (chunk.mBuffer) {
+  if (enabled_ && chunk.mBuffer) {
     switch (chunk.mBufferFormat) {
       case AUDIO_FORMAT_FLOAT32:
         {
@@ -987,6 +1015,9 @@ void MediaPipelineTransmit::PipelineListener::ProcessAudioChunk(
           ConvertAudioSamplesWithScale(buf, samples, chunk.mDuration, chunk.mVolume);
         }
         break;
+      case AUDIO_FORMAT_SILENCE:
+        memset(samples, 0, chunk.mDuration * sizeof(samples[0]));
+        break;
       default:
         MOZ_ASSERT(PR_FALSE);
         return;
@@ -994,9 +1025,7 @@ void MediaPipelineTransmit::PipelineListener::ProcessAudioChunk(
     }
   } else {
     // This means silence.
-    for (uint32_t i = 0; i < chunk.mDuration; ++i) {
-      samples[i] = 0;
-    }
+    memset(samples, 0, chunk.mDuration * sizeof(samples[0]));
   }
 
   MOZ_ASSERT(!(rate%100)); // rate should be a multiple of 100
@@ -1080,7 +1109,7 @@ void MediaPipelineTransmit::PipelineListener::ProcessVideoChunk(
     return;
   }
 
-  if (chunk.mFrame.GetForceBlack()) {
+  if (!enabled_ || chunk.mFrame.GetForceBlack()) {
     uint32_t yPlaneLen = size.width*size.height;
     uint32_t cbcrPlaneLen = yPlaneLen/2;
     uint32_t length = yPlaneLen + cbcrPlaneLen;
@@ -1109,13 +1138,10 @@ void MediaPipelineTransmit::PipelineListener::ProcessVideoChunk(
   last_img_ = serial;
 
   ImageFormat format = img->GetFormat();
-#ifdef MOZ_WIDGET_GONK
+#ifdef WEBRTC_GONK
   if (format == ImageFormat::GRALLOC_PLANAR_YCBCR) {
     layers::GrallocImage *nativeImage = static_cast<layers::GrallocImage*>(img);
-    layers::SurfaceDescriptor handle = nativeImage->GetSurfaceDescriptor();
-    layers::SurfaceDescriptorGralloc grallocHandle = handle.get_SurfaceDescriptorGralloc();
-
-    android::sp<android::GraphicBuffer> graphicBuffer = layers::GrallocBufferActor::GetFrom(grallocHandle);
+    android::sp<android::GraphicBuffer> graphicBuffer = nativeImage->GetGraphicBuffer();
     void *basePtr;
     graphicBuffer->lock(android::GraphicBuffer::USAGE_SW_READ_MASK, &basePtr);
     conduit->SendVideoFrame(static_cast<unsigned char*>(basePtr),
@@ -1406,40 +1432,49 @@ void MediaPipelineReceiveVideo::PipelineListener::RenderVideoFrame(
     const unsigned char* buffer,
     unsigned int buffer_size,
     uint32_t time_stamp,
-    int64_t render_time) {
+    int64_t render_time,
+    const RefPtr<layers::Image>& video_image) {
 #ifdef MOZILLA_INTERNAL_API
   ReentrantMonitorAutoEnter enter(monitor_);
 
-  // Create a video frame and append it to the track.
+  if (buffer) {
+    // Create a video frame using |buffer|.
 #ifdef MOZ_WIDGET_GONK
-  ImageFormat format = ImageFormat::GRALLOC_PLANAR_YCBCR;
+    ImageFormat format = ImageFormat::GRALLOC_PLANAR_YCBCR;
 #else
-  ImageFormat format = ImageFormat::PLANAR_YCBCR;
+    ImageFormat format = ImageFormat::PLANAR_YCBCR;
 #endif
-  nsRefPtr<layers::Image> image = image_container_->CreateImage(format);
+    nsRefPtr<layers::Image> image = image_container_->CreateImage(format);
+    layers::PlanarYCbCrImage* yuvImage = static_cast<layers::PlanarYCbCrImage*>(image.get());
+    uint8_t* frame = const_cast<uint8_t*>(static_cast<const uint8_t*> (buffer));
+    const uint8_t lumaBpp = 8;
+    const uint8_t chromaBpp = 4;
 
-  layers::PlanarYCbCrImage* videoImage = static_cast<layers::PlanarYCbCrImage*>(image.get());
-  uint8_t* frame = const_cast<uint8_t*>(static_cast<const uint8_t*> (buffer));
-  const uint8_t lumaBpp = 8;
-  const uint8_t chromaBpp = 4;
+    layers::PlanarYCbCrData yuvData;
+    yuvData.mYChannel = frame;
+    yuvData.mYSize = IntSize(width_, height_);
+    yuvData.mYStride = width_ * lumaBpp/ 8;
+    yuvData.mCbCrStride = width_ * chromaBpp / 8;
+    yuvData.mCbChannel = frame + height_ * yuvData.mYStride;
+    yuvData.mCrChannel = yuvData.mCbChannel + height_ * yuvData.mCbCrStride / 2;
+    yuvData.mCbCrSize = IntSize(width_/ 2, height_/ 2);
+    yuvData.mPicX = 0;
+    yuvData.mPicY = 0;
+    yuvData.mPicSize = IntSize(width_, height_);
+    yuvData.mStereoMode = StereoMode::MONO;
 
-  layers::PlanarYCbCrData data;
-  data.mYChannel = frame;
-  data.mYSize = IntSize(width_, height_);
-  data.mYStride = width_ * lumaBpp/ 8;
-  data.mCbCrStride = width_ * chromaBpp / 8;
-  data.mCbChannel = frame + height_ * data.mYStride;
-  data.mCrChannel = data.mCbChannel + height_ * data.mCbCrStride / 2;
-  data.mCbCrSize = IntSize(width_/ 2, height_/ 2);
-  data.mPicX = 0;
-  data.mPicY = 0;
-  data.mPicSize = IntSize(width_, height_);
-  data.mStereoMode = StereoMode::MONO;
+    yuvImage->SetData(yuvData);
 
-  videoImage->SetData(data);
-
-  image_ = image.forget();
-#endif
+    image_ = image.forget();
+  }
+#ifdef WEBRTC_GONK
+  else {
+    // Decoder produced video frame that can be appended to the track directly.
+    MOZ_ASSERT(video_image);
+    image_ = video_image;
+  }
+#endif // WEBRTC_GONK
+#endif // MOZILLA_INTERNAL_API
 }
 
 void MediaPipelineReceiveVideo::PipelineListener::

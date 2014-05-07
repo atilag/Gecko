@@ -82,9 +82,9 @@ AudioBuffer::InitializeBuffers(uint32_t aNumberOfChannels, JSContext* aJSContext
 }
 
 JSObject*
-AudioBuffer::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+AudioBuffer::WrapObject(JSContext* aCx)
 {
-  return AudioBufferBinding::Wrap(aCx, aScope, this);
+  return AudioBufferBinding::Wrap(aCx, this);
 }
 
 bool
@@ -196,8 +196,9 @@ StealJSArrayDataIntoThreadSharedFloatArrayBufferList(JSContext* aJSContext,
   nsRefPtr<ThreadSharedFloatArrayBufferList> result =
     new ThreadSharedFloatArrayBufferList(aJSArrays.Length());
   for (uint32_t i = 0; i < aJSArrays.Length(); ++i) {
+    JS::Rooted<JSObject*> arrayBufferView(aJSContext, aJSArrays[i]);
     JS::Rooted<JSObject*> arrayBuffer(aJSContext,
-                                      JS_GetArrayBufferViewBuffer(aJSArrays[i]));
+                                      JS_GetArrayBufferViewBuffer(aJSContext, arrayBufferView));
     uint8_t* stolenData = arrayBuffer
                           ? (uint8_t*) JS_StealArrayBufferContents(aJSContext, arrayBuffer)
                           : nullptr;
@@ -228,40 +229,13 @@ AudioBuffer::GetThreadSharedChannelsForRate(JSContext* aJSContext)
   return mSharedChannels;
 }
 
-void
-AudioBuffer::MixToMono(JSContext* aJSContext)
-{
-  if (mJSChannels.Length() == 1) {
-    // The buffer is already mono
-    return;
-  }
-
-  // Prepare the input channels
-  nsAutoTArray<const void*, GUESS_AUDIO_CHANNELS> channels;
-  channels.SetLength(mJSChannels.Length());
-  for (uint32_t i = 0; i < mJSChannels.Length(); ++i) {
-    channels[i] = JS_GetFloat32ArrayData(mJSChannels[i]);
-  }
-
-  // Prepare the output channels
-  float* downmixBuffer = new float[mLength];
-
-  // Perform the down-mix
-  AudioChannelsDownMix(channels, &downmixBuffer, 1, mLength);
-
-  // Truncate the shared channels and copy the downmixed data over
-  mJSChannels.SetLength(1);
-  SetRawChannelContents(aJSContext, 0, downmixBuffer);
-  delete[] downmixBuffer;
-}
-
 size_t
 AudioBuffer::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
   size_t amount = aMallocSizeOf(this);
   amount += mJSChannels.SizeOfExcludingThis(aMallocSizeOf);
   if (mSharedChannels) {
-    amount += mSharedChannels->SizeOfExcludingThis(aMallocSizeOf);
+    amount += mSharedChannels->SizeOfIncludingThis(aMallocSizeOf);
   }
   return amount;
 }

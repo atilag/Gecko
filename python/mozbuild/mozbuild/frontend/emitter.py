@@ -16,6 +16,8 @@ from mach.mixin.logging import LoggingMixin
 import mozpack.path as mozpath
 import manifestparser
 
+import mozinfo
+
 from .data import (
     ConfigFileSubstitution,
     Defines,
@@ -69,12 +71,16 @@ class TreeMetadataEmitter(LoggingMixin):
 
         self.config = config
 
-        # TODO add mozinfo into config or somewhere else.
-        mozinfo_path = mozpath.join(config.topobjdir, 'mozinfo.json')
-        if os.path.exists(mozinfo_path):
-            self.mozinfo = json.load(open(mozinfo_path, 'rt'))
-        else:
-            self.mozinfo = {}
+        mozinfo.find_and_update_from_json(config.topobjdir)
+
+        # Python 2.6 doesn't allow unicode keys to be used for keyword
+        # arguments. This gross hack works around the problem until we
+        # rid ourselves of 2.6.
+        self.info = {}
+        for k, v in mozinfo.info.items():
+            if isinstance(k, unicode):
+                k = k.encode('ascii')
+            self.info[k] = v
 
         self._libs = {}
         self._final_libs = []
@@ -206,9 +212,6 @@ class TreeMetadataEmitter(LoggingMixin):
                         'doesn\'t exist in %s (%s) in %s'
                         % (symbol, src, sandbox['RELATIVEDIR']))
 
-        if sandbox.get('LIBXUL_LIBRARY') and sandbox.get('FORCE_STATIC_LIB'):
-            raise SandboxValidationError('LIBXUL_LIBRARY implies FORCE_STATIC_LIB')
-
         # Proxy some variables as-is until we have richer classes to represent
         # them. We should aim to keep this set small because it violates the
         # desired abstraction of the build definition away from makefiles.
@@ -237,7 +240,6 @@ class TreeMetadataEmitter(LoggingMixin):
             'IS_GYP_DIR',
             'JS_MODULES_PATH',
             'LIBS',
-            'LIBXUL_LIBRARY',
             'MSVC_ENABLE_PGO',
             'NO_DIST_INSTALL',
             'OS_LIBS',
@@ -480,7 +482,7 @@ class TreeMetadataEmitter(LoggingMixin):
                 # We return tests that don't exist because we want manifests
                 # defining tests that don't exist to result in error.
                 filtered = m.active_tests(exists=False, disabled=False,
-                    **self.mozinfo)
+                    **self.info)
 
                 missing = [t['name'] for t in filtered if not os.path.exists(t['path'])]
                 if missing:

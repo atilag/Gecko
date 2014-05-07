@@ -107,29 +107,40 @@ SetJsObject(JSContext* aContext,
 
 bool
 BroadcastSystemMessage(const nsAString& aType,
-                       const InfallibleTArray<BluetoothNamedValue>& aData)
+                       const BluetoothValue& aData)
 {
   mozilla::AutoSafeJSContext cx;
   NS_ASSERTION(!::JS_IsExceptionPending(cx),
       "Shouldn't get here when an exception is pending!");
 
-  JS::Rooted<JSObject*> obj(cx, JS_NewObject(cx, nullptr, JS::NullPtr(),
-                                             JS::NullPtr()));
-  if (!obj) {
-    BT_WARNING("Failed to new JSObject for system message!");
-    return false;
-  }
-
-  if (!SetJsObject(cx, aData, obj)) {
-    BT_WARNING("Failed to set properties of system message!");
-    return false;
-  }
-
   nsCOMPtr<nsISystemMessagesInternal> systemMessenger =
     do_GetService("@mozilla.org/system-message-internal;1");
   NS_ENSURE_TRUE(systemMessenger, false);
 
-  JS::Rooted<JS::Value> value(cx, JS::ObjectValue(*obj));
+  JS::Rooted<JS::Value> value(cx);
+  if (aData.type() == BluetoothValue::TnsString) {
+    JSString* jsData = JS_NewUCStringCopyN(cx,
+                                           aData.get_nsString().BeginReading(),
+                                           aData.get_nsString().Length());
+    value = STRING_TO_JSVAL(jsData);
+  } else if (aData.type() == BluetoothValue::TArrayOfBluetoothNamedValue) {
+    JS::Rooted<JSObject*> obj(cx, JS_NewObject(cx, nullptr, JS::NullPtr(),
+                                               JS::NullPtr()));
+    if (!obj) {
+      BT_WARNING("Failed to new JSObject for system message!");
+      return false;
+    }
+
+    if (!SetJsObject(cx, aData, obj)) {
+      BT_WARNING("Failed to set properties of system message!");
+      return false;
+    }
+    value = JS::ObjectValue(*obj);
+  } else {
+    BT_WARNING("Not support the unknown BluetoothValue type");
+    return false;
+  }
+
   systemMessenger->BroadcastMessage(aType, value,
                                     JS::UndefinedHandleValue);
 
@@ -165,10 +176,8 @@ DispatchStatusChangedEvent(const nsAString& aType,
   MOZ_ASSERT(NS_IsMainThread());
 
   InfallibleTArray<BluetoothNamedValue> data;
-  data.AppendElement(
-    BluetoothNamedValue(NS_LITERAL_STRING("address"), nsString(aAddress)));
-  data.AppendElement(
-    BluetoothNamedValue(NS_LITERAL_STRING("status"), aStatus));
+  BT_APPEND_NAMED_VALUE(data, "address", nsString(aAddress));
+  BT_APPEND_NAMED_VALUE(data, "status", aStatus);
 
   BluetoothSignal signal(nsString(aType), NS_LITERAL_STRING(KEY_ADAPTER), data);
 

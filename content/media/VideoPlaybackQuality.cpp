@@ -35,15 +35,15 @@ VideoPlaybackQuality::GetParentObject() const
 }
 
 JSObject*
-VideoPlaybackQuality::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aScope)
+VideoPlaybackQuality::WrapObject(JSContext *aCx)
 {
-  return VideoPlaybackQualityBinding::Wrap(aCx, aScope, this);
+  return VideoPlaybackQualityBinding::Wrap(aCx, this);
 }
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(VideoPlaybackQuality, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(VideoPlaybackQuality, Release)
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(VideoPlaybackQuality, mElement)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(VideoPlaybackQuality, mElement)
 
 } // namespace dom
 } // namespace mozilla

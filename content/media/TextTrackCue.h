@@ -7,28 +7,28 @@
 #ifndef mozilla_dom_TextTrackCue_h
 #define mozilla_dom_TextTrackCue_h
 
+#include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/dom/DocumentFragment.h"
 #include "mozilla/dom/VTTCueBinding.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsDOMEventTargetHelper.h"
 #include "nsIWebVTTParserWrapper.h"
 #include "mozilla/StaticPtr.h"
 #include "nsIDocument.h"
 #include "mozilla/dom/HTMLDivElement.h"
 #include "mozilla/dom/UnionTypes.h"
+#include "mozilla/dom/TextTrack.h"
 
 namespace mozilla {
 namespace dom {
 
 class HTMLTrackElement;
-class TextTrack;
 class TextTrackRegion;
 
-class TextTrackCue MOZ_FINAL : public nsDOMEventTargetHelper
+class TextTrackCue MOZ_FINAL : public DOMEventTargetHelper
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TextTrackCue, nsDOMEventTargetHelper)
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TextTrackCue, DOMEventTargetHelper)
 
   // TextTrackCue WebIDL
   // See bug 868509 about splitting out the WebVTT-specific interfaces.
@@ -39,24 +39,19 @@ public:
               const nsAString& aText,
               ErrorResult& aRv)
   {
-    nsRefPtr<TextTrackCue> ttcue = new TextTrackCue(aGlobal.GetAsSupports(), aStartTime,
+    nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
+    nsRefPtr<TextTrackCue> ttcue = new TextTrackCue(window, aStartTime,
                                                     aEndTime, aText, aRv);
     return ttcue.forget();
   }
-  TextTrackCue(nsISupports* aGlobal, double aStartTime, double aEndTime,
+  TextTrackCue(nsPIDOMWindow* aGlobal, double aStartTime, double aEndTime,
                const nsAString& aText, ErrorResult& aRv);
 
-  TextTrackCue(nsISupports* aGlobal, double aStartTime, double aEndTime,
+  TextTrackCue(nsPIDOMWindow* aGlobal, double aStartTime, double aEndTime,
                const nsAString& aText, HTMLTrackElement* aTrackElement,
                ErrorResult& aRv);
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
-
-  nsINode* GetParentObject()
-  {
-    return mDocument;
-  }
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   TextTrack* GetTrack() const
   {
@@ -300,6 +295,11 @@ public:
     mReset = false;
   }
 
+  void Reset()
+  {
+    mReset = true;
+  }
+
   bool HasBeenReset()
   {
     return mReset;
@@ -317,6 +317,11 @@ public:
     return mId;
   }
 
+  void SetTrack(TextTrack* aTextTrack)
+  {
+    mTrack = aTextTrack;
+  }
+
   /**
    * Produces a tree of anonymous content based on the tree of the processed
    * cue text.
@@ -330,7 +335,7 @@ public:
 
 private:
   void SetDefaultCueSettings();
-  nsresult StashDocument(nsISupports* aGlobal);
+  nsresult StashDocument();
 
   nsRefPtr<nsIDocument> mDocument;
   nsString mText;

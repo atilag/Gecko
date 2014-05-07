@@ -15,6 +15,7 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/TabChild.h"
+#include "mozilla/EventStateManager.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "mozilla/StartupTimeline.h"
@@ -149,8 +150,6 @@
 #include "nsISelectionDisplay.h"
 
 #include "nsIGlobalHistory2.h"
-
-#include "nsEventStateManager.h"
 
 #include "nsIFrame.h"
 #include "nsSubDocumentFrame.h"
@@ -444,8 +443,8 @@ private:
   nsCOMPtr<nsITimer> mTimer;
 };
 
-NS_IMPL_ISUPPORTS4(nsPingListener, nsIStreamListener, nsIRequestObserver,
-                   nsIInterfaceRequestor, nsIChannelEventSink)
+NS_IMPL_ISUPPORTS(nsPingListener, nsIStreamListener, nsIRequestObserver,
+                  nsIInterfaceRequestor, nsIChannelEventSink)
 
 nsPingListener::~nsPingListener()
 {
@@ -930,7 +929,7 @@ nsDocShell::Init()
 
     // We want to hold a strong ref to the loadgroup, so it better hold a weak
     // ref to us...  use an InterfaceRequestorProxy to do this.
-    nsCOMPtr<InterfaceRequestorProxy> proxy =
+    nsCOMPtr<nsIInterfaceRequestor> proxy =
         new InterfaceRequestorProxy(static_cast<nsIInterfaceRequestor*>
                                                (this));
     NS_ENSURE_TRUE(proxy, NS_ERROR_OUT_OF_MEMORY);
@@ -1326,7 +1325,6 @@ nsDocShell::LoadURI(nsIURI * aURI,
     if (IsPrintingOrPP()) {
       return NS_OK; // JS may not handle returning of an error code
     }
-    nsresult rv;
     nsCOMPtr<nsIURI> referrer;
     nsCOMPtr<nsIInputStream> postStream;
     nsCOMPtr<nsIInputStream> headersStream;
@@ -1517,9 +1515,9 @@ nsDocShell::LoadURI(nsIURI * aURI,
     // We need an owner (a referring principal).
     //
     // If ownerIsExplicit is not set there are 4 possibilities:
-    // (1) If the system principal was passed in and we're a typeContent
-    //     docshell, inherit the principal from the current document
-    //     instead.
+    // (1) If the system principal or an expanded principal was passed
+    //     in and we're a typeContent docshell, inherit the principal
+    //     from the current document instead.
     // (2) In all other cases when the principal passed in is not null,
     //     use that principal.
     // (3) If the caller has allowed inheriting from the current document,
@@ -1531,8 +1529,8 @@ nsDocShell::LoadURI(nsIURI * aURI,
     //     created later from the channel's internal data.
     //
     // If ownerIsExplicit *is* set, there are 4 possibilities
-    // (1) If the system principal was passed in and we're a typeContent
-    //     docshell, return an error.
+    // (1) If the system principal or an expanded principal was passed in
+    //     and we're a typeContent docshell, return an error.
     // (2) In all other cases when the principal passed in is not null,
     //     use that principal.
     // (3) If the caller has allowed inheriting from the current document,
@@ -1545,17 +1543,9 @@ nsDocShell::LoadURI(nsIURI * aURI,
     //       for in InternalLoad is data:, javascript:, and about:blank
     //       URIs.  For other URIs this would all be dead wrong!
 
-    nsCOMPtr<nsIScriptSecurityManager> secMan =
-        do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
-
     if (owner && mItemType != typeChrome) {
         nsCOMPtr<nsIPrincipal> ownerPrincipal = do_QueryInterface(owner);
-        bool isSystem;
-        rv = secMan->IsSystemPrincipal(ownerPrincipal, &isSystem);
-        NS_ENSURE_SUCCESS(rv, rv);
-
-        if (isSystem) {
+        if (nsContentUtils::IsSystemOrExpandedPrincipal(ownerPrincipal)) {
             if (ownerIsExplicit) {
                 return NS_ERROR_DOM_SECURITY_ERR;
             }
@@ -1565,11 +1555,8 @@ nsDocShell::LoadURI(nsIURI * aURI,
     }
     if (!owner && !inheritOwner && !ownerIsExplicit) {
         // See if there's system or chrome JS code running
-        rv = secMan->SubjectPrincipalIsSystem(&inheritOwner);
-        if (NS_FAILED(rv)) {
-            // Set it back to false
-            inheritOwner = false;
-        }
+        inheritOwner = nsContentUtils::IsSystemPrincipal(
+          nsContentUtils::GetSubjectPrincipal());
     }
 
     if (aLoadFlags & LOAD_FLAGS_DISALLOW_INHERIT_OWNER) {
@@ -6831,14 +6818,6 @@ nsDocShell::OnRedirectStateChange(nsIChannel* aOldChannel,
       }
     }
 
-    // On session restore we get a redirect from page to itself. Don't count it.
-    bool equals = false;
-    if (mTiming &&
-        !(mLoadType == LOAD_HISTORY &&
-          NS_SUCCEEDED(newURI->Equals(oldURI, &equals)) && equals)) {
-        mTiming->NotifyRedirect(oldURI, newURI);
-    }
-
     // Below a URI visit is saved (see AddURIVisit method doc).
     // The visit chain looks something like:
     //   ...
@@ -8767,7 +8746,7 @@ private:
     bool mInPrivateBrowsing;
 };
 
-NS_IMPL_ISUPPORTS1(nsCopyFaviconCallback, nsIFaviconDataCallback)
+NS_IMPL_ISUPPORTS(nsCopyFaviconCallback, nsIFaviconDataCallback)
 #endif
 
 // Tell the favicon service that aNewURI has the same favicon as aOldURI.
@@ -10046,6 +10025,9 @@ nsDocShell::DoURILoad(nsIURI * aURI,
     nsCOMPtr<nsITimedChannel> timedChannel(do_QueryInterface(channel));
     if (timedChannel) {
         timedChannel->SetTimingEnabled(true);
+        if (IsFrame()) {
+            timedChannel->SetInitiatorType(NS_LITERAL_STRING("subdocument"));
+        }
     }
 
     rv = DoChannelLoad(channel, uriLoader, aBypassClassifier);
@@ -10889,20 +10871,30 @@ nsDocShell::AddState(JS::Handle<JS::Value> aData, const nsAString& aTitle,
 
     // Step 5: If aReplace is false, indicating that we're doing a pushState
     // rather than a replaceState, notify bfcache that we've added a page to
-    // the history so it can evict content viewers if appropriate.
+    // the history so it can evict content viewers if appropriate. Otherwise
+    // call ReplaceEntry so that we notify nsIHistoryListeners that an entry
+    // was replaced.
+    nsCOMPtr<nsISHistory> rootSH;
+    GetRootSessionHistory(getter_AddRefs(rootSH));
+    NS_ENSURE_TRUE(rootSH, NS_ERROR_UNEXPECTED);
+
+    nsCOMPtr<nsISHistoryInternal> internalSH =
+        do_QueryInterface(rootSH);
+    NS_ENSURE_TRUE(internalSH, NS_ERROR_UNEXPECTED);
+
     if (!aReplace) {
-        nsCOMPtr<nsISHistory> rootSH;
-        GetRootSessionHistory(getter_AddRefs(rootSH));
-        NS_ENSURE_TRUE(rootSH, NS_ERROR_UNEXPECTED);
-
-        nsCOMPtr<nsISHistoryInternal> internalSH =
-            do_QueryInterface(rootSH);
-        NS_ENSURE_TRUE(internalSH, NS_ERROR_UNEXPECTED);
-
         int32_t curIndex = -1;
         rv = rootSH->GetIndex(&curIndex);
         if (NS_SUCCEEDED(rv) && curIndex > -1) {
             internalSH->EvictOutOfRangeContentViewers(curIndex);
+        }
+    } else {
+        nsCOMPtr<nsISHEntry> rootSHEntry = GetRootSHEntry(newSHEntry);
+
+        int32_t index = -1;
+        rv = rootSH->GetIndexOfEntry(rootSHEntry, &index);
+        if (NS_SUCCEEDED(rv) && index > -1) {
+            internalSH->ReplaceEntry(index, rootSHEntry);
         }
     }
 
@@ -12171,7 +12163,7 @@ nsDocShell::InterfaceRequestorProxy::~InterfaceRequestorProxy()
     mWeakPtr = nullptr;
 }
 
-NS_IMPL_ISUPPORTS1(nsDocShell::InterfaceRequestorProxy, nsIInterfaceRequestor) 
+NS_IMPL_ISUPPORTS(nsDocShell::InterfaceRequestorProxy, nsIInterfaceRequestor) 
   
 NS_IMETHODIMP 
 nsDocShell::InterfaceRequestorProxy::GetInterface(const nsIID & aIID, void **aSink)
@@ -12782,7 +12774,7 @@ bool
 nsDocShell::ShouldBlockLoadingForBackButton()
 {
   if (!(mLoadType & LOAD_CMD_HISTORY) ||
-      nsEventStateManager::IsHandlingUserInput() ||
+      EventStateManager::IsHandlingUserInput() ||
       !Preferences::GetBool("accessibility.blockjsredirection")) {
     return false;
   }

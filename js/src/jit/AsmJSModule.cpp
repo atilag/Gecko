@@ -149,24 +149,6 @@ CoerceInPlace_ToNumber(JSContext *cx, MutableHandleValue val)
     return true;
 }
 
-static void
-EnableActivationFromAsmJS(AsmJSActivation *activation)
-{
-    JSContext *cx = activation->cx();
-    Activation *act = cx->mainThread().activation();
-    JS_ASSERT(act->isJit());
-    act->asJit()->setActive(cx);
-}
-
-static void
-DisableActivationFromAsmJS(AsmJSActivation *activation)
-{
-    JSContext *cx = activation->cx();
-    Activation *act = cx->mainThread().activation();
-    JS_ASSERT(act->isJit());
-    act->asJit()->setActive(cx, false);
-}
-
 namespace js {
 
 // Defined in AsmJS.cpp:
@@ -242,10 +224,6 @@ AddressOf(AsmJSImmKind kind, ExclusiveContext *cx)
         return RedirectCall(FuncCast(CoerceInPlace_ToNumber), Args_General2);
       case AsmJSImm_ToInt32:
         return RedirectCall(FuncCast<int32_t (double)>(js::ToInt32), Args_Int_Double);
-      case AsmJSImm_EnableActivationFromAsmJS:
-        return RedirectCall(FuncCast(EnableActivationFromAsmJS), Args_General1);
-      case AsmJSImm_DisableActivationFromAsmJS:
-        return RedirectCall(FuncCast(DisableActivationFromAsmJS), Args_General1);
 #if defined(JS_CODEGEN_ARM)
       case AsmJSImm_aeabi_idivmod:
         return RedirectCall(FuncCast(__aeabi_idivmod), Args_General2);
@@ -350,7 +328,8 @@ AsmJSModule::staticallyLink(ExclusiveContext *cx)
     }
 }
 
-AsmJSModule::AsmJSModule(ScriptSource *scriptSource, uint32_t charsBegin)
+AsmJSModule::AsmJSModule(ScriptSource *scriptSource, uint32_t funcStart,
+                         uint32_t offsetToEndOfUseAsm, bool strict)
   : globalArgumentName_(nullptr),
     importArgumentName_(nullptr),
     bufferArgumentName_(nullptr),
@@ -358,13 +337,15 @@ AsmJSModule::AsmJSModule(ScriptSource *scriptSource, uint32_t charsBegin)
     interruptExit_(nullptr),
     dynamicallyLinked_(false),
     loadedFromCache_(false),
-    charsBegin_(charsBegin),
+    funcStart_(funcStart),
+    offsetToEndOfUseAsm_(offsetToEndOfUseAsm),
     scriptSource_(scriptSource),
     codeIsProtected_(false)
 {
     mozilla::PodZero(&pod);
     scriptSource_->incref();
     pod.minHeapLength_ = AsmJSAllocationGranularity;
+    pod.strict_ = strict;
 }
 
 AsmJSModule::~AsmJSModule()
@@ -390,9 +371,6 @@ AsmJSModule::~AsmJSModule()
 
         DeallocateExecutableMemory(code_, pod.totalBytes_);
     }
-
-    for (size_t i = 0; i < numFunctionCounts(); i++)
-        js_delete(functionCounts(i));
 }
 
 void
@@ -404,6 +382,8 @@ AsmJSModule::addSizeOfMisc(mozilla::MallocSizeOf mallocSizeOf, size_t *asmJSModu
                         globals_.sizeOfExcludingThis(mallocSizeOf) +
                         exits_.sizeOfExcludingThis(mallocSizeOf) +
                         exports_.sizeOfExcludingThis(mallocSizeOf) +
+                        callSites_.sizeOfExcludingThis(mallocSizeOf) +
+                        functionNames_.sizeOfExcludingThis(mallocSizeOf) +
                         heapAccesses_.sizeOfExcludingThis(mallocSizeOf) +
 #if defined(MOZ_VTUNE) || defined(JS_ION_PERF)
                         profiledFunctions_.sizeOfExcludingThis(mallocSizeOf) +
@@ -411,7 +391,6 @@ AsmJSModule::addSizeOfMisc(mozilla::MallocSizeOf mallocSizeOf, size_t *asmJSModu
 #if defined(JS_ION_PERF)
                         perfProfiledBlocksFunctions_.sizeOfExcludingThis(mallocSizeOf) +
 #endif
-                        functionCounts_.sizeOfExcludingThis(mallocSizeOf) +
                         staticLinkData_.sizeOfExcludingThis(mallocSizeOf);
 }
 
@@ -500,6 +479,12 @@ SerializedNameSize(PropertyName *name)
            (name ? name->length() * sizeof(jschar) : 0);
 }
 
+size_t
+AsmJSModule::Name::serializedSize() const
+{
+    return SerializedNameSize(name_);
+}
+
 static uint8_t *
 SerializeName(uint8_t *cursor, PropertyName *name)
 {
@@ -511,6 +496,12 @@ SerializeName(uint8_t *cursor, PropertyName *name)
         cursor = WriteScalar<uint32_t>(cursor, 0);
     }
     return cursor;
+}
+
+uint8_t *
+AsmJSModule::Name::serialize(uint8_t *cursor) const
+{
+    return SerializeName(cursor, name_);
 }
 
 static const uint8_t *
@@ -542,6 +533,19 @@ DeserializeName(ExclusiveContext *cx, const uint8_t *cursor, PropertyName **name
 
     *name = atom->asPropertyName();
     return cursor + length * sizeof(jschar);
+}
+
+const uint8_t *
+AsmJSModule::Name::deserialize(ExclusiveContext *cx, const uint8_t *cursor)
+{
+    return DeserializeName(cx, cursor, &name_);
+}
+
+bool
+AsmJSModule::Name::clone(ExclusiveContext *cx, Name *out) const
+{
+    out->name_ = name_;
+    return true;
 }
 
 template <class T>
@@ -811,6 +815,8 @@ AsmJSModule::serializedSize() const
            SerializedVectorSize(globals_) +
            SerializedVectorSize(exits_) +
            SerializedVectorSize(exports_) +
+           SerializedPodVectorSize(callSites_) +
+           SerializedVectorSize(functionNames_) +
            SerializedPodVectorSize(heapAccesses_) +
 #if defined(MOZ_VTUNE) || defined(JS_ION_PERF)
            SerializedVectorSize(profiledFunctions_) +
@@ -829,6 +835,8 @@ AsmJSModule::serialize(uint8_t *cursor) const
     cursor = SerializeVector(cursor, globals_);
     cursor = SerializeVector(cursor, exits_);
     cursor = SerializeVector(cursor, exports_);
+    cursor = SerializePodVector(cursor, callSites_);
+    cursor = SerializeVector(cursor, functionNames_);
     cursor = SerializePodVector(cursor, heapAccesses_);
 #if defined(MOZ_VTUNE) || defined(JS_ION_PERF)
     cursor = SerializeVector(cursor, profiledFunctions_);
@@ -853,6 +861,8 @@ AsmJSModule::deserialize(ExclusiveContext *cx, const uint8_t *cursor)
     (cursor = DeserializeVector(cx, cursor, &globals_)) &&
     (cursor = DeserializeVector(cx, cursor, &exits_)) &&
     (cursor = DeserializeVector(cx, cursor, &exports_)) &&
+    (cursor = DeserializePodVector(cx, cursor, &callSites_)) &&
+    (cursor = DeserializeVector(cx, cursor, &functionNames_)) &&
     (cursor = DeserializePodVector(cx, cursor, &heapAccesses_)) &&
 #if defined(MOZ_VTUNE) || defined(JS_ION_PERF)
     (cursor = DeserializeVector(cx, cursor, &profiledFunctions_)) &&
@@ -897,7 +907,7 @@ AsmJSModule::clone(JSContext *cx, ScopedJSDeletePtr<AsmJSModule> *moduleOut) con
 {
     AutoUnprotectCodeForClone cloneGuard(cx, *this);
 
-    *moduleOut = cx->new_<AsmJSModule>(scriptSource_, charsBegin_);
+    *moduleOut = cx->new_<AsmJSModule>(scriptSource_, funcStart_, offsetToEndOfUseAsm_, pod.strict_);
     if (!*moduleOut)
         return false;
 
@@ -920,6 +930,8 @@ AsmJSModule::clone(JSContext *cx, ScopedJSDeletePtr<AsmJSModule> *moduleOut) con
     if (!CloneVector(cx, globals_, &out.globals_) ||
         !CloneVector(cx, exits_, &out.exits_) ||
         !CloneVector(cx, exports_, &out.exports_) ||
+        !ClonePodVector(cx, callSites_, &out.callSites_) ||
+        !CloneVector(cx, functionNames_, &out.functionNames_) ||
         !ClonePodVector(cx, heapAccesses_, &out.heapAccesses_) ||
         !staticLinkData_.clone(cx, &out.staticLinkData_))
     {
@@ -1096,7 +1108,7 @@ class ModuleCharsForStore : ModuleChars
     js::Vector<char, 0, SystemAllocPolicy> compressedBuffer_;
 
   public:
-    bool init(AsmJSParser &parser, const AsmJSModule &module) {
+    bool init(AsmJSParser &parser) {
         JS_ASSERT(beginOffset(parser) < endOffset(parser));
 
         uncompressedSize_ = (endOffset(parser) - beginOffset(parser)) * sizeof(jschar);
@@ -1248,7 +1260,7 @@ js::StoreAsmJSModuleInCache(AsmJSParser &parser,
         return false;
 
     ModuleCharsForStore moduleChars;
-    if (!moduleChars.init(parser, module))
+    if (!moduleChars.init(parser))
         return false;
 
     size_t serializedSize = machineId.serializedSize() +
@@ -1332,8 +1344,11 @@ js::LookupAsmJSModuleInCache(ExclusiveContext *cx,
     if (!moduleChars.match(parser))
         return true;
 
+    uint32_t funcStart = parser.pc->maybeFunction->pn_body->pn_pos.begin;
+    uint32_t offsetToEndOfUseAsm = parser.tokenStream.currentToken().pos.end;
+    bool strict = parser.pc->sc->strict && !parser.pc->sc->hasExplicitUseStrict();
     ScopedJSDeletePtr<AsmJSModule> module(
-        cx->new_<AsmJSModule>(parser.ss, parser.offsetOfCurrentAsmJSModule()));
+        cx->new_<AsmJSModule>(parser.ss, funcStart, offsetToEndOfUseAsm, strict));
     if (!module)
         return false;
     cursor = module->deserialize(cx, cursor);
@@ -1347,7 +1362,7 @@ js::LookupAsmJSModuleInCache(ExclusiveContext *cx,
 
     module->staticallyLink(cx);
 
-    parser.tokenStream.advance(module->charsEnd());
+    parser.tokenStream.advance(module->funcEndBeforeCurly());
 
     int64_t usecAfter = PRMJ_Now();
     int ms = (usecAfter - usecBefore) / PRMJ_USEC_PER_MSEC;

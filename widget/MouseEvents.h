@@ -44,14 +44,16 @@ class WidgetPointerHelper
 {
 public:
   bool convertToPointer;
+  uint32_t pointerId;
   uint32_t tiltX;
   uint32_t tiltY;
 
-  WidgetPointerHelper() : convertToPointer(true), tiltX(0), tiltY(0) {}
+  WidgetPointerHelper() : convertToPointer(true), pointerId(0), tiltX(0), tiltY(0) {}
 
   void AssignPointerHelperData(const WidgetPointerHelper& aEvent)
   {
     convertToPointer = aEvent.convertToPointer;
+    pointerId = aEvent.pointerId;
     tiltX = aEvent.tiltX;
     tiltY = aEvent.tiltY;
   }
@@ -186,9 +188,6 @@ protected:
     reason(aReason), context(eNormal), exit(eChild), clickCount(0)
   {
     switch (aMessage) {
-      case NS_MOUSE_MOVE:
-        mFlags.mCancelable = false;
-        break;
       case NS_MOUSEENTER:
       case NS_MOUSELEAVE:
         mFlags.mBubbles = false;
@@ -209,9 +208,6 @@ public:
     reason(aReason), context(aContext), exit(eChild), clickCount(0)
   {
     switch (aMessage) {
-      case NS_MOUSE_MOVE:
-        mFlags.mCancelable = false;
-        break;
       case NS_MOUSEENTER:
       case NS_MOUSELEAVE:
         mFlags.mBubbles = false;
@@ -276,6 +272,15 @@ public:
   bool IsContextMenuKeyEvent() const
   {
     return message == NS_CONTEXTMENU && context == eContextMenuKey;
+  }
+
+  /**
+   * Returns true if the event is a real mouse event.  Otherwise, i.e., it's
+   * a synthesized event by scroll or something, returns false.
+   */
+  bool IsReal() const
+  {
+    return reason == eReal;
   }
 };
 
@@ -432,7 +437,7 @@ public:
 
   // NOTE: deltaX, deltaY and deltaZ may be customized by
   //       mousewheel.*.delta_multiplier_* prefs which are applied by
-  //       nsEventStateManager.  So, after widget dispatches this event,
+  //       EventStateManager.  So, after widget dispatches this event,
   //       these delta values may have different values than before.
   double deltaX;
   double deltaY;
@@ -456,7 +461,7 @@ public:
   // when accumulated pixel delta values reach a line height.
   bool isPixelOnlyDevice;
 
-  // If widget sets lineOrPageDelta, nsEventStateManager will dispatch
+  // If widget sets lineOrPageDelta, EventStateManager will dispatch
   // NS_MOUSE_SCROLL event for compatibility.  Note that the delta value means
   // pages if the deltaMode is DOM_DELTA_PAGE, otherwise, lines.
   int32_t lineOrPageDeltaX;
@@ -484,7 +489,7 @@ public:
   }
 
   // Scroll type
-  // The default value is SCROLL_DEFAULT, which means nsEventStateManager will
+  // The default value is SCROLL_DEFAULT, which means EventStateManager will
   // select preferred scroll type automatically.
   enum ScrollType
   {
@@ -499,7 +504,7 @@ public:
   // nsEventStateManger.  If the default action of the wheel event isn't scroll,
   // these values always zero.  Otherwise, remaning delta values which are
   // not used by scroll are set.
-  // NOTE: deltaX, deltaY and deltaZ may be modified by nsEventStateManager.
+  // NOTE: deltaX, deltaY and deltaZ may be modified by EventStateManager.
   //       However, overflowDeltaX and overflowDeltaY indicate unused original
   //       delta values which are not applied the delta_multiplier prefs.
   //       So, if widget wanted to know the actual direction to be scrolled,
@@ -551,7 +556,6 @@ public:
 
   WidgetPointerEvent(bool aIsTrusted, uint32_t aMsg, nsIWidget* w)
     : WidgetMouseEvent(aIsTrusted, aMsg, w, NS_POINTER_EVENT, eReal)
-    , pointerId(0)
     , width(0)
     , height(0)
     , isPrimary(true)
@@ -561,7 +565,6 @@ public:
 
   WidgetPointerEvent(const WidgetMouseEvent& aEvent)
     : WidgetMouseEvent(aEvent)
-    , pointerId(0)
     , width(0)
     , height(0)
     , isPrimary(true)
@@ -600,7 +603,6 @@ public:
     return result;
   }
 
-  uint32_t pointerId;
   uint32_t width;
   uint32_t height;
   bool isPrimary;
@@ -611,7 +613,6 @@ public:
   {
     AssignMouseEventData(aEvent, aCopyTargets);
 
-    pointerId = aEvent.pointerId;
     width = aEvent.width;
     height = aEvent.height;
     isPrimary = aEvent.isPrimary;

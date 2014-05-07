@@ -7,7 +7,7 @@
 #include "MediaRecorder.h"
 #include "GeneratedEvents.h"
 #include "MediaEncoder.h"
-#include "nsDOMEventTargetHelper.h"
+#include "mozilla/DOMEventTargetHelper.h"
 #include "nsError.h"
 #include "nsIDocument.h"
 #include "nsIDOMRecordErrorEvent.h"
@@ -33,14 +33,14 @@ namespace mozilla {
 
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_1(MediaRecorder, nsDOMEventTargetHelper,
-                                     mStream)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(MediaRecorder, DOMEventTargetHelper,
+                                   mStream)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(MediaRecorder)
-NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
+NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
-NS_IMPL_ADDREF_INHERITED(MediaRecorder, nsDOMEventTargetHelper)
-NS_IMPL_RELEASE_INHERITED(MediaRecorder, nsDOMEventTargetHelper)
+NS_IMPL_ADDREF_INHERITED(MediaRecorder, DOMEventTargetHelper)
+NS_IMPL_RELEASE_INHERITED(MediaRecorder, DOMEventTargetHelper)
 
 /**
  * Session is an object to represent a single recording event.
@@ -426,6 +426,10 @@ private:
     if (strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0) {
       // Force stop Session to terminate Read Thread.
       mEncoder->Cancel();
+      if (mReadThread) {
+        mReadThread->Shutdown();
+        mReadThread = nullptr;
+      }
       if (mRecorder) {
         mRecorder->RemoveSession(this);
         mRecorder = nullptr;
@@ -464,7 +468,7 @@ private:
   bool mStopIssued;
 };
 
-NS_IMPL_ISUPPORTS1(MediaRecorder::Session, nsIObserver)
+NS_IMPL_ISUPPORTS(MediaRecorder::Session, nsIObserver)
 
 MediaRecorder::~MediaRecorder()
 {
@@ -478,7 +482,7 @@ MediaRecorder::~MediaRecorder()
 }
 
 MediaRecorder::MediaRecorder(DOMMediaStream& aStream, nsPIDOMWindow* aOwnerWindow)
-  : nsDOMEventTargetHelper(aOwnerWindow),
+  : DOMEventTargetHelper(aOwnerWindow),
     mState(RecordingState::Inactive),
     mMutex("Session.Data.Mutex")
 {
@@ -632,9 +636,9 @@ MediaRecorder::RequestData(ErrorResult& aResult)
 }
 
 JSObject*
-MediaRecorder::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+MediaRecorder::WrapObject(JSContext* aCx)
 {
-  return MediaRecorderBinding::Wrap(aCx, aScope, this);
+  return MediaRecorderBinding::Wrap(aCx, this);
 }
 
 /* static */ already_AddRefed<MediaRecorder>

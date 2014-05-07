@@ -58,8 +58,8 @@ cpu_type_t pref_cpu_types[2] = {
 //-------------------------------------------------------------------//
 // nsIProcess implementation
 //-------------------------------------------------------------------//
-NS_IMPL_ISUPPORTS2(nsProcess, nsIProcess,
-                   nsIObserver)
+NS_IMPL_ISUPPORTS(nsProcess, nsIProcess,
+                  nsIObserver)
 
 //Constructor
 nsProcess::nsProcess()
@@ -517,7 +517,7 @@ nsProcess::RunProcess(bool blocking, char **my_argv, nsIObserver* observer,
     }
     else {
         mThread = PR_CreateThread(PR_SYSTEM_THREAD, Monitor, this,
-                                  PR_PRIORITY_NORMAL, PR_LOCAL_THREAD,
+                                  PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD,
                                   PR_JOINABLE_THREAD, 0);
         if (!mThread) {
             NS_RELEASE_THIS();

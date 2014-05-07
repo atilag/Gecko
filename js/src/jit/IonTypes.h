@@ -7,6 +7,8 @@
 #ifndef jit_IonTypes_h
 #define jit_IonTypes_h
 
+#include "mozilla/TypedEnum.h"
+
 #include "jstypes.h"
 
 #include "js/Value.h"
@@ -48,7 +50,10 @@ enum BailoutKind
     Bailout_ShapeGuard,
 
     // A bailout caused by invalid assumptions based on Baseline code.
-    Bailout_BaselineInfo
+    Bailout_BaselineInfo,
+
+    // A bailout to baseline from Ion on exception to handle Debugger hooks.
+    Bailout_IonExceptionDebugMode,
 };
 
 inline const char *
@@ -65,12 +70,14 @@ BailoutKindString(BailoutKind kind)
         return "Bailout_ShapeGuard";
       case Bailout_BaselineInfo:
         return "Bailout_BaselineInfo";
+      case Bailout_IonExceptionDebugMode:
+        return "Bailout_IonExceptionDebugMode";
       default:
         MOZ_ASSUME_UNREACHABLE("Invalid BailoutKind");
     }
 }
 
-static const uint32_t ELEMENT_TYPE_BITS = 4;
+static const uint32_t ELEMENT_TYPE_BITS = 5;
 static const uint32_t ELEMENT_TYPE_SHIFT = 0;
 static const uint32_t ELEMENT_TYPE_MASK = (1 << ELEMENT_TYPE_BITS) - 1;
 static const uint32_t VECTOR_SCALE_BITS = 2;
@@ -90,14 +97,17 @@ enum MIRType
     MIRType_Float32,
     MIRType_String,
     MIRType_Object,
-    MIRType_Magic,
+    MIRType_MagicOptimizedArguments, // JS_OPTIMIZED_ARGUMENTS magic value.
+    MIRType_MagicOptimizedOut,       // JS_OPTIMIZED_OUT magic value.
+    MIRType_MagicHole,               // JS_ELEMENTS_HOLE magic value.
+    MIRType_MagicIsConstructing,     // JS_IS_CONSTRUCTING magic value.
     MIRType_Value,
-    MIRType_None,          // Invalid, used as a placeholder.
-    MIRType_Slots,         // A slots vector
-    MIRType_Elements,      // An elements vector
-    MIRType_Pointer,       // An opaque pointer that receives no special treatment
-    MIRType_Shape,         // A Shape pointer.
-    MIRType_ForkJoinContext, // js::ForkJoinContext*
+    MIRType_None,                    // Invalid, used as a placeholder.
+    MIRType_Slots,                   // A slots vector
+    MIRType_Elements,                // An elements vector
+    MIRType_Pointer,                 // An opaque pointer that receives no special treatment
+    MIRType_Shape,                   // A Shape pointer.
+    MIRType_ForkJoinContext,         // js::ForkJoinContext*
     MIRType_Last = MIRType_ForkJoinContext,
     MIRType_Float32x4 = MIRType_Float32 | (2 << VECTOR_SCALE_SHIFT),
     MIRType_Int32x4   = MIRType_Int32   | (2 << VECTOR_SCALE_SHIFT),
@@ -120,6 +130,8 @@ VectorSize(MIRType type)
 static inline MIRType
 MIRTypeFromValueType(JSValueType type)
 {
+    // This function does not deal with magic types. Magic constants should be
+    // filtered out in MIRTypeFromValue.
     switch (type) {
       case JSVAL_TYPE_DOUBLE:
         return MIRType_Double;
@@ -135,8 +147,6 @@ MIRTypeFromValueType(JSValueType type)
         return MIRType_Null;
       case JSVAL_TYPE_OBJECT:
         return MIRType_Object;
-      case JSVAL_TYPE_MAGIC:
-        return MIRType_Magic;
       case JSVAL_TYPE_UNKNOWN:
         return MIRType_Value;
       default:
@@ -161,7 +171,10 @@ ValueTypeFromMIRType(MIRType type)
       return JSVAL_TYPE_DOUBLE;
     case MIRType_String:
       return JSVAL_TYPE_STRING;
-    case MIRType_Magic:
+    case MIRType_MagicOptimizedArguments:
+    case MIRType_MagicOptimizedOut:
+    case MIRType_MagicHole:
+    case MIRType_MagicIsConstructing:
       return JSVAL_TYPE_MAGIC;
     default:
       JS_ASSERT(type == MIRType_Object);
@@ -195,8 +208,14 @@ StringFromMIRType(MIRType type)
       return "String";
     case MIRType_Object:
       return "Object";
-    case MIRType_Magic:
-      return "Magic";
+    case MIRType_MagicOptimizedArguments:
+      return "MagicOptimizedArguments";
+    case MIRType_MagicOptimizedOut:
+      return "MagicOptimizedOut";
+    case MIRType_MagicHole:
+      return "MagicHole";
+    case MIRType_MagicIsConstructing:
+      return "MagicIsConstructing";
     case MIRType_Value:
       return "Value";
     case MIRType_None:
@@ -306,6 +325,19 @@ enum ABIFunctionType
         (ArgType_Double << (ArgType_Shift * 1)) |
         (ArgType_General << (ArgType_Shift * 2))
 };
+
+MOZ_BEGIN_ENUM_CLASS(BarrierKind, uint32_t)
+    // No barrier is needed.
+    NoBarrier,
+
+    // The barrier only has to check the value's type tag is in the TypeSet.
+    // Specific object types don't have to be checked.
+    TypeTagOnly,
+
+    // Check if the value is in the TypeSet, including the object type if it's
+    // an object.
+    TypeSet
+MOZ_END_ENUM_CLASS(BarrierKind)
 
 } // namespace jit
 } // namespace js

@@ -78,7 +78,7 @@ public:
   virtual nsresult PostHandleEvent(
                      mozilla::EventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
   nsresult Clone(nsINodeInfo*, nsINode**) const MOZ_OVERRIDE;
-  virtual nsEventStates IntrinsicState() const MOZ_OVERRIDE;
+  virtual mozilla::EventStates IntrinsicState() const MOZ_OVERRIDE;
   virtual bool IsNodeOfType(uint32_t aFlags) const MOZ_OVERRIDE;
 
   // Set during reflow as necessary. Does a style change notification,
@@ -106,8 +106,7 @@ public:
   virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 
 protected:
-  virtual JSObject* WrapNode(JSContext *aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
 
 private:
   bool mIncrementScriptLevel;

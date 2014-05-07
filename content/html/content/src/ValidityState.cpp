@@ -11,7 +11,7 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(ValidityState, mConstraintValidation)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(ValidityState, mConstraintValidation)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(ValidityState)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(ValidityState)
 
@@ -98,9 +98,9 @@ ValidityState::GetValid(bool* aValid)
 }
 
 JSObject*
-ValidityState::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+ValidityState::WrapObject(JSContext* aCx)
 {
-  return ValidityStateBinding::Wrap(aCx, aScope, this);
+  return ValidityStateBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

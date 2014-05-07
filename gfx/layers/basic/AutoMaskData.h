@@ -6,7 +6,6 @@
 #ifndef GFX_AUTOMASKDATA_H_
 #define GFX_AUTOMASKDATA_H_
 
-#include "gfxASurface.h"
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
 
 namespace mozilla {
@@ -14,45 +13,45 @@ namespace layers {
 
 /**
  * Drawing with a mask requires a mask surface and a transform.
- * Sometimes the mask surface is a direct gfxASurface, but other times
- * it's a SurfaceDescriptor.  For SurfaceDescriptor, we need to use a
- * scoped AutoOpenSurface to get a gfxASurface for the
- * SurfaceDescriptor.
  *
- * This helper class manages the gfxASurface-or-SurfaceDescriptor
- * logic.
+ * This helper class manages the SourceSurface logic.
  */
-class MOZ_STACK_CLASS AutoMaskData {
+class MOZ_STACK_CLASS AutoMoz2DMaskData {
 public:
-  AutoMaskData() { }
-  ~AutoMaskData() { }
-
-  /**
-   * Construct this out of either a gfxASurface or a
-   * SurfaceDescriptor.  Construct() must only be called once.
-   * GetSurface() and GetTransform() must not be called until this has
-   * been constructed.
-   */
+  AutoMoz2DMaskData() { }
+  ~AutoMoz2DMaskData() { }
 
   void Construct(const gfx::Matrix& aTransform,
-                 gfxASurface* aSurface);
+                 gfx::SourceSurface* aSurface)
+  {
+    MOZ_ASSERT(!IsConstructed());
+    mTransform = aTransform;
+    mSurface = aSurface;
+  }
 
-  void Construct(const gfx::Matrix& aTransform,
-                 const SurfaceDescriptor& aSurface);
+  gfx::SourceSurface* GetSurface()
+  {
+    MOZ_ASSERT(IsConstructed());
+    return mSurface.get();
+  }
 
-  /** The returned surface can't escape the scope of |this|. */
-  gfxASurface* GetSurface();
-  const gfx::Matrix& GetTransform();
+  const gfx::Matrix& GetTransform()
+  {
+    MOZ_ASSERT(IsConstructed());
+    return mTransform;
+  }
 
 private:
-  bool IsConstructed();
+  bool IsConstructed()
+  {
+    return !!mSurface;
+  }
 
   gfx::Matrix mTransform;
-  nsRefPtr<gfxASurface> mSurface;
-  Maybe<AutoOpenSurface> mSurfaceOpener;
+  RefPtr<gfx::SourceSurface> mSurface;
 
-  AutoMaskData(const AutoMaskData&) MOZ_DELETE;
-  AutoMaskData& operator=(const AutoMaskData&) MOZ_DELETE;
+  AutoMoz2DMaskData(const AutoMoz2DMaskData&) MOZ_DELETE;
+  AutoMoz2DMaskData& operator=(const AutoMoz2DMaskData&) MOZ_DELETE;
 };
 
 }

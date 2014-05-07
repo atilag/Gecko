@@ -56,12 +56,12 @@ class MOZ_STACK_CLASS nsAutoSelectionReset
 {
   private:
     /** ref-counted reference to the selection that we are supposed to restore */
-    nsRefPtr<mozilla::Selection> mSel;
+    nsRefPtr<mozilla::dom::Selection> mSel;
     nsEditor *mEd;  // non-owning ref to nsEditor
 
   public:
     /** constructor responsible for remembering all state needed to restore aSel */
-    nsAutoSelectionReset(mozilla::Selection* aSel, nsEditor* aEd);
+    nsAutoSelectionReset(mozilla::dom::Selection* aSel, nsEditor* aEd);
     
     /** destructor restores mSel to its former state */
     ~nsAutoSelectionReset();
@@ -204,19 +204,27 @@ class nsTrivialFunctor : public nsBoolDomIterFunctor
  *****************************************************************************/
 struct MOZ_STACK_CLASS DOMPoint
 {
-  nsCOMPtr<nsIDOMNode> node;
+  nsCOMPtr<nsINode> node;
   int32_t offset;
   
-  DOMPoint() : node(0),offset(0) {}
-  DOMPoint(nsIDOMNode *aNode, int32_t aOffset) : 
-                 node(aNode),offset(aOffset) {}
-  void SetPoint(nsIDOMNode *aNode, int32_t aOffset)
+  DOMPoint(nsINode* aNode, int32_t aOffset)
+    : node(aNode)
+    , offset(aOffset)
+  {}
+  DOMPoint(nsIDOMNode* aNode, int32_t aOffset)
+    : node(do_QueryInterface(aNode))
+    , offset(aOffset)
+  {}
+
+  void SetPoint(nsINode* aNode, int32_t aOffset)
   {
-    node = aNode; offset = aOffset;
+    node = aNode;
+    offset = aOffset;
   }
-  void GetPoint(nsCOMPtr<nsIDOMNode> &aNode, int32_t &aOffset)
+  void SetPoint(nsIDOMNode* aNode, int32_t aOffset)
   {
-    aNode = node; aOffset = offset;
+    node = do_QueryInterface(aNode);
+    offset = aOffset;
   }
 };
 
@@ -224,6 +232,7 @@ struct MOZ_STACK_CLASS DOMPoint
 class nsEditorUtils
 {
   public:
+    static bool IsDescendantOf(nsINode* aNode, nsINode* aParent, int32_t* aOffset = 0);
     static bool IsDescendantOf(nsIDOMNode *aNode, nsIDOMNode *aParent, int32_t *aOffset = 0);
     static bool IsLeafNode(nsIDOMNode *aNode);
 };

@@ -3,13 +3,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "base/histogram.h"
+// Must #include ImageLogging.h before any IPDL-generated files or other files that #include prlog.h
 #include "ImageLogging.h"
+
+#include "RasterImage.h"
+
+#include "base/histogram.h"
+#include "gfxPlatform.h"
 #include "nsComponentManagerUtils.h"
 #include "imgDecoderObserver.h"
 #include "nsError.h"
 #include "Decoder.h"
-#include "RasterImage.h"
 #include "nsAutoPtr.h"
 #include "prenv.h"
 #include "prsystem.h"
@@ -30,6 +34,8 @@
 
 #include "gfxContext.h"
 
+#include "mozilla/gfx/2D.h"
+#include "mozilla/RefPtr.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Services.h"
 #include "mozilla/Preferences.h"
@@ -48,6 +54,7 @@
 #endif
 
 using namespace mozilla;
+using namespace mozilla::gfx;
 using namespace mozilla::image;
 using namespace mozilla::layers;
 
@@ -373,10 +380,10 @@ namespace image {
 static nsCOMPtr<nsIThread> sScaleWorkerThread = nullptr;
 
 #ifndef DEBUG
-NS_IMPL_ISUPPORTS2(RasterImage, imgIContainer, nsIProperties)
+NS_IMPL_ISUPPORTS(RasterImage, imgIContainer, nsIProperties)
 #else
-NS_IMPL_ISUPPORTS3(RasterImage, imgIContainer, nsIProperties,
-                              imgIContainerDebug)
+NS_IMPL_ISUPPORTS(RasterImage, imgIContainer, nsIProperties,
+                  imgIContainerDebug)
 #endif
 
 //******************************************************************************
@@ -880,9 +887,9 @@ RasterImage::CopyFrame(uint32_t aWhichFrame,
 }
 
 //******************************************************************************
-/* [noscript] gfxASurface getFrame(in uint32_t aWhichFrame,
- *                                 in uint32_t aFlags); */
-NS_IMETHODIMP_(already_AddRefed<gfxASurface>)
+/* [noscript] SourceSurface getFrame(in uint32_t aWhichFrame,
+ *                                   in uint32_t aFlags); */
+NS_IMETHODIMP_(TemporaryRef<SourceSurface>)
 RasterImage::GetFrame(uint32_t aWhichFrame,
                       uint32_t aFlags)
 {
@@ -951,7 +958,22 @@ RasterImage::GetFrame(uint32_t aWhichFrame,
     framesurf = imgsurf;
   }
 
-  return framesurf.forget();
+  RefPtr<SourceSurface> result;
+
+  // As far as Moz2D is concerned, SourceSurface contains premultiplied alpha.
+  // If we're abusing it to contain non-premultiplied alpha then we want to
+  // avoid having Moz2D do any conversions on it (like copy to another
+  // surface). Hence why we try to wrap framesurf's data here for
+  // FLAG_DECODE_NO_PREMULTIPLY_ALPHA.
+  if ((aFlags & FLAG_WANT_DATA_SURFACE) != 0 ||
+      (aFlags & FLAG_DECODE_NO_PREMULTIPLY_ALPHA) != 0) {
+    result = gfxPlatform::GetPlatform()->GetWrappedDataSourceSurface(framesurf);
+  }
+  if (!result) {
+    result = gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(nullptr,
+                                                                    framesurf);
+  }
+  return result.forget();
 }
 
 already_AddRefed<layers::Image>
@@ -964,8 +986,8 @@ RasterImage::GetCurrentImage()
     return nullptr;
   }
 
-  nsRefPtr<gfxASurface> imageSurface = GetFrame(FRAME_CURRENT, FLAG_NONE);
-  if (!imageSurface) {
+  RefPtr<SourceSurface> surface = GetFrame(FRAME_CURRENT, FLAG_NONE);
+  if (!surface) {
     // The OS threw out some or all of our buffer. Start decoding again.
     // GetFrame will only return null in the case that the image was
     // discarded. We already checked that the image is decoded, so other
@@ -980,10 +1002,9 @@ RasterImage::GetCurrentImage()
   }
 
   CairoImage::Data cairoData;
-  cairoData.mDeprecatedSurface = imageSurface;
   GetWidth(&cairoData.mSize.width);
   GetHeight(&cairoData.mSize.height);
-  cairoData.mSourceSurface = gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(nullptr, imageSurface);
+  cairoData.mSourceSurface = surface;
 
   nsRefPtr<layers::Image> image = mImageContainer->CreateImage(ImageFormat::CAIRO_SURFACE);
   NS_ASSERTION(image, "Failed to create Image");
@@ -1106,7 +1127,7 @@ RasterImage::EnsureAnimExists()
   if (!mAnim) {
 
     // Create the animation context
-    mAnim = new FrameAnimator(mFrameBlender);
+    mAnim = new FrameAnimator(mFrameBlender, mAnimationMode);
 
     // We don't support discarding animated images (See bug 414259).
     // Lock the image and throw away the key.
@@ -3146,8 +3167,8 @@ RasterImage::FinishedSomeDecoding(eShutdownIntent aIntent /* = eShutdownIntent_D
   return RequestDecodeIfNeeded(rv, aIntent, done, wasSize);
 }
 
-NS_IMPL_ISUPPORTS1(RasterImage::DecodePool,
-                              nsIObserver)
+NS_IMPL_ISUPPORTS(RasterImage::DecodePool,
+                  nsIObserver)
 
 /* static */ RasterImage::DecodePool*
 RasterImage::DecodePool::Singleton()
@@ -3180,7 +3201,7 @@ public:
     ~RIDThreadPoolListener() {}
 };
 
-NS_IMPL_ISUPPORTS1(RIDThreadPoolListener, nsIThreadPoolListener)
+NS_IMPL_ISUPPORTS(RIDThreadPoolListener, nsIThreadPoolListener)
 
 NS_IMETHODIMP
 RIDThreadPoolListener::OnThreadCreated()
@@ -3565,7 +3586,7 @@ RasterImage::DecodeDoneWorker::NotifyFinishedSomeDecoding(RasterImage* image, De
 {
   image->mDecodingMonitor.AssertCurrentThreadIn();
 
-  nsCOMPtr<DecodeDoneWorker> worker = new DecodeDoneWorker(image, request);
+  nsCOMPtr<nsIRunnable> worker = new DecodeDoneWorker(image, request);
   NS_DispatchToMainThread(worker);
 }
 
@@ -3588,7 +3609,7 @@ RasterImage::FrameNeededWorker::FrameNeededWorker(RasterImage* image)
 void
 RasterImage::FrameNeededWorker::GetNewFrame(RasterImage* image)
 {
-  nsCOMPtr<FrameNeededWorker> worker = new FrameNeededWorker(image);
+  nsCOMPtr<nsIRunnable> worker = new FrameNeededWorker(image);
   NS_DispatchToMainThread(worker);
 }
 

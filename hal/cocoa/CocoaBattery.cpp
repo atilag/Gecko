@@ -12,7 +12,8 @@
 #include <mozilla/dom/battery/Constants.h>
 #include <mozilla/Services.h>
 
-#include <nsObserverService.h>
+#include <nsIObserverService.h>
+#include <nsIObserver.h>
 
 #include <dlfcn.h>
 
@@ -108,7 +109,7 @@ struct SingletonDestroyer MOZ_FINAL : public nsIObserver
   NS_DECL_NSIOBSERVER
 };
 
-NS_IMPL_ISUPPORTS1(SingletonDestroyer, nsIObserver)
+NS_IMPL_ISUPPORTS(SingletonDestroyer, nsIObserver)
 
 NS_IMETHODIMP
 SingletonDestroyer::Observe(nsISupports*, const char* aTopic, const char16_t*)

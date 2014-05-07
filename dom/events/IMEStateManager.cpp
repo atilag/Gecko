@@ -7,14 +7,15 @@
 #include "mozilla/IMEStateManager.h"
 
 #include "mozilla/Attributes.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
+#include "mozilla/TextComposition.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/dom/HTMLFormElement.h"
 
 #include "HTMLInputElement.h"
 #include "IMEContentObserver.h"
-#include "TextComposition.h"
 
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
@@ -767,8 +768,10 @@ IMEStateManager::GetTextCompositionFor(nsIWidget* aWidget)
 already_AddRefed<TextComposition>
 IMEStateManager::GetTextCompositionFor(WidgetGUIEvent* aEvent)
 {
-  MOZ_ASSERT(aEvent->AsCompositionEvent() || aEvent->AsTextEvent(),
-             "aEvent has to be WidgetCompositionEvent or WidgetTextEvent");
+  MOZ_ASSERT(aEvent->AsCompositionEvent() || aEvent->AsTextEvent() ||
+             aEvent->AsKeyboardEvent(),
+             "aEvent has to be WidgetCompositionEvent, WidgetTextEvent or "
+             "WidgetKeyboardEvent");
   return GetTextCompositionFor(aEvent->widget);
 }
 

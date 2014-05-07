@@ -20,7 +20,7 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "assembler/jit/ExecutableAllocator.h"
@@ -99,9 +99,10 @@ ExecutablePool::toggleAllCodeAsAccessible(bool accessible)
     size_t size = m_freePtr - begin;
 
     if (size) {
-        int flags = accessible
-                    ? PROT_READ | PROT_WRITE | PROT_EXEC
-                    : PROT_READ | PROT_WRITE;
+        // N.B. Some systems, like 32bit Mac OS 10.6, implicitly add PROT_EXEC
+        // when mprotect'ing memory with any flag other than PROT_NONE. Be
+        // sure to use PROT_NONE when making inaccessible.
+        int flags = accessible ? PROT_READ | PROT_WRITE | PROT_EXEC : PROT_NONE;
         if (mprotect(begin, size, flags))
             MOZ_CRASH();
     }

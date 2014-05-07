@@ -9,6 +9,11 @@
 #include "nsXULAppAPI.h"
 #include <fcntl.h>
 
+#ifdef MOZ_TASK_TRACER
+#include "GeckoTaskTracer.h"
+using namespace mozilla::tasktracer;
+#endif
+
 static const size_t MAX_READ_SIZE = 1 << 16;
 
 namespace mozilla {
@@ -64,8 +69,7 @@ public:
     MOZ_ASSERT(!NS_IsMainThread());
     MOZ_ASSERT(!mShuttingDownOnIOThread);
 
-    RemoveWatchers(READ_WATCHER|WRITE_WATCHER);
-
+    Close(); // will also remove fd from I/O loop
     mShuttingDownOnIOThread = true;
   }
 
@@ -643,7 +647,7 @@ void
 UnixSocketImpl::OnSocketCanReceiveWithoutBlocking()
 {
   MOZ_ASSERT(MessageLoopForIO::current() == GetIOLoop());
-  MOZ_ASSERT(GetConnectionStatus() == SOCKET_IS_CONNECTED);
+  MOZ_ASSERT(GetConnectionStatus() == SOCKET_IS_CONNECTED); // see bug 990984
 
   // Read all of the incoming data.
   while (true) {
@@ -674,6 +678,12 @@ UnixSocketImpl::OnSocketCanReceiveWithoutBlocking()
       return;
     }
 
+#ifdef MOZ_TASK_TRACER
+    // Make unix socket creation events to be the source events of TaskTracer,
+    // and originate the rest correlation tasks from here.
+    AutoSourceEvent taskTracerEvent(SourceEventType::UNIXSOCKET);
+#endif
+
     incoming->mSize = ret;
     nsRefPtr<SocketReceiveRunnable> r =
       new SocketReceiveRunnable(this, incoming.forget());
@@ -691,7 +701,7 @@ void
 UnixSocketImpl::OnSocketCanSendWithoutBlocking()
 {
   MOZ_ASSERT(MessageLoopForIO::current() == GetIOLoop());
-  MOZ_ASSERT(GetConnectionStatus() == SOCKET_IS_CONNECTED);
+  MOZ_ASSERT(GetConnectionStatus() == SOCKET_IS_CONNECTED); // see bug 990984
 
   // Try to write the bytes of mCurrentRilRawData.  If all were written, continue.
   //
@@ -739,6 +749,8 @@ UnixSocketConsumer::UnixSocketConsumer() : mImpl(nullptr)
 
 UnixSocketConsumer::~UnixSocketConsumer()
 {
+  MOZ_ASSERT(mConnectionStatus == SOCKET_DISCONNECTED);
+  MOZ_ASSERT(!mImpl);
 }
 
 bool

@@ -10,7 +10,6 @@
 #include <map>
 #include <android/log.h>
 #include "nsSurfaceTexture.h"
-#include "gfxImageSurface.h"
 #include "AndroidBridge.h"
 #include "nsThreadUtils.h"
 #include "mozilla/gfx/Matrix.h"
@@ -194,7 +193,7 @@ nsSurfaceTexture::~nsSurfaceTexture()
   JNIEnv* env = GetJNIForThread();
 
   if (mSurfaceTexture) {
-    GeckoAppShell::UnregisterSurfaceTextureFrameListener(mSurfaceTexture);
+    mozilla::widget::android::GeckoAppShell::UnregisterSurfaceTextureFrameListener(mSurfaceTexture);
 
     env->DeleteGlobalRef(mSurfaceTexture);
     mSurfaceTexture = nullptr;
@@ -223,9 +222,9 @@ void
 nsSurfaceTexture::SetFrameAvailableCallback(nsIRunnable* aRunnable)
 {
   if (aRunnable)
-    GeckoAppShell::RegisterSurfaceTextureFrameListener(mSurfaceTexture, mID);
+    mozilla::widget::android::GeckoAppShell::RegisterSurfaceTextureFrameListener(mSurfaceTexture, mID);
   else
-    GeckoAppShell::UnregisterSurfaceTextureFrameListener(mSurfaceTexture);
+    mozilla::widget::android::GeckoAppShell::UnregisterSurfaceTextureFrameListener(mSurfaceTexture);
 
   mFrameAvailableCallback = aRunnable;
 }

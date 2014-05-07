@@ -24,6 +24,8 @@ SharedSurface_GL::ProdCopy(SharedSurface_GL* src, SharedSurface_GL* dest,
 {
     GLContext* gl = src->GL();
 
+    gl->MakeCurrent();
+
     if (src->AttachType() == AttachmentType::Screen &&
         dest->AttachType() == AttachmentType::Screen)
     {
@@ -320,18 +322,8 @@ void
 SharedSurface_Basic::Fence()
 {
     mGL->MakeCurrent();
-
     ScopedBindFramebuffer autoFB(mGL, mFB);
-
-    DataSourceSurface::MappedSurface map;
-    mData->Map(DataSourceSurface::MapType::WRITE, &map);
-    nsRefPtr<gfxImageSurface> wrappedData =
-      new gfxImageSurface(map.mData,
-                          ThebesIntSize(mData->GetSize()),
-                          map.mStride,
-                          SurfaceFormatToImageFormat(mData->GetFormat()));
-    ReadPixelsIntoImageSurface(mGL, wrappedData);
-    mData->Unmap();
+    ReadPixelsIntoDataSurface(mGL, mData);
 }
 
 

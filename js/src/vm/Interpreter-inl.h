@@ -31,6 +31,16 @@ inline bool
 ComputeThis(JSContext *cx, AbstractFramePtr frame)
 {
     JS_ASSERT_IF(frame.isInterpreterFrame(), !frame.asInterpreterFrame()->runningInJit());
+
+    if (frame.isFunctionFrame() && frame.fun()->isArrow()) {
+        /*
+         * Arrow functions store their (lexical) |this| value in an
+         * extended slot.
+         */
+        frame.thisValue() = frame.fun()->getExtendedSlot(0);
+        return true;
+    }
+
     if (frame.thisValue().isObject())
         return true;
     RootedValue thisv(cx, frame.thisValue());
@@ -229,13 +239,14 @@ SetNameOperation(JSContext *cx, JSScript *script, jsbytecode *pc, HandleObject s
     /*
      * In strict-mode, we need to trigger an error when trying to assign to an
      * undeclared global variable. To do this, we call SetPropertyHelper
-     * directly and pass DNP_UNQUALIFIED.
+     * directly and pass Unqualified.
      */
     if (scope->is<GlobalObject>()) {
         JS_ASSERT(!scope->getOps()->setProperty);
         RootedId id(cx, NameToId(name));
         return baseops::SetPropertyHelper<SequentialExecution>(cx, scope, scope, id,
-                                                               DNP_UNQUALIFIED, &valCopy, strict);
+                                                               baseops::Unqualified, &valCopy,
+                                                               strict);
     }
 
     return JSObject::setProperty(cx, scope, scope, name, &valCopy, strict);

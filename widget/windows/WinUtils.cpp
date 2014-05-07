@@ -59,13 +59,13 @@ using namespace mozilla::gfx;
 namespace mozilla {
 namespace widget {
 
-NS_IMPL_ISUPPORTS1(myDownloadObserver, nsIDownloadObserver)
+NS_IMPL_ISUPPORTS(myDownloadObserver, nsIDownloadObserver)
 #ifdef MOZ_PLACES
-NS_IMPL_ISUPPORTS1(AsyncFaviconDataReady, nsIFaviconDataCallback)
+NS_IMPL_ISUPPORTS(AsyncFaviconDataReady, nsIFaviconDataCallback)
 #endif
-NS_IMPL_ISUPPORTS1(AsyncEncodeAndWriteIcon, nsIRunnable)
-NS_IMPL_ISUPPORTS1(AsyncDeleteIconFromDisk, nsIRunnable)
-NS_IMPL_ISUPPORTS1(AsyncDeleteAllFaviconsFromDisk, nsIRunnable)
+NS_IMPL_ISUPPORTS(AsyncEncodeAndWriteIcon, nsIRunnable)
+NS_IMPL_ISUPPORTS(AsyncDeleteIconFromDisk, nsIRunnable)
+NS_IMPL_ISUPPORTS(AsyncDeleteAllFaviconsFromDisk, nsIRunnable)
 
 
 const char FaviconHelper::kJumpListCacheDir[] = "jumpListCache";
@@ -683,7 +683,7 @@ nsresult AsyncFaviconDataReady::OnFaviconDataNotAvailable(void)
   rv = NS_NewChannel(getter_AddRefs(channel), mozIconURI);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<myDownloadObserver> downloadObserver = new myDownloadObserver;
+  nsCOMPtr<nsIDownloadObserver> downloadObserver = new myDownloadObserver;
   nsCOMPtr<nsIStreamListener> listener;
   rv = NS_NewDownloader(getter_AddRefs(listener), downloadObserver, icoFile);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -731,12 +731,8 @@ AsyncFaviconDataReady::OnComplete(nsIURI *aFaviconURI,
                                 getter_AddRefs(container));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsRefPtr<gfxASurface> imgFrame =
-    container->GetFrame(imgIContainer::FRAME_FIRST, 0);
-  NS_ENSURE_TRUE(imgFrame, NS_ERROR_FAILURE);
-
   RefPtr<SourceSurface> surface =
-    gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(nullptr, imgFrame);
+    container->GetFrame(imgIContainer::FRAME_FIRST, 0);
   NS_ENSURE_TRUE(surface, NS_ERROR_FAILURE);
 
   RefPtr<DataSourceSurface> dataSurface;
@@ -770,13 +766,17 @@ AsyncFaviconDataReady::OnComplete(nsIURI *aFaviconURI,
 
     dataSurface->Unmap();
   } else {
-    size.width = GetSystemMetrics(SM_CXSMICON);
-    size.height = GetSystemMetrics(SM_CYSMICON);
-    if (!size.width || !size.height) {
-      size.width = 16;
-      size.height = 16;
-    }
+    // By using the input image surface's size, we may end up encoding
+    // to a different size than a 16x16 (or bigger for higher DPI) ICO, but
+    // Windows will resize appropriately for us. If we want to encode ourselves
+    // one day because we like our resizing better, we'd have to manually
+    // resize the image here and use GetSystemMetrics w/ SM_CXSMICON and
+    // SM_CYSMICON. We don't support resizing images asynchronously at the
+    // moment anyway so getting the DPI aware icon size won't help.
+    size.width = surface->GetSize().width;
+    size.height = surface->GetSize().height;
     dataSurface = surface->GetDataSurface();
+    NS_ENSURE_TRUE(dataSurface, NS_ERROR_FAILURE);
   }
 
   // Allocate a new buffer that we own and can use out of line in
@@ -823,11 +823,6 @@ NS_IMETHODIMP AsyncEncodeAndWriteIcon::Run()
 {
   NS_PRECONDITION(!NS_IsMainThread(), "Should not be called on the main thread.");
 
-  // Get the recommended icon width and height, or if failure to obtain 
-  // these settings, fall back to 16x16 ICOs.  These values can be different
-  // if the user has a different DPI setting other than 100%.
-  // Windows would scale the 16x16 icon themselves, but it's better
-  // we let our ICO encoder do it.
   nsCOMPtr<nsIInputStream> iconStream;
   nsRefPtr<imgIEncoder> encoder =
     do_CreateInstance("@mozilla.org/image/encoder;2?"

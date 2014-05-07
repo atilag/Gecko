@@ -97,7 +97,9 @@ function createMediaElement(type, label) {
  *        The error callback if the stream fails to be retrieved
  */
 function getUserMedia(constraints, onSuccess, onError) {
-  constraints["fake"] = FAKE_ENABLED;
+  if (!("fake" in constraints)) {
+    constraints["fake"] = FAKE_ENABLED;
+  }
 
   info("Call getUserMedia for " + JSON.stringify(constraints));
   navigator.mozGetUserMedia(constraints, onSuccess, onError);
@@ -120,7 +122,7 @@ function runTest(aCallback) {
       ['dom.messageChannel.enabled', true],
       ['media.peerconnection.enabled', true],
       ['media.peerconnection.identity.enabled', true],
-      ['media.peerconnection.identity.timeout', 3000],
+      ['media.peerconnection.identity.timeout', 12000],
       ['media.navigator.permission.disabled', true]]
     }, function () {
       try {

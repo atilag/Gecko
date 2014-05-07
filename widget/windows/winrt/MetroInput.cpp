@@ -13,12 +13,13 @@
 #include "InputData.h"
 #include "UIABridgePrivate.h"
 #include "MetroAppShell.h"
+#include "mozilla/EventStateManager.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/TouchEvents.h"
 #include "mozilla/Preferences.h"  // for Preferences
 #include "WinUtils.h"
 #include "nsIPresShell.h"
-#include "nsEventStateManager.h"
 
 // System headers (alphabetical)
 #include <windows.ui.core.h> // ABI::Window::UI::Core namespace
@@ -487,6 +488,7 @@ MetroInput::OnPointerNonTouch(UI::Input::IPointerPoint* aPoint) {
                          WidgetMouseEvent::eReal,
                          WidgetMouseEvent::eNormal);
   event->button = button;
+  aPoint->get_PointerId(&event->pointerId);
   InitGeckoMouseEventFromPointerPoint(event, aPoint);
   DispatchAsyncEventIgnoreStatus(event);
 }
@@ -807,6 +809,7 @@ MetroInput::InitGeckoMouseEventFromPointerPoint(
   aPointerPoint->get_PointerDevice(device.GetAddressOf());
   device->get_PointerDeviceType(&deviceType);
   aPointerPoint->get_Properties(props.GetAddressOf());
+  aPointerPoint->get_PointerId(&aEvent->pointerId);
   props->get_Pressure(&pressure);
   props->get_XTilt(&tiltX);
   props->get_YTilt(&tiltY);
@@ -1128,7 +1131,7 @@ MetroInput::DeliverNextQueuedEventIgnoreStatus()
   }
   nsCOMPtr<nsIPresShell> presShell = mWidget->GetPresShell();
   if (presShell) {
-    nsEventStateManager* esm = presShell->GetPresContext()->EventStateManager();
+    EventStateManager* esm = presShell->GetPresContext()->EventStateManager();
     if (esm) {
       esm->SetContentState(nullptr, NS_EVENT_STATE_HOVER);
     }

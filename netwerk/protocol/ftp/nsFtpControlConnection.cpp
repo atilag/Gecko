@@ -25,7 +25,7 @@ extern PRLogModuleInfo* gFTPLog;
 // nsFtpControlConnection implementation ...
 //
 
-NS_IMPL_ISUPPORTS1(nsFtpControlConnection, nsIInputStreamCallback)
+NS_IMPL_ISUPPORTS(nsFtpControlConnection, nsIInputStreamCallback)
 
 NS_IMETHODIMP
 nsFtpControlConnection::OnInputStreamReady(nsIAsyncInputStream *stream)
@@ -65,8 +65,8 @@ nsFtpControlConnection::OnInputStreamReady(nsIAsyncInputStream *stream)
 
 nsFtpControlConnection::nsFtpControlConnection(const nsCSubstring& host,
                                                uint32_t port)
-    : mServerType(0), mSessionId(gFtpHandler->GetSessionId()), mHost(host)
-    , mPort(port)
+    : mServerType(0), mSessionId(gFtpHandler->GetSessionId())
+    , mUseUTF8(false), mHost(host), mPort(port)
 {
     LOG_ALWAYS(("FTP:CC created @%p", this));
 }

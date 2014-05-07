@@ -52,10 +52,10 @@ NS_INTERFACE_MAP_BEGIN(MobileMessageManager)
   NS_INTERFACE_MAP_ENTRY(nsIDOMMozMobileMessageManager)
   NS_INTERFACE_MAP_ENTRY(nsIObserver)
   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(MozMobileMessageManager)
-NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
+NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
-NS_IMPL_ADDREF_INHERITED(MobileMessageManager, nsDOMEventTargetHelper)
-NS_IMPL_RELEASE_INHERITED(MobileMessageManager, nsDOMEventTargetHelper)
+NS_IMPL_ADDREF_INHERITED(MobileMessageManager, DOMEventTargetHelper)
+NS_IMPL_RELEASE_INHERITED(MobileMessageManager, DOMEventTargetHelper)
 
 NS_IMPL_EVENT_HANDLER(MobileMessageManager, received)
 NS_IMPL_EVENT_HANDLER(MobileMessageManager, retrieving)
@@ -131,7 +131,7 @@ MobileMessageManager::Send(JSContext* aCx, JS::Handle<JSObject*> aGlobal,
                            uint32_t aServiceId,
                            JS::Handle<JSString*> aNumber,
                            const nsAString& aMessage,
-                           JS::Value* aRequest)
+                           JS::MutableHandle<JS::Value> aRequest)
 {
   nsCOMPtr<nsISmsService> smsService = do_GetService(SMS_SERVICE_CONTRACTID);
   NS_ENSURE_TRUE(smsService, NS_ERROR_FAILURE);
@@ -148,17 +148,15 @@ MobileMessageManager::Send(JSContext* aCx, JS::Handle<JSObject*> aGlobal,
                                  false, msgCallback);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  JS::Rooted<JSObject*> global(aCx, aGlobal);
-  JS::Rooted<JS::Value> rval(aCx);
-  rv = nsContentUtils::WrapNative(aCx, global,
+  js::AssertSameCompartment(aCx, aGlobal);
+  rv = nsContentUtils::WrapNative(aCx,
                                   static_cast<nsIDOMDOMRequest*>(request.get()),
-                                  &rval);
+                                  aRequest);
   if (NS_FAILED(rv)) {
     NS_ERROR("Failed to create the js value!");
     return rv;
   }
 
-  *aRequest = rval;
   return NS_OK;
 }
 
@@ -208,7 +206,7 @@ MobileMessageManager::Send(JS::Handle<JS::Value> aNumber,
 
   if (aNumber.isString()) {
     JS::Rooted<JSString*> str(aCx, aNumber.toString());
-    return Send(aCx, global, serviceId, str, aMessage, aReturn.address());
+    return Send(aCx, global, serviceId, str, aMessage, aReturn);
   }
 
   // Must be an array then.
@@ -236,7 +234,7 @@ MobileMessageManager::Send(JS::Handle<JS::Value> aNumber,
       return NS_ERROR_FAILURE;
     }
 
-    nsresult rv = Send(aCx, global, serviceId, str, aMessage, &requests[i]);
+    nsresult rv = Send(aCx, global, serviceId, str, aMessage, requests[i]);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 

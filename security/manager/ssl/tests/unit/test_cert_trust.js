@@ -52,8 +52,10 @@ function test_ca_distrust(ee_cert, cert_to_modify_trust, isRootCA, useMozillaPKI
                                                  : SEC_ERROR_INADEQUATE_CERT_TYPE,
                          certificateUsageObjectSigner); // expected
   check_cert_err_generic(ee_cert, useMozillaPKIX ? SEC_ERROR_CA_CERT_INVALID
-                                                 : SEC_ERROR_INVALID_ARGS,
-                         certificateUsageVerifyCA); // expected no bc
+                                                 : 0,
+                         certificateUsageVerifyCA);
+  // mozilla::pkix enforces that certificase must have a basic constraints
+  // extension with cA:true to be a CA certificate,  whereas classic does not
   check_cert_err_generic(ee_cert, SEC_ERROR_INADEQUATE_CERT_TYPE,
                          certificateUsageStatusResponder); //expected
 
@@ -75,9 +77,15 @@ function test_ca_distrust(ee_cert, cert_to_modify_trust, isRootCA, useMozillaPKI
                                                  : SEC_ERROR_INADEQUATE_CERT_TYPE,
                          certificateUsageObjectSigner);
   check_cert_err_generic(ee_cert, useMozillaPKIX ? SEC_ERROR_CA_CERT_INVALID
-                                                 : SEC_ERROR_INVALID_ARGS,
+                                                 : 0,
                          certificateUsageVerifyCA);
-  check_cert_err_generic(ee_cert, SEC_ERROR_INADEQUATE_CERT_TYPE,
+  // In mozilla::pkix (but not classic verification), certificate chain
+  // properties are checked before the end-entity. Thus, if we're using
+  // mozilla::pkix and the root certificate has been distrusted, the error
+  // will be "untrusted issuer" and not "inadequate cert type".
+  check_cert_err_generic(ee_cert, (!isRootCA && useMozillaPKIX)
+                                    ? SEC_ERROR_UNTRUSTED_ISSUER
+                                    : SEC_ERROR_INADEQUATE_CERT_TYPE,
                          certificateUsageStatusResponder);
 
 
@@ -111,7 +119,7 @@ function test_ca_distrust(ee_cert, cert_to_modify_trust, isRootCA, useMozillaPKI
                                                             : SEC_ERROR_INADEQUATE_CERT_TYPE,
                          certificateUsageObjectSigner);
   check_cert_err_generic(ee_cert, useMozillaPKIX ? SEC_ERROR_CA_CERT_INVALID
-                                                 : SEC_ERROR_INVALID_ARGS,
+                                                 : 0,
                          certificateUsageVerifyCA);
   check_cert_err_generic(ee_cert, SEC_ERROR_INADEQUATE_CERT_TYPE,
                          certificateUsageStatusResponder);
@@ -133,9 +141,15 @@ function test_ca_distrust(ee_cert, cert_to_modify_trust, isRootCA, useMozillaPKI
                                                  : SEC_ERROR_INADEQUATE_CERT_TYPE,
                          certificateUsageObjectSigner);
   check_cert_err_generic(ee_cert, useMozillaPKIX ? SEC_ERROR_CA_CERT_INVALID
-                                                 : SEC_ERROR_INVALID_ARGS,
+                                                 : 0,
                          certificateUsageVerifyCA);
-  check_cert_err_generic(ee_cert, SEC_ERROR_INADEQUATE_CERT_TYPE,
+  // In mozilla::pkix (but not classic verification), certificate chain
+  // properties are checked before the end-entity. Thus, if we're using
+  // mozilla::pkix and the root certificate has been distrusted, the error
+  // will be "untrusted issuer" and not "inadequate cert type".
+  check_cert_err_generic(ee_cert, (!isRootCA && useMozillaPKIX)
+                                    ? SEC_ERROR_UNTRUSTED_ISSUER
+                                    : SEC_ERROR_INADEQUATE_CERT_TYPE,
                          certificateUsageStatusResponder);
 
   // Inherited trust SSL
@@ -157,7 +171,7 @@ function test_ca_distrust(ee_cert, cert_to_modify_trust, isRootCA, useMozillaPKI
                                                  : SEC_ERROR_INADEQUATE_CERT_TYPE,
                          certificateUsageObjectSigner);
   check_cert_err_generic(ee_cert, useMozillaPKIX ? SEC_ERROR_CA_CERT_INVALID
-                                                 : SEC_ERROR_INVALID_ARGS,
+                                                 : 0,
                          certificateUsageVerifyCA);
   check_cert_err_generic(ee_cert, SEC_ERROR_INADEQUATE_CERT_TYPE,
                          certificateUsageStatusResponder);
@@ -180,7 +194,7 @@ function test_ca_distrust(ee_cert, cert_to_modify_trust, isRootCA, useMozillaPKI
                                                  : SEC_ERROR_INADEQUATE_CERT_TYPE,
                          certificateUsageObjectSigner);
   check_cert_err_generic(ee_cert, useMozillaPKIX ? SEC_ERROR_CA_CERT_INVALID
-                                                 : SEC_ERROR_INVALID_ARGS,
+                                                 : 0,
                          certificateUsageVerifyCA);
   check_cert_err_generic(ee_cert, SEC_ERROR_INADEQUATE_CERT_TYPE,
                          certificateUsageStatusResponder);
@@ -208,7 +222,7 @@ function test_ca_distrust(ee_cert, cert_to_modify_trust, isRootCA, useMozillaPKI
                                                  : SEC_ERROR_INADEQUATE_CERT_TYPE,
                          certificateUsageObjectSigner);
   check_cert_err_generic(ee_cert, useMozillaPKIX ? SEC_ERROR_CA_CERT_INVALID
-                                                 : SEC_ERROR_INVALID_ARGS,
+                                                 : 0,
                          certificateUsageVerifyCA);
   check_cert_err_generic(ee_cert, SEC_ERROR_INADEQUATE_CERT_TYPE,
                          certificateUsageStatusResponder);

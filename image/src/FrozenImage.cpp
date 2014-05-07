@@ -5,10 +5,12 @@
 
 #include "FrozenImage.h"
 
+using namespace mozilla::gfx;
+
 namespace mozilla {
 namespace image {
 
-NS_IMPL_ISUPPORTS1(FrozenImage, imgIContainer)
+NS_IMPL_ISUPPORTS(FrozenImage, imgIContainer)
 
 nsIntRect
 FrozenImage::FrameRect(uint32_t /* aWhichFrame - ignored */)
@@ -40,7 +42,7 @@ FrozenImage::GetAnimated(bool* aAnimated)
   return rv;
 }
 
-NS_IMETHODIMP_(already_AddRefed<gfxASurface>)
+NS_IMETHODIMP_(TemporaryRef<SourceSurface>)
 FrozenImage::GetFrame(uint32_t aWhichFrame,
                       uint32_t aFlags)
 {

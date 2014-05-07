@@ -52,9 +52,9 @@ nsPluginArray::GetParentObject() const
 }
 
 JSObject*
-nsPluginArray::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+nsPluginArray::WrapObject(JSContext* aCx)
 {
-  return PluginArrayBinding::Wrap(aCx, aScope, this);
+  return PluginArrayBinding::Wrap(aCx, this);
 }
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsPluginArray)
@@ -66,10 +66,10 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsPluginArray)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_3(nsPluginArray,
-                                        mWindow,
-                                        mPlugins,
-                                        mHiddenPlugins)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsPluginArray,
+                                      mWindow,
+                                      mPlugins,
+                                      mHiddenPlugins)
 
 static void
 GetPluginMimeTypes(const nsTArray<nsRefPtr<nsPluginElement> >& aPlugins,
@@ -222,6 +222,12 @@ nsPluginArray::NamedGetter(const nsAString& aName, bool &aFound)
   return plugin;
 }
 
+bool
+nsPluginArray::NameIsEnumerable(const nsAString& aName)
+{
+  return true;
+}
+
 uint32_t
 nsPluginArray::Length()
 {
@@ -235,7 +241,7 @@ nsPluginArray::Length()
 }
 
 void
-nsPluginArray::GetSupportedNames(nsTArray< nsString >& aRetval)
+nsPluginArray::GetSupportedNames(unsigned, nsTArray<nsString>& aRetval)
 {
   aRetval.Clear();
 
@@ -350,7 +356,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsPluginElement)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(nsPluginElement, mWindow, mMimeTypes)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsPluginElement, mWindow, mMimeTypes)
 
 nsPluginElement::nsPluginElement(nsPIDOMWindow* aWindow,
                                  nsPluginTag* aPluginTag)
@@ -368,9 +374,9 @@ nsPluginElement::GetParentObject() const
 }
 
 JSObject*
-nsPluginElement::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+nsPluginElement::WrapObject(JSContext* aCx)
 {
-  return PluginBinding::Wrap(aCx, aScope, this);
+  return PluginBinding::Wrap(aCx, this);
 }
 
 void
@@ -440,6 +446,12 @@ nsPluginElement::NamedGetter(const nsAString& aName, bool &aFound)
   return nullptr;
 }
 
+bool
+nsPluginElement::NameIsEnumerable(const nsAString& aName)
+{
+  return true;
+}
+
 uint32_t
 nsPluginElement::Length()
 {
@@ -449,7 +461,7 @@ nsPluginElement::Length()
 }
 
 void
-nsPluginElement::GetSupportedNames(nsTArray< nsString >& retval)
+nsPluginElement::GetSupportedNames(unsigned, nsTArray<nsString>& retval)
 {
   EnsurePluginMimeTypes();
 

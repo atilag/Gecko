@@ -106,7 +106,7 @@ public:
 };
 
 #ifdef DEBUG
-NS_IMPL_ISUPPORTS_INHERITED1(GfxInfo, GfxInfoBase, nsIGfxInfoDebug)
+NS_IMPL_ISUPPORTS_INHERITED(GfxInfo, GfxInfoBase, nsIGfxInfoDebug)
 #endif
 
 GfxInfo::GfxInfo()
@@ -360,10 +360,10 @@ GfxInfo::GetGfxDriverInfo()
 }
 
 nsresult
-GfxInfo::GetFeatureStatusImpl(int32_t aFeature, 
-                              int32_t *aStatus, 
+GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
+                              int32_t *aStatus,
                               nsAString & aSuggestedDriverVersion,
-                              const nsTArray<GfxDriverInfo>& aDriverInfo, 
+                              const nsTArray<GfxDriverInfo>& aDriverInfo,
                               OperatingSystem* aOS /* = nullptr */)
 {
   NS_ENSURE_ARG_POINTER(aStatus);
@@ -480,7 +480,7 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
       {
         // Honeycomb Samsung devices are whitelisted.
         // All other Honeycomb devices are blacklisted.
-	bool isWhitelisted =
+        bool isWhitelisted =
           cManufacturer.Equals("samsung", nsCaseInsensitiveCStringComparator());
 
         if (!isWhitelisted) {
@@ -547,6 +547,24 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
           *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
           return NS_OK;
         }
+      }
+    }
+
+    if (aFeature == FEATURE_WEBRTC_HW_ACCELERATION) {
+      NS_LossyConvertUTF16toASCII cManufacturer(mManufacturer);
+      NS_LossyConvertUTF16toASCII cModel(mModel);
+      NS_LossyConvertUTF16toASCII cHardware(mHardware);
+
+      if (cHardware.Equals("hammerhead") &&
+          CompareVersions(mOSVersion.get(), "4.4.2") >= 0 &&
+          cManufacturer.Equals("lge", nsCaseInsensitiveCStringComparator()) &&
+          cModel.Equals("nexus 5", nsCaseInsensitiveCStringComparator())) {
+        *aStatus = nsIGfxInfo::FEATURE_NO_INFO;
+        return NS_OK;
+      } else {
+        // Blocklist all other devices except Nexus 5 which VP8 hardware acceleration is supported
+        *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
+        return NS_OK;
       }
     }
   }

@@ -40,6 +40,7 @@
 #include "webrtc/voice_engine/include/voe_volume_control.h"
 #include "webrtc/voice_engine/include/voe_external_media.h"
 #include "webrtc/voice_engine/include/voe_audio_processing.h"
+#include "webrtc/voice_engine/include/voe_call_report.h"
 
 // Video Engine
 #include "webrtc/video_engine/include/vie_base.h"
@@ -56,6 +57,7 @@
 #endif
 
 #include "NullTransport.h"
+#include "AudioOutputObserver.h"
 
 namespace mozilla {
 
@@ -140,14 +142,16 @@ public:
 
   virtual void GetName(nsAString&);
   virtual void GetUUID(nsAString&);
-  virtual nsresult Allocate(const MediaEnginePrefs &aPrefs);
+  virtual nsresult Allocate(const VideoTrackConstraintsN &aConstraints,
+                            const MediaEnginePrefs &aPrefs);
   virtual nsresult Deallocate();
   virtual nsresult Start(SourceMediaStream*, TrackID);
   virtual nsresult Stop(SourceMediaStream*, TrackID);
   virtual nsresult Snapshot(uint32_t aDuration, nsIDOMFile** aFile);
   virtual nsresult Config(bool aEchoOn, uint32_t aEcho,
                           bool aAgcOn, uint32_t aAGC,
-                          bool aNoiseOn, uint32_t aNoise) { return NS_OK; };
+                          bool aNoiseOn, uint32_t aNoise,
+                          int32_t aPlayoutDelay) { return NS_OK; };
   virtual void NotifyPull(MediaStreamGraph* aGraph,
                           SourceMediaStream *aSource,
                           TrackID aId,
@@ -167,7 +171,7 @@ public:
 
   void OnHardwareStateChange(HardwareState aState);
   bool OnNewPreviewFrame(layers::Image* aImage, uint32_t aWidth, uint32_t aHeight);
-  void OnError(CameraErrorContext aContext, CameraError aError);
+  void OnUserError(UserContext aContext, nsresult aError);
   void OnTakePictureComplete(uint8_t* aData, uint32_t aLength, const nsAString& aMimeType);
 
   void AllocImpl();
@@ -244,7 +248,11 @@ private:
   nsString mDeviceName;
   nsString mUniqueId;
 
-  void ChooseCapability(const MediaEnginePrefs &aPrefs);
+  void ChooseCapability(const VideoTrackConstraintsN &aConstraints,
+                        const MediaEnginePrefs &aPrefs);
+
+  void GuessCapability(const VideoTrackConstraintsN &aConstraints,
+                       const MediaEnginePrefs &aPrefs);
 };
 
 class MediaEngineWebRTCAudioSource : public MediaEngineAudioSource,
@@ -258,10 +266,13 @@ public:
     , mCapIndex(aIndex)
     , mChannel(-1)
     , mInitDone(false)
+    , mStarted(false)
+    , mSamples(0)
     , mEchoOn(false), mAgcOn(false), mNoiseOn(false)
     , mEchoCancel(webrtc::kEcDefault)
     , mAGC(webrtc::kAgcDefault)
     , mNoiseSuppress(webrtc::kNsDefault)
+    , mPlayoutDelay(0)
     , mNullTransport(nullptr) {
     MOZ_ASSERT(aVoiceEnginePtr);
     mState = kReleased;
@@ -274,14 +285,16 @@ public:
   virtual void GetName(nsAString&);
   virtual void GetUUID(nsAString&);
 
-  virtual nsresult Allocate(const MediaEnginePrefs &aPrefs);
+  virtual nsresult Allocate(const AudioTrackConstraintsN &aConstraints,
+                            const MediaEnginePrefs &aPrefs);
   virtual nsresult Deallocate();
   virtual nsresult Start(SourceMediaStream*, TrackID);
   virtual nsresult Stop(SourceMediaStream*, TrackID);
   virtual nsresult Snapshot(uint32_t aDuration, nsIDOMFile** aFile);
   virtual nsresult Config(bool aEchoOn, uint32_t aEcho,
                           bool aAgcOn, uint32_t aAGC,
-                          bool aNoiseOn, uint32_t aNoise);
+                          bool aNoiseOn, uint32_t aNoise,
+                          int32_t aPlayoutDelay);
 
   virtual void NotifyPull(MediaStreamGraph* aGraph,
                           SourceMediaStream *aSource,
@@ -312,6 +325,7 @@ private:
   ScopedCustomReleasePtr<webrtc::VoEExternalMedia> mVoERender;
   ScopedCustomReleasePtr<webrtc::VoENetwork> mVoENetwork;
   ScopedCustomReleasePtr<webrtc::VoEAudioProcessing> mVoEProcessing;
+  ScopedCustomReleasePtr<webrtc::VoECallReport> mVoECallReport;
 
   // mMonitor protects mSources[] access/changes, and transitions of mState
   // from kStarted to kStopped (which are combined with EndTrack()).
@@ -323,6 +337,8 @@ private:
   int mChannel;
   TrackID mTrackID;
   bool mInitDone;
+  bool mStarted;
+  int mSamples; // int to avoid conversions when comparing/etc to samplingFreq & length
 
   nsString mDeviceName;
   nsString mDeviceUUID;
@@ -331,6 +347,7 @@ private:
   webrtc::EcModes  mEchoCancel;
   webrtc::AgcModes mAGC;
   webrtc::NsModes  mNoiseSuppress;
+  int32_t mPlayoutDelay;
 
   NullTransport *mNullTransport;
 };
@@ -339,12 +356,6 @@ class MediaEngineWebRTC : public MediaEngine
 {
 public:
   MediaEngineWebRTC(MediaEnginePrefs &aPrefs);
-  ~MediaEngineWebRTC() {
-    Shutdown();
-#ifdef MOZ_B2G_CAMERA
-    AsyncLatencyLogger::Get()->Release();
-#endif
-  }
 
   // Clients should ensure to clean-up sources video/audio sources
   // before invoking Shutdown on this class.
@@ -354,6 +365,15 @@ public:
   virtual void EnumerateAudioDevices(nsTArray<nsRefPtr<MediaEngineAudioSource> >*);
 
 private:
+  ~MediaEngineWebRTC() {
+    Shutdown();
+#ifdef MOZ_B2G_CAMERA
+    AsyncLatencyLogger::Get()->Release();
+#endif
+    // XXX
+    gFarendObserver = nullptr;
+  }
+
   Mutex mMutex;
   // protected with mMutex:
 

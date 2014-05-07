@@ -60,9 +60,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-DocumentType::WrapNode(JSContext *cx, JS::Handle<JSObject*> scope)
+DocumentType::WrapNode(JSContext *cx)
 {
-  return DocumentTypeBinding::Wrap(cx, scope, this);
+  return DocumentTypeBinding::Wrap(cx, this);
 }
 
 DocumentType::DocumentType(already_AddRefed<nsINodeInfo>& aNodeInfo,
@@ -82,8 +82,8 @@ DocumentType::~DocumentType()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED2(DocumentType, nsGenericDOMDataNode, nsIDOMNode,
-                             nsIDOMDocumentType)
+NS_IMPL_ISUPPORTS_INHERITED(DocumentType, nsGenericDOMDataNode, nsIDOMNode,
+                            nsIDOMDocumentType)
 
 bool
 DocumentType::IsNodeOfType(uint32_t aFlags) const

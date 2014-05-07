@@ -27,7 +27,7 @@ using namespace mozilla;
  * nsMenuBarListener implementation
  */
 
-NS_IMPL_ISUPPORTS1(nsMenuBarListener, nsIDOMEventListener)
+NS_IMPL_ISUPPORTS(nsMenuBarListener, nsIDOMEventListener)
 
 #define MODIFIER_SHIFT    1
 #define MODIFIER_CONTROL  2
@@ -106,7 +106,7 @@ nsMenuBarListener::ToggleMenuActiveState()
   if (pm && closemenu) {
     nsMenuPopupFrame* popupFrame = closemenu->GetPopup();
     if (popupFrame)
-      pm->HidePopup(popupFrame->GetContent(), false, false, true);
+      pm->HidePopup(popupFrame->GetContent(), false, false, true, false);
   }
 }
 

@@ -13,6 +13,7 @@
 #include "mozilla/Preferences.h"
 #include "PromiseCallback.h"
 #include "PromiseNativeHandler.h"
+#include "PromiseWorkerProxy.h"
 #include "nsContentUtils.h"
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
@@ -92,31 +93,18 @@ public:
                        JS::Handle<JS::Value> aValue,
                        Promise::PromiseState aState)
     : mPromise(aPromise)
-    , mValue(aValue)
+    , mValue(CycleCollectedJSRuntime::Get()->Runtime(), aValue)
     , mState(aState)
   {
     MOZ_ASSERT(aPromise);
     MOZ_ASSERT(mState != Promise::Pending);
     MOZ_COUNT_CTOR(PromiseResolverMixin);
-
-    /* It's safe to use unsafeGet() here: the unsafeness comes from the
-     * possibility of updating the value of mJSObject without triggering the
-     * barriers.  However if the value will always be marked, post barriers
-     * unnecessary. */
-    JS_AddNamedValueRootRT(CycleCollectedJSRuntime::Get()->Runtime(), mValue.unsafeGet(),
-                           "PromiseResolverMixin.mValue");
   }
 
   virtual ~PromiseResolverMixin()
   {
     NS_ASSERT_OWNINGTHREAD(PromiseResolverMixin);
     MOZ_COUNT_DTOR(PromiseResolverMixin);
-
-    /* It's safe to use unsafeGet() here: the unsafeness comes from the
-     * possibility of updating the value of mJSObject without triggering the
-     * barriers.  However if the value will always be marked, post barriers
-     * unnecessary. */
-    JS_RemoveValueRootRT(CycleCollectedJSRuntime::Get()->Runtime(), mValue.unsafeGet());
   }
 
 protected:
@@ -131,7 +119,7 @@ protected:
 
 private:
   nsRefPtr<Promise> mPromise;
-  JS::Heap<JS::Value> mValue;
+  JS::PersistentRooted<JS::Value> mValue;
   Promise::PromiseState mState;
   NS_DECL_OWNINGTHREAD;
 };
@@ -187,15 +175,15 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(Promise)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Promise)
   tmp->MaybeReportRejectedOnce();
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mGlobal)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mResolveCallbacks);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mRejectCallbacks);
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mResolveCallbacks)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mRejectCallbacks)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Promise)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mGlobal)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mResolveCallbacks);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRejectCallbacks);
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mResolveCallbacks)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRejectCallbacks)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
@@ -233,9 +221,9 @@ Promise::~Promise()
 }
 
 JSObject*
-Promise::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+Promise::WrapObject(JSContext* aCx)
 {
-  return PromiseBinding::Wrap(aCx, aScope, this);
+  return PromiseBinding::Wrap(aCx, this);
 }
 
 JSObject*
@@ -254,8 +242,10 @@ Promise::GetOrCreateWrapper(JSContext* aCx)
     return nullptr;
   }
 
+  JSAutoCompartment ac(aCx, scope);
+
   JS::Rooted<JS::Value> val(aCx);
-  if (!WrapNewBindingObject(aCx, scope, this, &val)) {
+  if (!WrapNewBindingObject(aCx, this, &val)) {
     MOZ_ASSERT(JS_IsExceptionPending(aCx));
     return nullptr;
   }
@@ -275,17 +265,6 @@ Promise::MaybeReject(JSContext* aCx,
                      JS::Handle<JS::Value> aValue)
 {
   MaybeRejectInternal(aCx, aValue);
-}
-
-static void
-EnterCompartment(Maybe<JSAutoCompartment>& aAc, JSContext* aCx,
-                 JS::Handle<JS::Value> aValue)
-{
-  // FIXME Bug 878849
-  if (aValue.isObject()) {
-    JS::Rooted<JSObject*> rooted(aCx, &aValue.toObject());
-    aAc.construct(aCx, rooted);
-  }
 }
 
 enum {
@@ -431,7 +410,7 @@ Promise::CreateFunction(JSContext* aCx, JSObject* aParent, Promise* aPromise,
   JS::Rooted<JSObject*> obj(aCx, JS_GetFunctionObject(func));
 
   JS::Rooted<JS::Value> promiseObj(aCx);
-  if (!dom::WrapNewBindingObject(aCx, obj, aPromise, &promiseObj)) {
+  if (!dom::WrapNewBindingObject(aCx, aPromise, &promiseObj)) {
     return nullptr;
   }
 
@@ -458,7 +437,7 @@ Promise::CreateThenableFunction(JSContext* aCx, Promise* aPromise, uint32_t aTas
   JS::Rooted<JSObject*> obj(aCx, JS_GetFunctionObject(func));
 
   JS::Rooted<JS::Value> promiseObj(aCx);
-  if (!dom::WrapNewBindingObject(aCx, obj, aPromise, &promiseObj)) {
+  if (!dom::WrapNewBindingObject(aCx, aPromise, &promiseObj)) {
     return nullptr;
   }
 
@@ -505,8 +484,13 @@ Promise::Constructor(const GlobalObject& aGlobal,
     JS::Rooted<JS::Value> value(cx);
     aRv.StealJSException(cx, &value);
 
-    Maybe<JSAutoCompartment> ac;
-    EnterCompartment(ac, cx, value);
+    // we want the same behavior as this JS implementation:
+    // function Promise(arg) { try { arg(a, b); } catch (e) { this.reject(e); }}
+    if (!JS_WrapValue(cx, &value)) {
+      aRv.Throw(NS_ERROR_UNEXPECTED);
+      return nullptr;
+    }
+
     promise->MaybeRejectInternal(cx, value);
   }
 
@@ -574,15 +558,20 @@ Promise::Reject(nsIGlobalObject* aGlobal, JSContext* aCx,
 }
 
 already_AddRefed<Promise>
-Promise::Then(AnyCallback* aResolveCallback, AnyCallback* aRejectCallback)
+Promise::Then(JSContext* aCx, AnyCallback* aResolveCallback,
+              AnyCallback* aRejectCallback)
 {
   nsRefPtr<Promise> promise = new Promise(GetParentObject());
 
+  JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
+
   nsRefPtr<PromiseCallback> resolveCb =
-    PromiseCallback::Factory(promise, aResolveCallback, PromiseCallback::Resolve);
+    PromiseCallback::Factory(promise, global, aResolveCallback,
+                             PromiseCallback::Resolve);
 
   nsRefPtr<PromiseCallback> rejectCb =
-    PromiseCallback::Factory(promise, aRejectCallback, PromiseCallback::Reject);
+    PromiseCallback::Factory(promise, global, aRejectCallback,
+                             PromiseCallback::Reject);
 
   AppendCallbacks(resolveCb, rejectCb);
 
@@ -590,10 +579,10 @@ Promise::Then(AnyCallback* aResolveCallback, AnyCallback* aRejectCallback)
 }
 
 already_AddRefed<Promise>
-Promise::Catch(AnyCallback* aRejectCallback)
+Promise::Catch(JSContext* aCx, AnyCallback* aRejectCallback)
 {
   nsRefPtr<AnyCallback> resolveCb;
-  return Then(resolveCb, aRejectCallback);
+  return Then(aCx, resolveCb, aRejectCallback);
 }
 
 /**
@@ -607,11 +596,17 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(CountdownHolder)
 
-  CountdownHolder(const GlobalObject& aGlobal, Promise* aPromise, uint32_t aCountdown)
+  CountdownHolder(const GlobalObject& aGlobal, Promise* aPromise,
+                  uint32_t aCountdown)
     : mPromise(aPromise), mCountdown(aCountdown)
   {
     MOZ_ASSERT(aCountdown != 0);
     JSContext* cx = aGlobal.GetContext();
+
+    // The only time aGlobal.GetContext() and aGlobal.Get() are not
+    // same-compartment is when we're called via Xrays, and in that situation we
+    // in fact want to create the array in the callee compartment
+
     JSAutoCompartment ac(cx, aGlobal.Get());
     mValues = JS_NewArrayObject(cx, aCountdown);
     mozilla::HoldJSObjects(this);
@@ -628,10 +623,13 @@ public:
 
     ThreadsafeAutoSafeJSContext cx;
     JSAutoCompartment ac(cx, mValues);
-
     {
+
       AutoDontReportUncaught silenceReporting(cx);
-      if (!JS_DefineElement(cx, mValues, index, aValue, nullptr, nullptr, JSPROP_ENUMERATE)) {
+      JS::Rooted<JS::Value> value(cx, aValue);
+      JS::Rooted<JSObject*> values(cx, mValues);
+      if (!JS_WrapValue(cx, &value) ||
+          !JS_DefineElement(cx, values, index, value, JSPROP_ENUMERATE)) {
         MOZ_ASSERT(JS_IsExceptionPending(cx));
         JS::Rooted<JS::Value> exn(cx);
         JS_GetPendingException(cx, &exn);
@@ -697,13 +695,13 @@ public:
   }
 
   void
-  ResolvedCallback(JS::Handle<JS::Value> aValue)
+  ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue)
   {
     mCountdownHolder->SetValue(mIndex, aValue);
   }
 
   void
-  RejectedCallback(JS::Handle<JS::Value> aValue)
+  RejectedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue)
   {
     // Should never be attached to Promise as a reject handler.
     MOZ_ASSERT(false, "AllResolveHandler should never be attached to a Promise's reject handler!");
@@ -720,7 +718,7 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(AllResolveHandler)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(AllResolveHandler)
 NS_INTERFACE_MAP_END_INHERITING(PromiseNativeHandler)
 
-NS_IMPL_CYCLE_COLLECTION_1(AllResolveHandler, mCountdownHolder)
+NS_IMPL_CYCLE_COLLECTION(AllResolveHandler, mCountdownHolder)
 
 /* static */ already_AddRefed<Promise>
 Promise::All(const GlobalObject& aGlobal, JSContext* aCx,
@@ -747,7 +745,13 @@ Promise::All(const GlobalObject& aGlobal, JSContext* aCx,
   nsRefPtr<CountdownHolder> holder =
     new CountdownHolder(aGlobal, promise, aIterable.Length());
 
-  nsRefPtr<PromiseCallback> rejectCb = new RejectPromiseCallback(promise);
+  JS::Rooted<JSObject*> obj(aCx, JS::CurrentGlobalOrNull(aCx));
+  if (!obj) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+
+  nsRefPtr<PromiseCallback> rejectCb = new RejectPromiseCallback(promise, obj);
 
   for (uint32_t i = 0; i < aIterable.Length(); ++i) {
     JS::Rooted<JS::Value> value(aCx, aIterable.ElementAt(i));
@@ -779,9 +783,18 @@ Promise::Race(const GlobalObject& aGlobal, JSContext* aCx,
     return nullptr;
   }
 
+  JS::Rooted<JSObject*> obj(aCx, JS::CurrentGlobalOrNull(aCx));
+  if (!obj) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+
   nsRefPtr<Promise> promise = new Promise(global);
-  nsRefPtr<PromiseCallback> resolveCb = new ResolvePromiseCallback(promise);
-  nsRefPtr<PromiseCallback> rejectCb = new RejectPromiseCallback(promise);
+
+  nsRefPtr<PromiseCallback> resolveCb =
+    new ResolvePromiseCallback(promise, obj);
+
+  nsRefPtr<PromiseCallback> rejectCb = new RejectPromiseCallback(promise, obj);
 
   for (uint32_t i = 0; i < aIterable.Length(); ++i) {
     JS::Rooted<JS::Value> value(aCx, aIterable.ElementAt(i));
@@ -853,11 +866,20 @@ Promise::RunTask()
   mResolveCallbacks.Clear();
   mRejectCallbacks.Clear();
 
-  ThreadsafeAutoJSContext cx; // Just for rooting.
+  ThreadsafeAutoJSContext cx;
   JS::Rooted<JS::Value> value(cx, mResult);
+  JS::Rooted<JSObject*> wrapper(cx, GetOrCreateWrapper(cx));
+  if (!wrapper) {
+    return;
+  }
+
+  JSAutoCompartment ac(cx, wrapper);
+  if (!MaybeWrapValue(cx, &value)) {
+    return;
+  }
 
   for (uint32_t i = 0; i < callbacks.Length(); ++i) {
-    callbacks[i]->Call(value);
+    callbacks[i]->Call(cx, value);
   }
 }
 
@@ -995,8 +1017,12 @@ Promise::ResolveInternal(JSContext* aCx,
         // If we could mark as called, neither of the callbacks had been called
         // when the exception was thrown. So we can reject the Promise.
         if (couldMarkAsCalled) {
-          Maybe<JSAutoCompartment> ac;
-          EnterCompartment(ac, aCx, exn);
+          bool ok = JS_WrapValue(aCx, &exn);
+          MOZ_ASSERT(ok);
+          if (!ok) {
+            NS_WARNING("Failed to wrap value into the right compartment.");
+          }
+
           RejectInternal(aCx, exn, Promise::SyncTask);
         }
         // At least one of resolveFunc or rejectFunc have been called, so ignore
@@ -1100,35 +1126,199 @@ PromiseReportRejectFeature::Notify(JSContext* aCx, workers::Status aStatus)
   return true;
 }
 
-bool
-Promise::ArgumentToJSValue(const nsAString& aArgument,
-                           JSContext* aCx,
-                           JSObject* aScope,
-                           JS::MutableHandle<JS::Value> aValue)
+// A WorkerRunnable to resolve/reject the Promise on the worker thread.
+
+class PromiseWorkerProxyRunnable : public workers::WorkerRunnable
 {
-  // XXXkhuey I'd love to use xpc::NonVoidStringToJsval here, but it requires
-  // a non-const nsAString for silly reasons.
-  nsStringBuffer* sharedBuffer;
-  if (!XPCStringConvert::ReadableToJSVal(aCx, aArgument, &sharedBuffer,
-                                         aValue)) {
-    return false;
+public:
+  PromiseWorkerProxyRunnable(PromiseWorkerProxy* aPromiseWorkerProxy,
+                             JSStructuredCloneCallbacks* aCallbacks,
+                             JSAutoStructuredCloneBuffer&& aBuffer,
+                             PromiseWorkerProxy::RunCallbackFunc aFunc)
+    : WorkerRunnable(aPromiseWorkerProxy->GetWorkerPrivate(),
+                     WorkerThreadUnchangedBusyCount)
+    , mPromiseWorkerProxy(aPromiseWorkerProxy)
+    , mCallbacks(aCallbacks)
+    , mBuffer(Move(aBuffer))
+    , mFunc(aFunc)
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+    MOZ_ASSERT(mPromiseWorkerProxy);
   }
 
-  if (sharedBuffer) {
-    NS_ADDREF(sharedBuffer);
+  virtual bool
+  WorkerRun(JSContext* aCx, workers::WorkerPrivate* aWorkerPrivate)
+  {
+    MOZ_ASSERT(aWorkerPrivate);
+    aWorkerPrivate->AssertIsOnWorkerThread();
+    MOZ_ASSERT(aWorkerPrivate == mWorkerPrivate);
+
+    MOZ_ASSERT(mPromiseWorkerProxy);
+    nsRefPtr<Promise> workerPromise = mPromiseWorkerProxy->GetWorkerPromise();
+    MOZ_ASSERT(workerPromise);
+
+    // Here we convert the buffer to a JS::Value.
+    JS::Rooted<JS::Value> value(aCx);
+    if (!mBuffer.read(aCx, &value, mCallbacks, mPromiseWorkerProxy)) {
+      JS_ClearPendingException(aCx);
+      return false;
+    }
+
+    // TODO Bug 975246 - nsRefPtr should support operator |nsRefPtr->*funcType|.
+    (workerPromise.get()->*mFunc)(aCx,
+                                  value,
+                                  Promise::PromiseTaskSync::SyncTask);
+
+    // Release the Promise because it has been resolved/rejected for sure.
+    mPromiseWorkerProxy->CleanUp(aCx);
+    return true;
+  }
+
+protected:
+  ~PromiseWorkerProxyRunnable() {}
+
+private:
+  nsRefPtr<PromiseWorkerProxy> mPromiseWorkerProxy;
+  JSStructuredCloneCallbacks* mCallbacks;
+  JSAutoStructuredCloneBuffer mBuffer;
+
+  // Function pointer for calling Promise::{ResolveInternal,RejectInternal}.
+  PromiseWorkerProxy::RunCallbackFunc mFunc;
+};
+
+PromiseWorkerProxy::PromiseWorkerProxy(WorkerPrivate* aWorkerPrivate,
+                                       Promise* aWorkerPromise,
+                                       JSStructuredCloneCallbacks* aCallbacks)
+  : mWorkerPrivate(aWorkerPrivate)
+  , mWorkerPromise(aWorkerPromise)
+  , mCleanedUp(false)
+  , mCallbacks(aCallbacks)
+  , mCleanUpLock("cleanUpLock")
+{
+  MOZ_ASSERT(mWorkerPrivate);
+  mWorkerPrivate->AssertIsOnWorkerThread();
+  MOZ_ASSERT(mWorkerPromise);
+
+  // We do this to make sure the worker thread won't shut down before the
+  // promise is resolved/rejected on the worker thread.
+  if (!mWorkerPrivate->AddFeature(mWorkerPrivate->GetJSContext(), this)) {
+    MOZ_ASSERT(false, "cannot add the worker feature!");
+    return;
+  }
+}
+
+PromiseWorkerProxy::~PromiseWorkerProxy()
+{
+  MOZ_ASSERT(mCleanedUp);
+  MOZ_ASSERT(!mWorkerPromise);
+}
+
+WorkerPrivate*
+PromiseWorkerProxy::GetWorkerPrivate() const
+{
+  // It's ok to race on |mCleanedUp|, because it will never cause us to fire
+  // the assertion when we should not.
+  MOZ_ASSERT(!mCleanedUp);
+
+  return mWorkerPrivate;
+}
+
+Promise*
+PromiseWorkerProxy::GetWorkerPromise() const
+{
+  return mWorkerPromise;
+}
+
+void
+PromiseWorkerProxy::StoreISupports(nsISupports* aSupports)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsMainThreadPtrHandle<nsISupports> supports =
+    new nsMainThreadPtrHolder<nsISupports>(aSupports);
+  mSupportsArray.AppendElement(supports);
+}
+
+void
+PromiseWorkerProxy::RunCallback(JSContext* aCx,
+                                JS::Handle<JS::Value> aValue,
+                                RunCallbackFunc aFunc)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  MutexAutoLock lock(mCleanUpLock);
+  // If the worker thread's been cancelled we don't need to resolve the Promise.
+  if (mCleanedUp) {
+    return;
+  }
+
+  // The |aValue| is written into the buffer. Note that we also pass |this|
+  // into the structured-clone write in order to set its |mSupportsArray| to
+  // keep objects alive until the structured-clone read/write is done.
+  JSAutoStructuredCloneBuffer buffer;
+  if (!buffer.write(aCx, aValue, mCallbacks, this)) {
+    JS_ClearPendingException(aCx);
+    MOZ_ASSERT(false, "cannot write the JSAutoStructuredCloneBuffer!");
+  }
+
+  nsRefPtr<PromiseWorkerProxyRunnable> runnable =
+    new PromiseWorkerProxyRunnable(this,
+                                   mCallbacks,
+                                   Move(buffer),
+                                   aFunc);
+
+  runnable->Dispatch(aCx);
+}
+
+void
+PromiseWorkerProxy::ResolvedCallback(JSContext* aCx,
+                                     JS::Handle<JS::Value> aValue)
+{
+  RunCallback(aCx, aValue, &Promise::ResolveInternal);
+}
+
+void
+PromiseWorkerProxy::RejectedCallback(JSContext* aCx,
+                                     JS::Handle<JS::Value> aValue)
+{
+  RunCallback(aCx, aValue, &Promise::RejectInternal);
+}
+
+bool
+PromiseWorkerProxy::Notify(JSContext* aCx, Status aStatus)
+{
+  MOZ_ASSERT(mWorkerPrivate);
+  mWorkerPrivate->AssertIsOnWorkerThread();
+  MOZ_ASSERT(mWorkerPrivate->GetJSContext() == aCx);
+
+  if (aStatus >= Canceling) {
+    CleanUp(aCx);
   }
 
   return true;
 }
 
-bool
-Promise::ArgumentToJSValue(bool aArgument,
-                           JSContext* aCx,
-                           JSObject* aScope,
-                           JS::MutableHandle<JS::Value> aValue)
+void
+PromiseWorkerProxy::CleanUp(JSContext* aCx)
 {
-  aValue.setBoolean(aArgument);
-  return true;
+  MutexAutoLock lock(mCleanUpLock);
+
+  // |mWorkerPrivate| might not be safe to use anymore if we have already
+  // cleaned up and RemoveFeature(), so we need to check |mCleanedUp| first.
+  if (mCleanedUp) {
+    return;
+  }
+
+  MOZ_ASSERT(mWorkerPrivate);
+  mWorkerPrivate->AssertIsOnWorkerThread();
+  MOZ_ASSERT(mWorkerPrivate->GetJSContext() == aCx);
+
+  // Release the Promise and remove the PromiseWorkerProxy from the features of
+  // the worker thread since the Promise has been resolved/rejected or the
+  // worker thread has been cancelled.
+  mWorkerPromise = nullptr;
+  mWorkerPrivate->RemoveFeature(aCx, this);
+  mCleanedUp = true;
 }
 
 } // namespace dom

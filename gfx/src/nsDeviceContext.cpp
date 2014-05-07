@@ -77,7 +77,7 @@ protected:
     nsTArray<nsFontMetrics*>  mFontMetrics;
 };
 
-NS_IMPL_ISUPPORTS1(nsFontCache, nsIObserver)
+NS_IMPL_ISUPPORTS(nsFontCache, nsIObserver)
 
 // The Init and Destroy methods are necessary because it's not
 // safe to call AddObserver from a constructor or RemoveObserver
@@ -377,8 +377,8 @@ nsDeviceContext::Init(nsIWidget *aWidget)
     return NS_OK;
 }
 
-nsresult
-nsDeviceContext::CreateRenderingContext(nsRenderingContext *&aContext)
+already_AddRefed<nsRenderingContext>
+nsDeviceContext::CreateRenderingContext()
 {
     nsRefPtr<gfxASurface> printingSurface = mPrintingSurface;
 #ifdef XP_MACOSX
@@ -394,12 +394,14 @@ nsDeviceContext::CreateRenderingContext(nsRenderingContext *&aContext)
 #endif
     nsRefPtr<nsRenderingContext> pContext = new nsRenderingContext();
 
-    pContext->Init(this, printingSurface);
-    pContext->Scale(mPrintingScale, mPrintingScale);
-    aContext = pContext;
-    NS_ADDREF(aContext);
+    RefPtr<gfx::DrawTarget> dt =
+      gfxPlatform::GetPlatform()->CreateDrawTargetForSurface(printingSurface,
+                                                             gfx::IntSize(mWidth, mHeight));
 
-    return NS_OK;
+    pContext->Init(this, dt);
+    pContext->Scale(mPrintingScale, mPrintingScale);
+
+    return pContext.forget();
 }
 
 nsresult

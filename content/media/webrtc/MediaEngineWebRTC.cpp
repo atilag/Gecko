@@ -32,6 +32,7 @@ GetUserMediaLog()
 #include "nsIComponentRegistrar.h"
 #include "MediaEngineTabVideoSource.h"
 #include "nsITabSource.h"
+#include "MediaTrackConstraints.h"
 
 #ifdef MOZ_WIDGET_ANDROID
 #include "AndroidJNIWrapper.h"
@@ -60,6 +61,8 @@ MediaEngineWebRTC::MediaEngineWebRTC(MediaEnginePrefs &aPrefs)
 #else
   AsyncLatencyLogger::Get()->AddRef();
 #endif
+  // XXX
+  gFarendObserver = new AudioOutputObserver();
 }
 
 void

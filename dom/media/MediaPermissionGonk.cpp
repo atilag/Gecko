@@ -170,17 +170,17 @@ private:
 };
 
 // MediaPermissionRequest
-NS_IMPL_ISUPPORTS1(MediaPermissionRequest, nsIContentPermissionRequest)
+NS_IMPL_ISUPPORTS(MediaPermissionRequest, nsIContentPermissionRequest)
 
 MediaPermissionRequest::MediaPermissionRequest(nsRefPtr<dom::GetUserMediaRequest> &aRequest,
                                                nsTArray<nsCOMPtr<nsIMediaDevice> > &aDevices)
   : mRequest(aRequest)
 {
-  dom::MediaStreamConstraintsInternal constraints;
+  dom::MediaStreamConstraints constraints;
   mRequest->GetConstraints(constraints);
 
-  mAudio = constraints.mAudio;
-  mVideo = constraints.mVideo;
+  mAudio = !constraints.mAudio.IsBoolean() || constraints.mAudio.GetAsBoolean();
+  mVideo = !constraints.mVideo.IsBoolean() || constraints.mVideo.GetAsBoolean();
 
   for (uint32_t i = 0; i < aDevices.Length(); ++i) {
     nsCOMPtr<nsIMediaDevice> device(aDevices[i]);
@@ -204,7 +204,7 @@ MediaPermissionRequest::GetTypes(nsIArray** aTypes)
   if (mAudio) {
     nsTArray<nsString> audioDeviceNames;
     CreateDeviceNameList(mAudioDevices, audioDeviceNames);
-    nsCOMPtr<ContentPermissionType> AudioType =
+    nsCOMPtr<nsISupports> AudioType =
       new ContentPermissionType(NS_LITERAL_CSTRING(AUDIO_PERMISSION_NAME),
                                 NS_LITERAL_CSTRING("unused"),
                                 audioDeviceNames);
@@ -213,7 +213,7 @@ MediaPermissionRequest::GetTypes(nsIArray** aTypes)
   if (mVideo) {
     nsTArray<nsString> videoDeviceNames;
     CreateDeviceNameList(mVideoDevices, videoDeviceNames);
-    nsCOMPtr<ContentPermissionType> VideoType =
+    nsCOMPtr<nsISupports> VideoType =
       new ContentPermissionType(NS_LITERAL_CSTRING(VIDEO_PERMISSION_NAME),
                                 NS_LITERAL_CSTRING("unused"),
                                 videoDeviceNames);
@@ -385,7 +385,7 @@ private:
   nsRefPtr<dom::GetUserMediaRequest> mRequest;
 };
 
-NS_IMPL_ISUPPORTS1(MediaDeviceSuccessCallback, nsIGetUserMediaDevicesSuccessCallback)
+NS_IMPL_ISUPPORTS(MediaDeviceSuccessCallback, nsIGetUserMediaDevicesSuccessCallback)
 
 // nsIGetUserMediaDevicesSuccessCallback method
 NS_IMETHODIMP
@@ -485,7 +485,7 @@ private:
   const nsString mCallID;
 };
 
-NS_IMPL_ISUPPORTS1(MediaDeviceErrorCallback, nsIDOMGetUserMediaErrorCallback)
+NS_IMPL_ISUPPORTS(MediaDeviceErrorCallback, nsIDOMGetUserMediaErrorCallback)
 
 // nsIDOMGetUserMediaErrorCallback method
 NS_IMETHODIMP
@@ -497,7 +497,7 @@ MediaDeviceErrorCallback::OnError(const nsAString &aError)
 } // namespace anonymous
 
 // MediaPermissionManager
-NS_IMPL_ISUPPORTS1(MediaPermissionManager, nsIObserver)
+NS_IMPL_ISUPPORTS(MediaPermissionManager, nsIObserver)
 
 MediaPermissionManager*
 MediaPermissionManager::GetInstance()
@@ -578,7 +578,7 @@ MediaPermissionManager::HandleRequest(nsRefPtr<dom::GetUserMediaRequest> &req)
   nsCOMPtr<nsIDOMGetUserMediaErrorCallback> onError =
       new MediaDeviceErrorCallback(callID);
 
-  dom::MediaStreamConstraintsInternal constraints;
+  dom::MediaStreamConstraints constraints;
   req->GetConstraints(constraints);
 
   nsRefPtr<MediaManager> MediaMgr = MediaManager::GetInstance();

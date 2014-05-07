@@ -14,7 +14,6 @@
 #include "nsCOMPtr.h"
 #include "nsString.h"
 #include "nsObjCExceptions.h"
-#include "nsHashtable.h"
 #include "nsThreadUtils.h"
 
 #include "mozilla/dom/Element.h"
@@ -27,7 +26,7 @@
 
 using namespace mozilla;
 
-NS_IMPL_ISUPPORTS1(nsMenuGroupOwnerX, nsIMutationObserver)
+NS_IMPL_ISUPPORTS(nsMenuGroupOwnerX, nsIMutationObserver)
 
 
 nsMenuGroupOwnerX::nsMenuGroupOwnerX()

@@ -71,7 +71,7 @@ nsXMLContentSerializer::~nsXMLContentSerializer()
 {
 }
 
-NS_IMPL_ISUPPORTS1(nsXMLContentSerializer, nsIContentSerializer)
+NS_IMPL_ISUPPORTS(nsXMLContentSerializer, nsIContentSerializer)
 
 NS_IMETHODIMP 
 nsXMLContentSerializer::Init(uint32_t aFlags, uint32_t aWrapColumn,
@@ -138,7 +138,8 @@ nsXMLContentSerializer::AppendTextData(nsIContent* aNode,
     return NS_ERROR_FAILURE;
   }
 
-  int32_t endoffset = (aEndOffset == -1) ? frag->GetLength() : aEndOffset;
+  int32_t fragLength = frag->GetLength();
+  int32_t endoffset = (aEndOffset == -1) ? fragLength : std::min(aEndOffset, fragLength);
   int32_t length = endoffset - aStartOffset;
 
   NS_ASSERTION(aStartOffset >= 0, "Negative start offset for text fragment!");
@@ -300,12 +301,16 @@ nsXMLContentSerializer::AppendComment(nsIContent* aComment,
   rv = comment->GetData(data);
   if (NS_FAILED(rv)) return NS_ERROR_FAILURE;
 
-  if (aStartOffset || (aEndOffset != -1)) {
-    int32_t length = (aEndOffset == -1) ? data.Length() : aEndOffset;
+  int32_t dataLength = data.Length();
+  if (aStartOffset || (aEndOffset != -1 && aEndOffset < dataLength)) {
+    int32_t length =
+      (aEndOffset == -1) ? dataLength : std::min(aEndOffset, dataLength);
     length -= aStartOffset;
 
     nsAutoString frag;
-    data.Mid(frag, aStartOffset, length);
+    if (length > 0) {
+      data.Mid(frag, aStartOffset, length);
+    }
     data.Assign(frag);
   }
 

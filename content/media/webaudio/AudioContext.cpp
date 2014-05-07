@@ -47,9 +47,10 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(AudioContext)
   if (!tmp->mIsStarted) {
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mActiveNodes)
   }
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END_INHERITED(nsDOMEventTargetHelper)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END_INHERITED(DOMEventTargetHelper)
 
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(AudioContext, nsDOMEventTargetHelper)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(AudioContext,
+                                                  DOMEventTargetHelper)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDestination)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mListener)
   if (!tmp->mIsStarted) {
@@ -59,10 +60,10 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(AudioContext, nsDOMEventTarget
   }
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
-NS_IMPL_ADDREF_INHERITED(AudioContext, nsDOMEventTargetHelper)
-NS_IMPL_RELEASE_INHERITED(AudioContext, nsDOMEventTargetHelper)
+NS_IMPL_ADDREF_INHERITED(AudioContext, DOMEventTargetHelper)
+NS_IMPL_RELEASE_INHERITED(AudioContext, DOMEventTargetHelper)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(AudioContext)
-NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
+NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
 static float GetSampleRateForAudioContext(bool aIsOffline, float aSampleRate)
 {
@@ -76,10 +77,11 @@ static float GetSampleRateForAudioContext(bool aIsOffline, float aSampleRate)
 
 AudioContext::AudioContext(nsPIDOMWindow* aWindow,
                            bool aIsOffline,
+                           AudioChannel aChannel,
                            uint32_t aNumberOfChannels,
                            uint32_t aLength,
                            float aSampleRate)
-  : nsDOMEventTargetHelper(aWindow)
+  : DOMEventTargetHelper(aWindow)
   , mSampleRate(GetSampleRateForAudioContext(aIsOffline, aSampleRate))
   , mNumberOfChannels(aNumberOfChannels)
   , mNodeCount(0)
@@ -91,8 +93,8 @@ AudioContext::AudioContext(nsPIDOMWindow* aWindow,
 
   // Note: AudioDestinationNode needs an AudioContext that must already be
   // bound to the window.
-  mDestination = new AudioDestinationNode(this, aIsOffline, aNumberOfChannels,
-                                          aLength, aSampleRate);
+  mDestination = new AudioDestinationNode(this, aIsOffline, aChannel,
+                                          aNumberOfChannels, aLength, aSampleRate);
   // We skip calling SetIsOnlyNodeForContext during mDestination's constructor,
   // because we can only call SetIsOnlyNodeForContext after mDestination has
   // been set up.
@@ -110,12 +112,12 @@ AudioContext::~AudioContext()
 }
 
 JSObject*
-AudioContext::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+AudioContext::WrapObject(JSContext* aCx)
 {
   if (mIsOffline) {
-    return OfflineAudioContextBinding::Wrap(aCx, aScope, this);
+    return OfflineAudioContextBinding::Wrap(aCx, this);
   } else {
-    return AudioContextBinding::Wrap(aCx, aScope, this);
+    return AudioContextBinding::Wrap(aCx, this);
   }
 }
 
@@ -130,6 +132,24 @@ AudioContext::Constructor(const GlobalObject& aGlobal,
   }
 
   nsRefPtr<AudioContext> object = new AudioContext(window, false);
+
+  RegisterWeakMemoryReporter(object);
+
+  return object.forget();
+}
+
+/* static */ already_AddRefed<AudioContext>
+AudioContext::Constructor(const GlobalObject& aGlobal,
+                          AudioChannel aChannel,
+                          ErrorResult& aRv)
+{
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
+  if (!window) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+
+  nsRefPtr<AudioContext> object = new AudioContext(window, false, aChannel);
 
   RegisterWeakMemoryReporter(object);
 
@@ -161,6 +181,7 @@ AudioContext::Constructor(const GlobalObject& aGlobal,
 
   nsRefPtr<AudioContext> object = new AudioContext(window,
                                                    true,
+                                                   AudioChannel::Normal,
                                                    aNumberOfChannels,
                                                    aLength,
                                                    aSampleRate);
@@ -201,39 +222,6 @@ AudioContext::CreateBuffer(JSContext* aJSContext, uint32_t aNumberOfChannels,
   }
 
   return buffer.forget();
-}
-
-already_AddRefed<AudioBuffer>
-AudioContext::CreateBuffer(JSContext* aJSContext, const ArrayBuffer& aBuffer,
-                          bool aMixToMono, ErrorResult& aRv)
-{
-  // Do not accept this method unless the legacy pref has been set.
-  if (!Preferences::GetBool("media.webaudio.legacy.AudioContext")) {
-    aRv.ThrowNotEnoughArgsError();
-    return nullptr;
-  }
-
-  // Sniff the content of the media.
-  // Failed type sniffing will be handled by SyncDecodeMedia.
-  nsAutoCString contentType;
-  NS_SniffContent(NS_DATA_SNIFFER_CATEGORY, nullptr,
-                  aBuffer.Data(), aBuffer.Length(),
-                  contentType);
-
-  nsRefPtr<WebAudioDecodeJob> job =
-    new WebAudioDecodeJob(contentType, this, aBuffer);
-
-  if (mDecoder.SyncDecodeMedia(contentType.get(),
-                               aBuffer.Data(), aBuffer.Length(), *job) &&
-      job->mOutput) {
-    nsRefPtr<AudioBuffer> buffer = job->mOutput.forget();
-    if (aMixToMono) {
-      buffer->MixToMono(aJSContext);
-    }
-    return buffer.forget();
-  }
-
-  return nullptr;
 }
 
 namespace {
@@ -676,7 +664,7 @@ AudioContext::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
   amount += mDecoder.SizeOfExcludingThis(aMallocSizeOf);
   amount += mDecodeJobs.SizeOfExcludingThis(aMallocSizeOf);
   for (uint32_t i = 0; i < mDecodeJobs.Length(); ++i) {
-    amount += mDecodeJobs[i]->SizeOfExcludingThis(aMallocSizeOf);
+    amount += mDecodeJobs[i]->SizeOfIncludingThis(aMallocSizeOf);
   }
   amount += mActiveNodes.SizeOfExcludingThis(nullptr, aMallocSizeOf);
   amount += mPannerNodes.SizeOfExcludingThis(nullptr, aMallocSizeOf);

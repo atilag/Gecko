@@ -94,13 +94,12 @@ ArraySetLength(typename ExecutionModeTraits<mode>::ContextType cx,
                unsigned attrs, HandleValue value, bool setterIsStrict);
 
 /*
- * Elements header used for all objects other than non-native objects (except
- * for ArrayBufferObjects!!!) and typed arrays. The elements component of such
- * objects offers an efficient representation for all or some of the indexed
- * properties of the object, using a flat array of Values rather than a shape
- * hierarchy stored in the object's slots. This structure is immediately
- * followed by an array of elements, with the elements member in an object
- * pointing to the beginning of that array (the end of this structure).
+ * Elements header used for all objects. The elements component of such objects
+ * offers an efficient representation for all or some of the indexed properties
+ * of the object, using a flat array of Values rather than a shape hierarchy
+ * stored in the object's slots. This structure is immediately followed by an
+ * array of elements, with the elements member in an object pointing to the
+ * beginning of that array (the end of this structure).
  * See below for usage of this structure.
  *
  * The sets of properties represented by an object's elements and slots
@@ -149,14 +148,14 @@ ArraySetLength(typename ExecutionModeTraits<mode>::ContextType cx,
  * value less than or equal to both the object's length and the object's
  * capacity.
  *
- * With inference enabled, there is flexibility in exactly the value the
- * initialized length must hold, e.g. if an array has length 5, capacity 10,
- * completely empty, it is valid for the initialized length to be any value
- * between zero and 5, as long as the in memory values below the initialized
- * length have been initialized with a hole value. However, in such cases we
- * want to keep the initialized length as small as possible: if the object is
- * known to have no hole values below its initialized length, then it is
- * "packed" and can be accessed much faster by JIT code.
+ * There is flexibility in exactly the value the initialized length must hold,
+ * e.g. if an array has length 5, capacity 10, completely empty, it is valid
+ * for the initialized length to be any value between zero and 5, as long as
+ * the in memory values below the initialized length have been initialized with
+ * a hole value. However, in such cases we want to keep the initialized length
+ * as small as possible: if the object is known to have no hole values below
+ * its initialized length, then it is "packed" and can be accessed much faster
+ * by JIT code.
  *
  * Elements do not track property creation order, so enumerating the elements
  * of an object does not necessarily visit indexes in the order they were
@@ -288,7 +287,7 @@ IsObjectValueInCompartment(js::Value v, JSCompartment *comp);
  * variable-sized array of values for inline storage, which may be used by
  * either properties of native objects (fixed slots), by elements (fixed
  * elements), or by other data for certain kinds of objects, such as
- * ArrayBufferObjects.
+ * ArrayBufferObjects and TypedArrayObjects.
  *
  * Two native objects with the same shape are guaranteed to have the same
  * number of fixed slots.
@@ -827,6 +826,13 @@ class ObjectImpl : public gc::BarrieredCell<ObjectImpl>
         return elements == emptyObjectElements;
     }
 
+    /*
+     * Get a pointer to the unused data in the object's allocation immediately
+     * following this object, for use with objects which allocate a larger size
+     * class than they need and store non-elements data inline.
+     */
+    inline void *fixedData(size_t nslots) const;
+
     /* GC support. */
     static ThingRootKind rootKind() { return THING_ROOT_OBJECT; }
 
@@ -834,7 +840,12 @@ class ObjectImpl : public gc::BarrieredCell<ObjectImpl>
 
     void privateWriteBarrierPost(void **pprivate) {
 #ifdef JSGC_GENERATIONAL
-        shadowRuntimeFromAnyThread()->gcStoreBufferPtr()->putCell(reinterpret_cast<js::gc::Cell **>(pprivate));
+        js::gc::Cell **cellp = reinterpret_cast<js::gc::Cell **>(pprivate);
+        JS_ASSERT(cellp);
+        JS_ASSERT(*cellp);
+        js::gc::StoreBuffer *storeBuffer = (*cellp)->storeBuffer();
+        if (storeBuffer)
+            storeBuffer->putCellFromAnyThread(cellp);
 #endif
     }
 
@@ -938,30 +949,43 @@ BarrieredCell<ObjectImpl>::isNullLike(ObjectImpl *obj)
 
 template<>
 /* static */ inline void
-BarrieredCell<ObjectImpl>::writeBarrierPost(ObjectImpl *obj, void *addr)
+BarrieredCell<ObjectImpl>::writeBarrierPost(ObjectImpl *obj, void *cellp)
 {
+    JS_ASSERT(cellp);
 #ifdef JSGC_GENERATIONAL
     if (IsNullTaggedPointer(obj))
         return;
-    obj->shadowRuntimeFromAnyThread()->gcStoreBufferPtr()->putCell((Cell **)addr);
+    JS_ASSERT(obj == *static_cast<ObjectImpl **>(cellp));
+    gc::StoreBuffer *storeBuffer = obj->storeBuffer();
+    if (storeBuffer)
+        storeBuffer->putCellFromAnyThread(static_cast<Cell **>(cellp));
 #endif
 }
 
 template<>
 /* static */ inline void
-BarrieredCell<ObjectImpl>::writeBarrierPostRelocate(ObjectImpl *obj, void *addr)
+BarrieredCell<ObjectImpl>::writeBarrierPostRelocate(ObjectImpl *obj, void *cellp)
 {
+    JS_ASSERT(cellp);
+    JS_ASSERT(obj);
+    JS_ASSERT(obj == *static_cast<ObjectImpl **>(cellp));
 #ifdef JSGC_GENERATIONAL
-    obj->shadowRuntimeFromAnyThread()->gcStoreBufferPtr()->putRelocatableCell((Cell **)addr);
+    gc::StoreBuffer *storeBuffer = obj->storeBuffer();
+    if (storeBuffer)
+        storeBuffer->putRelocatableCellFromAnyThread(static_cast<Cell **>(cellp));
 #endif
 }
 
 template<>
 /* static */ inline void
-BarrieredCell<ObjectImpl>::writeBarrierPostRemove(ObjectImpl *obj, void *addr)
+BarrieredCell<ObjectImpl>::writeBarrierPostRemove(ObjectImpl *obj, void *cellp)
 {
+    JS_ASSERT(cellp);
+    JS_ASSERT(obj);
+    JS_ASSERT(obj == *static_cast<ObjectImpl **>(cellp));
 #ifdef JSGC_GENERATIONAL
-    obj->shadowRuntimeFromAnyThread()->gcStoreBufferPtr()->removeRelocatableCell((Cell **)addr);
+    obj->shadowRuntimeFromAnyThread()->gcStoreBufferPtr()->removeRelocatableCellFromAnyThread(
+        static_cast<Cell **>(cellp));
 #endif
 }
 

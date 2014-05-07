@@ -2,14 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-include protocol PGrallocBuffer;
-
-
 using struct gfxPoint from "gfxPoint.h";
 using struct nsIntRect from "nsRect.h";
 using nsIntRegion from "nsRegion.h";
 using struct nsIntSize from "nsSize.h";
 using struct mozilla::layers::MagicGrallocBufferHandle from "gfxipc/ShadowLayerUtils.h";
+using struct mozilla::layers::GrallocBufferRef from "gfxipc/ShadowLayerUtils.h";
 using struct mozilla::layers::SurfaceDescriptorX11 from "gfxipc/ShadowLayerUtils.h";
 using struct mozilla::null_t from "ipc/IPCMessageUtils.h";
 using mozilla::WindowsHandle from "ipc/IPCMessageUtils.h";
@@ -25,6 +23,7 @@ namespace layers {
 
 union MaybeMagicGrallocBufferHandle {
   MagicGrallocBufferHandle;
+  GrallocBufferRef;
   null_t;
 };
 
@@ -41,6 +40,7 @@ struct SurfaceDescriptorDIB {
 struct SurfaceDescriptorD3D10 {
   WindowsHandle handle;
   SurfaceFormat format;
+  IntSize size;
 };
 
 struct SurfaceDescriptorMacIOSurface {
@@ -57,70 +57,18 @@ struct SharedTextureDescriptor {
 };
 
 struct NewSurfaceDescriptorGralloc {
-  PGrallocBuffer buffer;
+  MaybeMagicGrallocBufferHandle buffer;
   /**
    * android::GraphicBuffer has a size information. But there are cases
    * that GraphicBuffer's size and actual video's size are different.
    * Extra size member is necessary. See Bug 850566.
    */
   IntSize size;
-};
-
-// XXX - soon to be removed
-struct SurfaceDescriptorGralloc {
-  PGrallocBuffer buffer;
-  /**
-   * android::GraphicBuffer has a size information. But there are cases
-   * that GraphicBuffer's size and actual video's size are different.
-   * Extra size member is necessary. See Bug 850566.
-   */
-  IntSize size;
-
-  /**
-   * We can have one source producing gralloc buffers and sharing them
-   * with another source that may also produce its own gralloc buffers.
-   * This happens for camera preview buffers sent to video code.  When
-   * that happens, the producer can mark the buffer as "external" to
-   * prevent its consumer from mistakenly freeing the buffer.
-   */
-  bool external;
-
-  /**
-   * This gralloc buffer will be treated as if the RB bytes are swapped.
-   * This is useful for rendering using Cairo/Thebes, because there is no
-   * BGRX Android pixel format, and so we have to do byte swapping.
-   *
-   * For example, if the GraphicBuffer has an Android pixel format of
-   * PIXEL_FORMAT_RGBA_8888 and isRBSwapped is true, when it is sampled
-   * (for example, with GL), a BGRA shader should be used.
-   */
-  bool isRBSwapped;
 };
 
 struct SurfaceStreamDescriptor {
   SurfaceStreamHandle handle;
   bool yflip;
-};
-
-// XXX - can be removed as soon as DeprecatedImageClientSingle is removed
-struct YCbCrImage {
-  Shmem data;
-  uint64_t owner;
-};
-
-// XXX remove RGBImage (see bug 847914)
-struct RGBImage {
-  Shmem data;
-  nsIntRect picture;
-  gfxImageFormat rgbFormat;
-  uint64_t owner;
-};
-
-struct MemoryImage {
-  uintptr_t data;
-  IntSize size;
-  uint32_t stride;
-  gfxImageFormat format;
 };
 
 /**
@@ -150,11 +98,6 @@ union SurfaceDescriptor {
   SurfaceStreamDescriptor;
   SurfaceDescriptorMacIOSurface;
   NewSurfaceDescriptorGralloc;
-  YCbCrImage;                 // XXX - deprecated
-  SurfaceDescriptorGralloc;   // XXX - deprecated
-  Shmem;                      // XXX - deprecated
-  RGBImage;                   // XXX - deprecated
-  MemoryImage;                // XXX - deprecated
   null_t;
 };
 

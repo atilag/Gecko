@@ -23,7 +23,6 @@
 #include "nsIDOMXMLDocument.h"
 #include "nsIDOMDocumentXBL.h"
 #include "nsStubDocumentObserver.h"
-#include "nsIDOMStyleSheetList.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIContent.h"
 #include "nsIPrincipal.h"
@@ -62,8 +61,10 @@
 #include "nsIChannelEventSink.h"
 #include "imgIRequest.h"
 #include "mozilla/EventListenerManager.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/DOMImplementation.h"
+#include "mozilla/dom/StyleSheetList.h"
 #include "nsIDOMTouchEvent.h"
 #include "nsDataHashtable.h"
 #include "mozilla/TimeStamp.h"
@@ -77,7 +78,6 @@
 #define XML_DECLARATION_BITS_STANDALONE_YES       (1 << 3)
 
 
-class nsDOMStyleSheetList;
 class nsDOMStyleSheetSetList;
 class nsIOutputStream;
 class nsDocument;
@@ -435,16 +435,14 @@ public:
   nsDocHeaderData*  mNext;
 };
 
-class nsDOMStyleSheetList : public nsIDOMStyleSheetList,
+class nsDOMStyleSheetList : public mozilla::dom::StyleSheetList,
                             public nsStubDocumentObserver
 {
 public:
   nsDOMStyleSheetList(nsIDocument *aDocument);
   virtual ~nsDOMStyleSheetList();
 
-  NS_DECL_ISUPPORTS
-
-  NS_DECL_NSIDOMSTYLESHEETLIST
+  NS_DECL_ISUPPORTS_INHERITED
 
   // nsIDocumentObserver
   NS_DECL_NSIDOCUMENTOBSERVER_STYLESHEETADDED
@@ -453,7 +451,13 @@ public:
   // nsIMutationObserver
   NS_DECL_NSIMUTATIONOBSERVER_NODEWILLBEDESTROYED
 
-  nsIStyleSheet* GetItemAt(uint32_t aIndex);
+  virtual nsINode* GetParentObject() const MOZ_OVERRIDE
+  {
+    return mDocument;
+  }
+
+  virtual uint32_t Length() MOZ_OVERRIDE;
+  virtual nsCSSStyleSheet* IndexedGetter(uint32_t aIndex, bool& aFound) MOZ_OVERRIDE;
 
 protected:
   int32_t       mLength;
@@ -696,6 +700,10 @@ public:
 
   virtual void SetDocumentURI(nsIURI* aURI) MOZ_OVERRIDE;
 
+  virtual void SetChromeXHRDocURI(nsIURI* aURI) MOZ_OVERRIDE;
+
+  virtual void SetChromeXHRDocBaseURI(nsIURI* aURI) MOZ_OVERRIDE;
+
   /**
    * Set the principal responsible for this document.
    */
@@ -842,8 +850,10 @@ public:
   virtual void SetReadyStateInternal(ReadyState rs) MOZ_OVERRIDE;
 
   virtual void ContentStateChanged(nsIContent* aContent,
-                                   nsEventStates aStateMask) MOZ_OVERRIDE;
-  virtual void DocumentStatesChanged(nsEventStates aStateMask) MOZ_OVERRIDE;
+                                   mozilla::EventStates aStateMask)
+                                     MOZ_OVERRIDE;
+  virtual void DocumentStatesChanged(
+                 mozilla::EventStates aStateMask) MOZ_OVERRIDE;
 
   virtual void StyleRuleChanged(nsIStyleSheet* aStyleSheet,
                                 nsIStyleRule* aOldStyleRule,
@@ -1066,7 +1076,7 @@ public:
 
   virtual nsISupports* GetCurrentContentSink() MOZ_OVERRIDE;
 
-  virtual nsEventStates GetDocumentState() MOZ_OVERRIDE;
+  virtual mozilla::EventStates GetDocumentState() MOZ_OVERRIDE;
 
   virtual void RegisterHostObjectUri(const nsACString& aUri) MOZ_OVERRIDE;
   virtual void UnregisterHostObjectUri(const nsACString& aUri) MOZ_OVERRIDE;
@@ -1106,13 +1116,6 @@ public:
   virtual nsresult SetNavigationTiming(nsDOMNavigationTiming* aTiming) MOZ_OVERRIDE;
 
   virtual Element* FindImageMap(const nsAString& aNormalizedMapName) MOZ_OVERRIDE;
-
-  virtual void NotifyAudioAvailableListener() MOZ_OVERRIDE;
-
-  bool HasAudioAvailableListeners() MOZ_OVERRIDE
-  {
-    return mHasAudioAvailableListener;
-  }
 
   virtual Element* GetFullScreenElement() MOZ_OVERRIDE;
   virtual void AsyncRequestFullScreen(Element* aElement) MOZ_OVERRIDE;
@@ -1225,7 +1228,7 @@ public:
     RegisterElement(JSContext* aCx, const nsAString& aName,
                     const mozilla::dom::ElementRegistrationOptions& aOptions,
                     mozilla::ErrorResult& rv) MOZ_OVERRIDE;
-  virtual nsIDOMStyleSheetList* StyleSheets() MOZ_OVERRIDE;
+  virtual mozilla::dom::StyleSheetList* StyleSheets() MOZ_OVERRIDE;
   virtual void SetSelectedStyleSheetSet(const nsAString& aSheetSet) MOZ_OVERRIDE;
   virtual void GetLastStyleSheetSet(nsString& aSheetSet) MOZ_OVERRIDE;
   virtual mozilla::dom::DOMStringList* StyleSheetSets() MOZ_OVERRIDE;
@@ -1240,6 +1243,8 @@ public:
                                                     const nsAString& aTypeExtension,
                                                     mozilla::ErrorResult& rv) MOZ_OVERRIDE;
   virtual void UseRegistryFromDocument(nsIDocument* aDocument) MOZ_OVERRIDE;
+
+  virtual void UnblockDOMContentLoaded() MOZ_OVERRIDE;
 
 protected:
   friend class nsNodeUtils;
@@ -1430,7 +1435,7 @@ public:
   nsRefPtr<mozilla::dom::Registry> mRegistry;
 
   nsRefPtr<mozilla::EventListenerManager> mListenerManager;
-  nsCOMPtr<nsIDOMStyleSheetList> mDOMStyleSheets;
+  nsRefPtr<mozilla::dom::StyleSheetList> mDOMStyleSheets;
   nsRefPtr<nsDOMStyleSheetSetList> mStyleSheetSetList;
   nsRefPtr<nsScriptLoader> mScriptLoader;
   nsDocHeaderData* mHeaderData;
@@ -1470,10 +1475,6 @@ public:
 
   // Whether we currently require our images to animate
   bool mAnimatingImages:1;
-
-  // Whether some node in this document has a listener for the
-  // "mozaudioavailable" event.
-  bool mHasAudioAvailableListener:1;
 
   // Whether we're currently under a FlushPendingNotifications call to
   // our presshell.  This is used to handle flush reentry correctly.
@@ -1534,8 +1535,8 @@ public:
 
   nsCOMPtr<nsIContent> mFirstBaseNodeWithHref;
 
-  nsEventStates mDocumentState;
-  nsEventStates mGotDocumentState;
+  mozilla::EventStates mDocumentState;
+  mozilla::EventStates mGotDocumentState;
 
   nsRefPtr<nsDOMNavigationTiming> mTiming;
 private:

@@ -12,6 +12,9 @@
 
 namespace mozilla {
 
+class VideoTrackConstraintsN;
+class AudioTrackConstraintsN;
+
 /**
  * Abstract interface for managing audio and video devices. Each platform
  * must implement a concrete class that will map these classes and methods
@@ -36,16 +39,17 @@ enum {
   kAudioTrack = 2
 };
 
-class MediaEngine : public RefCounted<MediaEngine>
+class MediaEngine
 {
 public:
-  MOZ_DECLARE_REFCOUNTED_TYPENAME(MediaEngine)
-  virtual ~MediaEngine() {}
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MediaEngine)
 
   static const int DEFAULT_VIDEO_FPS = 30;
   static const int DEFAULT_VIDEO_MIN_FPS = 10;
-  static const int DEFAULT_VIDEO_WIDTH = 640;
-  static const int DEFAULT_VIDEO_HEIGHT = 480;
+  static const int DEFAULT_43_VIDEO_WIDTH = 640;
+  static const int DEFAULT_43_VIDEO_HEIGHT = 480;
+  static const int DEFAULT_169_VIDEO_WIDTH = 1280;
+  static const int DEFAULT_169_VIDEO_HEIGHT = 720;
   static const int DEFAULT_AUDIO_TIMER_MS = 10;
 
   /* Populate an array of video sources in the nsTArray. Also include devices
@@ -55,6 +59,9 @@ public:
   /* Populate an array of audio sources in the nsTArray. Also include devices
    * that are currently unavailable. */
   virtual void EnumerateAudioDevices(nsTArray<nsRefPtr<MediaEngineAudioSource> >*) = 0;
+
+protected:
+  virtual ~MediaEngine() {}
 };
 
 /**
@@ -70,9 +77,6 @@ public:
 
   /* Populate the UUID of this device in the nsAString */
   virtual void GetUUID(nsAString&) = 0;
-
-  /* This call reserves but does not start the device. */
-  virtual nsresult Allocate(const MediaEnginePrefs &aPrefs) = 0;
 
   /* Release the device back to the system. */
   virtual nsresult Deallocate() = 0;
@@ -101,7 +105,8 @@ public:
   /* Change device configuration.  */
   virtual nsresult Config(bool aEchoOn, uint32_t aEcho,
                           bool aAgcOn, uint32_t aAGC,
-                          bool aNoiseOn, uint32_t aNoise) = 0;
+                          bool aNoiseOn, uint32_t aNoise,
+                          int32_t aPlayoutDelay) = 0;
 
   /* Returns true if a source represents a fake capture device and
    * false otherwise
@@ -127,17 +132,56 @@ protected:
 /**
  * Video source and friends.
  */
-struct MediaEnginePrefs {
+class MediaEnginePrefs {
+public:
   int32_t mWidth;
   int32_t mHeight;
   int32_t mFPS;
   int32_t mMinFPS;
+
+  // mWidth and/or mHeight may be zero (=adaptive default), so use functions.
+
+  int32_t GetWidth(bool aHD = false) const {
+    return mWidth? mWidth : (mHeight?
+                             (mHeight * GetDefWidth(aHD)) / GetDefHeight(aHD) :
+                             GetDefWidth(aHD));
+  }
+
+  int32_t GetHeight(bool aHD = false) const {
+    return mHeight? mHeight : (mWidth?
+                               (mWidth * GetDefHeight(aHD)) / GetDefWidth(aHD) :
+                               GetDefHeight(aHD));
+  }
+private:
+  static int32_t GetDefWidth(bool aHD = false) {
+    // It'd be nice if we could use the ternary operator here, but we can't
+    // because of bug 1002729.
+    if (aHD) {
+      return MediaEngine::DEFAULT_169_VIDEO_WIDTH;
+    }
+
+    return MediaEngine::DEFAULT_43_VIDEO_WIDTH;
+  }
+
+  static int32_t GetDefHeight(bool aHD = false) {
+    // It'd be nice if we could use the ternary operator here, but we can't
+    // because of bug 1002729.
+    if (aHD) {
+      return MediaEngine::DEFAULT_169_VIDEO_HEIGHT;
+    }
+
+    return MediaEngine::DEFAULT_43_VIDEO_HEIGHT;
+  }
 };
 
 class MediaEngineVideoSource : public MediaEngineSource
 {
 public:
   virtual ~MediaEngineVideoSource() {}
+
+  /* This call reserves but does not start the device. */
+  virtual nsresult Allocate(const VideoTrackConstraintsN &aConstraints,
+                            const MediaEnginePrefs &aPrefs) = 0;
 };
 
 /**
@@ -147,6 +191,11 @@ class MediaEngineAudioSource : public MediaEngineSource
 {
 public:
   virtual ~MediaEngineAudioSource() {}
+
+  /* This call reserves but does not start the device. */
+  virtual nsresult Allocate(const AudioTrackConstraintsN &aConstraints,
+                            const MediaEnginePrefs &aPrefs) = 0;
+
 };
 
 }

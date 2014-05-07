@@ -15,7 +15,7 @@
 using namespace mozilla;
 using namespace mozilla::psm;
 
-NS_IMPL_ISUPPORTS1(nsProtectedAuthThread, nsIProtectedAuthThread)
+NS_IMPL_ISUPPORTS(nsProtectedAuthThread, nsIProtectedAuthThread)
 
 static void nsProtectedAuthThreadRunner(void *arg)
 {
@@ -64,7 +64,7 @@ NS_IMETHODIMP nsProtectedAuthThread::Login(nsIObserver *aObserver)
     mIAmRunning = true;
     
     mThreadHandle = PR_CreateThread(PR_USER_THREAD, nsProtectedAuthThreadRunner, static_cast<void*>(this), 
-        PR_PRIORITY_NORMAL, PR_LOCAL_THREAD, PR_JOINABLE_THREAD, 0);
+        PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD, PR_JOINABLE_THREAD, 0);
     
     // bool thread_started_ok = (threadHandle != nullptr);
     // we might want to return "thread started ok" to caller in the future

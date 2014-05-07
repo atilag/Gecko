@@ -14,6 +14,7 @@
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/mobilemessage/Constants.h" // For MessageType
 #include "mozilla/dom/mobilemessage/SmsTypes.h"
+#include "mozilla/dom/ToJSValue.h"
 #include "nsDOMFile.h"
 #include "nsCxPusher.h"
 
@@ -467,76 +468,10 @@ MmsMessage::GetDeliveryInfo(JSContext* aCx, JS::MutableHandle<JS::Value> aDelive
     return NS_OK;
   }
 
-  JS::Rooted<JSObject*> deliveryInfo(
-    aCx, JS_NewArrayObject(aCx, length));
-  NS_ENSURE_TRUE(deliveryInfo, NS_ERROR_OUT_OF_MEMORY);
-
-  for (uint32_t i = 0; i < length; ++i) {
-    const MmsDeliveryInfo &info = mDeliveryInfo[i];
-
-    JS::Rooted<JSObject*> infoJsObj(
-      aCx, JS_NewObject(aCx, nullptr, JS::NullPtr(), JS::NullPtr()));
-    NS_ENSURE_TRUE(infoJsObj, NS_ERROR_OUT_OF_MEMORY);
-
-    JS::Rooted<JS::Value> tmpJsVal(aCx);
-    JSString* tmpJsStr;
-
-    // Get |info.mReceiver|.
-    tmpJsStr = JS_NewUCStringCopyN(aCx,
-                                   info.mReceiver.get(),
-                                   info.mReceiver.Length());
-    NS_ENSURE_TRUE(tmpJsStr, NS_ERROR_OUT_OF_MEMORY);
-
-    tmpJsVal.setString(tmpJsStr);
-    if (!JS_DefineProperty(aCx, infoJsObj, "receiver", tmpJsVal,
-                           nullptr, nullptr, JSPROP_ENUMERATE)) {
-      return NS_ERROR_FAILURE;
-    }
-
-    // Get |info.mDeliveryStatus|.
-    tmpJsStr = JS_NewUCStringCopyN(aCx,
-                                   info.mDeliveryStatus.get(),
-                                   info.mDeliveryStatus.Length());
-    NS_ENSURE_TRUE(tmpJsStr, NS_ERROR_OUT_OF_MEMORY);
-
-    tmpJsVal.setString(tmpJsStr);
-    if (!JS_DefineProperty(aCx, infoJsObj, "deliveryStatus", tmpJsVal,
-                           nullptr, nullptr, JSPROP_ENUMERATE)) {
-      return NS_ERROR_FAILURE;
-    }
-
-    // Get |info.mDeliveryTimestamp|.
-    tmpJsVal.setNumber(static_cast<double>(info.mDeliveryTimestamp));
-    if (!JS_DefineProperty(aCx, infoJsObj, "deliveryTimestamp", tmpJsVal,
-                           nullptr, nullptr, JSPROP_ENUMERATE)) {
-      return NS_ERROR_FAILURE;
-    }
-
-    // Get |info.mReadStatus|.
-    tmpJsStr = JS_NewUCStringCopyN(aCx,
-                                   info.mReadStatus.get(),
-                                   info.mReadStatus.Length());
-    NS_ENSURE_TRUE(tmpJsStr, NS_ERROR_OUT_OF_MEMORY);
-
-    tmpJsVal.setString(tmpJsStr);
-    if (!JS_DefineProperty(aCx, infoJsObj, "readStatus", tmpJsVal,
-                           nullptr, nullptr, JSPROP_ENUMERATE)) {
-      return NS_ERROR_FAILURE;
-    }
-
-    // Get |info.mReadTimestamp|.
-    tmpJsVal.setNumber(static_cast<double>(info.mReadTimestamp));
-    if (!JS_DefineProperty(aCx, infoJsObj, "readTimestamp", tmpJsVal,
-                           nullptr, nullptr, JSPROP_ENUMERATE)) {
-      return NS_ERROR_FAILURE;
-    }
-
-    if (!JS_SetElement(aCx, deliveryInfo, i, infoJsObj)) {
-      return NS_ERROR_FAILURE;
-    }
+  if (!ToJSValue(aCx, mDeliveryInfo, aDeliveryInfo)) {
+    return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  aDeliveryInfo.setObject(*deliveryInfo);
   return NS_OK;
 }
 
@@ -609,8 +544,7 @@ MmsMessage::GetAttachments(JSContext* aCx, JS::MutableHandle<JS::Value> aAttachm
       aCx, JS_NewObject(aCx, nullptr, JS::NullPtr(), JS::NullPtr()));
     NS_ENSURE_TRUE(attachmentObj, NS_ERROR_OUT_OF_MEMORY);
 
-    JS::Rooted<JS::Value> tmpJsVal(aCx);
-    JSString* tmpJsStr;
+    JS::Rooted<JSString*> tmpJsStr(aCx);
 
     // Get |attachment.mId|.
     tmpJsStr = JS_NewUCStringCopyN(aCx,
@@ -618,9 +552,7 @@ MmsMessage::GetAttachments(JSContext* aCx, JS::MutableHandle<JS::Value> aAttachm
                                    attachment.id.Length());
     NS_ENSURE_TRUE(tmpJsStr, NS_ERROR_OUT_OF_MEMORY);
 
-    tmpJsVal.setString(tmpJsStr);
-    if (!JS_DefineProperty(aCx, attachmentObj, "id", tmpJsVal,
-                           nullptr, nullptr, JSPROP_ENUMERATE)) {
+    if (!JS_DefineProperty(aCx, attachmentObj, "id", tmpJsStr, JSPROP_ENUMERATE)) {
       return NS_ERROR_FAILURE;
     }
 
@@ -630,23 +562,19 @@ MmsMessage::GetAttachments(JSContext* aCx, JS::MutableHandle<JS::Value> aAttachm
                                    attachment.location.Length());
     NS_ENSURE_TRUE(tmpJsStr, NS_ERROR_OUT_OF_MEMORY);
 
-    tmpJsVal.setString(tmpJsStr);
-    if (!JS_DefineProperty(aCx, attachmentObj, "location", tmpJsVal,
-                           nullptr, nullptr, JSPROP_ENUMERATE)) {
+    if (!JS_DefineProperty(aCx, attachmentObj, "location", tmpJsStr, JSPROP_ENUMERATE)) {
       return NS_ERROR_FAILURE;
     }
 
     // Get |attachment.mContent|.
-    JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
+    JS::Rooted<JS::Value> tmpJsVal(aCx);
     nsresult rv = nsContentUtils::WrapNative(aCx,
-                                             global,
                                              attachment.content,
                                              &NS_GET_IID(nsIDOMBlob),
                                              &tmpJsVal);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    if (!JS_DefineProperty(aCx, attachmentObj, "content", tmpJsVal,
-                           nullptr, nullptr, JSPROP_ENUMERATE)) {
+    if (!JS_DefineProperty(aCx, attachmentObj, "content", tmpJsVal, JSPROP_ENUMERATE)) {
       return NS_ERROR_FAILURE;
     }
 

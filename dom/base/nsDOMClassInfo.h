@@ -20,6 +20,7 @@
 
 class nsContentList;
 class nsDocument;
+struct nsGlobalNameStruct;
 class nsGlobalWindow;
 class nsIScriptSecurityManager;
 
@@ -268,22 +269,15 @@ public:
   NS_IMETHOD Enumerate(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
                        JSObject *obj, bool *_retval) MOZ_OVERRIDE;
   NS_IMETHOD NewResolve(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
-                        JSObject *obj, jsid id, uint32_t flags,
-                        JSObject **objp, bool *_retval) MOZ_OVERRIDE;
-  NS_IMETHOD Finalize(nsIXPConnectWrappedNative *wrapper, JSFreeOp *fop,
-                      JSObject *obj) MOZ_OVERRIDE;
+                        JSObject *obj, jsid id, JSObject **objp,
+                        bool *_retval) MOZ_OVERRIDE;
   NS_IMETHOD OuterObject(nsIXPConnectWrappedNative *wrapper, JSContext * cx,
                          JSObject * obj, JSObject * *_retval) MOZ_OVERRIDE;
 
-  static bool GlobalScopePolluterNewResolve(JSContext *cx, JS::Handle<JSObject*> obj,
-                                            JS::Handle<jsid> id, unsigned flags,
-                                            JS::MutableHandle<JSObject*> objp);
-  static bool GlobalScopePolluterGetProperty(JSContext *cx, JS::Handle<JSObject*> obj,
-                                             JS::Handle<jsid> id, JS::MutableHandle<JS::Value> vp);
-  static bool InvalidateGlobalScopePolluter(JSContext *cx,
-                                            JS::Handle<JSObject*> obj);
-  static nsresult InstallGlobalScopePolluter(JSContext *cx,
-                                             JS::Handle<JSObject*> obj);
+  static bool NameStructEnabled(JSContext* aCx, nsGlobalWindow *aWin,
+                                const nsAString& aName,
+                                const nsGlobalNameStruct& aNameStruct);
+
   static nsIClassInfo *doCreate(nsDOMClassInfoData* aData)
   {
     return new nsWindowSH(aData);
@@ -316,111 +310,6 @@ public:
 };
 
 
-// Generic array scriptable helper
-
-class nsGenericArraySH : public nsDOMClassInfo
-{
-protected:
-  nsGenericArraySH(nsDOMClassInfoData* aData) : nsDOMClassInfo(aData)
-  {
-  }
-
-  virtual ~nsGenericArraySH()
-  {
-  }
-
-public:
-  NS_IMETHOD NewResolve(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
-                        JSObject *obj, jsid id, uint32_t flags,
-                        JSObject **objp, bool *_retval) MOZ_OVERRIDE;
-  NS_IMETHOD Enumerate(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
-                       JSObject *obj, bool *_retval) MOZ_OVERRIDE;
-
-  virtual nsresult GetLength(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
-                             JS::Handle<JSObject*> obj, uint32_t *length);
-
-  static nsIClassInfo *doCreate(nsDOMClassInfoData* aData)
-  {
-    return new nsGenericArraySH(aData);
-  }
-};
-
-
-// Array scriptable helper
-
-class nsArraySH : public nsGenericArraySH
-{
-protected:
-  nsArraySH(nsDOMClassInfoData* aData) : nsGenericArraySH(aData)
-  {
-  }
-
-  virtual ~nsArraySH()
-  {
-  }
-
-  // Subclasses need to override this, if the implementation can't fail it's
-  // allowed to not set *aResult.
-  virtual nsISupports* GetItemAt(nsISupports *aNative, uint32_t aIndex,
-                                 nsWrapperCache **aCache, nsresult *aResult) = 0;
-
-public:
-  NS_IMETHOD GetProperty(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
-                         JSObject *obj, jsid id, JS::Value *vp, bool *_retval) MOZ_OVERRIDE;
-
-private:
-  // Not implemented, nothing should create an instance of this class.
-  static nsIClassInfo *doCreate(nsDOMClassInfoData* aData);
-};
-
-
-// StyleSheetList helper
-
-class nsStyleSheetListSH : public nsArraySH
-{
-protected:
-  nsStyleSheetListSH(nsDOMClassInfoData* aData) : nsArraySH(aData)
-  {
-  }
-
-  virtual ~nsStyleSheetListSH()
-  {
-  }
-
-  virtual nsISupports* GetItemAt(nsISupports *aNative, uint32_t aIndex,
-                                 nsWrapperCache **aCache, nsresult *aResult) MOZ_OVERRIDE;
-
-public:
-  static nsIClassInfo *doCreate(nsDOMClassInfoData* aData)
-  {
-    return new nsStyleSheetListSH(aData);
-  }
-};
-
-
-// CSSRuleList helper
-
-class nsCSSRuleListSH : public nsArraySH
-{
-protected:
-  nsCSSRuleListSH(nsDOMClassInfoData* aData) : nsArraySH(aData)
-  {
-  }
-
-  virtual ~nsCSSRuleListSH()
-  {
-  }
-
-  virtual nsISupports* GetItemAt(nsISupports *aNative, uint32_t aIndex,
-                                 nsWrapperCache **aCache, nsresult *aResult) MOZ_OVERRIDE;
-
-public:
-  static nsIClassInfo *doCreate(nsDOMClassInfoData* aData)
-  {
-    return new nsCSSRuleListSH(aData);
-  }
-};
-
 // WebApps Storage helpers
 
 class nsStorage2SH : public nsDOMGenericSH
@@ -435,8 +324,8 @@ protected:
   }
 
   NS_IMETHOD NewResolve(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
-                        JSObject *obj, jsid id, uint32_t flags,
-                        JSObject **objp, bool *_retval) MOZ_OVERRIDE;
+                        JSObject *obj, jsid id, JSObject **objp,
+                        bool *_retval) MOZ_OVERRIDE;
   NS_IMETHOD SetProperty(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
                          JSObject *obj, jsid id, JS::Value *vp, bool *_retval) MOZ_OVERRIDE;
   NS_IMETHOD GetProperty(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
@@ -494,8 +383,8 @@ public:
     return NS_OK;
   }
   NS_IMETHOD NewResolve(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
-                        JSObject *obj, jsid id, uint32_t flags,
-                        JSObject **objp, bool *_retval) MOZ_OVERRIDE;
+                        JSObject *obj, jsid id, JSObject **objp,
+                        bool *_retval) MOZ_OVERRIDE;
   NS_IMETHOD Call(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
                   JSObject *obj, const JS::CallArgs &args, bool *_retval) MOZ_OVERRIDE;
 

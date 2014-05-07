@@ -17,6 +17,7 @@
 #include "nsNameSpaceManager.h"
 #include "nsThemeConstants.h"
 #include "mozilla/BasicEvents.h"
+#include "mozilla/EventStates.h"
 #include "nsContentUtils.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsContentList.h"
@@ -41,6 +42,8 @@ NS_IMPL_FRAMEARENA_HELPERS(nsNumberControlFrame)
 NS_QUERYFRAME_HEAD(nsNumberControlFrame)
   NS_QUERYFRAME_ENTRY(nsNumberControlFrame)
   NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
+  NS_QUERYFRAME_ENTRY(nsITextControlFrame)
+  NS_QUERYFRAME_ENTRY(nsIFormControlFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 nsNumberControlFrame::nsNumberControlFrame(nsStyleContext* aContext)
@@ -210,7 +213,7 @@ nsNumberControlFrame::Reflow(nsPresContext* aPresContext,
 void
 nsNumberControlFrame::SyncDisabledState()
 {
-  nsEventStates eventStates = mContent->AsElement()->State();
+  EventStates eventStates = mContent->AsElement()->State();
   if (eventStates.HasState(NS_EVENT_STATE_DISABLED)) {
     mTextField->SetAttr(kNameSpaceID_None, nsGkAtoms::disabled, EmptyString(),
                         true);
@@ -246,11 +249,17 @@ nsNumberControlFrame::AttributeChanged(int32_t  aNameSpaceID,
 }
 
 void
-nsNumberControlFrame::ContentStatesChanged(nsEventStates aStates)
+nsNumberControlFrame::ContentStatesChanged(EventStates aStates)
 {
   if (aStates.HasState(NS_EVENT_STATE_DISABLED)) {
     nsContentUtils::AddScriptRunner(new SyncDisabledStateEvent(this));
   }
+}
+
+nsITextControlFrame*
+nsNumberControlFrame::GetTextFieldFrame()
+{
+  return do_QueryFrame(GetAnonTextControl()->GetPrimaryFrame());
 }
 
 nsresult
@@ -404,6 +413,84 @@ nsIAtom*
 nsNumberControlFrame::GetType() const
 {
   return nsGkAtoms::numberControlFrame;
+}
+
+NS_IMETHODIMP
+nsNumberControlFrame::GetEditor(nsIEditor **aEditor)
+{
+  return GetTextFieldFrame()->GetEditor(aEditor);
+}
+
+NS_IMETHODIMP
+nsNumberControlFrame::SetSelectionStart(int32_t aSelectionStart)
+{
+  return GetTextFieldFrame()->SetSelectionStart(aSelectionStart);
+}
+
+NS_IMETHODIMP
+nsNumberControlFrame::SetSelectionEnd(int32_t aSelectionEnd)
+{
+  return GetTextFieldFrame()->SetSelectionEnd(aSelectionEnd);
+}
+
+NS_IMETHODIMP
+nsNumberControlFrame::SetSelectionRange(int32_t aSelectionStart,
+                                        int32_t aSelectionEnd,
+                                        SelectionDirection aDirection)
+{
+  return GetTextFieldFrame()->SetSelectionRange(aSelectionStart, aSelectionEnd,
+                                                aDirection);
+}
+
+NS_IMETHODIMP
+nsNumberControlFrame::GetSelectionRange(int32_t* aSelectionStart,
+                                        int32_t* aSelectionEnd,
+                                        SelectionDirection* aDirection)
+{
+  return GetTextFieldFrame()->GetSelectionRange(aSelectionStart, aSelectionEnd,
+                                                aDirection);
+}
+
+NS_IMETHODIMP
+nsNumberControlFrame::GetOwnedSelectionController(nsISelectionController** aSelCon)
+{
+  return GetTextFieldFrame()->GetOwnedSelectionController(aSelCon);
+}
+
+nsFrameSelection*
+nsNumberControlFrame::GetOwnedFrameSelection()
+{
+  return GetTextFieldFrame()->GetOwnedFrameSelection();
+}
+
+nsresult
+nsNumberControlFrame::GetPhonetic(nsAString& aPhonetic)
+{
+  return GetTextFieldFrame()->GetPhonetic(aPhonetic);
+}
+
+nsresult
+nsNumberControlFrame::EnsureEditorInitialized()
+{
+  return GetTextFieldFrame()->EnsureEditorInitialized();
+}
+
+nsresult
+nsNumberControlFrame::ScrollSelectionIntoView()
+{
+  return GetTextFieldFrame()->ScrollSelectionIntoView();
+}
+
+void
+nsNumberControlFrame::SetFocus(bool aOn, bool aRepaint)
+{
+  GetTextFieldFrame()->SetFocus(aOn, aRepaint);
+}
+
+nsresult
+nsNumberControlFrame::SetFormProperty(nsIAtom* aName, const nsAString& aValue)
+{
+  return GetTextFieldFrame()->SetFormProperty(aName, aValue);
 }
 
 HTMLInputElement*

@@ -4,9 +4,10 @@
 
 #include "inCSSValueSearch.h"
 
+#include "mozilla/dom/StyleSheetList.h"
+#include "nsCSSStyleSheet.h"
 #include "nsIComponentManager.h"
 #include "nsIServiceManager.h"
-#include "nsVoidArray.h"
 #include "nsReadableUtils.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMStyleSheetList.h"
@@ -20,6 +21,8 @@
 #include "nsIURI.h"
 #include "nsIDocument.h"
 #include "nsNetUtil.h"
+
+using namespace mozilla;
 
 ///////////////////////////////////////////////////////////////////////////////
 inCSSValueSearch::inCSSValueSearch()
@@ -43,7 +46,7 @@ inCSSValueSearch::~inCSSValueSearch()
   nsCSSProps::ReleaseTable();
 }
 
-NS_IMPL_ISUPPORTS2(inCSSValueSearch, inISearchProcess, inICSSValueSearch)
+NS_IMPL_ISUPPORTS(inCSSValueSearch, inISearchProcess, inICSSValueSearch)
 
 ///////////////////////////////////////////////////////////////////////////////
 // inISearchProcess
@@ -85,24 +88,18 @@ inCSSValueSearch::SearchSync()
     return NS_OK;
   }
 
-  nsCOMPtr<nsIURI> baseURI;
-  nsCOMPtr<nsIDocument> idoc = do_QueryInterface(mDocument);
-  if (idoc) {
-    baseURI = idoc->GetBaseURI();
-  }
+  nsCOMPtr<nsIDocument> document = do_QueryInterface(mDocument);
+  MOZ_ASSERT(document);
 
-  nsCOMPtr<nsIDOMStyleSheetList> sheets;
-  nsresult rv = mDocument->GetStyleSheets(getter_AddRefs(sheets));
-  NS_ENSURE_SUCCESS(rv, NS_OK);
+  nsCOMPtr<nsIURI> baseURI = document->GetBaseURI();
 
-  uint32_t length;
-  sheets->GetLength(&length);
+  nsRefPtr<dom::StyleSheetList> sheets = document->StyleSheets();
+  MOZ_ASSERT(sheets);
+
+  uint32_t length = sheets->Length();
   for (uint32_t i = 0; i < length; ++i) {
-    nsCOMPtr<nsIDOMStyleSheet> sheet;
-    sheets->Item(i, getter_AddRefs(sheet));
-    nsCOMPtr<nsIDOMCSSStyleSheet> cssSheet = do_QueryInterface(sheet);
-    if (cssSheet)
-      SearchStyleSheet(cssSheet, baseURI);
+    nsRefPtr<nsCSSStyleSheet> sheet = sheets->Item(i);
+    SearchStyleSheet(sheet, baseURI);
   }
 
   // XXX would be nice to search inline style as well.

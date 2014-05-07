@@ -72,9 +72,9 @@ nsDOMStringMap::~nsDOMStringMap()
 
 /* virtual */
 JSObject*
-nsDOMStringMap::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
+nsDOMStringMap::WrapObject(JSContext *cx)
 {
-  return DOMStringMapBinding::Wrap(cx, scope, this);
+  return DOMStringMapBinding::Wrap(cx, this);
 }
 
 void
@@ -89,6 +89,12 @@ nsDOMStringMap::NamedGetter(const nsAString& aProp, bool& found,
   }
 
   found = mElement->GetAttr(attr, aResult);
+}
+
+bool
+nsDOMStringMap::NameIsEnumerable(const nsAString& aName)
+{
+  return true;
 }
 
 void
@@ -143,7 +149,7 @@ nsDOMStringMap::NamedDeleter(const nsAString& aProp, bool& found)
 }
 
 void
-nsDOMStringMap::GetSupportedNames(nsTArray<nsString>& aNames)
+nsDOMStringMap::GetSupportedNames(unsigned, nsTArray<nsString>& aNames)
 {
   uint32_t attrCount = mElement->GetAttrCount();
 

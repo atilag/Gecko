@@ -6,7 +6,7 @@
 #include <stdio.h>
 
 #include "mozilla/Assertions.h"
-#include "mozilla/Selection.h"
+#include "mozilla/dom/Selection.h"
 #include "mozilla/dom/Element.h"
 #include "nsAString.h"
 #include "nsAlgorithm.h"
@@ -42,6 +42,7 @@
 #include <algorithm>
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 /***************************************************************************
  * stack based helper class for restoring selection after table edit
@@ -3085,9 +3086,8 @@ nsHTMLEditor::SetSelectionAfterTableEdit(nsIDOMElement* aTable, int32_t aRow, in
 {
   NS_ENSURE_TRUE(aTable, NS_ERROR_NOT_INITIALIZED);
 
-  nsCOMPtr<nsISelection>selection;
-  nsresult res = GetSelection(getter_AddRefs(selection));
-  NS_ENSURE_SUCCESS(res, res);
+  nsRefPtr<Selection> selection = GetSelection();
+  nsresult res;
   
   if (!selection)
   {
@@ -3116,7 +3116,11 @@ nsHTMLEditor::SetSelectionAfterTableEdit(nsIDOMElement* aTable, int32_t aRow, in
           //   but don't go into nested tables
           // TODO: Should we really be placing the caret at the END
           //  of the cell content?
-          return CollapseSelectionToDeepestNonTableFirstChild(selection, cell);
+          nsCOMPtr<nsINode> cellNode = do_QueryInterface(cell);
+          if (cellNode) {
+            CollapseSelectionToDeepestNonTableFirstChild(selection, cellNode);
+          }
+          return NS_OK;
         }
       } else {
         // Setup index to find another cell in the 

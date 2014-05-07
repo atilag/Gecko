@@ -68,6 +68,8 @@ public class Tab {
     private ErrorType mErrorType = ErrorType.NONE;
     private static final int MAX_HISTORY_LIST_SIZE = 50;
     private volatile int mLoadProgress;
+    private volatile int mRecordingCount = 0;
+    private String mMostRecentHomePanel;
 
     public static final int STATE_DELAYED = 0;
     public static final int STATE_LOADING = 1;
@@ -187,6 +189,14 @@ public class Tab {
         return mThumbnail;
     }
 
+    public String getMostRecentHomePanel() {
+        return mMostRecentHomePanel;
+    }
+
+    public void setMostRecentHomePanel(String panelId) {
+        mMostRecentHomePanel = panelId;
+    }
+
     public Bitmap getThumbnailBitmap(int width, int height) {
         if (mThumbnailBitmap != null) {
             // Bug 787318 - Honeycomb has a bug with bitmap caching, we can't
@@ -209,15 +219,20 @@ public class Tab {
         return mThumbnailBitmap;
     }
 
-    public void updateThumbnail(final Bitmap b) {
+    public void updateThumbnail(final Bitmap b, final ThumbnailHelper.CachePolicy cachePolicy) {
         ThreadUtils.postToBackgroundThread(new Runnable() {
             @Override
             public void run() {
                 if (b != null) {
                     try {
                         mThumbnail = new BitmapDrawable(mAppContext.getResources(), b);
-                        if (mState == Tab.STATE_SUCCESS)
+                        if (mState == Tab.STATE_SUCCESS && cachePolicy == ThumbnailHelper.CachePolicy.STORE) {
                             saveThumbnailToDB();
+                        } else {
+                            // If the page failed to load, or requested that we not cache info about it, clear any previous
+                            // thumbnails we've stored.
+                            clearThumbnailFromDB();
+                        }
                     } catch (OutOfMemoryError oom) {
                         Log.w(LOGTAG, "Unable to create/scale bitmap.", oom);
                         mThumbnail = null;
@@ -690,12 +705,31 @@ public class Tab {
     }
 
     protected void saveThumbnailToDB() {
+        final BitmapDrawable thumbnail = mThumbnail;
+        if (thumbnail == null) {
+            return;
+        }
+
+        try {
+            String url = getURL();
+            if (url == null) {
+                return;
+            }
+
+            BrowserDB.updateThumbnailForUrl(getContentResolver(), url, thumbnail);
+        } catch (Exception e) {
+            // ignore
+        }
+    }
+
+    private void clearThumbnailFromDB() {
         try {
             String url = getURL();
             if (url == null)
                 return;
 
-            BrowserDB.updateThumbnailForUrl(getContentResolver(), url, mThumbnail);
+            // Passing in a null thumbnail will delete the stored thumbnail for this url
+            BrowserDB.updateThumbnailForUrl(getContentResolver(), url, null);
         } catch (Exception e) {
             // ignore
         }
@@ -813,5 +847,17 @@ public class Tab {
      */
     public int getLoadProgress() {
         return mLoadProgress;
+    }
+
+    public void setRecording(boolean isRecording) {
+        if (isRecording) {
+            mRecordingCount++;
+        } else {
+            mRecordingCount--;
+        }
+    }
+
+    public boolean isRecording() {
+        return mRecordingCount > 0;
     }
 }

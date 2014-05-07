@@ -28,7 +28,7 @@ extern PRLogModuleInfo* gPIPNSSLog;
 
 using namespace mozilla;
 
-NS_IMPL_ISUPPORTS2(nsCMSMessage, nsICMSMessage, nsICMSMessage2)
+NS_IMPL_ISUPPORTS(nsCMSMessage, nsICMSMessage, nsICMSMessage2)
 
 nsCMSMessage::nsCMSMessage()
 {
@@ -264,9 +264,10 @@ nsresult nsCMSMessage::CommonVerifySignature(unsigned char* aDigestData, uint32_
   NS_ENSURE_TRUE(certVerifier, NS_ERROR_UNEXPECTED);
 
   {
-    SECStatus srv = certVerifier->VerifyCert(si->cert, nullptr,
+    SECStatus srv = certVerifier->VerifyCert(si->cert,
                                              certificateUsageEmailSigner,
-                                             PR_Now(), nullptr /*XXX pinarg*/);
+                                             PR_Now(), nullptr /*XXX pinarg*/,
+                                             nullptr /*hostname*/);
     if (srv != SECSuccess) {
       PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
              ("nsCMSMessage::CommonVerifySignature - signing cert not trusted now\n"));
@@ -718,7 +719,7 @@ loser:
   return rv;
 }
 
-NS_IMPL_ISUPPORTS1(nsCMSDecoder, nsICMSDecoder)
+NS_IMPL_ISUPPORTS(nsCMSDecoder, nsICMSDecoder)
 
 nsCMSDecoder::nsCMSDecoder()
 : m_dcx(nullptr)
@@ -801,7 +802,7 @@ NS_IMETHODIMP nsCMSDecoder::Finish(nsICMSMessage ** aCMSMsg)
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS1(nsCMSEncoder, nsICMSEncoder)
+NS_IMPL_ISUPPORTS(nsCMSEncoder, nsICMSEncoder)
 
 nsCMSEncoder::nsCMSEncoder()
 : m_ecx(nullptr)

@@ -114,7 +114,7 @@ NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_END
 
 // QueryInterface implementation for nsDOMAttributeMap
 NS_INTERFACE_TABLE_HEAD(nsDOMAttributeMap)
-  NS_INTERFACE_TABLE1(nsDOMAttributeMap, nsIDOMMozNamedAttrMap)
+  NS_INTERFACE_TABLE(nsDOMAttributeMap, nsIDOMMozNamedAttrMap)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRIES_CYCLE_COLLECTION(nsDOMAttributeMap)
@@ -215,6 +215,12 @@ nsDOMAttributeMap::NamedGetter(const nsAString& aAttrName, bool& aFound)
 
   aFound = true;
   return GetAttribute(ni, false);
+}
+
+bool
+nsDOMAttributeMap::NameIsEnumerable(const nsAString& aName)
+{
+  return true;
 }
 
 Attr*
@@ -553,7 +559,7 @@ nsDOMAttributeMap::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 }
 
 /* virtual */ JSObject*
-nsDOMAttributeMap::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+nsDOMAttributeMap::WrapObject(JSContext* aCx)
 {
-  return MozNamedAttrMapBinding::Wrap(aCx, aScope, this);
+  return MozNamedAttrMapBinding::Wrap(aCx, this);
 }

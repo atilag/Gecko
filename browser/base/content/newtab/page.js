@@ -19,9 +19,21 @@ let gPage = {
     // Listen for 'unload' to unregister this page.
     addEventListener("unload", this, false);
 
-    // Listen for toggle button clicks.
-    let button = document.getElementById("newtab-toggle");
-    button.addEventListener("click", this, false);
+    // XXX bug 991111 - Not all click events are correctly triggered when
+    // listening from xhtml nodes -- in particular middle clicks on sites, so
+    // listen from the xul window and filter then delegate
+    addEventListener("click", this, false);
+
+    // Initialize sponsored panel
+    this._sponsoredPanel = document.getElementById("sponsored-panel");
+    let link = this._sponsoredPanel.querySelector(".text-link");
+    link.addEventListener("click", () => this._sponsoredPanel.hidePopup());
+    if (UpdateChannel.get().startsWith("release")) {
+      document.getElementById("sponsored-panel-trial-descr").style.display = "none";
+    }
+    else {
+      document.getElementById("sponsored-panel-release-descr").style.display = "none";
+    }
 
     // Check if the new tab feature is enabled.
     let enabled = gAllPages.enabled;
@@ -81,6 +93,21 @@ let gPage = {
   },
 
   /**
+   * Shows sponsored panel
+   */
+  showSponsoredPanel: function Page_showSponsoredPanel(aTarget) {
+    if (this._sponsoredPanel.state == "closed") {
+      let self = this;
+      this._sponsoredPanel.addEventListener("popuphidden", function onPopupHidden(aEvent) {
+        self._sponsoredPanel.removeEventListener("popuphidden", onPopupHidden, false);
+        aTarget.removeAttribute("panelShown");
+      });
+    }
+    aTarget.setAttribute("panelShown", "true");
+    this._sponsoredPanel.openPopup(aTarget);
+  },
+
+  /**
    * Internally initializes the page. This runs only when/if the feature
    * is/gets enabled.
    */
@@ -89,6 +116,8 @@ let gPage = {
       return;
 
     this._initialized = true;
+
+    gSearch.init();
 
     this._mutationObserver = new MutationObserver(() => {
       if (this.allowBackgroundCaptures) {
@@ -117,6 +146,10 @@ let gPage = {
           let shownCount = Math.min(10, count);
           Services.telemetry.getHistogramById(shownId).add(shownCount);
         }
+
+        // content.js isn't loaded for the page while it's in the preloader,
+        // which is why this is necessary.
+        gSearch.setUpInitialState();
       }
     });
     this._mutationObserver.observe(document.documentElement, {
@@ -124,19 +157,17 @@ let gPage = {
       attributeFilter: ["allow-background-captures"],
     });
 
-    gLinks.populateCache(function () {
-      // Initialize and render the grid.
-      gGrid.init();
+    // Initialize and render the grid.
+    gGrid.init();
 
-      // Initialize the drop target shim.
-      gDropTargetShim.init();
+    // Initialize the drop target shim.
+    gDropTargetShim.init();
 
 #ifdef XP_MACOSX
-      // Workaround to prevent a delay on MacOSX due to a slow drop animation.
-      document.addEventListener("dragover", this, false);
-      document.addEventListener("drop", this, false);
+    // Workaround to prevent a delay on MacOSX due to a slow drop animation.
+    document.addEventListener("dragover", this, false);
+    document.addEventListener("drop", this, false);
 #endif
-    }.bind(this));
   },
 
   /**
@@ -145,7 +176,7 @@ let gPage = {
    */
   _updateAttributes: function Page_updateAttributes(aValue) {
     // Set the nodes' states.
-    let nodeSelector = "#newtab-scrollbox, #newtab-toggle, #newtab-grid";
+    let nodeSelector = "#newtab-scrollbox, #newtab-toggle, #newtab-grid, #newtab-search-container";
     for (let node of document.querySelectorAll(nodeSelector)) {
       if (aValue)
         node.removeAttribute("page-disabled");
@@ -178,7 +209,22 @@ let gPage = {
         gAllPages.unregister(this);
         break;
       case "click":
-        gAllPages.enabled = !gAllPages.enabled;
+        let {button, target} = aEvent;
+        if (target.id == "newtab-toggle") {
+          if (button == 0) {
+            gAllPages.enabled = !gAllPages.enabled;
+          }
+          break;
+        }
+
+        // Go up ancestors until we find a Site or not
+        while (target) {
+          if (target.hasOwnProperty("_newtabSite")) {
+            target._newtabSite.onClick(aEvent);
+            break;
+          }
+          target = target.parentNode;
+        }
         break;
       case "dragover":
         if (gDrag.isValid(aEvent) && gDrag.draggedSite)

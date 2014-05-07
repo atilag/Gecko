@@ -8,11 +8,12 @@ package org.mozilla.gecko.home;
 import java.util.EnumSet;
 
 import org.mozilla.gecko.R;
+import org.mozilla.gecko.Telemetry;
+import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.ThumbnailHelper;
-import org.mozilla.gecko.db.BrowserDB.TopSitesCursorWrapper;
 import org.mozilla.gecko.db.BrowserDB.URLColumns;
+import org.mozilla.gecko.db.TopSitesCursorWrapper;
 import org.mozilla.gecko.home.HomePager.OnUrlOpenListener;
-import org.mozilla.gecko.util.StringUtils;
 
 import android.content.Context;
 import android.content.res.TypedArray;
@@ -105,12 +106,14 @@ public class TopSitesGridView extends GridView {
                 TopSitesGridItemView row = (TopSitesGridItemView) view;
 
                 // Decode "user-entered" URLs before loading them.
-                String url = TopSitesPanel.decodeUserEnteredUrl(row.getUrl());
+                String url = HomeFragment.decodeUserEnteredUrl(row.getUrl());
 
                 // If the url is empty, the user can pin a site.
                 // If not, navigate to the page given by the url.
                 if (!TextUtils.isEmpty(url)) {
                     if (mUrlOpenListener != null) {
+                        Telemetry.sendUIEvent(TelemetryContract.Event.LOAD_URL, TelemetryContract.Method.GRID_ITEM);
+
                         mUrlOpenListener.onUrlOpen(url, EnumSet.noneOf(OnUrlOpenListener.Flags.class));
                     }
                 } else {
@@ -125,7 +128,15 @@ public class TopSitesGridView extends GridView {
             @Override
             public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
                 Cursor cursor = (Cursor) parent.getItemAtPosition(position);
-                mContextMenuInfo = new TopSitesGridContextMenuInfo(view, position, id, cursor);
+
+                TopSitesGridItemView gridView = (TopSitesGridItemView) view;
+                if (cursor == null || gridView.isEmpty()) {
+                    mContextMenuInfo = null;
+                    return false;
+                }
+
+                mContextMenuInfo = new TopSitesGridContextMenuInfo(view, position, id);
+                updateContextMenuFromCursor(mContextMenuInfo, cursor);
                 return showContextMenuForChild(TopSitesGridView.this);
             }
         });
@@ -221,6 +232,18 @@ public class TopSitesGridView extends GridView {
         return mContextMenuInfo;
     }
 
+    /*
+     * Update the fields of a TopSitesGridContextMenuInfo object
+     * from a cursor.
+     *
+     * @param  info    context menu info object to be updated
+     * @param  cursor  used to update the context menu info object
+     */
+    private void updateContextMenuFromCursor(TopSitesGridContextMenuInfo info, Cursor cursor) {
+        info.url = cursor.getString(cursor.getColumnIndexOrThrow(URLColumns.URL));
+        info.title = cursor.getString(cursor.getColumnIndexOrThrow(URLColumns.TITLE));
+        info.isPinned = ((TopSitesCursorWrapper) cursor).isPinned();
+    }
     /**
      * Set an url open listener to be used by this view.
      *
@@ -240,29 +263,13 @@ public class TopSitesGridView extends GridView {
     }
 
     /**
-     * A ContextMenuInfo for TopBoomarksView that adds details from the cursor.
+     * Stores information regarding the creation of the context menu for a GridView item.
      */
-    public static class TopSitesGridContextMenuInfo extends AdapterContextMenuInfo {
+    public static class TopSitesGridContextMenuInfo extends HomeContextMenuInfo {
+        public boolean isPinned = false;
 
-        public String url;
-        public String title;
-        public boolean isPinned;
-
-        public TopSitesGridContextMenuInfo(View targetView, int position, long id, Cursor cursor) {
+        public TopSitesGridContextMenuInfo(View targetView, int position, long id) {
             super(targetView, position, id);
-
-            if (cursor == null) {
-                return;
-            }
-
-            url = cursor.getString(cursor.getColumnIndexOrThrow(URLColumns.URL));
-            title = cursor.getString(cursor.getColumnIndexOrThrow(URLColumns.TITLE));
-            isPinned = ((TopSitesCursorWrapper) cursor).isPinned();
-        }
-
-        public String getDisplayTitle() {
-            return TextUtils.isEmpty(title) ?
-                StringUtils.stripCommonSubdomains(StringUtils.stripScheme(url, StringUtils.UrlFlags.STRIP_HTTPS)) : title;
         }
     }
 }

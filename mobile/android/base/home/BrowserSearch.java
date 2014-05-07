@@ -5,12 +5,15 @@
 
 package org.mozilla.gecko.home;
 
+import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.PrefsHelper;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Tab;
 import org.mozilla.gecko.Tabs;
+import org.mozilla.gecko.Telemetry;
+import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.db.BrowserDB.URLColumns;
 import org.mozilla.gecko.home.HomePager.OnUrlOpenListener;
 import org.mozilla.gecko.home.SearchEngine;
@@ -79,11 +82,15 @@ public class BrowserSearch extends HomeFragment
     // for an autocomplete result
     private static final int MAX_AUTOCOMPLETE_SEARCH = 20;
 
+    // Length of https:// + 1 required to make autocomplete
+    // fill in the domain, for both http:// and https://
+    private static final int HTTPS_PREFIX_LENGTH = 9;
+
     // Duration for fade-in animation
     private static final int ANIMATION_DURATION = 250;
 
     // Holds the current search term to use in the query
-    private String mSearchTerm;
+    private volatile String mSearchTerm;
 
     // Adapter for the list of search results
     private SearchAdapter mAdapter;
@@ -217,6 +224,20 @@ public class BrowserSearch extends HomeFragment
     }
 
     @Override
+    public void onResume() {
+        super.onResume();
+
+        Telemetry.startUISession(TelemetryContract.Session.FRECENCY);
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+
+        Telemetry.stopUISession(TelemetryContract.Session.FRECENCY);
+    }
+
+    @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
         // All list views are styled to look the same with a global activity theme.
         // If the style of the list changes, inflate it from an XML.
@@ -230,7 +251,8 @@ public class BrowserSearch extends HomeFragment
     public void onDestroyView() {
         super.onDestroyView();
 
-        unregisterEventListener("SearchEngines:Data");
+        EventDispatcher.getInstance().unregisterGeckoThreadListener(this,
+            "SearchEngines:Data");
 
         mList.setAdapter(null);
         mList = null;
@@ -259,6 +281,11 @@ public class BrowserSearch extends HomeFragment
                 position -= getSuggestEngineCount();
                 final Cursor c = mAdapter.getCursor(position);
                 final String url = c.getString(c.getColumnIndexOrThrow(URLColumns.URL));
+
+                // The "urlbar" and "frecency" sessions can be open at the same time. Use the LIST_ITEM
+                // method to set this LOAD_URL event apart from the case where the user commits what's in
+                // the url bar.
+                Telemetry.sendUIEvent(TelemetryContract.Event.LOAD_URL, TelemetryContract.Method.LIST_ITEM);
 
                 // This item is a TwoLinePageRow, so we allow switch-to-tab.
                 mUrlOpenListener.onUrlOpen(url, EnumSet.of(OnUrlOpenListener.Flags.ALLOW_SWITCH_TO_TAB));
@@ -296,7 +323,8 @@ public class BrowserSearch extends HomeFragment
         });
 
         registerForContextMenu(mList);
-        registerEventListener("SearchEngines:Data");
+        EventDispatcher.getInstance().registerGeckoThreadListener(this,
+            "SearchEngines:Data");
 
         GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("SearchEngines:GetVisible", null));
     }
@@ -418,7 +446,8 @@ public class BrowserSearch extends HomeFragment
             // Does the completion match against the whole URL? This will match
             // about: pages, as well as user input including "http://...".
             if (url.startsWith(searchTerm)) {
-                return uriSubstringUpToMatchedPath(url, 0, searchLength);
+                return uriSubstringUpToMatchedPath(url, 0,
+                        (searchLength > HTTPS_PREFIX_LENGTH) ? searchLength : HTTPS_PREFIX_LENGTH);
             }
 
             final Uri uri = Uri.parse(url);
@@ -681,12 +710,12 @@ public class BrowserSearch extends HomeFragment
         return (TextUtils.isEmpty(mSearchTerm) || mSuggestClient == null || !mSuggestionsEnabled) ? 0 : 1;
     }
 
-    private void registerEventListener(String eventName) {
-        GeckoAppShell.registerEventListener(eventName, this);
+    private void restartSearchLoader() {
+        SearchLoader.restart(getLoaderManager(), LOADER_ID_SEARCH, mCursorLoaderCallbacks, mSearchTerm);
     }
 
-    private void unregisterEventListener(String eventName) {
-        GeckoAppShell.unregisterEventListener(eventName, this);
+    private void initSearchLoader() {
+        SearchLoader.init(getLoaderManager(), LOADER_ID_SEARCH, mCursorLoaderCallbacks, mSearchTerm);
     }
 
     public void filter(String searchTerm, AutocompleteHandler handler) {
@@ -694,21 +723,26 @@ public class BrowserSearch extends HomeFragment
             return;
         }
 
-        if (TextUtils.equals(mSearchTerm, searchTerm)) {
-            return;
-        }
+        final boolean isNewFilter = !TextUtils.equals(mSearchTerm, searchTerm);
 
         mSearchTerm = searchTerm;
         mAutocompleteHandler = handler;
 
         if (isVisible()) {
-            // The adapter depends on the search term to determine its number
-            // of items. Make it we notify the view about it.
-            mAdapter.notifyDataSetChanged();
+            if (isNewFilter) {
+                // The adapter depends on the search term to determine its number
+                // of items. Make it we notify the view about it.
+                mAdapter.notifyDataSetChanged();
 
-            // Restart loaders with the new search term
-            SearchLoader.restart(getLoaderManager(), LOADER_ID_SEARCH, mCursorLoaderCallbacks, mSearchTerm);
-            filterSuggestions();
+                // Restart loaders with the new search term
+                restartSearchLoader();
+                filterSuggestions();
+            } else {
+                // The search term hasn't changed, simply reuse any existing
+                // loader for the current search term. This will ensure autocompletion
+                // is consistently triggered (see bug 933739).
+                initSearchLoader();
+            }
         }
     }
 

@@ -235,7 +235,7 @@ XDRScriptBindings(XDRState<mode> *xdr, LifoAllocScope &las, unsigned numArgs, ui
             RootedAtom atom(cx);
             if (!XDRAtom(xdr, &atom))
                 return false;
-            atoms[i] = StringValue(atom);
+            atoms[i].setString(atom);
         }
 
         Binding *bindingArray = las.alloc().newArrayUninitialized<Binding>(nameCount);
@@ -851,7 +851,7 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
      * after the enclosing block has been XDR'd.
      */
     for (i = 0; i != nobjects; ++i) {
-        HeapPtr<JSObject> *objp = &script->objects()->vector[i];
+        HeapPtrObject *objp = &script->objects()->vector[i];
         XDRClassKind classk;
 
         if (mode == XDR_ENCODE) {
@@ -1182,8 +1182,8 @@ JSScript::initScriptCounts(JSContext *cx)
 
     /* Enable interrupts in any interpreter frames running on this script. */
     for (ActivationIterator iter(cx->runtime()); !iter.done(); ++iter) {
-        if (iter.activation()->isInterpreter())
-            iter.activation()->asInterpreter()->enableInterruptsIfRunning(this);
+        if (iter->isInterpreter())
+            iter->asInterpreter()->enableInterruptsIfRunning(this);
     }
 
     return true;
@@ -1567,11 +1567,11 @@ ScriptSource::substring(JSContext *cx, uint32_t start, uint32_t stop)
 }
 
 bool
-ScriptSource::setSourceCopy(ExclusiveContext *cx, const jschar *src, uint32_t length,
+ScriptSource::setSourceCopy(ExclusiveContext *cx, SourceBufferHolder &srcBuf,
                             bool argumentsNotIncluded, SourceCompressionTask *task)
 {
     JS_ASSERT(!hasSourceData());
-    length_ = length;
+    length_ = srcBuf.length();
     argumentsNotIncluded_ = argumentsNotIncluded;
 
     // There are several cases where source compression is not a good idea:
@@ -1604,16 +1604,18 @@ ScriptSource::setSourceCopy(ExclusiveContext *cx, const jschar *src, uint32_t le
 #endif
     const size_t TINY_SCRIPT = 256;
     const size_t HUGE_SCRIPT = 5 * 1024 * 1024;
-    if (TINY_SCRIPT <= length && length < HUGE_SCRIPT && canCompressOffThread) {
+    if (TINY_SCRIPT <= srcBuf.length() && srcBuf.length() < HUGE_SCRIPT && canCompressOffThread) {
         task->ss = this;
-        task->chars = src;
+        task->chars = srcBuf.get();
         ready_ = false;
         if (!StartOffThreadCompression(cx, task))
             return false;
+    } else if (srcBuf.ownsChars()) {
+        data.source = srcBuf.take();
     } else {
-        if (!adjustDataSize(sizeof(jschar) * length))
+        if (!adjustDataSize(sizeof(jschar) * srcBuf.length()))
             return false;
-        PodCopy(data.source, src, length_);
+        PodCopy(data.source, srcBuf.get(), length_);
     }
 
     return true;
@@ -2061,7 +2063,7 @@ SaveSharedScriptData(ExclusiveContext *cx, Handle<JSScript *> script, SharedScri
      */
     if (cx->isJSContext()) {
         JSRuntime *rt = cx->asJSContext()->runtime();
-        if (JS::IsIncrementalGCInProgress(rt) && rt->gcIsFull)
+        if (JS::IsIncrementalGCInProgress(rt) && rt->gc.isFull)
             ssd->marked = true;
     }
 #endif
@@ -2079,14 +2081,14 @@ MarkScriptData(JSRuntime *rt, const jsbytecode *bytecode)
      * a GC. Since SweepScriptBytecodes is only called during a full gc,
      * to preserve this invariant, only mark during a full gc.
      */
-    if (rt->gcIsFull)
+    if (rt->gc.isFull)
         SharedScriptData::fromBytecode(bytecode)->marked = true;
 }
 
 void
 js::UnmarkScriptData(JSRuntime *rt)
 {
-    JS_ASSERT(rt->gcIsFull);
+    JS_ASSERT(rt->gc.isFull);
     ScriptDataTable &table = rt->scriptDataTable();
     for (ScriptDataTable::Enum e(table); !e.empty(); e.popFront()) {
         SharedScriptData *entry = e.front();
@@ -2097,7 +2099,7 @@ js::UnmarkScriptData(JSRuntime *rt)
 void
 js::SweepScriptData(JSRuntime *rt)
 {
-    JS_ASSERT(rt->gcIsFull);
+    JS_ASSERT(rt->gc.isFull);
     ScriptDataTable &table = rt->scriptDataTable();
 
     if (rt->keepAtoms())
@@ -2358,13 +2360,13 @@ JSScript::partiallyInit(ExclusiveContext *cx, HandleScript script, uint32_t ncon
 
     if (nobjects != 0) {
         script->objects()->length = nobjects;
-        script->objects()->vector = (HeapPtr<JSObject> *)cursor;
+        script->objects()->vector = (HeapPtrObject *)cursor;
         cursor += nobjects * sizeof(script->objects()->vector[0]);
     }
 
     if (nregexps != 0) {
         script->regexps()->length = nregexps;
-        script->regexps()->vector = (HeapPtr<JSObject> *)cursor;
+        script->regexps()->vector = (HeapPtrObject *)cursor;
         cursor += nregexps * sizeof(script->regexps()->vector[0]);
     }
 
@@ -2425,7 +2427,9 @@ JSScript::fullyInitFromEmitter(ExclusiveContext *cx, HandleScript script, Byteco
 
     uint32_t mainLength = bce->offset();
     uint32_t prologLength = bce->prologOffset();
-    uint32_t nsrcnotes = uint32_t(bce->countFinalSourceNotes());
+    uint32_t nsrcnotes;
+    if (!FinishTakingSrcNotes(cx, bce, &nsrcnotes))
+        return false;
     uint32_t natoms = bce->atomIndices->count();
     if (!partiallyInit(cx, script,
                        bce->constList.length(), bce->objectList.length, bce->regexpList.length,
@@ -2448,8 +2452,7 @@ JSScript::fullyInitFromEmitter(ExclusiveContext *cx, HandleScript script, Byteco
     jsbytecode *code = ssd->data;
     PodCopy<jsbytecode>(code, bce->prolog.code.begin(), prologLength);
     PodCopy<jsbytecode>(code + prologLength, bce->code().begin(), mainLength);
-    if (!FinishTakingSrcNotes(cx, bce, (jssrcnote *)(code + script->length())))
-        return false;
+    CopySrcNotes(bce, (jssrcnote *)(code + script->length()), nsrcnotes);
     InitAtomMap(bce->atomIndices.getMap(), ssd->atoms());
 
     if (!SaveSharedScriptData(cx, script, ssd, nsrcnotes))
@@ -3023,13 +3026,13 @@ js::CloneScript(JSContext *cx, HandleObject enclosingScope, HandleFunction fun, 
             JS_ASSERT_IF(vector[i].isMarkable(), vector[i].toString()->isAtom());
     }
     if (nobjects != 0) {
-        HeapPtrObject *vector = Rebase<HeapPtr<JSObject> >(dst, src, src->objects()->vector);
+        HeapPtrObject *vector = Rebase<HeapPtrObject>(dst, src, src->objects()->vector);
         dst->objects()->vector = vector;
         for (unsigned i = 0; i < nobjects; ++i)
             vector[i].init(objects[i]);
     }
     if (nregexps != 0) {
-        HeapPtrObject *vector = Rebase<HeapPtr<JSObject> >(dst, src, src->regexps()->vector);
+        HeapPtrObject *vector = Rebase<HeapPtrObject>(dst, src, src->regexps()->vector);
         dst->regexps()->vector = vector;
         for (unsigned i = 0; i < nregexps; ++i)
             vector[i].init(regexps[i]);
@@ -3149,40 +3152,29 @@ JSScript::ensureHasDebugScript(JSContext *cx)
      * debug state is destroyed.
      */
     for (ActivationIterator iter(cx->runtime()); !iter.done(); ++iter) {
-        if (iter.activation()->isInterpreter())
-            iter.activation()->asInterpreter()->enableInterruptsIfRunning(this);
+        if (iter->isInterpreter())
+            iter->asInterpreter()->enableInterruptsIfRunning(this);
     }
 
     return true;
 }
 
 void
-JSScript::recompileForStepMode(FreeOp *fop)
+JSScript::setNewStepMode(FreeOp *fop, uint32_t newValue)
 {
-#ifdef JS_ION
-    if (hasBaselineScript())
-        baseline->toggleDebugTraps(this, nullptr);
-#endif
-}
-
-bool
-JSScript::tryNewStepMode(JSContext *cx, uint32_t newValue)
-{
-    JS_ASSERT(hasDebugScript_);
-
     DebugScript *debug = debugScript();
     uint32_t prior = debug->stepMode;
     debug->stepMode = newValue;
 
     if (!prior != !newValue) {
-        /* Step mode has been enabled or disabled. Alert the methodjit. */
-        recompileForStepMode(cx->runtime()->defaultFreeOp());
+#ifdef JS_ION
+        if (hasBaselineScript())
+            baseline->toggleDebugTraps(this, nullptr);
+#endif
 
         if (!stepModeEnabled() && !debug->numSites)
-            js_free(releaseDebugScript());
+            fop->free_(releaseDebugScript());
     }
-
-    return true;
 }
 
 bool
@@ -3191,25 +3183,40 @@ JSScript::setStepModeFlag(JSContext *cx, bool step)
     if (!ensureHasDebugScript(cx))
         return false;
 
-    return tryNewStepMode(cx, (debugScript()->stepMode & stepCountMask) |
-                               (step ? stepFlagMask : 0));
+    setNewStepMode(cx->runtime()->defaultFreeOp(),
+                   (debugScript()->stepMode & stepCountMask) |
+                   (step ? stepFlagMask : 0));
+    return true;
 }
 
 bool
-JSScript::changeStepModeCount(JSContext *cx, int delta)
+JSScript::incrementStepModeCount(JSContext *cx)
 {
+    assertSameCompartment(cx, this);
+    MOZ_ASSERT(cx->compartment()->debugMode());
+
     if (!ensureHasDebugScript(cx))
         return false;
 
-    assertSameCompartment(cx, this);
-    JS_ASSERT_IF(delta > 0, cx->compartment()->debugMode());
-
     DebugScript *debug = debugScript();
     uint32_t count = debug->stepMode & stepCountMask;
-    JS_ASSERT(((count + delta) & stepCountMask) == count + delta);
-    return tryNewStepMode(cx,
-                          (debug->stepMode & stepFlagMask) |
-                          ((count + delta) & stepCountMask));
+    MOZ_ASSERT(((count + 1) & stepCountMask) == count + 1);
+
+    setNewStepMode(cx->runtime()->defaultFreeOp(),
+                   (debug->stepMode & stepFlagMask) |
+                   ((count + 1) & stepCountMask));
+    return true;
+}
+
+void
+JSScript::decrementStepModeCount(FreeOp *fop)
+{
+    DebugScript *debug = debugScript();
+    uint32_t count = debug->stepMode & stepCountMask;
+
+    setNewStepMode(fop,
+                   (debug->stepMode & stepFlagMask) |
+                   ((count - 1) & stepCountMask));
 }
 
 BreakpointSite *
@@ -3297,7 +3304,7 @@ JSScript::markChildren(JSTracer *trc)
     // JSScript::Create(), but not yet finished initializing it with
     // fullyInitFromEmitter() or fullyInitTrivial().
 
-    JS_ASSERT_IF(trc->runtime->gcStrictCompartmentChecking, zone()->isCollecting());
+    JS_ASSERT_IF(trc->runtime()->gc.strictCompartmentChecking, zone()->isCollecting());
 
     for (uint32_t i = 0; i < natoms(); ++i) {
         if (atoms[i])
@@ -3337,7 +3344,7 @@ JSScript::markChildren(JSTracer *trc)
         compartment()->mark();
 
         if (code())
-            MarkScriptData(trc->runtime, code());
+            MarkScriptData(trc->runtime(), code());
     }
 
     bindings.trace(trc);
@@ -3445,13 +3452,17 @@ void
 JSScript::setArgumentsHasVarBinding()
 {
     argsHasVarBinding_ = true;
+#ifdef JS_ION
     needsArgsAnalysis_ = true;
+#else
+    // The arguments analysis is performed by IonBuilder.
+    needsArgsObj_ = true;
+#endif
 }
 
 void
 JSScript::setNeedsArgsObj(bool needsArgsObj)
 {
-    JS_ASSERT(!analyzedArgsUsage());
     JS_ASSERT_IF(needsArgsObj, argumentsHasVarBinding());
     needsArgsAnalysis_ = false;
     needsArgsObj_ = needsArgsObj;
@@ -3480,10 +3491,13 @@ js::SetFrameArgumentsObject(JSContext *cx, AbstractFramePtr frame,
         pc += JSOP_ARGUMENTS_LENGTH;
         JS_ASSERT(*pc == JSOP_SETALIASEDVAR);
 
-        if (frame.callObj().as<ScopeObject>().aliasedVar(pc).isMagic(JS_OPTIMIZED_ARGUMENTS))
+        // Note that here and below, it is insufficient to only check for
+        // JS_OPTIMIZED_ARGUMENTS, as Ion could have optimized out the
+        // arguments slot.
+        if (IsOptimizedPlaceholderMagicValue(frame.callObj().as<ScopeObject>().aliasedVar(pc)))
             frame.callObj().as<ScopeObject>().setAliasedVar(cx, pc, cx->names().arguments, ObjectValue(*argsobj));
     } else {
-        if (frame.unaliasedLocal(var).isMagic(JS_OPTIMIZED_ARGUMENTS))
+        if (IsOptimizedPlaceholderMagicValue(frame.unaliasedLocal(var)))
             frame.unaliasedLocal(var) = ObjectValue(*argsobj);
     }
 }

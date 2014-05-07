@@ -21,8 +21,8 @@ HTMLLIElement::~HTMLLIElement()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED1(HTMLLIElement, nsGenericHTMLElement,
-                             nsIDOMHTMLLIElement)
+NS_IMPL_ISUPPORTS_INHERITED(HTMLLIElement, nsGenericHTMLElement,
+                            nsIDOMHTMLLIElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLLIElement)
 
@@ -109,9 +109,9 @@ HTMLLIElement::GetAttributeMappingFunction() const
 }
 
 JSObject*
-HTMLLIElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+HTMLLIElement::WrapNode(JSContext *aCx)
 {
-  return HTMLLIElementBinding::Wrap(aCx, aScope, this);
+  return HTMLLIElementBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

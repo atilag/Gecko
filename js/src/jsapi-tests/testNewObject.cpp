@@ -59,8 +59,8 @@ BEGIN_TEST(testNewObject_1)
     CHECK(argv.resize(N));
 
     JS::RootedValue v(cx);
-    EVAL("Array", v.address());
-    JS::RootedObject Array(cx, JSVAL_TO_OBJECT(v));
+    EVAL("Array", &v);
+    JS::RootedObject Array(cx, v.toObjectOrNull());
 
     // With no arguments.
     JS::RootedObject obj(cx, JS_New(cx, Array, JS::HandleValueArray::empty()));

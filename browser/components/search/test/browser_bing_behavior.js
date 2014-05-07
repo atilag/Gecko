@@ -9,9 +9,6 @@
 
 const BROWSER_SEARCH_PREF = "browser.search.";
 
-let runtime = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime);
-// Custom search parameters
-const PC_PARAM_VALUE = runtime.isOfficialBranding ? "MOZI" : null;
 
 function test() {
   let engine = Services.search.getEngineByName("Bing");
@@ -20,10 +17,7 @@ function test() {
   let previouslySelectedEngine = Services.search.currentEngine;
   Services.search.currentEngine = engine;
 
-  let base = "http://www.bing.com/search?q=foo";
-  if (typeof(PC_PARAM_VALUE) == "string")
-    base += "&pc=" + PC_PARAM_VALUE;
-
+  let base = "http://www.bing.com/search?q=foo&pc=MOZI";
   let url;
 
   // Test search URLs (including purposes).
@@ -36,7 +30,7 @@ function test() {
   var gTests = [
     {
       name: "context menu search",
-      searchURL: base + "&form=MOZSBR",
+      searchURL: base + "&form=MOZCON",
       run: function () {
         // Simulate a contextmenu search
         // FIXME: This is a bit "low-level"...
@@ -66,9 +60,56 @@ function test() {
       }
     },
     {
+      name: "new tab search",
+      searchURL: base + "&form=MOZTSB",
+      run: function () {
+        function doSearch(doc) {
+          // Re-add the listener, and perform a search
+          gBrowser.addProgressListener(listener);
+          doc.getElementById("newtab-search-text").value = "foo";
+          doc.getElementById("newtab-search-submit").click();
+        }
+
+        // load about:newtab, but remove the listener first so it doesn't
+        // get in the way
+        gBrowser.removeProgressListener(listener);
+        gBrowser.loadURI("about:newtab");
+        info("Waiting for about:newtab load");
+        tab.linkedBrowser.addEventListener("load", function load(event) {
+          if (event.originalTarget != tab.linkedBrowser.contentDocument ||
+              event.target.location.href == "about:blank") {
+            info("skipping spurious load event");
+            return;
+          }
+          tab.linkedBrowser.removeEventListener("load", load, true);
+
+          // Observe page setup
+          let win = gBrowser.contentWindow;
+          if (win.gSearch.currentEngineName ==
+              Services.search.currentEngine.name) {
+            doSearch(win.document);
+          }
+          else {
+            info("Waiting for newtab search init");
+            win.addEventListener("ContentSearchService", function done(event) {
+              info("Got newtab search event " + event.detail.type);
+              if (event.detail.type == "State") {
+                win.removeEventListener("ContentSearchService", done);
+                // Let gSearch respond to the event before continuing.
+                executeSoon(() => doSearch(win.document));
+              }
+            });
+          }
+        }, true);
+      }
+    },
+    {
       name: "home page search",
       searchURL: base + "&form=MOZSPG",
       run: function () {
+        // Bug 992270: Ignore uncaught about:home exceptions (related to snippets from IndexedDB)
+        ignoreAllUncaughtExceptions(true);
+
         // load about:home, but remove the listener first so it doesn't
         // get in the way
         gBrowser.removeProgressListener(listener);
@@ -101,6 +142,9 @@ function test() {
   ];
 
   function nextTest() {
+    // Make sure we listen again for uncaught exceptions in the next test or cleanup.
+    ignoreAllUncaughtExceptions(false);
+
     if (gTests.length) {
       gCurrTest = gTests.shift();
       info("Running : " + gCurrTest.name);

@@ -802,7 +802,7 @@ js::XDRStaticBlockObject(XDRState<mode> *xdr, HandleObject enclosingScope,
             return false;
 
         for (Shape::Range<NoGC> r(obj->lastProperty()); !r.empty(); r.popFront())
-            shapes[obj->shapeToIndex(r.front())] = &r.front();
+            shapes[obj->shapeToIndex(r.front())].set(&r.front());
 
         RootedShape shape(cx);
         RootedId propid(cx);
@@ -853,7 +853,7 @@ CloneStaticBlockObject(JSContext *cx, HandleObject enclosingScope, Handle<Static
         return nullptr;
 
     for (Shape::Range<NoGC> r(srcBlock->lastProperty()); !r.empty(); r.popFront())
-        shapes[srcBlock->shapeToIndex(r.front())] = &r.front();
+        shapes[srcBlock->shapeToIndex(r.front())].set(&r.front());
 
     for (Shape **p = shapes.begin(); p != shapes.end(); ++p) {
         RootedId id(cx, (*p)->propid());
@@ -1150,7 +1150,7 @@ class DebugScopeProxy : public BaseProxyHandler
         if (scope->is<CallObject>() && !scope->as<CallObject>().isForEval()) {
             CallObject &callobj = scope->as<CallObject>();
             RootedScript script(cx, callobj.callee().nonLazyScript());
-            if (!script->ensureHasTypes(cx))
+            if (!script->ensureHasTypes(cx) || !script->ensureHasAnalyzedArgsUsage(cx))
                 return false;
 
             Bindings &bindings = script->bindings;
@@ -1179,7 +1179,7 @@ class DebugScopeProxy : public BaseProxyHandler
                 } else {
                     /* The unaliased value has been lost to the debugger. */
                     if (action == GET)
-                        vp.set(UndefinedValue());
+                        vp.set(MagicValue(JS_OPTIMIZED_OUT));
                 }
             } else {
                 JS_ASSERT(bi->kind() == Binding::ARGUMENT);
@@ -1208,7 +1208,7 @@ class DebugScopeProxy : public BaseProxyHandler
                 } else {
                     /* The unaliased value has been lost to the debugger. */
                     if (action == GET)
-                        vp.set(UndefinedValue());
+                        vp.set(MagicValue(JS_OPTIMIZED_OUT));
                 }
 
                 if (action == SET)
@@ -1325,15 +1325,13 @@ class DebugScopeProxy : public BaseProxyHandler
     }
 
     bool getPropertyDescriptor(JSContext *cx, HandleObject proxy, HandleId id,
-                               MutableHandle<PropertyDescriptor> desc,
-                               unsigned flags) MOZ_OVERRIDE
+                               MutableHandle<PropertyDescriptor> desc) MOZ_OVERRIDE
     {
-        return getOwnPropertyDescriptor(cx, proxy, id, desc, flags);
+        return getOwnPropertyDescriptor(cx, proxy, id, desc);
     }
 
     bool getOwnPropertyDescriptor(JSContext *cx, HandleObject proxy, HandleId id,
-                                  MutableHandle<PropertyDescriptor> desc,
-                                  unsigned flags) MOZ_OVERRIDE
+                                  MutableHandle<PropertyDescriptor> desc) MOZ_OVERRIDE
     {
         Rooted<DebugScopeObject*> debugScope(cx, &proxy->as<DebugScopeObject>());
         Rooted<ScopeObject*> scope(cx, &debugScope->scope());
@@ -1361,7 +1359,7 @@ class DebugScopeProxy : public BaseProxyHandler
             return true;
         }
 
-        return JS_GetOwnPropertyDescriptorById(cx, scope, id, flags, desc);
+        return JS_GetOwnPropertyDescriptorById(cx, scope, id, desc);
     }
 
     bool get(JSContext *cx, HandleObject proxy, HandleObject receiver,  HandleId id,
@@ -1406,8 +1404,7 @@ class DebugScopeProxy : public BaseProxyHandler
         if (found)
             return Throw(cx, id, JSMSG_CANT_REDEFINE_PROP);
 
-        return JS_DefinePropertyById(cx, scope, id, desc.value(), desc.getter(), desc.setter(),
-                                     desc.attributes());
+        return JS_DefinePropertyById(cx, scope, id, desc.value(), desc.attributes(), desc.getter(), desc.setter());
     }
 
     bool getScopePropertyNames(JSContext *cx, HandleObject proxy, AutoIdVector &props,
@@ -1565,7 +1562,7 @@ js_IsDebugScopeSlow(ProxyObject *proxy)
 
 /* static */ MOZ_ALWAYS_INLINE void
 DebugScopes::proxiedScopesPostWriteBarrier(JSRuntime *rt, ObjectWeakMap *map,
-                                           const EncapsulatedPtr<JSObject> &key)
+                                           const PreBarrieredObject &key)
 {
 #ifdef JSGC_GENERATIONAL
     /*
@@ -1584,7 +1581,7 @@ DebugScopes::proxiedScopesPostWriteBarrier(JSRuntime *rt, ObjectWeakMap *map,
 
     typedef gc::HashKeyRef<UnbarrieredMap, JSObject *> Ref;
     if (key && IsInsideNursery(rt, key))
-        rt->gcStoreBuffer.putGeneric(Ref(unbarrieredMap, key.get()));
+        rt->gc.storeBuffer.putGeneric(Ref(unbarrieredMap, key.get()));
 #endif
 }
 
@@ -1602,7 +1599,7 @@ class DebugScopes::MissingScopesRef : public gc::BufferableRef
         MissingScopeMap::Ptr p = map->lookup(key);
         if (!p)
             return;
-        JS_SET_TRACING_LOCATION(trc, &const_cast<ScopeIterKey &>(p->key()).enclosingScope());
+        trc->setTracingLocation(&const_cast<ScopeIterKey &>(p->key()).enclosingScope());
         Mark(trc, &key.enclosingScope(), "MissingScopesRef");
         map->rekeyIfMoved(prior, key);
     }
@@ -1615,7 +1612,7 @@ DebugScopes::missingScopesPostWriteBarrier(JSRuntime *rt, MissingScopeMap *map,
 {
 #ifdef JSGC_GENERATIONAL
     if (key.enclosingScope() && IsInsideNursery(rt, key.enclosingScope()))
-        rt->gcStoreBuffer.putGeneric(MissingScopesRef(map, key));
+        rt->gc.storeBuffer.putGeneric(MissingScopesRef(map, key));
 #endif
 }
 
@@ -1631,7 +1628,7 @@ DebugScopes::liveScopesPostWriteBarrier(JSRuntime *rt, LiveScopeMap *map, ScopeO
                     RuntimeAllocPolicy> UnbarrieredLiveScopeMap;
     typedef gc::HashKeyRef<UnbarrieredLiveScopeMap, ScopeObject *> Ref;
     if (key && IsInsideNursery(rt, key))
-        rt->gcStoreBuffer.putGeneric(Ref(reinterpret_cast<UnbarrieredLiveScopeMap *>(map), key));
+        rt->gc.storeBuffer.putGeneric(Ref(reinterpret_cast<UnbarrieredLiveScopeMap *>(map), key));
 #endif
 }
 
@@ -1912,7 +1909,7 @@ DebugScopes::onPopCall(AbstractFramePtr frame, JSContext *cx)
         if (script->analyzedArgsUsage() && script->needsArgsObj() && frame.hasArgsObj()) {
             for (unsigned i = 0; i < frame.numFormalArgs(); ++i) {
                 if (script->formalLivesInArgumentsObject(i))
-                    vec[i] = frame.argsObj().arg(i);
+                    vec[i].set(frame.argsObj().arg(i));
             }
         }
 
@@ -2017,11 +2014,7 @@ DebugScopes::updateLiveScopes(JSContext *cx)
      * the flag for us, at exactly the time when execution resumes fp->prev().
      */
     for (AllFramesIter i(cx); !i.done(); ++i) {
-        /*
-         * Debug-mode currently disables Ion compilation in the compartment of
-         * the debuggee.
-         */
-        if (i.isIon())
+        if (!i.hasUsableAbstractFramePtr())
             continue;
 
         AbstractFramePtr frame = i.abstractFramePtr();
@@ -2254,13 +2247,11 @@ RemoveReferencedNames(JSContext *cx, HandleScript script, PropertyNameSet &remai
 
         switch (JSOp(*pc)) {
           case JSOP_NAME:
-          case JSOP_CALLNAME:
           case JSOP_SETNAME:
             name = script->getName(pc);
             break;
 
           case JSOP_GETALIASEDVAR:
-          case JSOP_CALLALIASEDVAR:
           case JSOP_SETALIASEDVAR:
             name = ScopeCoordinateName(cx->runtime()->scopeCoordinateNameCache, script, pc);
             break;

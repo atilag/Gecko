@@ -170,7 +170,7 @@ imgFrame::~imgFrame()
   mPalettedImageData = nullptr;
 
   if (mInformedDiscardTracker) {
-    DiscardTracker::InformAllocation(-4 * mSize.height * mSize.width);
+    DiscardTracker::InformDeallocation(4 * mSize.height * mSize.width);
   }
 }
 
@@ -203,6 +203,11 @@ nsresult imgFrame::Init(int32_t aX, int32_t aY, int32_t aWidth, int32_t aHeight,
       NS_WARNING("moz_malloc for paletted image data should succeed");
     NS_ENSURE_TRUE(mPalettedImageData, NS_ERROR_OUT_OF_MEMORY);
   } else {
+    // Inform the discard tracker that we are going to allocate some memory.
+    if (!DiscardTracker::TryAllocation(4 * mSize.width * mSize.height)) {
+      NS_WARNING("Exceed the hard limit of decode image size");
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
     // For Windows, we must create the device surface first (if we're
     // going to) so that the image surface can wrap it.  Can't be done
     // the other way around.
@@ -238,22 +243,20 @@ nsresult imgFrame::Init(int32_t aX, int32_t aY, int32_t aWidth, int32_t aHeight,
       } else if (!mImageSurface->CairoStatus()) {
         NS_WARNING("gfxImageSurface should have good CairoStatus");
       }
+
+      // Image surface allocation is failed, need to return
+      // the booked buffer size.
+      DiscardTracker::InformDeallocation(4 * mSize.width * mSize.height);
       return NS_ERROR_OUT_OF_MEMORY;
     }
+
+    mInformedDiscardTracker = true;
 
 #ifdef XP_MACOSX
     if (!ShouldUseImageSurfaces()) {
       mQuartzSurface = new gfxQuartzImageSurface(mImageSurface);
     }
 #endif
-  }
-
-  // Inform the discard tracker that we've allocated some memory, but only if
-  // we're not a paletted image (paletted images are not usually large and are
-  // used only for animated frames, which we don't discard).
-  if (!mPalettedImageData) {
-    DiscardTracker::InformAllocation(4 * mSize.width * mSize.height);
-    mInformedDiscardTracker = true;
   }
 
   return NS_OK;
@@ -309,11 +312,12 @@ nsresult imgFrame::Optimize()
 #ifdef XP_MACOSX
         mQuartzSurface = nullptr;
 #endif
+        mDrawSurface = nullptr;
 
         // We just dumped most of our allocated memory, so tell the discard
         // tracker that we're not using any at all.
         if (mInformedDiscardTracker) {
-          DiscardTracker::InformAllocation(-4 * mSize.width * mSize.height);
+          DiscardTracker::InformDeallocation(4 * mSize.width * mSize.height);
           mInformedDiscardTracker = false;
         }
 
@@ -368,6 +372,7 @@ nsresult imgFrame::Optimize()
     mImageSurface = surf;
     mVBuf = buf;
     mFormat = optFormat;
+    mDrawSurface = nullptr;
   }
 #else
   if (mOptSurface == nullptr)
@@ -383,6 +388,7 @@ nsresult imgFrame::Optimize()
 #ifdef XP_MACOSX
     mQuartzSurface = nullptr;
 #endif
+    mDrawSurface = nullptr;
   }
 
   return NS_OK;
@@ -500,11 +506,28 @@ bool imgFrame::Draw(gfxContext *aContext, GraphicsFilter aFilter,
   NS_ASSERTION(!sourceRect.Intersect(subimage).IsEmpty(),
                "We must be allowed to sample *some* source pixels!");
 
-  nsRefPtr<gfxASurface> surf;
-  if (!mSinglePixel) {
-    surf = ThebesSurface();
-    if (!surf)
+  nsRefPtr<gfxASurface> surf = CachedThebesSurface();
+  VolatileBufferPtr<unsigned char> ref(mVBuf);
+  if (!mSinglePixel && !surf) {
+    if (ref.WasBufferPurged()) {
       return false;
+    }
+
+    surf = mDrawSurface;
+    if (!surf) {
+      long stride = gfxImageSurface::ComputeStride(mSize, mFormat);
+      nsRefPtr<gfxImageSurface> imgSurf =
+        new gfxImageSurface(ref, mSize, stride, mFormat);
+#if defined(XP_MACOSX)
+      surf = mDrawSurface = new gfxQuartzImageSurface(imgSurf);
+#else
+      surf = mDrawSurface = imgSurf;
+#endif
+    }
+    if (!surf || surf->CairoStatus()) {
+      mDrawSurface = nullptr;
+      return true;
+    }
   }
 
   bool doTile = !imageRect.Contains(sourceRect) &&
@@ -826,7 +849,10 @@ void imgFrame::ApplyDirtToSurfaces()
 void imgFrame::SetDiscardable()
 {
   MOZ_ASSERT(mLockCount, "Expected to be locked when SetDiscardable is called");
+  // Disabled elsewhere due to the cost of calling GetSourceSurfaceForSurface.
+#ifdef MOZ_WIDGET_ANDROID
   mDiscardable = true;
+#endif
 }
 
 int32_t imgFrame::GetRawTimeout() const
@@ -944,6 +970,10 @@ imgFrame::SizeOfExcludingThisWithComputedFallbackIfHeap(gfxMemoryLocation aLocat
   if (mVBuf && aLocation == gfxMemoryLocation::IN_PROCESS_HEAP) {
     n += aMallocSizeOf(mVBuf);
     n += mVBuf->HeapSizeOfExcludingThis(aMallocSizeOf);
+  }
+
+  if (mVBuf && aLocation == gfxMemoryLocation::IN_PROCESS_NONHEAP) {
+    n += mVBuf->NonHeapSizeOfExcludingThis();
   }
 
   if (mOptSurface && aLocation == mOptSurface->GetMemoryLocation()) {

@@ -106,13 +106,13 @@ txStylesheetSink::txStylesheetSink(txStylesheetCompiler* aCompiler,
     mListener = do_QueryInterface(aParser);
 }
 
-NS_IMPL_ISUPPORTS6(txStylesheetSink,
-                   nsIXMLContentSink,
-                   nsIContentSink,
-                   nsIExpatSink,
-                   nsIStreamListener,
-                   nsIRequestObserver,
-                   nsIInterfaceRequestor)
+NS_IMPL_ISUPPORTS(txStylesheetSink,
+                  nsIXMLContentSink,
+                  nsIContentSink,
+                  nsIExpatSink,
+                  nsIStreamListener,
+                  nsIRequestObserver,
+                  nsIInterfaceRequestor)
 
 NS_IMETHODIMP
 txStylesheetSink::HandleStartElement(const char16_t *aName,
@@ -381,9 +381,13 @@ private:
     nsCOMPtr<nsILoadGroup> mLoadGroup;
     nsCOMPtr<nsIPrincipal> mCallerPrincipal;
 
-protected:
     // This exists solely to suppress a warning from nsDerivedSafe
     txCompileObserver();
+
+    // Private destructor, to discourage deletion outside of Release():
+    ~txCompileObserver()
+    {
+    }
 };
 
 txCompileObserver::txCompileObserver(txMozillaXSLTProcessor* aProcessor,
@@ -605,7 +609,12 @@ public:
     TX_DECL_ACOMPILEOBSERVER
     NS_INLINE_DECL_REFCOUNTING(txSyncCompileObserver)
 
-protected:
+private:
+    // Private destructor, to discourage deletion outside of Release():
+    ~txSyncCompileObserver()
+    {
+    }
+
     nsRefPtr<txMozillaXSLTProcessor> mProcessor;
 };
 

@@ -22,7 +22,6 @@
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsFrameMessageManager.h"
 #include "nsIWebProgressListener.h"
-#include "nsDOMEventTargetHelper.h"
 #include "nsIPresShell.h"
 #include "nsIScriptObjectPrincipal.h"
 #include "nsWeakReference.h"
@@ -30,6 +29,7 @@
 #include "nsITooltipListener.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/TabContext.h"
+#include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/layers/CompositorTypes.h"
@@ -42,13 +42,21 @@ namespace layout {
 class RenderFrameChild;
 }
 
+namespace layers {
+class ActiveElementManager;
+}
+
+namespace widget {
+struct AutoCacheNativeKeyCommands;
+}
+
 namespace dom {
 
 class TabChild;
 class ClonedMessageData;
 class TabChildBase;
 
-class TabChildGlobal : public nsDOMEventTargetHelper,
+class TabChildGlobal : public DOMEventTargetHelper,
                        public nsIContentFrameMessageManager,
                        public nsIScriptObjectPrincipal,
                        public nsIGlobalObject
@@ -57,7 +65,7 @@ public:
   TabChildGlobal(TabChildBase* aTabChild);
   void Init();
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TabChildGlobal, nsDOMEventTargetHelper)
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TabChildGlobal, DOMEventTargetHelper)
   NS_FORWARD_SAFE_NSIMESSAGELISTENERMANAGER(mMessageManager)
   NS_FORWARD_SAFE_NSIMESSAGESENDER(mMessageManager)
   NS_IMETHOD SendSyncMessage(const nsAString& aMessageName,
@@ -103,19 +111,19 @@ public:
                               bool aUseCapture)
   {
     // By default add listeners only for trusted events!
-    return nsDOMEventTargetHelper::AddEventListener(aType, aListener,
-                                                    aUseCapture, false, 2);
+    return DOMEventTargetHelper::AddEventListener(aType, aListener,
+                                                  aUseCapture, false, 2);
   }
-  using nsDOMEventTargetHelper::AddEventListener;
+  using DOMEventTargetHelper::AddEventListener;
   NS_IMETHOD AddEventListener(const nsAString& aType,
                               nsIDOMEventListener* aListener,
                               bool aUseCapture, bool aWantsUntrusted,
                               uint8_t optional_argc) MOZ_OVERRIDE
   {
-    return nsDOMEventTargetHelper::AddEventListener(aType, aListener,
-                                                    aUseCapture,
-                                                    aWantsUntrusted,
-                                                    optional_argc);
+    return DOMEventTargetHelper::AddEventListener(aType, aListener,
+                                                  aUseCapture,
+                                                  aWantsUntrusted,
+                                                  optional_argc);
   }
 
   nsresult
@@ -130,7 +138,7 @@ public:
   virtual JSObject* GetGlobalJSObject() MOZ_OVERRIDE;
 
   nsCOMPtr<nsIContentFrameMessageManager> mMessageManager;
-  TabChildBase* mTabChild;
+  nsRefPtr<TabChildBase> mTabChild;
 };
 
 class ContentListener MOZ_FINAL : public nsIDOMEventListener
@@ -147,11 +155,14 @@ protected:
 // between b2g/android FF/embedlite clients implementation.
 // It make sense to place in this class all helper functions, and functionality which could be shared between
 // Cross-process/Cross-thread implmentations.
-class TabChildBase : public nsFrameScriptExecutor,
+class TabChildBase : public nsISupports,
+                     public nsFrameScriptExecutor,
                      public ipc::MessageManagerCallback
 {
 public:
     TabChildBase();
+    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+    NS_DECL_CYCLE_COLLECTION_CLASS(TabChildBase)
 
     virtual nsIWebNavigation* WebNavigation() = 0;
     virtual nsIWidget* WebWidget() = 0;
@@ -194,7 +205,6 @@ protected:
 
     nsEventStatus DispatchWidgetEvent(WidgetGUIEvent& event);
 
-    bool HasValidInnerSize();
     void InitializeRootMetrics();
 
     mozilla::layers::FrameMetrics ProcessUpdateFrame(const mozilla::layers::FrameMetrics& aFrameMetrics);
@@ -228,6 +238,7 @@ class TabChild : public PBrowserChild,
     typedef mozilla::dom::ClonedMessageData ClonedMessageData;
     typedef mozilla::layout::RenderFrameChild RenderFrameChild;
     typedef mozilla::layout::ScrollingBehavior ScrollingBehavior;
+    typedef mozilla::layers::ActiveElementManager ActiveElementManager;
 
 public:
     /** 
@@ -296,8 +307,9 @@ public:
                                    const mozilla::layers::ScrollableLayerGuid& aGuid) MOZ_OVERRIDE;
     virtual bool RecvHandleLongTapUp(const CSSPoint& aPoint,
                                      const mozilla::layers::ScrollableLayerGuid& aGuid) MOZ_OVERRIDE;
-    virtual bool RecvNotifyTransformBegin(const ViewID& aViewId) MOZ_OVERRIDE;
-    virtual bool RecvNotifyTransformEnd(const ViewID& aViewId) MOZ_OVERRIDE;
+    virtual bool RecvNotifyAPZStateChange(const ViewID& aViewId,
+                                          const APZStateChange& aChange,
+                                          const int& aArg) MOZ_OVERRIDE;
     virtual bool RecvActivate() MOZ_OVERRIDE;
     virtual bool RecvDeactivate() MOZ_OVERRIDE;
     virtual bool RecvMouseEvent(const nsString& aType,
@@ -387,6 +399,8 @@ public:
 
     void NotifyPainted();
 
+    void RequestNativeKeyBindings(mozilla::widget::AutoCacheNativeKeyCommands* aAutoCache,
+                                  WidgetKeyboardEvent* aEvent);
 
     /** Return a boolean indicating if the page has called preventDefault on
      *  the event.
@@ -430,6 +444,9 @@ public:
     }
 
     static TabChild* GetFrom(nsIPresShell* aPresShell);
+    static TabChild* GetFrom(uint64_t aLayersId);
+
+    void DidComposite();
 
     static inline TabChild*
     GetFrom(nsIDOMWindow* aWindow)
@@ -504,6 +521,8 @@ private:
                               bool* aWindowIsNew,
                               nsIDOMWindow** aReturn);
 
+    bool HasValidInnerSize();
+
     class CachedFileDescriptorInfo;
     class CachedFileDescriptorCallbackRunnable;
 
@@ -514,6 +533,7 @@ private:
     RenderFrameChild* mRemoteFrame;
     nsRefPtr<ContentChild> mManager;
     uint32_t mChromeFlags;
+    uint64_t mLayersId;
     nsIntRect mOuterRect;
     // When we're tracking a possible tap gesture, this is the "down"
     // point of the touchstart.
@@ -540,6 +560,8 @@ private:
     void FireSingleTapEvent(LayoutDevicePoint aPoint);
 
     bool mIgnoreKeyPressEvent;
+    nsRefPtr<ActiveElementManager> mActiveElementManager;
+    bool mHasValidInnerSize;
 
     DISALLOW_EVIL_CONSTRUCTORS(TabChild);
 };

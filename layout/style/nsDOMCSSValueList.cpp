@@ -31,12 +31,12 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDOMCSSValueList)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, CSSValue)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(nsDOMCSSValueList, mCSSValues)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsDOMCSSValueList, mCSSValues)
 
 JSObject*
-nsDOMCSSValueList::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
+nsDOMCSSValueList::WrapObject(JSContext *cx)
 {
-  return dom::CSSValueListBinding::Wrap(cx, scope, this);
+  return dom::CSSValueListBinding::Wrap(cx, this);
 }
 
 void

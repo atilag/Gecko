@@ -18,15 +18,15 @@ namespace mozilla {
 
 namespace layout {
 class RenderFrameChild;
+class ShadowLayerForwarder;
 }
 
 namespace layers {
 
 class LayerTransactionChild : public PLayerTransactionChild
-                            , public AtomicRefCounted<LayerTransactionChild>
 {
 public:
-  MOZ_DECLARE_REFCOUNTED_TYPENAME(LayerTransactionChild)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(LayerTransactionChild)
   /**
    * Clean this up, finishing with Send__delete__().
    *
@@ -38,20 +38,16 @@ public:
 
   bool IPCOpen() const { return mIPCOpen; }
 
+  void SetForwarder(ShadowLayerForwarder* aForwarder)
+  {
+    mForwarder = aForwarder;
+  }
+
 protected:
   LayerTransactionChild()
     : mIPCOpen(false)
   {}
   ~LayerTransactionChild() { }
-  friend class AtomicRefCounted<LayerTransactionChild>;
-  friend class detail::RefCounted<LayerTransactionChild, detail::AtomicRefCount>;
-
-  virtual PGrallocBufferChild*
-  AllocPGrallocBufferChild(const IntSize&,
-                           const uint32_t&, const uint32_t&,
-                           MaybeMagicGrallocBufferHandle*) MOZ_OVERRIDE;
-  virtual bool
-  DeallocPGrallocBufferChild(PGrallocBufferChild* actor) MOZ_OVERRIDE;
 
   virtual PLayerChild* AllocPLayerChild() MOZ_OVERRIDE;
   virtual bool DeallocPLayerChild(PLayerChild* actor) MOZ_OVERRIDE;
@@ -62,6 +58,9 @@ protected:
   virtual PTextureChild* AllocPTextureChild(const SurfaceDescriptor& aSharedData,
                                             const TextureFlags& aFlags) MOZ_OVERRIDE;
   virtual bool DeallocPTextureChild(PTextureChild* actor) MOZ_OVERRIDE;
+
+  virtual bool
+  RecvParentAsyncMessage(const mozilla::layers::AsyncParentMessageData& aMessage) MOZ_OVERRIDE;
 
   virtual void ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE;
 
@@ -79,6 +78,7 @@ protected:
   friend class layout::RenderFrameChild;
 
   bool mIPCOpen;
+  ShadowLayerForwarder* mForwarder;
 };
 
 } // namespace layers

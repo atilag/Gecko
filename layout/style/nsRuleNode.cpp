@@ -274,7 +274,7 @@ static nsSize CalcViewportUnitsScale(nsPresContext* aPresContext)
         styles.mVertical == NS_STYLE_OVERFLOW_SCROLL) {
       // Gather scrollbar size information.
       nsRefPtr<nsRenderingContext> context =
-        aPresContext->PresShell()->GetReferenceRenderingContext();
+        aPresContext->PresShell()->CreateReferenceRenderingContext();
       nsMargin sizes(scrollFrame->GetDesiredScrollbarSizes(aPresContext, context));
 
       if (styles.mHorizontal == NS_STYLE_OVERFLOW_SCROLL) {
@@ -4261,13 +4261,13 @@ nsRuleNode::ComputeTextData(void* aStartStruct,
               parentText->mTextOrientation,
               NS_STYLE_TEXT_ORIENTATION_AUTO, 0, 0, 0, 0);
 
-  // text-combine-horizontal: enum, inherit, initial
-  SetDiscrete(*aRuleData->ValueForTextCombineHorizontal(),
-              text->mTextCombineHorizontal,
+  // text-combine-upright: enum, inherit, initial
+  SetDiscrete(*aRuleData->ValueForTextCombineUpright(),
+              text->mTextCombineUpright,
               canStoreInRuleTree,
               SETDSC_ENUMERATED | SETDSC_UNSET_INHERIT,
-              parentText->mTextCombineHorizontal,
-              NS_STYLE_TEXT_COMBINE_HORIZ_NONE, 0, 0, 0, 0);
+              parentText->mTextCombineUpright,
+              NS_STYLE_TEXT_COMBINE_UPRIGHT_NONE, 0, 0, 0, 0);
 
   COMPUTE_END_INHERITED(Text, text)
 }
@@ -6239,14 +6239,6 @@ nsRuleNode::ComputeBackgroundData(void* aStartStruct,
                     uint8_t(NS_STYLE_BG_CLIP_BORDER), parentBG->mClipCount,
                     bg->mClipCount, maxItemCount, rebuild, canStoreInRuleTree);
 
-  // background-inline-policy: enum, inherit, initial
-  SetDiscrete(*aRuleData->ValueForBackgroundInlinePolicy(),
-              bg->mBackgroundInlinePolicy,
-              canStoreInRuleTree,
-              SETDSC_ENUMERATED | SETDSC_UNSET_INITIAL,
-              parentBG->mBackgroundInlinePolicy,
-              NS_STYLE_BG_INLINE_POLICY_CONTINUOUS, 0, 0, 0, 0);
-
   // background-blend-mode: enum, inherit, initial [list]
   SetBackgroundList(aContext, *aRuleData->ValueForBackgroundBlendMode(),
                     bg->mLayers,
@@ -6444,6 +6436,13 @@ nsRuleNode::ComputeBorderData(void* aStartStruct,
                               const bool aCanStoreInRuleTree)
 {
   COMPUTE_START_RESET(Border, (mPresContext), border, parentBorder)
+
+  // box-decoration-break: enum, inherit, initial
+  SetDiscrete(*aRuleData->ValueForBoxDecorationBreak(),
+              border->mBoxDecorationBreak, canStoreInRuleTree,
+              SETDSC_ENUMERATED | SETDSC_UNSET_INITIAL,
+              parentBorder->mBoxDecorationBreak,
+              NS_STYLE_BOX_DECORATION_BREAK_SLICE, 0, 0, 0, 0);
 
   // box-shadow: none, list, inherit, initial
   const nsCSSValue* boxShadowValue = aRuleData->ValueForBoxShadow();
@@ -7506,7 +7505,7 @@ nsRuleNode::ComputePositionData(void* aStartStruct,
       break;
     case eCSSUnit_Initial:
     case eCSSUnit_Unset:
-      pos->mGridAutoFlow = NS_STYLE_GRID_AUTO_FLOW_NONE;
+      pos->mGridAutoFlow = NS_STYLE_GRID_AUTO_FLOW_ROW;
       break;
     default:
       NS_ASSERTION(gridAutoFlow.GetUnit() == eCSSUnit_Enumerated,
@@ -7545,33 +7544,6 @@ nsRuleNode::ComputePositionData(void* aStartStruct,
                        &pos->mGridTemplateAreas,
                        parentPos->mGridTemplateAreas,
                        canStoreInRuleTree);
-
-  // grid-auto-position
-  const nsCSSValue& gridAutoPosition = *aRuleData->ValueForGridAutoPosition();
-  switch (gridAutoPosition.GetUnit()) {
-    case eCSSUnit_Null:
-      break;
-    case eCSSUnit_Inherit:
-      canStoreInRuleTree = false;
-      pos->mGridAutoPositionColumn = parentPos->mGridAutoPositionColumn;
-      pos->mGridAutoPositionRow = parentPos->mGridAutoPositionRow;
-      break;
-    case eCSSUnit_Initial:
-    case eCSSUnit_Unset:
-      // '1 / 1'
-      pos->mGridAutoPositionColumn.SetToInteger(1);
-      pos->mGridAutoPositionRow.SetToInteger(1);
-      break;
-    default:
-      SetGridLine(gridAutoPosition.GetPairValue().mXValue,
-                  pos->mGridAutoPositionColumn,
-                  parentPos->mGridAutoPositionColumn,
-                  canStoreInRuleTree);
-      SetGridLine(gridAutoPosition.GetPairValue().mYValue,
-                  pos->mGridAutoPositionRow,
-                  parentPos->mGridAutoPositionRow,
-                  canStoreInRuleTree);
-  }
 
   // grid-column-start
   SetGridLine(*aRuleData->ValueForGridColumnStart(),

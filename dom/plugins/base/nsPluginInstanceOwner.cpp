@@ -349,11 +349,11 @@ nsPluginInstanceOwner::~nsPluginInstanceOwner()
   }
 }
 
-NS_IMPL_ISUPPORTS4(nsPluginInstanceOwner,
-                   nsIPluginInstanceOwner,
-                   nsIDOMEventListener,
-                   nsIPrivacyTransitionObserver,
-                   nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(nsPluginInstanceOwner,
+                  nsIPluginInstanceOwner,
+                  nsIDOMEventListener,
+                  nsIPrivacyTransitionObserver,
+                  nsISupportsWeakReference)
 
 nsresult
 nsPluginInstanceOwner::SetInstance(nsNPAPIPluginInstance *aInstance)
@@ -1465,7 +1465,7 @@ void nsPluginInstanceOwner::RemovePluginView()
   if (!mInstance || !mJavaView)
     return;
 
-  GeckoAppShell::RemovePluginView((jobject)mJavaView, mFullScreen);
+  mozilla::widget::android::GeckoAppShell::RemovePluginView((jobject)mJavaView, mFullScreen);
   AndroidBridge::GetJNIEnv()->DeleteGlobalRef((jobject)mJavaView);
   mJavaView = nullptr;
 
@@ -1897,7 +1897,7 @@ nsEventStatus nsPluginInstanceOwner::ProcessEvent(const WidgetGUIEvent& anEvent)
 #ifdef XP_WIN
   // this code supports windowless plugins
   NPEvent *pPluginEvent = (NPEvent*)anEvent.pluginEvent;
-  // we can get synthetic events from the nsEventStateManager... these
+  // we can get synthetic events from the EventStateManager... these
   // have no pluginEvent
   NPEvent pluginEvent;
   if (anEvent.eventStructType == NS_MOUSE_EVENT) {
@@ -3177,8 +3177,8 @@ nsPluginDOMContextMenuListener::~nsPluginDOMContextMenuListener()
 {
 }
 
-NS_IMPL_ISUPPORTS1(nsPluginDOMContextMenuListener,
-                   nsIDOMEventListener)
+NS_IMPL_ISUPPORTS(nsPluginDOMContextMenuListener,
+                  nsIDOMEventListener)
 
 NS_IMETHODIMP
 nsPluginDOMContextMenuListener::HandleEvent(nsIDOMEvent* aEvent)

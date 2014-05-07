@@ -10,7 +10,7 @@
 #include "nsAutoPtr.h"
 #include "nsISupportsImpl.h"
 
-class DeviceStorageFileDescriptor;
+struct DeviceStorageFileDescriptor;
 
 class nsIFile;
 
@@ -46,11 +46,12 @@ enum {
   CAMERA_PARAM_FOCUSDISTANCEOPTIMUM,
   CAMERA_PARAM_FOCUSDISTANCEFAR,
   CAMERA_PARAM_EXPOSURECOMPENSATION,
-  CAMERA_PARAM_PICTURESIZE,
   CAMERA_PARAM_THUMBNAILSIZE,
   CAMERA_PARAM_THUMBNAILQUALITY,
   CAMERA_PARAM_SENSORANGLE,
   CAMERA_PARAM_ISOMODE,
+  CAMERA_PARAM_LUMINANCE,
+  CAMERA_PARAM_SCENEMODE_HDR_RETURNNORMALPICTURE,
 
   // supported features
   CAMERA_PARAM_SUPPORTED_PREVIEWSIZES,
@@ -69,6 +70,7 @@ enum {
   CAMERA_PARAM_SUPPORTED_EXPOSURECOMPENSATIONSTEP,
   CAMERA_PARAM_SUPPORTED_ZOOM,
   CAMERA_PARAM_SUPPORTED_ZOOMRATIOS,
+  CAMERA_PARAM_SUPPORTED_MAXDETECTEDFACES,
   CAMERA_PARAM_SUPPORTED_JPEG_THUMBNAIL_SIZES,
   CAMERA_PARAM_SUPPORTED_ISOMODES
 };
@@ -78,8 +80,28 @@ class ICameraControl
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ICameraControl)
 
+  // Returns the number of cameras supported by the system.
+  //
+  // Return values:
+  //  - NS_OK on success;
+  //  - NS_ERROR_FAILURE if the camera count cannot be retrieved.
   static nsresult GetNumberOfCameras(int32_t& aDeviceCount);
+
+  // Gets the (possibly-meaningful) name of a particular camera.
+  //
+  // Return values:
+  //  - NS_OK on success;
+  //  - NS_ERROR_INVALID_ARG if 'aDeviceNum' is not a valid camera number;
+  //  - NS_ERROR_NOT_AVAILABLE if 'aDeviceNum' is valid but the camera name
+  //      could still not be retrieved.
   static nsresult GetCameraName(uint32_t aDeviceNum, nsCString& aDeviceName);
+
+  // Returns a list of names of all cameras supported by the system.
+  //
+  // Return values:
+  //  - NS_OK on success, even if no camera names are returned (in which
+  //      case 'aList' will be empty);
+  //  - NS_ERROR_NOT_AVAILABLE if the list of cameras cannot be retrieved.
   static nsresult GetListOfCameras(nsTArray<nsString>& aList);
 
   enum Mode {
@@ -102,16 +124,17 @@ public:
   };
 
   struct Position {
-    double latitude;
-    double longitude;
-    double altitude;
-    double timestamp;
+    double    latitude;
+    double    longitude;
+    double    altitude;
+    double    timestamp;
   };
 
   struct StartRecordingOptions {
     uint32_t  rotation;
     uint32_t  maxFileSizeBytes;
     uint32_t  maxVideoLengthMs;
+    bool      autoEnableLowLightTorch;
   };
 
   struct Configuration {
@@ -119,24 +142,61 @@ public:
     Size      mPreviewSize;
     nsString  mRecorderProfile;
   };
+
+  struct Point {
+    int32_t   x;
+    int32_t   y;
+  };
+
+  struct Face {
+    uint32_t  id;
+    uint32_t  score;
+    Region    bound;
+    bool      hasLeftEye;
+    Point     leftEye;
+    bool      hasRightEye;
+    Point     rightEye;
+    bool      hasMouth;
+    Point     mouth;
+  };
+
   static already_AddRefed<ICameraControl> Create(uint32_t aCameraId);
-
-  virtual nsresult Start(const Configuration* aInitialConfig = nullptr) = 0;
-  virtual nsresult Stop() = 0;
-
-  virtual nsresult SetConfiguration(const Configuration& aConfig) = 0;
 
   virtual void AddListener(CameraControlListener* aListener) = 0;
   virtual void RemoveListener(CameraControlListener* aListener) = 0;
 
+  // Camera control methods.
+  //
+  // Return values:
+  //  - NS_OK on success (if the method requires an asynchronous process,
+  //      this value indicates that the process has begun successfully);
+  //  - NS_ERROR_INVALID_ARG if one or more arguments is invalid;
+  //  - NS_ERROR_FAILURE if an asynchronous method could not be dispatched.
+  virtual nsresult Start(const Configuration* aInitialConfig = nullptr) = 0;
+  virtual nsresult Stop() = 0;
+  virtual nsresult SetConfiguration(const Configuration& aConfig) = 0;
   virtual nsresult StartPreview() = 0;
   virtual nsresult StopPreview() = 0;
-  virtual nsresult AutoFocus(bool aCancelExistingCall) = 0;
+  virtual nsresult AutoFocus() = 0;
   virtual nsresult TakePicture() = 0;
   virtual nsresult StartRecording(DeviceStorageFileDescriptor *aFileDescriptor,
                                   const StartRecordingOptions* aOptions = nullptr) = 0;
   virtual nsresult StopRecording() = 0;
+  virtual nsresult StartFaceDetection() = 0;
+  virtual nsresult StopFaceDetection() = 0;
+  virtual nsresult ResumeContinuousFocus() = 0;
 
+  // Camera parameter getters and setters. 'aKey' must be one of the
+  // CAMERA_PARAM_* values enumerated above.
+  //
+  // Return values:
+  //  - NS_OK on success;
+  //  - NS_ERROR_INVALID_ARG if 'aValue' contains an invalid value;
+  //  - NS_ERROR_NOT_IMPLEMENTED if 'aKey' is invalid;
+  //  - NS_ERROR_NOT_AVAILABLE if the getter fails to retrieve a valid value,
+  //      or if a setter fails because it requires one or more values that
+  //      could not be retrieved;
+  //  - NS_ERROR_FAILURE on unexpected internal failures.
   virtual nsresult Set(uint32_t aKey, const nsAString& aValue) = 0;
   virtual nsresult Get(uint32_t aKey, nsAString& aValue) = 0;
   virtual nsresult Set(uint32_t aKey, double aValue) = 0;

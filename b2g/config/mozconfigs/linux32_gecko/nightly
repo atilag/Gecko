@@ -21,7 +21,8 @@ export MOZ_TELEMETRY_REPORTING=1
 # Treat warnings as errors in directories with FAIL_ON_WARNINGS.
 # DISABLED WHILE NOT ON TRY ac_add_options --enable-warnings-as-errors
 
-# Use ccache
+# Use sccache
+no_sccache=
 . "$topsrcdir/build/mozconfig.cache"
 
 #B2G options
@@ -30,5 +31,8 @@ ac_add_options --disable-elf-hack
 export CXXFLAGS=-DMOZ_ENABLE_JS_DUMP
 
 GAIADIR=$topsrcdir/gaia
+
+# Build simulator xpi and phone tweaks for b2g-desktop
+FXOS_SIMULATOR=1
 
 . "$topsrcdir/b2g/config/mozconfigs/common.override"

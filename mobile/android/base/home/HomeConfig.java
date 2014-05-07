@@ -5,6 +5,8 @@
 
 package org.mozilla.gecko.home;
 
+import org.mozilla.gecko.GeckoAppShell;
+import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.util.ThreadUtils;
 
@@ -142,7 +144,7 @@ public final class HomeConfig {
                 final int viewCount = jsonViews.length();
                 for (int i = 0; i < viewCount; i++) {
                     final JSONObject jsonViewConfig = (JSONObject) jsonViews.get(i);
-                    final ViewConfig viewConfig = new ViewConfig(jsonViewConfig);
+                    final ViewConfig viewConfig = new ViewConfig(i, jsonViewConfig);
                     mViews.add(viewConfig);
                 }
             } else {
@@ -603,12 +605,15 @@ public final class HomeConfig {
     }
 
     public static class ViewConfig implements Parcelable {
+        private final int mIndex;
         private final ViewType mType;
         private final String mDatasetId;
         private final ItemType mItemType;
         private final ItemHandler mItemHandler;
         private final String mBackImageUrl;
         private final String mFilter;
+        private final EmptyViewConfig mEmptyViewConfig;
+        private final EnumSet<Flags> mFlags;
 
         private static final String JSON_KEY_TYPE = "type";
         private static final String JSON_KEY_DATASET = "dataset";
@@ -616,8 +621,15 @@ public final class HomeConfig {
         private static final String JSON_KEY_ITEM_HANDLER = "itemHandler";
         private static final String JSON_KEY_BACK_IMAGE_URL = "backImageUrl";
         private static final String JSON_KEY_FILTER = "filter";
+        private static final String JSON_KEY_EMPTY = "empty";
+        private static final String JSON_KEY_REFRESH_ENABLED = "refreshEnabled";
 
-        public ViewConfig(JSONObject json) throws JSONException, IllegalArgumentException {
+        public enum Flags {
+            REFRESH_ENABLED
+        }
+
+        public ViewConfig(int index, JSONObject json) throws JSONException, IllegalArgumentException {
+            mIndex = index;
             mType = ViewType.fromId(json.getString(JSON_KEY_TYPE));
             mDatasetId = json.getString(JSON_KEY_DATASET);
             mItemType = ItemType.fromId(json.getString(JSON_KEY_ITEM_TYPE));
@@ -625,40 +637,62 @@ public final class HomeConfig {
             mBackImageUrl = json.optString(JSON_KEY_BACK_IMAGE_URL, null);
             mFilter = json.optString(JSON_KEY_FILTER, null);
 
+            final JSONObject jsonEmptyViewConfig = json.optJSONObject(JSON_KEY_EMPTY);
+            if (jsonEmptyViewConfig != null) {
+                mEmptyViewConfig = new EmptyViewConfig(jsonEmptyViewConfig);
+            } else {
+                mEmptyViewConfig = null;
+            }
+
+            mFlags = EnumSet.noneOf(Flags.class);
+            if (json.optBoolean(JSON_KEY_REFRESH_ENABLED, false)) {
+                mFlags.add(Flags.REFRESH_ENABLED);
+            }
+
             validate();
         }
 
         @SuppressWarnings("unchecked")
         public ViewConfig(Parcel in) {
+            mIndex = in.readInt();
             mType = (ViewType) in.readParcelable(getClass().getClassLoader());
             mDatasetId = in.readString();
             mItemType = (ItemType) in.readParcelable(getClass().getClassLoader());
             mItemHandler = (ItemHandler) in.readParcelable(getClass().getClassLoader());
             mBackImageUrl = in.readString();
             mFilter = in.readString();
+            mEmptyViewConfig = (EmptyViewConfig) in.readParcelable(getClass().getClassLoader());
+            mFlags = (EnumSet<Flags>) in.readSerializable();
 
             validate();
         }
 
         public ViewConfig(ViewConfig viewConfig) {
+            mIndex = viewConfig.mIndex;
             mType = viewConfig.mType;
             mDatasetId = viewConfig.mDatasetId;
             mItemType = viewConfig.mItemType;
             mItemHandler = viewConfig.mItemHandler;
             mBackImageUrl = viewConfig.mBackImageUrl;
             mFilter = viewConfig.mFilter;
+            mEmptyViewConfig = viewConfig.mEmptyViewConfig;
+            mFlags = viewConfig.mFlags.clone();
 
             validate();
         }
 
-        public ViewConfig(ViewType type, String datasetId, ItemType itemType,
-                          ItemHandler itemHandler, String backImageUrl, String filter) {
+        public ViewConfig(int index, ViewType type, String datasetId, ItemType itemType,
+                          ItemHandler itemHandler, String backImageUrl, String filter,
+                          EmptyViewConfig emptyViewConfig, EnumSet<Flags> flags) {
+            mIndex = index;
             mType = type;
             mDatasetId = datasetId;
             mItemType = itemType;
             mItemHandler = itemHandler;
             mBackImageUrl = backImageUrl;
             mFilter = filter;
+            mEmptyViewConfig = emptyViewConfig;
+            mFlags = flags;
 
             validate();
         }
@@ -679,6 +713,14 @@ public final class HomeConfig {
             if (mItemHandler == null) {
                 throw new IllegalArgumentException("Can't create ViewConfig with null item handler");
             }
+
+            if (mFlags == null) {
+               throw new IllegalArgumentException("Can't create ViewConfig with null flags");
+            }
+        }
+
+        public int getIndex() {
+            return mIndex;
         }
 
         public ViewType getType() {
@@ -705,6 +747,14 @@ public final class HomeConfig {
             return mFilter;
         }
 
+        public EmptyViewConfig getEmptyViewConfig() {
+            return mEmptyViewConfig;
+        }
+
+        public boolean isRefreshEnabled() {
+            return mFlags.contains(Flags.REFRESH_ENABLED);
+        }
+
         public JSONObject toJSON() throws JSONException {
             final JSONObject json = new JSONObject();
 
@@ -721,6 +771,14 @@ public final class HomeConfig {
                 json.put(JSON_KEY_FILTER, mFilter);
             }
 
+            if (mEmptyViewConfig != null) {
+                json.put(JSON_KEY_EMPTY, mEmptyViewConfig.toJSON());
+            }
+
+            if (mFlags.contains(Flags.REFRESH_ENABLED)) {
+                json.put(JSON_KEY_REFRESH_ENABLED, true);
+            }
+
             return json;
         }
 
@@ -731,12 +789,15 @@ public final class HomeConfig {
 
         @Override
         public void writeToParcel(Parcel dest, int flags) {
+            dest.writeInt(mIndex);
             dest.writeParcelable(mType, 0);
             dest.writeString(mDatasetId);
             dest.writeParcelable(mItemType, 0);
             dest.writeParcelable(mItemHandler, 0);
             dest.writeString(mBackImageUrl);
             dest.writeString(mFilter);
+            dest.writeParcelable(mEmptyViewConfig, 0);
+            dest.writeSerializable(mFlags);
         }
 
         public static final Creator<ViewConfig> CREATOR = new Creator<ViewConfig>() {
@@ -748,6 +809,75 @@ public final class HomeConfig {
             @Override
             public ViewConfig[] newArray(final int size) {
                 return new ViewConfig[size];
+            }
+        };
+    }
+
+    public static class EmptyViewConfig implements Parcelable {
+        private final String mText;
+        private final String mImageUrl;
+
+        private static final String JSON_KEY_TEXT = "text";
+        private static final String JSON_KEY_IMAGE_URL = "imageUrl";
+
+        public EmptyViewConfig(JSONObject json) throws JSONException, IllegalArgumentException {
+            mText = json.optString(JSON_KEY_TEXT, null);
+            mImageUrl = json.optString(JSON_KEY_IMAGE_URL, null);
+        }
+
+        @SuppressWarnings("unchecked")
+        public EmptyViewConfig(Parcel in) {
+            mText = in.readString();
+            mImageUrl = in.readString();
+        }
+
+        public EmptyViewConfig(EmptyViewConfig emptyViewConfig) {
+            mText = emptyViewConfig.mText;
+            mImageUrl = emptyViewConfig.mImageUrl;
+        }
+
+        public EmptyViewConfig(String text, String imageUrl) {
+            mText = text;
+            mImageUrl = imageUrl;
+        }
+
+        public String getText() {
+            return mText;
+        }
+
+        public String getImageUrl() {
+            return mImageUrl;
+        }
+
+        public JSONObject toJSON() throws JSONException {
+            final JSONObject json = new JSONObject();
+
+            json.put(JSON_KEY_TEXT, mText);
+            json.put(JSON_KEY_IMAGE_URL, mImageUrl);
+
+            return json;
+        }
+
+        @Override
+        public int describeContents() {
+            return 0;
+        }
+
+        @Override
+        public void writeToParcel(Parcel dest, int flags) {
+            dest.writeString(mText);
+            dest.writeString(mImageUrl);
+        }
+
+        public static final Creator<EmptyViewConfig> CREATOR = new Creator<EmptyViewConfig>() {
+            @Override
+            public EmptyViewConfig createFromParcel(final Parcel in) {
+                return new EmptyViewConfig(in);
+            }
+
+            @Override
+            public EmptyViewConfig[] newArray(final int size) {
+                return new EmptyViewConfig[size];
             }
         };
     }
@@ -926,6 +1056,7 @@ public final class HomeConfig {
         private final HomeConfig mHomeConfig;
         private final Map<String, PanelConfig> mConfigMap;
         private final List<String> mConfigOrder;
+        private final List<GeckoEvent> mEventQueue;
         private final Thread mOriginalThread;
 
         private PanelConfig mDefaultPanel;
@@ -939,6 +1070,7 @@ public final class HomeConfig {
             mOriginalThread = Thread.currentThread();
             mConfigMap = new HashMap<String, PanelConfig>();
             mConfigOrder = new LinkedList<String>();
+            mEventQueue = new LinkedList<GeckoEvent>();
             mEnabledCount = 0;
 
             mHasChanged = false;
@@ -1144,6 +1276,9 @@ public final class HomeConfig {
                 }
 
                 installed = true;
+
+                // Add an event to the queue if a new panel is sucessfully installed.
+                mEventQueue.add(GeckoEvent.createBroadcastEvent("HomePanels:Installed", panelConfig.getId()));
             }
 
             mHasChanged = true;
@@ -1178,6 +1313,9 @@ public final class HomeConfig {
                 findNewDefault();
             }
 
+            // Add an event to the queue if a panel is succesfully uninstalled.
+            mEventQueue.add(GeckoEvent.createBroadcastEvent("HomePanels:Uninstalled", panelId));
+
             mHasChanged = true;
             return true;
         }
@@ -1198,6 +1336,8 @@ public final class HomeConfig {
 
             mConfigOrder.remove(panelId);
             mConfigOrder.add(destIndex, panelId);
+            mHasChanged = true;
+
             return true;
         }
 
@@ -1246,10 +1386,18 @@ public final class HomeConfig {
             final State newConfigState =
                     new State(mHomeConfig, makeOrderedCopy(true), isDefault());
 
+            // Copy the event queue to a new list, so that we only modify mEventQueue on
+            // the original thread where it was created.
+            final LinkedList<GeckoEvent> eventQueueCopy = new LinkedList<GeckoEvent>(mEventQueue);
+            mEventQueue.clear();
+
             ThreadUtils.getBackgroundHandler().post(new Runnable() {
                 @Override
                 public void run() {
                     mHomeConfig.save(newConfigState);
+
+                    // Send pending events after the new config is saved.
+                    sendEventsToGecko(eventQueueCopy);
                 }
             });
 
@@ -1272,6 +1420,10 @@ public final class HomeConfig {
             // need to deep copy the current PanelConfig instances.
             mHomeConfig.save(newConfigState);
 
+            // Send pending events after the new config is saved.
+            sendEventsToGecko(mEventQueue);
+            mEventQueue.clear();
+
             return newConfigState;
         }
 
@@ -1287,6 +1439,12 @@ public final class HomeConfig {
 
         public boolean isEmpty() {
             return mConfigMap.isEmpty();
+        }
+
+        private void sendEventsToGecko(List<GeckoEvent> events) {
+            for (GeckoEvent e : events) {
+                GeckoAppShell.sendEventToGecko(e);
+            }
         }
 
         private class EditorIterator implements Iterator<PanelConfig> {

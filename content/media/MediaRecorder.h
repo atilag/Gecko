@@ -8,7 +8,7 @@
 #define MediaRecorder_h
 
 #include "mozilla/dom/MediaRecorderBinding.h"
-#include "nsDOMEventTargetHelper.h"
+#include "mozilla/DOMEventTargetHelper.h"
 
 // Max size for allowing queue encoded data in memory
 #define MAX_ALLOW_MEMORY_BUFFER 1024000
@@ -35,7 +35,7 @@ namespace dom {
  * Also extract the encoded data and create blobs on every timeslice passed from start function or RequestData function called by UA.
  */
 
-class MediaRecorder : public nsDOMEventTargetHelper
+class MediaRecorder : public DOMEventTargetHelper
 {
   class Session;
   friend class CreateAndDispatchBlobEventRunnable;
@@ -45,14 +45,13 @@ public:
   virtual ~MediaRecorder();
 
   // nsWrapperCache
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   nsPIDOMWindow* GetParentObject() { return GetOwner(); }
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(MediaRecorder,
-                                           nsDOMEventTargetHelper)
+                                           DOMEventTargetHelper)
 
   // WebIDL
   // Start recording. If timeSlice has been provided, mediaRecorder will

@@ -12,23 +12,24 @@
   <!--original fetch url was https://git.mozilla.org/releases-->
   <remote fetch="https://git.mozilla.org/releases" name="mozillaorg"/>
   <!-- B2G specific things. -->
-  <project name="platform_build" path="build" remote="b2g" revision="a9e08b91e9cd1f0930f16cfc49ec72f63575d5fe">
+  <project name="platform_build" path="build" remote="b2g" revision="65fba428f8d76336b33ddd9e15900357953600ba">
     <copyfile dest="Makefile" src="core/root.mk"/>
   </project>
-  <project name="gaia" path="gaia" remote="mozillaorg" revision="874fe42b82e8d819d592690e74db91c07179e68c"/>
+  <project name="gaia" path="gaia" remote="mozillaorg" revision="870a5c518742665d36b17e7e88c2ab07d440b94c"/>
   <project name="fake-libdvm" path="dalvik" remote="b2g" revision="d50ae982b19f42f0b66d08b9eb306be81687869f"/>
-  <project name="gonk-misc" path="gonk-misc" remote="b2g" revision="266bca6e60dad43e395f38b66edabe8bdc882334"/>
-  <project name="moztt" path="external/moztt" remote="b2g" revision="5b93c7150acac5f657675b91889d828cc2b532e3"/>
+  <project name="gonk-misc" path="gonk-misc" remote="b2g" revision="f313e6d3aaaefe8c82eaed15912a09b120fb7260"/>
+  <project name="moztt" path="external/moztt" remote="b2g" revision="ce95d372e6d285725b96490afdaaf489ad8f9ca9"/>
   <project name="rilproxy" path="rilproxy" remote="b2g" revision="827214fcf38d6569aeb5c6d6f31cb296d1f09272"/>
   <project name="valgrind" path="external/valgrind" remote="b2g" revision="daa61633c32b9606f58799a3186395fd2bbb8d8c"/>
   <project name="vex" path="external/VEX" remote="b2g" revision="47f031c320888fe9f3e656602588565b52d43010"/>
-  <project name="apitrace" path="external/apitrace" remote="apitrace" revision="89c5816399e71bda92a8959b5b771c04d6672ea3"/>
+  <project name="apitrace" path="external/apitrace" remote="apitrace" revision="3691614d0045f7968addce45d4140fb360c3ceaf"/>
   <!-- Stock Android things -->
   <project groups="linux" name="platform/prebuilts/gcc/linux-x86/host/i686-linux-glibc2.7-4.6" path="prebuilts/gcc/linux-x86/host/i686-linux-glibc2.7-4.6" revision="f92a936f2aa97526d4593386754bdbf02db07a12"/>
   <project groups="linux" name="platform/prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.7-4.6" path="prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.7-4.6" revision="6e47ff2790f5656b5b074407829ceecf3e6188c4"/>
   <project groups="linux,arm" name="platform/prebuilts/gcc/linux-x86/arm/arm-eabi-4.7" path="prebuilts/gcc/linux-x86/arm/arm-eabi-4.7" revision="1950e4760fa14688b83cdbb5acaa1af9f82ef434"/>
   <project groups="linux,arm" name="platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.7" path="prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.7" revision="ac6eb97a37035c09fb5ede0852f0881e9aadf9ad"/>
   <project groups="linux,x86" name="platform/prebuilts/gcc/linux-x86/x86/i686-linux-android-4.7" path="prebuilts/gcc/linux-x86/x86/i686-linux-android-4.7" revision="737f591c5f95477148d26602c7be56cbea0cdeb9"/>
+  <project groups="linux,x86" name="platform/prebuilts/python/linux-x86/2.7.5" path="prebuilts/python/linux-x86/2.7.5" revision="51da9b1981be481b92a59a826d4d78dc73d0989a"/>
   <project name="device/common" path="device/common" revision="798a3664597e6041985feab9aef42e98d458bc3d"/>
   <project name="device/sample" path="device/sample" revision="9aebb4ac5b6c1b2552599651a0e51b01e720eea6"/>
   <project name="platform/abi/cpp" path="abi/cpp" revision="77d97588f8ca4ea280d4e6b6225fc72853078778"/>
@@ -55,7 +56,6 @@
   <project name="platform/external/gtest" path="external/gtest" revision="0e87f7087bead3fbba86ad24fb888b23c25b35d3"/>
   <project name="platform/external/harfbuzz" path="external/harfbuzz" revision="77bfb851261572216aeba5a5e1bb1d910d40ecb9"/>
   <project name="platform/external/harfbuzz_ng" path="external/harfbuzz_ng" revision="6e3a3edf0a9ae09a7b92637c2a7131df0bde4760"/>
-  <project name="platform/external/icu4c" path="external/icu4c" remote="aosp" revision="b4c6379528887dc25ca9991a535a8d92a61ad6b6"/>
   <project name="platform/external/iproute2" path="external/iproute2" revision="b438b9c63d6f79cb08391f0b0f12b8457ea99395"/>
   <project name="platform/external/ipsec-tools" path="external/ipsec-tools" revision="c493b85a54d27cbcb1dcb91bb86545254cf28684"/>
   <project name="platform/external/iptables" path="external/iptables" revision="fe8cf0795af508d6bd413d0ab729ed6afabd237e"/>
@@ -118,15 +118,16 @@
   <project name="platform/system/netd" path="system/netd" revision="36704b0da24debcab8090156568ac236315036bb"/>
   <project name="platform/system/security" path="system/security" revision="583374f69f531ba68fc3dcbff1f74893d2a96406"/>
   <project name="platform/system/vold" path="system/vold" revision="d4455b8cf361f8353e8aebac15ffd64b4aedd2b9"/>
-  <project name="platform_frameworks_av" path="frameworks/av" remote="b2g" revision="ee814270f52127febfcf29bacf9f1b327d7c4c29"/>
+  <project name="platform/external/icu4c" path="external/icu4c" remote="aosp" revision="b4c6379528887dc25ca9991a535a8d92a61ad6b6"/>
+  <project name="platform_frameworks_av" path="frameworks/av" remote="b2g" revision="6c67114dfa109f31d37e880b9c009f2965a22261"/>
   <project name="platform_system_core" path="system/core" remote="b2g" revision="9395eb5aa885cf6d305a202de6e9694a58a89717"/>
   <default remote="caf" revision="refs/tags/android-4.4.2_r1" sync-j="4"/>
   <!-- Emulator specific things -->
   <project name="device/generic/armv7-a-neon" path="device/generic/armv7-a-neon" revision="72ffdf71c68a96309212eb13d63560d66db14c9e"/>
-  <project name="device_generic_goldfish" path="device/generic/goldfish" remote="b2g" revision="a706bf388e30ec1f5273cf72cd0156e429f23fac"/>
-  <project name="platform_external_qemu" path="external/qemu" remote="b2g" revision="5ba6bcbdba30842b02f33f595660e32e3b9182d8"/>
+  <project name="device_generic_goldfish" path="device/generic/goldfish" remote="b2g" revision="cf3f83a8ef13597b62fb6de7aa0cfaf5dc5de2b5"/>
+  <project name="platform_external_qemu" path="external/qemu" remote="b2g" revision="606dd627fad312cb79284fa38e44f0ed4bd42bfa"/>
   <project name="platform/external/wpa_supplicant_8" path="external/wpa_supplicant_8" revision="694cecf256122d0cb3b6a1a4efb4b5c7401db223"/>
-  <project name="platform_hardware_ril" path="hardware/ril" remote="b2g" revision="e5dba2723b3e417b107cf9546fb8e10b98e977ae"/>
+  <project name="platform_hardware_ril" path="hardware/ril" remote="b2g" revision="aa430bd055bf7e1003d78e9bf0c0abbe32f33e45"/>
   <project name="platform/development" path="development" revision="5968ff4e13e0d696ad8d972281fc27ae5a12829b"/>
   <project name="android-sdk" path="sdk" remote="b2g" revision="0951179277915335251c5e11d242e4e1a8c2236f"/>
 </manifest>

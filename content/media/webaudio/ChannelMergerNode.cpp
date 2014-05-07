@@ -53,6 +53,11 @@ public:
       }
     }
   }
+
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
 };
 
 ChannelMergerNode::ChannelMergerNode(AudioContext* aContext,
@@ -68,9 +73,9 @@ ChannelMergerNode::ChannelMergerNode(AudioContext* aContext,
 }
 
 JSObject*
-ChannelMergerNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+ChannelMergerNode::WrapObject(JSContext* aCx)
 {
-  return ChannelMergerNodeBinding::Wrap(aCx, aScope, this);
+  return ChannelMergerNodeBinding::Wrap(aCx, this);
 }
 
 }

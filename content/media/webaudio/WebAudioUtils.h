@@ -19,16 +19,13 @@ typedef struct SpeexResamplerState_ SpeexResamplerState;
 namespace mozilla {
 
 class AudioNodeStream;
-class MediaStream;
 
 namespace dom {
 
 class AudioParamTimeline;
 
 struct WebAudioUtils {
-  // This is an arbitrary large number used to protect against OOMs.
-  // We can adjust it later if needed.
-  static const uint32_t MaxChannelCount = 32;
+  static const uint32_t MaxChannelCount;
 
   static bool FuzzyEqual(float v1, float v2)
   {
@@ -212,7 +209,13 @@ struct WebAudioUtils {
                         uint32_t aChannel,
                         const int16_t* aIn, uint32_t* aInLen,
                         float* aOut, uint32_t* aOutLen);
-};
+
+  static int
+  SpeexResamplerProcess(SpeexResamplerState* aResampler,
+                        uint32_t aChannel,
+                        const int16_t* aIn, uint32_t* aInLen,
+                        int16_t* aOut, uint32_t* aOutLen);
+  };
 
 }
 }

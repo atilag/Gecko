@@ -13,11 +13,8 @@
 #include "SharedSurfaceGL.h"            // for SharedSurface_GLTexture, etc
 #include "SurfaceStream.h"              // for SurfaceStream
 #include "SurfaceTypes.h"               // for SharedSurfaceType, etc
-#include "TiledLayerBuffer.h"           // for TILEDLAYERBUFFER_TILE_SIZE
 #include "gfx2DGlue.h"                  // for ContentForFormat, etc
-#include "gfxImageSurface.h"            // for gfxImageSurface
 #include "gfxReusableSurfaceWrapper.h"  // for gfxReusableSurfaceWrapper
-#include "ipc/AutoOpenSurface.h"        // for AutoOpenSurface
 #include "mozilla/gfx/2D.h"             // for DataSourceSurface
 #include "mozilla/gfx/BaseSize.h"       // for BaseSize
 #include "mozilla/layers/CompositorOGL.h"  // for CompositorOGL
@@ -55,26 +52,6 @@ CreateCompositableBackendSpecificDataOGL()
   return nullptr;
 #endif
 }
-
-TemporaryRef<DeprecatedTextureHost>
-CreateDeprecatedTextureHostOGL(SurfaceDescriptorType aDescriptorType,
-                     uint32_t aDeprecatedTextureHostFlags,
-                     uint32_t aTextureFlags)
-{
-  RefPtr<DeprecatedTextureHost> result = nullptr;
-
-  if (aDeprecatedTextureHostFlags & TEXTURE_HOST_TILED) {
-    result = new TiledDeprecatedTextureHostOGL();
-  } else {
-    result = new TextureImageDeprecatedTextureHostOGL();
-  }
-
-  NS_ASSERTION(result, "Result should have been created.");
-
-  result->SetFlags(aTextureFlags);
-  return result.forget();
-}
-
 
 TemporaryRef<TextureHost>
 CreateTextureHostOGL(const SurfaceDescriptor& aDesc,
@@ -129,20 +106,20 @@ FlagsToGLFlags(TextureFlags aFlags)
 {
   uint32_t result = TextureImage::NoFlags;
 
-  if (aFlags & TEXTURE_USE_NEAREST_FILTER)
+  if (aFlags & TextureFlags::USE_NEAREST_FILTER)
     result |= TextureImage::UseNearestFilter;
-  if (aFlags & TEXTURE_NEEDS_Y_FLIP)
+  if (aFlags & TextureFlags::NEEDS_Y_FLIP)
     result |= TextureImage::NeedsYFlip;
-  if (aFlags & TEXTURE_DISALLOW_BIGIMAGE)
+  if (aFlags & TextureFlags::DISALLOW_BIGIMAGE)
     result |= TextureImage::DisallowBigImage;
 
   return static_cast<gl::TextureImage::Flags>(result);
 }
 
-GLenum
-WrapMode(gl::GLContext *aGl, bool aAllowRepeat)
+static GLenum
+WrapMode(gl::GLContext *aGl, TextureFlags aFlags)
 {
-  if (aAllowRepeat &&
+  if ((aFlags & TextureFlags::ALLOW_REPEAT) &&
       (aGl->IsExtensionSupported(GLContext::ARB_texture_non_power_of_two) ||
        aGl->IsExtensionSupported(GLContext::OES_texture_npot))) {
     return LOCAL_GL_REPEAT;
@@ -250,12 +227,12 @@ TextureImageTextureSourceOGL::Update(gfx::DataSourceSurface* aSurface,
 
   IntSize size = aSurface->GetSize();
   if (!mTexImage ||
-      mTexImage->GetSize() != size ||
+      (mTexImage->GetSize() != size && !aSrcOffset) ||
       mTexImage->GetContentType() != gfx::ContentForFormat(aSurface->GetFormat())) {
-    if (mFlags & TEXTURE_DISALLOW_BIGIMAGE) {
+    if (mFlags & TextureFlags::DISALLOW_BIGIMAGE) {
       mTexImage = CreateBasicTextureImage(mGL, size,
                                           gfx::ContentForFormat(aSurface->GetFormat()),
-                                          WrapMode(mGL, mFlags & TEXTURE_ALLOW_REPEAT),
+                                          WrapMode(mGL, mFlags),
                                           FlagsToGLFlags(mFlags),
                                           SurfaceFormatToImageFormat(aSurface->GetFormat()));
     } else {
@@ -266,7 +243,7 @@ TextureImageTextureSourceOGL::Update(gfx::DataSourceSurface* aSurface,
       mTexImage = CreateTextureImage(mGL,
                                      size,
                                      gfx::ContentForFormat(aSurface->GetFormat()),
-                                     WrapMode(mGL, mFlags & TEXTURE_ALLOW_REPEAT),
+                                     WrapMode(mGL, mFlags),
                                      FlagsToGLFlags(mFlags),
                                      SurfaceFormatToImageFormat(aSurface->GetFormat()));
     }
@@ -279,6 +256,37 @@ TextureImageTextureSourceOGL::Update(gfx::DataSourceSurface* aSurface,
     mTexImage->EndUpdate();
   }
   return true;
+}
+
+void
+TextureImageTextureSourceOGL::EnsureBuffer(const nsIntSize& aSize,
+                                           gfxContentType aContentType)
+{
+  if (!mTexImage ||
+      mTexImage->GetSize() != aSize.ToIntSize() ||
+      mTexImage->GetContentType() != aContentType) {
+    mTexImage = CreateTextureImage(mGL,
+                                   aSize.ToIntSize(),
+                                   aContentType,
+                                   WrapMode(mGL, mFlags),
+                                   FlagsToGLFlags(mFlags));
+  }
+  mTexImage->Resize(aSize.ToIntSize());
+}
+
+void
+TextureImageTextureSourceOGL::CopyTo(const nsIntRect& aSourceRect,
+                                     DataTextureSource *aDest,
+                                     const nsIntRect& aDestRect)
+{
+  MOZ_ASSERT(aDest->AsSourceOGL(), "Incompatible destination type!");
+  TextureImageTextureSourceOGL *dest =
+    aDest->AsSourceOGL()->AsTextureImageTextureSource();
+  MOZ_ASSERT(dest, "Incompatible destination type!");
+
+  mGL->BlitTextureImageHelper()->BlitTextureImage(mTexImage, aSourceRect,
+                                                  dest->mTexImage, aDestRect);
+  dest->mTexImage->MarkValid();
 }
 
 void
@@ -651,296 +659,6 @@ StreamTextureHostOGL::GetSize() const
 {
   MOZ_ASSERT(mTextureSource);
   return mTextureSource->GetSize();
-}
-
-TextureImageDeprecatedTextureHostOGL::~TextureImageDeprecatedTextureHostOGL()
-{
-  MOZ_COUNT_DTOR(TextureImageDeprecatedTextureHostOGL);
-  if (mTexture && mTexture->InUpdate()) {
-    mTexture->EndUpdate();
-  }
-}
-
-gfx::IntSize
-TextureImageDeprecatedTextureHostOGL::GetSize() const
-{
-  if (mTexture) {
-    if (mIterating) {
-      return mTexture->GetTileRect().Size();
-    }
-    return mTexture->GetSize();
-  }
-  return gfx::IntSize(0, 0);
-}
-
-nsIntRect TextureImageDeprecatedTextureHostOGL::GetTileRect()
-{
-  return ThebesIntRect(mTexture->GetTileRect());
-}
-
-void
-TextureImageDeprecatedTextureHostOGL::SetCompositor(Compositor* aCompositor)
-{
-  CompositorOGL* glCompositor = static_cast<CompositorOGL*>(aCompositor);
-  GLContext* newGL = glCompositor ? glCompositor->gl() : nullptr;
-  if (mGL != newGL) {
-    mGL = newGL;
-    mTexture = nullptr;
-    // if we have a buffer we reupload it with the new gl context
-    // Post landing TODO: the new DeprecatedTextureClient/Host model will make this
-    // go away.
-    if (newGL && mBuffer && IsSurfaceDescriptorValid(*mBuffer)) {
-      UpdateImpl(*mBuffer);
-    }
-  }
-}
-
-void
-TextureImageDeprecatedTextureHostOGL::EnsureBuffer(const nsIntSize& aSize,
-                                         gfxContentType aContentType)
-{
-  if (!mTexture ||
-      mTexture->GetSize() != aSize.ToIntSize() ||
-      mTexture->GetContentType() != aContentType) {
-    mTexture = CreateTextureImage(mGL,
-                                  aSize.ToIntSize(),
-                                  aContentType,
-                                  WrapMode(mGL, mFlags & TEXTURE_ALLOW_REPEAT),
-                                  FlagsToGLFlags(mFlags));
-  }
-  mTexture->Resize(aSize.ToIntSize());
-}
-
-void
-TextureImageDeprecatedTextureHostOGL::CopyTo(const nsIntRect& aSourceRect,
-                                   DeprecatedTextureHost *aDest,
-                                   const nsIntRect& aDestRect)
-{
-  MOZ_ASSERT(aDest->AsSourceOGL(), "Incompatible destination type!");
-  TextureImageDeprecatedTextureHostOGL *dest =
-    aDest->AsSourceOGL()->AsTextureImageDeprecatedTextureHost();
-  MOZ_ASSERT(dest, "Incompatible destination type!");
-
-  mGL->BlitTextureImageHelper()->BlitTextureImage(mTexture, aSourceRect,
-                                                  dest->mTexture, aDestRect);
-  dest->mTexture->MarkValid();
-}
-
-void
-TextureImageDeprecatedTextureHostOGL::UpdateImpl(const SurfaceDescriptor& aImage,
-                                       nsIntRegion* aRegion,
-                                       nsIntPoint* aOffset)
-{
-  if (!mGL) {
-    NS_WARNING("trying to update TextureImageDeprecatedTextureHostOGL without a compositor?");
-    return;
-  }
-
-#ifdef MOZ_WIDGET_GONK
-  if (mCompositableBackendData) {
-    // on gonk, this class is used as a fallback from gralloc buffer.
-    // There is a case this class is used with GrallocDeprecatedTextureHostOGL
-    // under same CompositableHost. if it happens, a gralloc buffer of
-    // GrallocDeprecatedTextureHostOGL needs to be unbounded from a texture,
-    // when the gralloc buffer is not rendered.
-    // Establish the unbound by deleting the texture.
-    // See Bug 916264.
-    static_cast<CompositableDataGonkOGL*>(mCompositableBackendData.get())->DeleteTextureIfPresent();
-  }
-#endif
-
-  AutoOpenSurface surf(OPEN_READ_ONLY, aImage);
-  gfx::IntSize size = surf.Size();
-  TextureImage::ImageFormat format = surf.ImageFormat();
-
-  if (!mTexture ||
-      (mTexture->GetSize() != size && !aOffset) ||
-      mTexture->GetContentType() != surf.ContentType() ||
-      (mTexture->GetImageFormat() != format &&
-       mTexture->GetImageFormat() != gfxImageFormat::Unknown)) {
-
-    mTexture = CreateTextureImage(mGL,
-                                  size,
-                                  surf.ContentType(),
-                                  WrapMode(mGL, mFlags & TEXTURE_ALLOW_REPEAT),
-                                  FlagsToGLFlags(mFlags),
-                                  format);
-  }
-
-  // XXX this is always just ridiculously slow
-  nsIntRegion updateRegion;
-
-  if (!aRegion) {
-    updateRegion = nsIntRegion(nsIntRect(0, 0, size.width, size.height));
-  } else {
-    updateRegion = *aRegion;
-  }
-  gfx::IntPoint offset;
-  if (aOffset) {
-    offset.x = aOffset->x;
-    offset.y = aOffset->y;
-  }
-  nsRefPtr<gfxImageSurface> thebesSurf = surf.GetAsImage();
-  RefPtr<DataSourceSurface> sourceSurf =
-    gfx::Factory::CreateWrappingDataSourceSurface(thebesSurf->Data(),
-                                                  thebesSurf->Stride(),
-                                                  ToIntSize(thebesSurf->GetSize()),
-                                                  ImageFormatToSurfaceFormat(thebesSurf->Format()));
-  mTexture->DirectUpdate(sourceSurf, updateRegion, offset);
-  mFormat = mTexture->GetTextureFormat();
-
-  if (mTexture->InUpdate()) {
-    mTexture->EndUpdate();
-  }
-}
-
-bool
-TextureImageDeprecatedTextureHostOGL::Lock()
-{
-  if (!mTexture) {
-    NS_WARNING("TextureImageDeprecatedTextureHost to be composited without texture");
-    return false;
-  }
-
-  mFormat = mTexture->GetTextureFormat();
-
-  return true;
-}
-
-TiledDeprecatedTextureHostOGL::~TiledDeprecatedTextureHostOGL()
-{
-  DeleteTextures();
-}
-
-void
-TiledDeprecatedTextureHostOGL::BindTexture(GLenum aTextureUnit, gfx::Filter aFilter)
-{
-  mGL->fActiveTexture(aTextureUnit);
-  mGL->fBindTexture(LOCAL_GL_TEXTURE_2D, mTextureHandle);
-  SetFilter(mGL, aFilter);
-}
-
-static void
-GetFormatAndTileForImageFormat(gfxImageFormat aFormat,
-                               GLenum& aOutFormat,
-                               GLenum& aOutType)
-{
-  if (aFormat == gfxImageFormat::RGB16_565) {
-    aOutFormat = LOCAL_GL_RGB;
-    aOutType = LOCAL_GL_UNSIGNED_SHORT_5_6_5;
-  } else {
-    aOutFormat = LOCAL_GL_RGBA;
-    aOutType = LOCAL_GL_UNSIGNED_BYTE;
-  }
-}
-
-void
-TiledDeprecatedTextureHostOGL::SetCompositor(Compositor* aCompositor)
-{
-  CompositorOGL* glCompositor = static_cast<CompositorOGL*>(aCompositor);
-  if (mGL && !glCompositor) {
-    DeleteTextures();
-  }
-  mGL = glCompositor ? glCompositor->gl() : nullptr;
-}
-
-void
-TiledDeprecatedTextureHostOGL::DeleteTextures()
-{
-  if (mTextureHandle) {
-    if (mGL->MakeCurrent()) {
-      mGL->fDeleteTextures(1, &mTextureHandle);
-
-      gl::GfxTexturesReporter::UpdateAmount(gl::GfxTexturesReporter::MemoryFreed,
-                                            mGLFormat, GetTileType(),
-                                            TILEDLAYERBUFFER_TILE_SIZE);
-    } else if (mGL->IsDestroyed()) {
-      // if MakeCurrent failed because the context was already destoyed, it means
-      // the driver already freed the texture memory underneith us, so it should
-      // not count as a leak.
-      gl::GfxTexturesReporter::UpdateAmount(gl::GfxTexturesReporter::MemoryFreed,
-                                            mGLFormat, GetTileType(),
-                                            TILEDLAYERBUFFER_TILE_SIZE);
-    }
-
-    mTextureHandle = 0;
-  }
-}
-
-void
-TiledDeprecatedTextureHostOGL::Update(gfxReusableSurfaceWrapper* aReusableSurface, TextureFlags aFlags, const gfx::IntSize& aSize)
-{
-  mSize = aSize;
-  if (!mGL->MakeCurrent()) {
-    return;
-  }
-
-  if (aFlags & TEXTURE_NEW_TILE) {
-    SetFlags(aFlags);
-    mGL->fGenTextures(1, &mTextureHandle);
-    mGL->fBindTexture(LOCAL_GL_TEXTURE_2D, mTextureHandle);
-    mGL->fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_WRAP_S, LOCAL_GL_CLAMP_TO_EDGE);
-    mGL->fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_WRAP_T, LOCAL_GL_CLAMP_TO_EDGE);
-    ClearCachedFilter();
-  } else {
-    mGL->fBindTexture(LOCAL_GL_TEXTURE_2D, mTextureHandle);
-    // We're re-using a texture, but the format may change. Update the memory
-    // reporter with a free and alloc (below) using the old and new formats.
-    gl::GfxTexturesReporter::UpdateAmount(gl::GfxTexturesReporter::MemoryFreed,
-                                          mGLFormat, GetTileType(),
-                                          TILEDLAYERBUFFER_TILE_SIZE);
-  }
-
-  GLenum type;
-  GetFormatAndTileForImageFormat(aReusableSurface->Format(), mGLFormat, type);
-
-  const unsigned char* buf = aReusableSurface->GetReadOnlyData();
-  mGL->fTexImage2D(LOCAL_GL_TEXTURE_2D, 0, mGLFormat,
-                   TILEDLAYERBUFFER_TILE_SIZE, TILEDLAYERBUFFER_TILE_SIZE, 0,
-                   mGLFormat, type, buf);
-
-  gl::GfxTexturesReporter::UpdateAmount(gl::GfxTexturesReporter::MemoryAllocated,
-                                        mGLFormat, type,
-                                        TILEDLAYERBUFFER_TILE_SIZE);
-
-  if (mGLFormat == LOCAL_GL_RGB) {
-    mFormat = SurfaceFormat::R8G8B8X8;
-  } else {
-    mFormat = SurfaceFormat::B8G8R8A8;
-  }
-}
-
-bool
-TiledDeprecatedTextureHostOGL::Lock()
-{
-  if (!mTextureHandle) {
-    NS_WARNING("TiledDeprecatedTextureHostOGL not ready to be composited");
-    return false;
-  }
-
-  if (!mGL->MakeCurrent()) {
-    return false;
-  }
-  mGL->fActiveTexture(LOCAL_GL_TEXTURE0);
-
-  return true;
-}
-
-TemporaryRef<gfx::DataSourceSurface>
-TextureImageDeprecatedTextureHostOGL::GetAsSurface() {
-  RefPtr<gfx::DataSourceSurface> surf =
-    IsValid() ? ReadBackSurface(mGL, mTexture->GetTextureID(),
-                                false, mTexture->GetTextureFormat())
-              : nullptr;
-  return surf.forget();
-}
-
-TemporaryRef<gfx::DataSourceSurface>
-TiledDeprecatedTextureHostOGL::GetAsSurface() {
-  RefPtr<DataSourceSurface> surf =
-    IsValid() ? ReadBackSurface(mGL, mTextureHandle, false, GetFormat())
-              : nullptr;
-  return surf.forget();
 }
 
 } // namespace

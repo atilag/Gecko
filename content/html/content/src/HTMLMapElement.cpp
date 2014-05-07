@@ -33,7 +33,7 @@ NS_IMPL_RELEASE_INHERITED(HTMLMapElement, Element)
 
 // QueryInterface implementation for HTMLMapElement
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLMapElement)
-  NS_INTERFACE_TABLE_INHERITED1(HTMLMapElement, nsIDOMHTMLMapElement)
+  NS_INTERFACE_TABLE_INHERITED(HTMLMapElement, nsIDOMHTMLMapElement)
 NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLMapElement)
@@ -67,9 +67,9 @@ NS_IMPL_STRING_ATTR(HTMLMapElement, Name, name)
 
 
 JSObject*
-HTMLMapElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+HTMLMapElement::WrapNode(JSContext* aCx)
 {
-  return HTMLMapElementBinding::Wrap(aCx, aScope, this);
+  return HTMLMapElementBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

@@ -1,16 +1,17 @@
 package org.mozilla.gecko.tests;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.Map;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.StringTokenizer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
 import android.app.Instrumentation;
 import android.os.Build;
 import android.os.SystemClock;
@@ -202,8 +203,13 @@ class MotionEventReplayer {
                             eventTime * 1000000, action, pointerCount, pointerIds, (float[])pointerData,
                             metaState, xPrecision, yPrecision, deviceId, edgeFlags);
                 }
-                Log.v(LOGTAG, "Injecting " + event.toString());
-                mInstrumentation.sendPointerSync(event);
+                try {
+                    Log.v(LOGTAG, "Injecting " + event.toString());
+                    mInstrumentation.sendPointerSync(event);
+                } finally {
+                    event.recycle();
+                    event = null;
+                }
 
                 eventProperties.clear();
             }

@@ -11,6 +11,7 @@
 #include "base/message_loop.h"
 #include "nsXULAppAPI.h"
 #include "nsThreadUtils.h"
+#include "mozilla/Mutex.h"
 #include "mozilla/StaticPtr.h"
 #include "nsTArray.h"
 
@@ -27,7 +28,7 @@
 
 using namespace mozilla;
 
-#if defined(XP_LINUX) || defined(__FreeBSD__) // {
+#if defined(XP_LINUX) || defined(__FreeBSD__) || defined(XP_MACOSX) // {
 
 /**
  * Abstract base class for something which watches an fd and takes action when
@@ -90,8 +91,8 @@ public:
     MOZ_ASSERT(!strcmp(aTopic, "xpcom-shutdown"));
 
     XRE_GetIOMessageLoop()->PostTask(
-        FROM_HERE,
-        NewRunnableMethod(this, &FdWatcher::StopWatching));
+      FROM_HERE,
+      NewRunnableMethod(this, &FdWatcher::StopWatching));
 
     return NS_OK;
   }
@@ -107,6 +108,11 @@ typedef nsTArray<FifoInfo> FifoInfoArray;
 class FifoWatcher : public FdWatcher
 {
 public:
+  /**
+   * The name of the preference used to enable/disable the FifoWatcher.
+   */
+  static const char* const kPrefName;
+
   static FifoWatcher* GetSingleton();
 
   static bool MaybeCreate();
@@ -126,8 +132,10 @@ private:
 
   FifoWatcher(nsCString aPath)
     : mDirPath(aPath)
+    , mFifoInfoLock("FifoWatcher.mFifoInfoLock")
   {}
 
+  mozilla::Mutex mFifoInfoLock; // protects mFifoInfo
   FifoInfoArray mFifoInfo;
 };
 
@@ -143,9 +151,9 @@ class SignalPipeWatcher : public FdWatcher
 public:
   static SignalPipeWatcher* GetSingleton();
 
-  void RegisterCallback(const uint8_t aSignal, PipeCallback aCallback);
+  void RegisterCallback(uint8_t aSignal, PipeCallback aCallback);
 
-  void RegisterSignalHandler(const uint8_t aSignal = 0);
+  void RegisterSignalHandler(uint8_t aSignal = 0);
 
   virtual ~SignalPipeWatcher();
 
@@ -159,10 +167,12 @@ private:
   static StaticRefPtr<SignalPipeWatcher> sSingleton;
 
   SignalPipeWatcher()
+    : mSignalInfoLock("SignalPipeWatcher.mSignalInfoLock")
   {
     MOZ_ASSERT(NS_IsMainThread());
   }
 
+  mozilla::Mutex mSignalInfoLock; // protects mSignalInfo
   SignalInfoArray mSignalInfo;
 };
 
@@ -180,8 +190,8 @@ public:
    * instead.
    */
   static nsresult OpenTempFile(const nsACString& aFilename,
-                        nsIFile** aFile,
-                        const nsACString& aFoldername = EmptyCString());
+                               nsIFile** aFile,
+                               const nsACString& aFoldername = EmptyCString());
 };
 
 #endif

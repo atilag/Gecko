@@ -51,6 +51,7 @@ const SEC_ERROR_OCSP_INVALID_SIGNING_CERT               = SEC_ERROR_BASE + 144;
 const SEC_ERROR_POLICY_VALIDATION_FAILED                = SEC_ERROR_BASE + 160; // -8032
 const SEC_ERROR_OCSP_BAD_SIGNATURE                      = SEC_ERROR_BASE + 157;
 const SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED       = SEC_ERROR_BASE + 176;
+const SEC_ERROR_APPLICATION_CALLBACK_ERROR              = SEC_ERROR_BASE + 178;
 
 const SSL_ERROR_BAD_CERT_DOMAIN                         = SSL_ERROR_BASE +  12;
 
@@ -99,6 +100,19 @@ function getXPCOMStatusFromNSS(statusNSS) {
   let nssErrorsService = Cc["@mozilla.org/nss_errors_service;1"]
                            .getService(Ci.nsINSSErrorsService);
   return nssErrorsService.getXPCOMFromNSSError(statusNSS);
+}
+
+function checkCertErrorGeneric(certdb, cert, expectedError, usage) {
+  let hasEVPolicy = {};
+  let verifiedChain = {};
+  let error = certdb.verifyCertNow(cert, usage, NO_FLAGS, verifiedChain,
+                                   hasEVPolicy);
+  // expected error == -1 is a special marker for any error is OK
+  if (expectedError != -1 ) {
+    do_check_eq(error, expectedError);
+  } else {
+    do_check_neq (error, 0);
+  }
 }
 
 function _getLibraryFunctionWithNoArguments(functionName, libraryName) {
@@ -348,7 +362,8 @@ function _setupTLSServerTest(serverBinName)
   let certDir = directoryService.get("CurWorkD", Ci.nsILocalFile);
   certDir.append("tlsserver");
   do_check_true(certDir.exists());
-  process.run(false, [certDir.path], 1);
+  // Using "sql:" causes the SQL DB to be used so we can run tests on Android.
+  process.run(false, [ "sql:" + certDir.path ], 1);
 
   do_register_cleanup(function() {
     process.kill();
@@ -369,7 +384,8 @@ function generateOCSPResponses(ocspRespArray, nssDBlocation)
     let argArray = new Array();
     let ocspFilepre = do_get_file(i.toString() + ".ocsp", true);
     let filename = ocspFilepre.path;
-    argArray.push(nssDBlocation);
+    // Using "sql:" causes the SQL DB to be used so we can run tests on Android.
+    argArray.push("sql:" + nssDBlocation);
     argArray.push(ocspRespArray[i][0]); // ocsRespType;
     argArray.push(ocspRespArray[i][1]); // nick;
     argArray.push(ocspRespArray[i][2]); // extranickname

@@ -62,14 +62,14 @@ ProcessingInstruction::~ProcessingInstruction()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED3(ProcessingInstruction, nsGenericDOMDataNode,
-                             nsIDOMNode, nsIDOMCharacterData,
-                             nsIDOMProcessingInstruction)
+NS_IMPL_ISUPPORTS_INHERITED(ProcessingInstruction, nsGenericDOMDataNode,
+                            nsIDOMNode, nsIDOMCharacterData,
+                            nsIDOMProcessingInstruction)
 
 JSObject*
-ProcessingInstruction::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+ProcessingInstruction::WrapNode(JSContext *aCx)
 {
-  return ProcessingInstructionBinding::Wrap(aCx, aScope, this);
+  return ProcessingInstructionBinding::Wrap(aCx, this);
 }
 
 NS_IMETHODIMP

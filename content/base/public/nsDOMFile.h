@@ -34,6 +34,7 @@
 #include "nsWrapperCache.h"
 #include "nsCycleCollectionParticipant.h"
 
+class nsDOMMultipartFile;
 class nsIFile;
 class nsIInputStream;
 class nsIClassInfo;
@@ -42,6 +43,8 @@ class nsDOMFileBase : public nsIDOMFile,
                       public nsIXHRSendable,
                       public nsIMutable
 {
+  friend class nsDOMMultipartFile;
+
 public:
   typedef mozilla::dom::indexedDB::FileInfo FileInfo;
 
@@ -361,8 +364,9 @@ public:
   nsDOMMemoryFile(void *aMemoryBuffer,
                   uint64_t aLength,
                   const nsAString& aName,
-                  const nsAString& aContentType)
-    : nsDOMFile(aName, aContentType, aLength, UINT64_MAX),
+                  const nsAString& aContentType,
+                  uint64_t aLastModifiedDate)
+    : nsDOMFile(aName, aContentType, aLength, aLastModifiedDate),
       mDataOwner(new DataOwner(aMemoryBuffer, aLength))
   {
     NS_ASSERTION(mDataOwner && mDataOwner->mData, "must have data");
@@ -400,7 +404,7 @@ protected:
   friend class DataOwnerAdapter;
   friend class nsDOMMemoryFileDataOwnerMemoryReporter;
 
-  class DataOwner : public mozilla::LinkedListElement<DataOwner> {
+  class DataOwner MOZ_FINAL : public mozilla::LinkedListElement<DataOwner> {
   public:
     NS_INLINE_DECL_THREADSAFE_REFCOUNTING(DataOwner)
     DataOwner(void* aMemoryBuffer, uint64_t aLength)
@@ -416,6 +420,8 @@ protected:
       sDataOwners->insertBack(this);
     }
 
+  private:
+    // Private destructor, to discourage deletion outside of Release():
     ~DataOwner() {
       mozilla::StaticMutexAutoLock lock(sDataOwnerMutex);
 
@@ -428,6 +434,7 @@ protected:
       moz_free(mData);
     }
 
+  public:
     static void EnsureMemoryReporterRegistered();
 
     // sDataOwners and sMemoryReporterRegistered may only be accessed while
@@ -459,8 +466,7 @@ public:
 
   NS_DECL_NSIDOMFILELIST
 
-  virtual JSObject* WrapObject(JSContext *cx,
-                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx) MOZ_OVERRIDE;
 
   nsISupports* GetParentObject()
   {

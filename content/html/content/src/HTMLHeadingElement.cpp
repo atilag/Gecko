@@ -21,15 +21,15 @@ HTMLHeadingElement::~HTMLHeadingElement()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED1(HTMLHeadingElement, nsGenericHTMLElement,
-                             nsIDOMHTMLHeadingElement)
+NS_IMPL_ISUPPORTS_INHERITED(HTMLHeadingElement, nsGenericHTMLElement,
+                            nsIDOMHTMLHeadingElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLHeadingElement)
 
 JSObject*
-HTMLHeadingElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+HTMLHeadingElement::WrapNode(JSContext *aCx)
 {
-  return HTMLHeadingElementBinding::Wrap(aCx, aScope, this);
+  return HTMLHeadingElementBinding::Wrap(aCx, this);
 }
 
 NS_IMPL_STRING_ATTR(HTMLHeadingElement, Align, align)

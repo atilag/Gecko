@@ -70,13 +70,13 @@
 #include "nsWhitespaceTokenizer.h"
 #include "nsAttrName.h"
 #include "nsNetUtil.h"
-#include "nsEventStates.h"
 
 #ifdef DEBUG
 #include "nsIDOMCharacterData.h"
 #endif
 
 #include "mozilla/Assertions.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/unused.h"
@@ -91,8 +91,8 @@ using namespace mozilla::a11y;
 ////////////////////////////////////////////////////////////////////////////////
 // Accessible: nsISupports and cycle collection
 
-NS_IMPL_CYCLE_COLLECTION_3(Accessible,
-                           mContent, mParent, mChildren)
+NS_IMPL_CYCLE_COLLECTION(Accessible,
+                         mContent, mParent, mChildren)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Accessible)
   NS_INTERFACE_MAP_ENTRY(nsIAccessible)
@@ -652,7 +652,7 @@ Accessible::NativeState()
     state |= states::STALE;
 
   if (HasOwnContent() && mContent->IsElement()) {
-    nsEventStates elementState = mContent->AsElement()->State();
+    EventStates elementState = mContent->AsElement()->State();
 
     if (elementState.HasState(NS_EVENT_STATE_INVALID))
       state |= states::INVALID;
@@ -1573,6 +1573,10 @@ Accessible::ApplyARIAState(uint64_t* aState) const
     }    
   }
 
+  // special case: A native button element whose role got transformed by ARIA to a toggle button
+  if (IsButton())
+    aria::MapToState(aria::eARIAPressed, element, aState);
+
   if (!mRoleMapEntry)
     return;
 
@@ -2449,6 +2453,8 @@ Accessible::Shutdown()
 
   mContent = nullptr;
   mDoc = nullptr;
+  if (SelectionMgr()->AccessibleWithCaret(nullptr) == this)
+    SelectionMgr()->ResetCaretOffset();
 }
 
 // Accessible protected

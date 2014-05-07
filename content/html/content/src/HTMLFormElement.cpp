@@ -8,11 +8,11 @@
 #include "jsapi.h"
 #include "mozilla/ContentEvents.h"
 #include "mozilla/EventDispatcher.h"
+#include "mozilla/EventStateManager.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/dom/HTMLFormControlsCollection.h"
 #include "mozilla/dom/HTMLFormElementBinding.h"
 #include "nsIHTMLDocument.h"
-#include "nsEventStateManager.h"
-#include "nsEventStates.h"
 #include "nsGkAtoms.h"
 #include "nsStyleConsts.h"
 #include "nsPresContext.h"
@@ -177,11 +177,11 @@ NS_IMPL_RELEASE_INHERITED(HTMLFormElement, Element)
 
 // QueryInterface implementation for HTMLFormElement
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLFormElement)
-  NS_INTERFACE_TABLE_INHERITED4(HTMLFormElement,
-                                nsIDOMHTMLFormElement,
-                                nsIForm,
-                                nsIWebProgressListener,
-                                nsIRadioGroupContainer)
+  NS_INTERFACE_TABLE_INHERITED(HTMLFormElement,
+                               nsIDOMHTMLFormElement,
+                               nsIForm,
+                               nsIWebProgressListener,
+                               nsIRadioGroupContainer)
 NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLElement)
 
 
@@ -658,7 +658,7 @@ HTMLFormElement::DoSubmit(WidgetEvent* aEvent)
     mSubmitPopupState = openAbused;
   }
 
-  mSubmitInitiatedFromUserInput = nsEventStateManager::IsHandlingUserInput();
+  mSubmitInitiatedFromUserInput = EventStateManager::IsHandlingUserInput();
 
   if(mDeferSubmission) { 
     // we are in an event handler, JS submitted so we have to
@@ -1434,8 +1434,14 @@ HTMLFormElement::NamedGetter(const nsAString& aName, bool &aFound)
   return nullptr;
 }
 
+bool
+HTMLFormElement::NameIsEnumerable(const nsAString& aName)
+{
+  return true;
+}
+
 void
-HTMLFormElement::GetSupportedNames(nsTArray<nsString >& aRetval)
+HTMLFormElement::GetSupportedNames(unsigned, nsTArray<nsString >& aRetval)
 {
   // TODO https://www.w3.org/Bugs/Public/show_bug.cgi?id=22320
 }
@@ -2039,6 +2045,7 @@ HTMLFormElement::GetNextRadioButton(const nsAString& aName,
   radioGroup->GetLength(&numRadios);
   nsRefPtr<HTMLInputElement> radio;
 
+  bool isRadio = false;
   do {
     if (aPrevious) {
       if (--index < 0) {
@@ -2052,10 +2059,11 @@ HTMLFormElement::GetNextRadioButton(const nsAString& aName,
     if (!radio)
       continue;
 
-    if (radio->GetType() != NS_FORM_INPUT_RADIO)
+    isRadio = radio->GetType() == NS_FORM_INPUT_RADIO;
+    if (!isRadio)
       continue;
 
-  } while (radio->Disabled() && radio != currentRadio);
+  } while ((radio->Disabled() && radio != currentRadio) || !isRadio);
 
   NS_IF_ADDREF(*aRadioOut = radio);
   return NS_OK;
@@ -2194,10 +2202,10 @@ HTMLFormElement::SetValueMissingState(const nsAString& aName, bool aValue)
   mValueMissingRadioGroups.Put(aName, aValue);
 }
 
-nsEventStates
+EventStates
 HTMLFormElement::IntrinsicState() const
 {
-  nsEventStates state = nsGenericHTMLElement::IntrinsicState();
+  EventStates state = nsGenericHTMLElement::IntrinsicState();
 
   if (mInvalidElementsCount) {
     state |= NS_EVENT_STATE_INVALID;
@@ -2366,9 +2374,9 @@ HTMLFormElement::AddToPastNamesMap(const nsAString& aName,
 }
  
 JSObject*
-HTMLFormElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+HTMLFormElement::WrapNode(JSContext* aCx)
 {
-  return HTMLFormElementBinding::Wrap(aCx, aScope, this);
+  return HTMLFormElementBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

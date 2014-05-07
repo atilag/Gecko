@@ -13,27 +13,26 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_3(TextTrackList,
-                                     nsDOMEventTargetHelper,
-                                     mGlobal,
-                                     mTextTracks,
-                                     mTextTrackManager)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(TextTrackList,
+                                   DOMEventTargetHelper,
+                                   mTextTracks,
+                                   mTextTrackManager)
 
-NS_IMPL_ADDREF_INHERITED(TextTrackList, nsDOMEventTargetHelper)
-NS_IMPL_RELEASE_INHERITED(TextTrackList, nsDOMEventTargetHelper)
+NS_IMPL_ADDREF_INHERITED(TextTrackList, DOMEventTargetHelper)
+NS_IMPL_RELEASE_INHERITED(TextTrackList, DOMEventTargetHelper)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(TextTrackList)
-NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
+NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
-TextTrackList::TextTrackList(nsISupports* aGlobal) : mGlobal(aGlobal)
+TextTrackList::TextTrackList(nsPIDOMWindow* aOwnerWindow)
+  : DOMEventTargetHelper(aOwnerWindow)
 {
-  SetIsDOMBinding();
 }
 
-TextTrackList::TextTrackList(nsISupports* aGlobal, TextTrackManager* aTextTrackManager)
- : mGlobal(aGlobal)
+TextTrackList::TextTrackList(nsPIDOMWindow* aOwnerWindow,
+                             TextTrackManager* aTextTrackManager)
+ : DOMEventTargetHelper(aOwnerWindow)
  , mTextTrackManager(aTextTrackManager)
 {
-  SetIsDOMBinding();
 }
 
 void
@@ -57,9 +56,9 @@ TextTrackList::UpdateAndGetShowingCues(nsTArray<nsRefPtr<TextTrackCue> >& aCues)
 }
 
 JSObject*
-TextTrackList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+TextTrackList::WrapObject(JSContext* aCx)
 {
-  return TextTrackListBinding::Wrap(aCx, aScope, this);
+  return TextTrackListBinding::Wrap(aCx, this);
 }
 
 TextTrack*
@@ -84,7 +83,7 @@ TextTrackList::AddTextTrack(TextTrackKind aKind,
                             TextTrackSource aTextTrackSource,
                             const CompareTextTracks& aCompareTT)
 {
-  nsRefPtr<TextTrack> track = new TextTrack(mGlobal, this, aKind, aLabel,
+  nsRefPtr<TextTrack> track = new TextTrack(GetOwner(), this, aKind, aLabel,
                                             aLanguage, aMode, aReadyState,
                                             aTextTrackSource);
   AddTextTrack(track, aCompareTT);

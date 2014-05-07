@@ -28,7 +28,6 @@
 #include "nsPIDOMWindow.h"
 #include "nsIDOMXULPopupElement.h"
 #include "nsIEditingSession.h"
-#include "nsEventStateManager.h"
 #include "nsIFrame.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsImageFrame.h"
@@ -44,6 +43,7 @@
 #include "nsNameSpaceManager.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/dom/DocumentType.h"
 #include "mozilla/dom/Element.h"
 
@@ -970,17 +970,50 @@ DocAccessible::AttributeChangedImpl(Accessible* aAccessible,
     }
   }
 
-  if (aAttribute == nsGkAtoms::alt ||
-      aAttribute == nsGkAtoms::title ||
-      aAttribute == nsGkAtoms::aria_label ||
-      aAttribute == nsGkAtoms::aria_labelledby) {
+  // Fire name change and description change events. XXX: it's not complete and
+  // dupes the code logic of accessible name and description calculation, we do
+  // that for performance reasons.
+  if (aAttribute == nsGkAtoms::aria_label) {
     FireDelayedEvent(nsIAccessibleEvent::EVENT_NAME_CHANGE, aAccessible);
     return;
   }
 
+  if (aAttribute == nsGkAtoms::aria_describedby) {
+    FireDelayedEvent(nsIAccessibleEvent::EVENT_DESCRIPTION_CHANGE, aAccessible);
+    return;
+  }
+
+  nsIContent* elm = aAccessible->GetContent();
+  if (aAttribute == nsGkAtoms::aria_labelledby &&
+      !elm->HasAttr(kNameSpaceID_None, nsGkAtoms::aria_label)) {
+    FireDelayedEvent(nsIAccessibleEvent::EVENT_NAME_CHANGE, aAccessible);
+    return;
+  }
+
+  if (aAttribute == nsGkAtoms::alt &&
+      !elm->HasAttr(kNameSpaceID_None, nsGkAtoms::aria_label) &&
+      !elm->HasAttr(kNameSpaceID_None, nsGkAtoms::aria_labelledby)) {
+    FireDelayedEvent(nsIAccessibleEvent::EVENT_NAME_CHANGE, aAccessible);
+    return;
+  }
+
+  if (aAttribute == nsGkAtoms::title) {
+    if (!elm->HasAttr(kNameSpaceID_None, nsGkAtoms::aria_label) &&
+        !elm->HasAttr(kNameSpaceID_None, nsGkAtoms::aria_labelledby) &&
+        !elm->HasAttr(kNameSpaceID_None, nsGkAtoms::alt)) {
+      FireDelayedEvent(nsIAccessibleEvent::EVENT_NAME_CHANGE, aAccessible);
+      return;
+    }
+
+    if (!elm->HasAttr(kNameSpaceID_None, nsGkAtoms::aria_describedby))
+      FireDelayedEvent(nsIAccessibleEvent::EVENT_DESCRIPTION_CHANGE, aAccessible);
+
+    return;
+  }
+
   if (aAttribute == nsGkAtoms::aria_busy) {
-    bool isOn = aAccessible->GetContent()->
-      AttrValueIs(aNameSpaceID, aAttribute, nsGkAtoms::_true, eCaseMatters);
+    bool isOn = elm->AttrValueIs(aNameSpaceID, aAttribute, nsGkAtoms::_true,
+                                 eCaseMatters);
     nsRefPtr<AccEvent> event =
       new AccStateChangeEvent(aAccessible, states::BUSY, isOn);
     FireDelayedEvent(event);
@@ -993,7 +1026,6 @@ DocAccessible::AttributeChangedImpl(Accessible* aAccessible,
     Accessible* widget =
       nsAccUtils::GetSelectableContainer(aAccessible, aAccessible->State());
     if (widget) {
-      nsIContent* elm = aAccessible->GetContent();
       AccSelChangeEvent::SelChangeType selChangeType =
         elm->AttrValueIs(aNameSpaceID, aAttribute, nsGkAtoms::_true, eCaseMatters) ?
           AccSelChangeEvent::eSelectionAdd : AccSelChangeEvent::eSelectionRemove;
@@ -1066,17 +1098,10 @@ DocAccessible::ARIAAttributeChanged(Accessible* aAccessible, nsIAtom* aAttribute
                      aAccessible);
 
   nsIContent* elm = aAccessible->GetContent();
-  if (!elm->HasAttr(kNameSpaceID_None, nsGkAtoms::role)) {
-    // We don't care about these other ARIA attribute changes unless there is
-    // an ARIA role set for the element
-    // XXX: we should check the role map to see if the changed property is
-    // relevant for that particular role.
-    return;
-  }
 
-  // The following ARIA attributes only take affect when dynamic content role is present
   if (aAttribute == nsGkAtoms::aria_checked ||
-      aAttribute == nsGkAtoms::aria_pressed) {
+      (aAccessible->IsButton() &&
+       aAttribute == nsGkAtoms::aria_pressed)) {
     const uint64_t kState = (aAttribute == nsGkAtoms::aria_checked) ?
                             states::CHECKED : states::PRESSED;
     nsRefPtr<AccEvent> event = new AccStateChangeEvent(aAccessible, kState);
@@ -1146,7 +1171,7 @@ DocAccessible::ContentAppended(nsIDocument* aDocument,
 void
 DocAccessible::ContentStateChanged(nsIDocument* aDocument,
                                    nsIContent* aContent,
-                                   nsEventStates aStateMask)
+                                   EventStates aStateMask)
 {
   Accessible* accessible = GetAccessible(aContent);
   if (!accessible)
@@ -1185,7 +1210,7 @@ DocAccessible::ContentStateChanged(nsIDocument* aDocument,
 
 void
 DocAccessible::DocumentStatesChanged(nsIDocument* aDocument,
-                                     nsEventStates aStateMask)
+                                     EventStates aStateMask)
 {
 }
 

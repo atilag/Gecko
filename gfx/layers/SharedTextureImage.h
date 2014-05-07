@@ -12,8 +12,6 @@
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "mozilla/gfx/Point.h"          // for IntSize
 
-class gfxASurface;
-
 // Split into a separate header from ImageLayers.h due to GLContext.h dependence
 // Implementation remains in ImageLayers.cpp
 
@@ -34,10 +32,6 @@ public:
   const Data* GetData() { return &mData; }
 
   gfx::IntSize GetSize() { return mData.mSize; }
-
-  virtual already_AddRefed<gfxASurface> DeprecatedGetAsSurface() {
-    return nullptr;
-  }
 
   virtual TemporaryRef<gfx::SourceSurface> GetAsSourceSurface() MOZ_OVERRIDE
   {

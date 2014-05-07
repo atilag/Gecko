@@ -54,12 +54,10 @@ bool
 ThebesLayerComposite::SetCompositableHost(CompositableHost* aHost)
 {
   switch (aHost->GetType()) {
-    case BUFFER_CONTENT:
-    case BUFFER_CONTENT_DIRECT:
-    case BUFFER_CONTENT_INC:
-    case BUFFER_TILED:
-    case COMPOSITABLE_CONTENT_SINGLE:
-    case COMPOSITABLE_CONTENT_DOUBLE:
+    case CompositableType::BUFFER_CONTENT_INC:
+    case CompositableType::BUFFER_TILED:
+    case CompositableType::CONTENT_SINGLE:
+    case CompositableType::CONTENT_DOUBLE:
       mBuffer = static_cast<ContentHost*>(aHost);
       return true;
     default:
@@ -197,8 +195,8 @@ nsACString&
 ThebesLayerComposite::PrintInfo(nsACString& aTo, const char* aPrefix)
 {
   ThebesLayer::PrintInfo(aTo, aPrefix);
-  aTo += "\n";
   if (mBuffer && mBuffer->IsAttached()) {
+    aTo += "\n";
     nsAutoCString pfx(aPrefix);
     pfx += "  ";
     mBuffer->PrintInfo(aTo, pfx.get());

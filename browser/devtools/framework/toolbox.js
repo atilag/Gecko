@@ -41,10 +41,6 @@ loader.lazyGetter(this, "toolboxStrings", () => {
   };
 });
 
-loader.lazyGetter(this, "Requisition", () => {
-  return require("gcli/cli").Requisition;
-});
-
 loader.lazyGetter(this, "Selection", () => require("devtools/framework/selection").Selection);
 loader.lazyGetter(this, "InspectorFront", () => require("devtools/server/actors/inspector").InspectorFront);
 
@@ -531,7 +527,9 @@ Toolbox.prototype = {
    * Add buttons to the UI as specified in the devtools.toolbox.toolbarSpec pref
    */
   _buildButtons: function() {
-    this._buildPickerButton();
+    if (!this.target.isAddon) {
+      this._buildPickerButton();
+    }
 
     if (!this.target.isLocalTab) {
       return;
@@ -539,7 +537,7 @@ Toolbox.prototype = {
 
     let spec = CommandUtils.getCommandbarSpec("devtools.toolbox.toolbarSpec");
     let environment = CommandUtils.createEnvironment(this, '_target');
-    this._requisition = new Requisition({ environment: environment });
+    this._requisition = CommandUtils.createRequisition(environment);
     let buttons = CommandUtils.createButtons(spec, this._target,
                                              this.doc, this._requisition);
     let container = this.doc.getElementById("toolbox-buttons");
@@ -577,7 +575,8 @@ Toolbox.prototype = {
       "command-button-responsive",
       "command-button-paintflashing",
       "command-button-tilt",
-      "command-button-scratchpad"
+      "command-button-scratchpad",
+      "command-button-eyedropper"
     ].map(id => {
       let button = this.doc.getElementById(id);
       // Some buttons may not exist inside of Browser Toolbox

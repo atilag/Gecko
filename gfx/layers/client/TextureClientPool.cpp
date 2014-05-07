@@ -57,12 +57,12 @@ TextureClientPool::GetTextureClient()
   if (gfxPrefs::ForceShmemTiles()) {
     // gfx::BackendType::NONE means use the content backend
     textureClient = TextureClient::CreateBufferTextureClient(mSurfaceAllocator,
-      mFormat, TEXTURE_IMMEDIATE_UPLOAD, gfx::BackendType::NONE);
+      mFormat, TextureFlags::IMMEDIATE_UPLOAD, gfx::BackendType::NONE);
   } else {
     textureClient = TextureClient::CreateTextureClientForDrawing(mSurfaceAllocator,
-      mFormat, TEXTURE_IMMEDIATE_UPLOAD, gfx::BackendType::NONE, mSize);
+      mFormat, TextureFlags::IMMEDIATE_UPLOAD, gfx::BackendType::NONE, mSize);
   }
-  textureClient->AsTextureClientDrawTarget()->AllocateForSurface(mSize, ALLOC_DEFAULT);
+  textureClient->AllocateForSurface(mSize, ALLOC_DEFAULT);
 
   return textureClient;
 }

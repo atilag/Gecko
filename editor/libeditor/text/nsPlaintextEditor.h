@@ -73,7 +73,9 @@ public:
                                          bool aSuppressTransaction);
 
   /** prepare the editor for use */
-  NS_IMETHOD Init(nsIDOMDocument *aDoc, nsIContent *aRoot, nsISelectionController *aSelCon, uint32_t aFlags);
+  NS_IMETHOD Init(nsIDOMDocument *aDoc, nsIContent *aRoot,
+                  nsISelectionController *aSelCon, uint32_t aFlags,
+                  const nsAString& aValue);
   
   NS_IMETHOD GetDocumentIsEmpty(bool *aDocumentIsEmpty);
   NS_IMETHOD GetIsDocumentEditable(bool *aIsDocumentEditable);
@@ -174,6 +176,9 @@ protected:
   // key event helpers
   NS_IMETHOD CreateBR(nsIDOMNode *aNode, int32_t aOffset, 
                       nsCOMPtr<nsIDOMNode> *outBRNode, EDirection aSelect = eNone);
+  already_AddRefed<mozilla::dom::Element>
+      CreateBRImpl(nsCOMPtr<nsINode>* aInOutParent, int32_t* aInOutOffset,
+                   EDirection aSelect);
   nsresult CreateBRImpl(nsCOMPtr<nsIDOMNode>* aInOutParent,
                         int32_t* aInOutOffset,
                         nsCOMPtr<nsIDOMNode>* outBRNode,

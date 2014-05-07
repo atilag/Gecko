@@ -80,10 +80,10 @@ template<size_t ArgCount> bool
 ExhaustiveTest(const char funcode[])
 {
     RootedValue v(cx);
-    EVAL(funcode, v.address());
+    EVAL(funcode, &v);
 
-    EVAL(CALL_CODES[ArgCount], v.address());
-    Rooted<ArgumentsObject*> argsobj(cx, &JSVAL_TO_OBJECT(v)->as<ArgumentsObject>());
+    EVAL(CALL_CODES[ArgCount], &v);
+    Rooted<ArgumentsObject*> argsobj(cx, &v.toObjectOrNull()->as<ArgumentsObject>());
 
     JS::AutoValueArray<MAX_ELEMS> elems(cx);
 

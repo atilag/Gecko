@@ -49,6 +49,22 @@ MediaStreamAudioSourceNode::~MediaStreamAudioSourceNode()
 {
 }
 
+size_t
+MediaStreamAudioSourceNode::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
+{
+  // Future:
+  // - mInputStream
+  size_t amount = AudioNode::SizeOfExcludingThis(aMallocSizeOf);
+  amount += mInputPort->SizeOfIncludingThis(aMallocSizeOf);
+  return amount;
+}
+
+size_t
+MediaStreamAudioSourceNode::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
+{
+  return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+}
+
 void
 MediaStreamAudioSourceNode::DestroyMediaStream()
 {
@@ -60,9 +76,9 @@ MediaStreamAudioSourceNode::DestroyMediaStream()
 }
 
 JSObject*
-MediaStreamAudioSourceNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+MediaStreamAudioSourceNode::WrapObject(JSContext* aCx)
 {
-  return MediaStreamAudioSourceNodeBinding::Wrap(aCx, aScope, this);
+  return MediaStreamAudioSourceNodeBinding::Wrap(aCx, this);
 }
 
 }

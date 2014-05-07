@@ -21,7 +21,7 @@
 #include "mozilla/layers/CompositorTypes.h"  // for TextureInfo, etc
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
 #include "mozilla/layers/LayersTypes.h"  // for LayerRenderState, etc
-#include "mozilla/layers/TextureHost.h"  // for DeprecatedTextureHost
+#include "mozilla/layers/TextureHost.h"  // for TextureHost
 #include "mozilla/layers/TiledContentClient.h"
 #include "mozilla/mozalloc.h"           // for operator delete
 #include "nsRegion.h"                   // for nsIntRegion
@@ -47,7 +47,6 @@ class Compositor;
 class ISurfaceAllocator;
 class Layer;
 class ThebesBufferData;
-class TiledThebesLayerComposite;
 struct EffectChain;
 
 
@@ -212,17 +211,6 @@ public:
   void UseTiledLayerBuffer(ISurfaceAllocator* aAllocator,
                            const SurfaceDescriptorTiles& aTiledDescriptor);
 
-  // Renders a single given tile.
-  void RenderTile(const TileHost& aTile,
-                  EffectChain& aEffectChain,
-                  float aOpacity,
-                  const gfx::Matrix4x4& aTransform,
-                  const gfx::Filter& aFilter,
-                  const gfx::Rect& aClipRect,
-                  const nsIntRegion& aScreenRegion,
-                  const nsIntPoint& aTextureOffset,
-                  const nsIntSize& aTextureBounds);
-
   void Composite(EffectChain& aEffectChain,
                  float aOpacity,
                  const gfx::Matrix4x4& aTransform,
@@ -231,17 +219,9 @@ public:
                  const nsIntRegion* aVisibleRegion = nullptr,
                  TiledLayerProperties* aLayerProperties = nullptr);
 
-  virtual CompositableType GetType() { return BUFFER_TILED; }
+  virtual CompositableType GetType() { return CompositableType::BUFFER_TILED; }
 
   virtual TiledLayerComposer* AsTiledLayerComposer() MOZ_OVERRIDE { return this; }
-
-  virtual void EnsureDeprecatedTextureHost(TextureIdentifier aTextureId,
-                                 const SurfaceDescriptor& aSurface,
-                                 ISurfaceAllocator* aAllocator,
-                                 const TextureInfo& aTextureInfo) MOZ_OVERRIDE
-  {
-    MOZ_CRASH("Does nothing");
-  }
 
   virtual void Attach(Layer* aLayer,
                       Compositor* aCompositor,
@@ -268,6 +248,7 @@ public:
 #endif
 
 private:
+
   void RenderLayerBuffer(TiledLayerBufferComposite& aLayerBuffer,
                          EffectChain& aEffectChain,
                          float aOpacity,
@@ -275,6 +256,17 @@ private:
                          const gfx::Rect& aClipRect,
                          nsIntRegion aMaskRegion,
                          gfx::Matrix4x4 aTransform);
+
+  // Renders a single given tile.
+  void RenderTile(const TileHost& aTile,
+                  EffectChain& aEffectChain,
+                  float aOpacity,
+                  const gfx::Matrix4x4& aTransform,
+                  const gfx::Filter& aFilter,
+                  const gfx::Rect& aClipRect,
+                  const nsIntRegion& aScreenRegion,
+                  const nsIntPoint& aTextureOffset,
+                  const nsIntSize& aTextureBounds);
 
   void EnsureTileStore() {}
 

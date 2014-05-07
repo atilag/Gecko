@@ -197,6 +197,7 @@ pref(svg.marker-improvements.enabled,true) == marker-orientation-02.svg marker-o
 == mask-basic-01.svg pass.svg
 == mask-basic-02.svg mask-basic-02-ref.svg
 == mask-basic-03.svg pass.svg
+== mask-basic-04.svg pass.svg
 == mask-extref-dataURI-01.svg pass.svg
 == mask-containing-masked-content-01.svg pass.svg
 == mask-transformed-01.svg mask-transformed-01-ref.svg
@@ -225,7 +226,7 @@ random-if(gtk2Widget) == objectBoundingBox-and-fePointLight-02.svg objectBoundin
 skip-if(d2d) fuzzy-if(azureQuartz,1,99974) == opacity-and-gradient-02.svg opacity-and-gradient-02-ref.svg
 == opacity-and-pattern-01.svg pass.svg
 == opacity-and-transform-01.svg opacity-and-transform-01-ref.svg
-fails-if(B2G) fuzzy-if(Android&&AndroidVersion>=15,8,200) == outer-svg-border-and-padding-01.svg outer-svg-border-and-padding-01-ref.svg # B2G scrollbar difference
+fuzzy-if(Android&&AndroidVersion>=15,8,200) == outer-svg-border-and-padding-01.svg outer-svg-border-and-padding-01-ref.svg
 == overflow-on-outer-svg-01.svg overflow-on-outer-svg-01-ref.svg
 == overflow-on-outer-svg-02a.xhtml overflow-on-outer-svg-02-ref.xhtml
 == overflow-on-outer-svg-02b.xhtml overflow-on-outer-svg-02-ref.xhtml
@@ -246,6 +247,7 @@ fuzzy-if(azureQuartz,6,47) == path-01.svg path-01-ref.svg
 == path-08.svg pass.svg
 == pathLength-01.svg pass.svg
 == pathLength-02.svg pass.svg
+== pattern-basic-01.svg pass.svg
 == pattern-invalid-01.svg pattern-invalid-01-ref.svg
 == pattern-live-01a.svg pattern-live-01-ref.svg
 == pattern-live-01b.svg pattern-live-01-ref.svg

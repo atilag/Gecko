@@ -35,7 +35,6 @@
 #include "nsCRT.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsUnicharUtils.h"
-#include "gfxASurface.h"
 #include "gfxContext.h"
 #include "nsRect.h"
 #include "nsMathUtils.h"
@@ -592,6 +591,13 @@ nsDragService::IsCollectionObject(IDataObject* inDataObj)
 NS_IMETHODIMP
 nsDragService::EndDragSession(bool aDoneDrag)
 {
+  // Bug 100180: If we've got mouse events captured, make sure we release it -
+  // that way, if we happen to call EndDragSession before diving into a nested
+  // event loop, we can still respond to mouse events.
+  if (::GetCapture()) {
+    ::ReleaseCapture();
+  }
+
   nsBaseDragService::EndDragSession(aDoneDrag);
   NS_IF_RELEASE(mDataObject);
 

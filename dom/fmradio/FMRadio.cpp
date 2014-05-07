@@ -184,9 +184,9 @@ FMRadio::Shutdown()
 }
 
 JSObject*
-FMRadio::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+FMRadio::WrapObject(JSContext* aCx)
 {
-  return FMRadioBinding::Wrap(aCx, aScope, this);
+  return FMRadioBinding::Wrap(aCx, this);
 }
 
 void
@@ -405,10 +405,10 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(FMRadio)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
   NS_INTERFACE_MAP_ENTRY(nsIAudioChannelAgentCallback)
   NS_INTERFACE_MAP_ENTRY(nsIDOMEventListener)
-NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
+NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
-NS_IMPL_ADDREF_INHERITED(FMRadio, nsDOMEventTargetHelper)
-NS_IMPL_RELEASE_INHERITED(FMRadio, nsDOMEventTargetHelper)
+NS_IMPL_ADDREF_INHERITED(FMRadio, DOMEventTargetHelper)
+NS_IMPL_RELEASE_INHERITED(FMRadio, DOMEventTargetHelper)
 
 END_FMRADIO_NAMESPACE
 

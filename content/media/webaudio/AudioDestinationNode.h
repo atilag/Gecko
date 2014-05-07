@@ -30,6 +30,7 @@ public:
   // whether it's in offline mode.
   AudioDestinationNode(AudioContext* aContext,
                        bool aIsOffline,
+                       AudioChannel aChannel = AudioChannel::Normal,
                        uint32_t aNumberOfChannels = 0,
                        uint32_t aLength = 0,
                        float aSampleRate = 0.0f);
@@ -40,8 +41,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(AudioDestinationNode, AudioNode)
   NS_DECL_NSIAUDIOCHANNELAGENTCALLBACK
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   virtual uint16_t NumberOfOutputs() const MOZ_FINAL MOZ_OVERRIDE
   {
@@ -74,6 +74,14 @@ public:
 
   // When aIsOnlyNode is true, this is the only node for the AudioContext.
   void SetIsOnlyNodeForContext(bool aIsOnlyNode);
+
+  virtual const char* NodeType() const
+  {
+    return "AudioDestinationNode";
+  }
+
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
 
 private:
   bool CheckAudioChannelPermissions(AudioChannel aValue);

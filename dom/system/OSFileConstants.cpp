@@ -46,6 +46,7 @@
 #include "nsIObserver.h"
 #include "nsDirectoryServiceUtils.h"
 #include "nsIXULRuntime.h"
+#include "nsIPropertyBag2.h"
 #include "nsXPCOMCIDInternal.h"
 #include "nsServiceManagerUtils.h"
 #include "nsString.h"
@@ -163,6 +164,12 @@ struct Paths {
  */
 Paths* gPaths = nullptr;
 
+/**
+ * (Unix) the umask, which goes in OS.Constants.Sys but
+ * can only be looked up (via the system-info service)
+ * on the main thread.
+ */
+uint32_t gUserUmask = 0;
 }
 
 /**
@@ -201,7 +208,7 @@ class DelayedPathSetter MOZ_FINAL: public nsIObserver
   DelayedPathSetter() {}
 };
 
-NS_IMPL_ISUPPORTS1(DelayedPathSetter, nsIObserver)
+NS_IMPL_ISUPPORTS(DelayedPathSetter, nsIObserver)
 
 NS_IMETHODIMP
 DelayedPathSetter::Observe(nsISupports*, const char * aTopic, const char16_t*)
@@ -297,6 +304,19 @@ nsresult InitOSFileConstants()
 #endif // defined(XP_MACOSX)
 
   gPaths = paths.forget();
+
+  // Get the umask from the system-info service.
+  // The property will always be present, but it will be zero on
+  // non-Unix systems.
+  nsCOMPtr<nsIPropertyBag2> infoService =
+    do_GetService("@mozilla.org/system-info;1");
+  MOZ_ASSERT(infoService, "Could not access the system information service");
+  rv = infoService->GetPropertyAsUint32(NS_LITERAL_STRING("umask"),
+                                        &gUserUmask);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
   return NS_OK;
 }
 
@@ -325,6 +345,17 @@ void CleanupOSFileConstants()
  */
 #define INT_CONSTANT(name)      \
   { #name, INT_TO_JSVAL(name) }
+
+/**
+ * Define a simple read-only property holding an unsigned integer.
+ *
+ * @param name The name of the constant. Used both as the JS name for the
+ * constant and to access its value. Must be defined.
+ *
+ * Produces a |ConstantSpec|.
+ */
+#define UINT_CONSTANT(name)      \
+  { #name, UINT_TO_JSVAL((name)) }
 
 /**
  * End marker for ConstantSpec
@@ -682,7 +713,7 @@ static const dom::ConstantSpec gWinProperties[] =
   INT_CONSTANT(FILE_END),
 
   // SetFilePointer error constant
-  INT_CONSTANT(INVALID_SET_FILE_POINTER),
+  UINT_CONSTANT(INVALID_SET_FILE_POINTER),
 
   // File attributes
   INT_CONSTANT(FILE_ATTRIBUTE_DIRECTORY),
@@ -739,7 +770,7 @@ JSObject *GetOrCreateObjectProperty(JSContext *cx, JS::Handle<JSObject*> aObject
       JSMSG_UNEXPECTED_TYPE, aProperty, "not an object");
     return nullptr;
   }
-  return JS_DefineObject(cx, aObject, aProperty, nullptr, nullptr,
+  return JS_DefineObject(cx, aObject, aProperty, nullptr, JS::NullPtr(),
                          JSPROP_ENUMERATE);
 }
 
@@ -841,6 +872,14 @@ bool DefineOSFileConstants(JSContext *cx, JS::Handle<JSObject*> global)
     return false;
   }
 #endif
+
+  dom::ConstantSpec umask_cs[] = {
+    { "umask", UINT_TO_JSVAL(gUserUmask) },
+    PROP_END
+  };
+  if (!dom::DefineConstants(cx, objSys, umask_cs)) {
+      return false;
+  }
 
   // Build OS.Constants.Path
 
@@ -948,7 +987,7 @@ bool DefineOSFileConstants(JSContext *cx, JS::Handle<JSObject*> global)
   return true;
 }
 
-NS_IMPL_ISUPPORTS1(OSFileConstantsService, nsIOSFileConstantsService)
+NS_IMPL_ISUPPORTS(OSFileConstantsService, nsIOSFileConstantsService)
 
 OSFileConstantsService::OSFileConstantsService()
 {

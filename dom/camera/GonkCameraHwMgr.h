@@ -43,6 +43,12 @@ class GonkCameraHardware : public GonkNativeWindowNewFrameCallback
 protected:
   GonkCameraHardware(mozilla::nsGonkCameraControl* aTarget, uint32_t aCameraId, const sp<Camera>& aCamera);
   virtual ~GonkCameraHardware();
+
+  // Initialize the AOSP camera interface.
+  //
+  // Return values:
+  //  - NS_OK on success;
+  //  - NS_ERROR_NOT_INITIALIZED if the interface could not be initialized.
   virtual nsresult Init();
 
 public:
@@ -78,7 +84,9 @@ public:
   virtual int      GetSensorOrientation(uint32_t aType = RAW_SENSOR_ORIENTATION);
 
   virtual int      AutoFocus();
-  virtual void     CancelAutoFocus();
+  virtual int      CancelAutoFocus();
+  virtual int      StartFaceDetection();
+  virtual int      StopFaceDetection();
   virtual int      TakePicture();
   virtual void     CancelTakePicture();
   virtual int      StartPreview();

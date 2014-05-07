@@ -9,6 +9,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/dom/HTMLAllCollection.h"
 #include "nsCOMPtr.h"
+#include "nsGlobalWindow.h"
 #include "nsXPIDLString.h"
 #include "nsPrintfCString.h"
 #include "nsReadableUtils.h"
@@ -198,32 +199,32 @@ nsHTMLDocument::~nsHTMLDocument()
 {
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_11(nsHTMLDocument, nsDocument,
-                                      mAll,
-                                      mImages,
-                                      mApplets,
-                                      mEmbeds,
-                                      mLinks,
-                                      mAnchors,
-                                      mScripts,
-                                      mForms,
-                                      mFormControls,
-                                      mWyciwygChannel,
-                                      mMidasCommandManager)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(nsHTMLDocument, nsDocument,
+                                   mAll,
+                                   mImages,
+                                   mApplets,
+                                   mEmbeds,
+                                   mLinks,
+                                   mAnchors,
+                                   mScripts,
+                                   mForms,
+                                   mFormControls,
+                                   mWyciwygChannel,
+                                   mMidasCommandManager)
 
 NS_IMPL_ADDREF_INHERITED(nsHTMLDocument, nsDocument)
 NS_IMPL_RELEASE_INHERITED(nsHTMLDocument, nsDocument)
 
 // QueryInterface implementation for nsHTMLDocument
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(nsHTMLDocument)
-  NS_INTERFACE_TABLE_INHERITED2(nsHTMLDocument, nsIHTMLDocument,
-                                nsIDOMHTMLDocument)
+  NS_INTERFACE_TABLE_INHERITED(nsHTMLDocument, nsIHTMLDocument,
+                               nsIDOMHTMLDocument)
 NS_INTERFACE_TABLE_TAIL_INHERITING(nsDocument)
 
 JSObject*
-nsHTMLDocument::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+nsHTMLDocument::WrapNode(JSContext* aCx)
 {
-  return HTMLDocumentBinding::Wrap(aCx, aScope, this);
+  return HTMLDocumentBinding::Wrap(aCx, this);
 }
 
 nsresult
@@ -1593,6 +1594,7 @@ nsHTMLDocument::Open(JSContext* cx,
     nsCOMPtr<nsIScriptGlobalObject> newScope(do_QueryReferent(mScopeObject));
     JS::Rooted<JSObject*> wrapper(cx, GetWrapper());
     if (oldScope && newScope != oldScope && wrapper) {
+      JSAutoCompartment ac(cx, wrapper);
       rv = mozilla::dom::ReparentWrapper(cx, wrapper);
       if (rv.Failed()) {
         return nullptr;
@@ -2153,28 +2155,24 @@ NS_IMETHODIMP
 nsHTMLDocument::GetSelection(nsISelection** aReturn)
 {
   ErrorResult rv;
-  *aReturn = GetSelection(rv).take();
+  NS_IF_ADDREF(*aReturn = GetSelection(rv));
   return rv.ErrorCode();
 }
 
-already_AddRefed<Selection>
-nsHTMLDocument::GetSelection(ErrorResult& rv)
+Selection*
+nsHTMLDocument::GetSelection(ErrorResult& aRv)
 {
-  nsCOMPtr<nsIDOMWindow> window = do_QueryInterface(GetScopeObject());
-  nsCOMPtr<nsPIDOMWindow> pwin = do_QueryInterface(window);
-  if (!pwin) {
-    return nullptr;
-  }
-  NS_ASSERTION(pwin->IsInnerWindow(), "Should have inner window here!");
-  if (!pwin->GetOuterWindow() ||
-      pwin->GetOuterWindow()->GetCurrentInnerWindow() != pwin) {
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(GetScopeObject());
+  if (!window) {
     return nullptr;
   }
 
-  nsCOMPtr<nsISelection> sel;
-  rv = window->GetSelection(getter_AddRefs(sel));
-  nsRefPtr<Selection> selection = static_cast<Selection*>(sel.get());
-  return selection.forget();
+  NS_ASSERTION(window->IsInnerWindow(), "Should have inner window here!");
+  if (!window->IsCurrentInnerWindow()) {
+    return nullptr;
+  }
+
+  return static_cast<nsGlobalWindow*>(window.get())->GetSelection(aRv);
 }
 
 NS_IMETHODIMP
@@ -2256,18 +2254,20 @@ nsHTMLDocument::NamedGetter(JSContext* cx, const nsAString& aName, bool& aFound,
   }
 
   JS::Rooted<JS::Value> val(cx);
-  { // Scope for auto-compartment
-    JS::Rooted<JSObject*> wrapper(cx, GetWrapper());
-    JSAutoCompartment ac(cx, wrapper);
-    // XXXbz Should we call the (slightly misnamed, really) WrapNativeParent
-    // here?
-    if (!dom::WrapObject(cx, wrapper, supp, cache, nullptr, &val)) {
-      rv.Throw(NS_ERROR_OUT_OF_MEMORY);
-      return nullptr;
-    }
+  // XXXbz Should we call the (slightly misnamed, really) WrapNativeParent
+  // here?
+  if (!dom::WrapObject(cx, supp, cache, nullptr, &val)) {
+    rv.Throw(NS_ERROR_OUT_OF_MEMORY);
+    return nullptr;
   }
   aFound = true;
   return &val.toObject();
+}
+
+bool
+nsHTMLDocument::NameIsEnumerable(const nsAString& aName)
+{
+  return true;
 }
 
 static PLDHashOperator
@@ -2282,7 +2282,7 @@ IdentifierMapEntryAddNames(nsIdentifierMapEntry* aEntry, void* aArg)
 }
 
 void
-nsHTMLDocument::GetSupportedNames(nsTArray<nsString>& aNames)
+nsHTMLDocument::GetSupportedNames(unsigned, nsTArray<nsString>& aNames)
 {
   mIdentifierMap.EnumerateEntries(IdentifierMapEntryAddNames, &aNames);
 }

@@ -14,9 +14,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGStyleElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+SVGStyleElement::WrapNode(JSContext *aCx)
 {
-  return SVGStyleElementBinding::Wrap(aCx, aScope, this);
+  return SVGStyleElementBinding::Wrap(aCx, this);
 }
 
 //----------------------------------------------------------------------
@@ -26,9 +26,9 @@ NS_IMPL_ADDREF_INHERITED(SVGStyleElement, SVGStyleElementBase)
 NS_IMPL_RELEASE_INHERITED(SVGStyleElement, SVGStyleElementBase)
 
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(SVGStyleElement)
-  NS_INTERFACE_TABLE_INHERITED2(SVGStyleElement,
-                                nsIStyleSheetLinkingElement,
-                                nsIMutationObserver)
+  NS_INTERFACE_TABLE_INHERITED(SVGStyleElement,
+                               nsIStyleSheetLinkingElement,
+                               nsIMutationObserver)
 NS_INTERFACE_TABLE_TAIL_INHERITING(SVGStyleElementBase)
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(SVGStyleElement)

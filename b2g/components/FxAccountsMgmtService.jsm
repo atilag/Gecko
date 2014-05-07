@@ -29,52 +29,40 @@ Cu.import("resource://gre/modules/FxAccountsCommon.js");
 XPCOMUtils.defineLazyModuleGetter(this, "FxAccountsManager",
   "resource://gre/modules/FxAccountsManager.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "SystemAppProxy",
+                                  "resource://gre/modules/SystemAppProxy.jsm");
+
 this.FxAccountsMgmtService = {
-
-  _sendChromeEvent: function(aEventName, aMsg) {
-    if (!this._shell) {
-      return;
-    }
-    log.debug("Chrome event " + JSON.stringify(aMsg));
-    this._shell.sendCustomEvent(aEventName, aMsg);
-  },
-
   _onFulfill: function(aMsgId, aData) {
-    this._sendChromeEvent("mozFxAccountsChromeEvent", {
+    SystemAppProxy._sendCustomEvent("mozFxAccountsChromeEvent", {
       id: aMsgId,
       data: aData ? aData : null
     });
   },
 
   _onReject: function(aMsgId, aReason) {
-    this._sendChromeEvent("mozFxAccountsChromeEvent", {
+    SystemAppProxy._sendCustomEvent("mozFxAccountsChromeEvent", {
       id: aMsgId,
       error: aReason ? aReason : null
     });
   },
 
   init: function() {
-    Services.obs.addObserver(this, "content-start", false);
     Services.obs.addObserver(this, ONLOGIN_NOTIFICATION, false);
     Services.obs.addObserver(this, ONVERIFIED_NOTIFICATION, false);
     Services.obs.addObserver(this, ONLOGOUT_NOTIFICATION, false);
+    SystemAppProxy.addEventListener("mozFxAccountsContentEvent",
+                                    FxAccountsMgmtService);
   },
 
   observe: function(aSubject, aTopic, aData) {
     log.debug("Observed " + aTopic);
     switch (aTopic) {
-      case "content-start":
-        this._shell = Services.wm.getMostRecentWindow("navigator:browser").shell;
-        let content = this._shell.contentBrowser.contentWindow;
-        content.addEventListener("mozFxAccountsContentEvent",
-                                 FxAccountsMgmtService);
-        Services.obs.removeObserver(this, "content-start");
-        break;
       case ONLOGIN_NOTIFICATION:
       case ONVERIFIED_NOTIFICATION:
       case ONLOGOUT_NOTIFICATION:
         // FxAccounts notifications have the form of fxaccounts:*
-        this._sendChromeEvent("mozFxAccountsUnsolChromeEvent", {
+        SystemAppProxy._sendCustomEvent("mozFxAccountsUnsolChromeEvent", {
           eventName: aTopic.substring(aTopic.indexOf(":") + 1)
         });
         break;
@@ -93,6 +81,11 @@ this.FxAccountsMgmtService = {
     let data = msg.data;
     if (!data) {
       return;
+    }
+    // Backwards compatibility: handle accountId coming from Gaia
+    if (data.accountId && typeof(data.email === "undefined")) {
+      data.email = data.accountId;
+      delete data.accountId;
     }
 
     switch(data.method) {
@@ -118,7 +111,7 @@ this.FxAccountsMgmtService = {
         ).then(null, Components.utils.reportError);
         break;
       case "queryAccount":
-        FxAccountsManager.queryAccount(data.accountId).then(
+        FxAccountsManager.queryAccount(data.email).then(
           result => {
             self._onFulfill(msg.id, result);
           },
@@ -130,7 +123,7 @@ this.FxAccountsMgmtService = {
       case "signIn":
       case "signUp":
       case "refreshAuthentication":
-        FxAccountsManager[data.method](data.accountId, data.password).then(
+        FxAccountsManager[data.method](data.email, data.password).then(
           user => {
             self._onFulfill(msg.id, user);
           },

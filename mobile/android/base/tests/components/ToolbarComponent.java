@@ -4,20 +4,23 @@
 
 package org.mozilla.gecko.tests.components;
 
-import static org.mozilla.gecko.tests.helpers.AssertionHelper.*;
+import static org.mozilla.gecko.tests.helpers.AssertionHelper.fAssertEquals;
+import static org.mozilla.gecko.tests.helpers.AssertionHelper.fAssertFalse;
+import static org.mozilla.gecko.tests.helpers.AssertionHelper.fAssertNotNull;
+import static org.mozilla.gecko.tests.helpers.AssertionHelper.fAssertTrue;
 
-import org.mozilla.gecko.InputMethods;
-import org.mozilla.gecko.tests.helpers.*;
-import org.mozilla.gecko.tests.UITestContext;
 import org.mozilla.gecko.R;
-
-import com.jayway.android.robotium.solo.Condition;
-import com.jayway.android.robotium.solo.Solo;
+import org.mozilla.gecko.tests.UITestContext;
+import org.mozilla.gecko.tests.helpers.DeviceHelper;
+import org.mozilla.gecko.tests.helpers.WaitHelper;
 
 import android.view.View;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.TextView;
+
+import com.jayway.android.robotium.solo.Condition;
+import com.jayway.android.robotium.solo.Solo;
 
 /**
  * A class representing any interactions that take place on the Toolbar.
@@ -67,13 +70,6 @@ public class ToolbarComponent extends BaseComponent {
         return (TextView) getToolbarView().findViewById(R.id.url_bar_title);
     }
 
-    /**
-     * Returns the View for the go button in the browser toolbar.
-     */
-    private ImageButton getGoButton() {
-        return (ImageButton) getToolbarView().findViewById(R.id.go);
-    }
-
     private ImageButton getBackButton() {
         DeviceHelper.assertIsTablet();
         return (ImageButton) getToolbarView().findViewById(R.id.back);
@@ -82,6 +78,13 @@ public class ToolbarComponent extends BaseComponent {
     private ImageButton getForwardButton() {
         DeviceHelper.assertIsTablet();
         return (ImageButton) getToolbarView().findViewById(R.id.forward);
+    }
+
+    /**
+     * Returns the View for the edit cancel button in the browser toolbar.
+     */
+    private ImageButton getEditCancelButton() {
+        return (ImageButton) getToolbarView().findViewById(R.id.edit_cancel);
     }
 
     private CharSequence getTitle() {
@@ -132,7 +135,7 @@ public class ToolbarComponent extends BaseComponent {
         WaitHelper.waitForPageLoad(new Runnable() {
             @Override
             public void run() {
-                mSolo.clickOnView(getGoButton());
+                mSolo.sendKey(Solo.ENTER);
             }
         });
         waitForNotEditing();
@@ -143,14 +146,19 @@ public class ToolbarComponent extends BaseComponent {
     public ToolbarComponent dismissEditingMode() {
         assertIsEditing();
 
-        if (getUrlEditText().isInputMethodTarget()) {
-            // Drop the soft keyboard.
-            // TODO: Solo.hideSoftKeyboard() does not clear focus, causing unexpected
-            // behavior, but we may want to use it over goBack().
-            mSolo.goBack();
-        }
+        // Cancel Button not implemeneted in tablet.
+        if (DeviceHelper.isTablet()) {
+            if (getUrlEditText().isInputMethodTarget()) {
+                // Drop the soft keyboard.
+                // TODO: Solo.hideSoftKeyboard() does not clear focus, causing unexpected
+                // behavior, but we may want to use it over goBack().
+                mSolo.goBack();
+            }
 
-        mSolo.goBack();
+            mSolo.goBack();
+        } else {
+            mSolo.clickOnView(getEditCancelButton());
+        }
 
         waitForNotEditing();
 

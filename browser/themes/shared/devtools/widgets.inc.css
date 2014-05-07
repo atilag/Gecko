@@ -161,7 +161,7 @@
 
 .theme-light #breadcrumb-separator-after,
 .theme-light #breadcrumb-separator-before:after {
-  background: url("chrome://browser/skin/devtools/metal.jpg"); /* Toolbars */
+  background: #f0f1f2; /* Toolbars */
 }
 
 /* This chevron arrow cannot be replicated easily in CSS, so we are using
@@ -624,10 +624,6 @@
 
 .variable-or-property:focus > .title > label {
   color: inherit !important;
-}
-
-.variable-or-property > .title > .value {
-  -moz-box-flex: 1;
 }
 
 .variable-or-property > .title > .arrow {

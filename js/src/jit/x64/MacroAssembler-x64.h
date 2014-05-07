@@ -110,6 +110,14 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
         call(rax);
     }
 
+    void call(const CallSiteDesc &desc, AsmJSImmPtr target) {
+        call(target);
+        appendCallSite(desc);
+    }
+    void callExit(AsmJSImmPtr target, uint32_t stackArgBytes) {
+        call(CallSiteDesc::Exit(), target);
+    }
+
     // Refers to the upper 32 bits of a 64-bit Value operand.
     // On x86_64, the upper 32 bits do not necessarily only contain the type.
     Operand ToUpper32(Operand base) {
@@ -457,6 +465,9 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
         movq(rhs, ScratchReg);
         cmpq(lhs, ScratchReg);
     }
+    void cmpPtr(const Register &lhs, const Imm32 rhs) {
+        cmpq(lhs, rhs);
+    }
     void cmpPtr(const Operand &lhs, const ImmGCPtr rhs) {
         movq(rhs, ScratchReg);
         cmpq(lhs, ScratchReg);
@@ -497,8 +508,12 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
         testq(lhs, rhs);
     }
 
-    Condition testNegativeZero(const FloatRegister &reg, const Register &scratch);
-    Condition testNegativeZeroFloat32(const FloatRegister &reg, const Register &scratch);
+    template <typename T1, typename T2>
+    void cmpPtrSet(Assembler::Condition cond, T1 lhs, T2 rhs, const Register &dest)
+    {
+        cmpPtr(lhs, rhs);
+        emitSet(cond, dest);
+    }
 
     /////////////////////////////////////////////////////////////////
     // Common interface.
@@ -553,6 +568,9 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
     }
     void subPtr(const Address &addr, const Register &dest) {
         subq(Operand(addr), dest);
+    }
+    void subPtr(const Register &src, const Address &dest) {
+        subq(src, Operand(dest));
     }
 
     void branch32(Condition cond, const AbsoluteAddress &lhs, Imm32 rhs, Label *label) {
@@ -887,6 +905,38 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
         cond = testNumber(cond, src);
         j(cond, label);
     }
+
+    // Perform a type-test on a Value addressed by BaseIndex.
+    // Clobbers the ScratchReg.
+    void branchTestUndefined(Condition cond, const BaseIndex &address, Label *label) {
+        cond = testUndefined(cond, address);
+        j(cond, label);
+    }
+    void branchTestInt32(Condition cond, const BaseIndex &address, Label *label) {
+        splitTag(address, ScratchReg);
+        branchTestInt32(cond, ScratchReg, label);
+    }
+    void branchTestBoolean(Condition cond, const BaseIndex &address, Label *label) {
+        splitTag(address, ScratchReg);
+        branchTestBoolean(cond, ScratchReg, label);
+    }
+    void branchTestDouble(Condition cond, const BaseIndex &address, Label *label) {
+        cond = testDouble(cond, address);
+        j(cond, label);
+    }
+    void branchTestNull(Condition cond, const BaseIndex &address, Label *label) {
+        cond = testNull(cond, address);
+        j(cond, label);
+    }
+    void branchTestString(Condition cond, const BaseIndex &address, Label *label) {
+        cond = testString(cond, address);
+        j(cond, label);
+    }
+    void branchTestObject(Condition cond, const BaseIndex &address, Label *label) {
+        cond = testObject(cond, address);
+        j(cond, label);
+    }
+
     template <typename T>
     void branchTestGCThing(Condition cond, const T &src, Label *label) {
         cond = testGCThing(cond, src);
@@ -933,6 +983,15 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
     {
         JS_ASSERT(cond == Equal || cond == NotEqual);
         branchPtr(cond, valaddr, value.valueReg(), label);
+    }
+
+    void testNullSet(Condition cond, const ValueOperand &value, Register dest) {
+        cond = testNull(cond, value);
+        emitSet(cond, dest);
+    }
+    void testUndefinedSet(Condition cond, const ValueOperand &value, Register dest) {
+        cond = testUndefined(cond, value);
+        emitSet(cond, dest);
     }
 
     void boxDouble(const FloatRegister &src, const ValueOperand &dest) {
@@ -1117,6 +1176,10 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
         testl(operand.valueReg(), operand.valueReg());
         return truthy ? NonZero : Zero;
     }
+    void branchTestInt32Truthy(bool truthy, const ValueOperand &operand, Label *label) {
+        Condition cond = testInt32Truthy(truthy, operand);
+        j(cond, label);
+    }
     void branchTestBooleanTruthy(bool truthy, const ValueOperand &operand, Label *label) {
         testl(operand.valueReg(), operand.valueReg());
         j(truthy ? NonZero : Zero, label);
@@ -1128,7 +1191,10 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
         testq(lengthAndFlags, Imm32(-1 << JSString::LENGTH_SHIFT));
         return truthy ? Assembler::NonZero : Assembler::Zero;
     }
-
+    void branchTestStringTruthy(bool truthy, const ValueOperand &value, Label *label) {
+        Condition cond = testStringTruthy(truthy, value);
+        j(cond, label);
+    }
 
     void loadInt32OrDouble(const Operand &operand, const FloatRegister &dest) {
         Label notInt32, end;
@@ -1169,6 +1235,10 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
             mov(ImmPtr(dest.addr), ScratchReg);
             addPtr(Imm32(1), Address(ScratchReg, 0));
         }
+    }
+
+    void incrementInt32Value(const Address &addr) {
+        addPtr(Imm32(1), addr);
     }
 
     // If source is a double, load it into dest. If source is int32,
@@ -1231,10 +1301,9 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
     }
 
     // Save an exit frame (which must be aligned to the stack pointer) to
-    // ThreadData::ionTop of the main thread.
+    // PerThreadData::jitTop of the main thread.
     void linkExitFrame() {
-        storePtr(StackPointer,
-                 AbsoluteAddress(GetIonContext()->runtime->addressOfIonTop()));
+        storePtr(StackPointer, AbsoluteAddress(GetIonContext()->runtime->addressOfJitTop()));
     }
 
     void callWithExitFrame(JitCode *target, Register dynStack) {
@@ -1247,7 +1316,7 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
     // Save an exit frame to the thread data of the current thread, given a
     // register that holds a PerThreadData *.
     void linkParallelExitFrame(const Register &pt) {
-        storePtr(StackPointer, Address(pt, offsetof(PerThreadData, ionTop)));
+        storePtr(StackPointer, Address(pt, offsetof(PerThreadData, jitTop)));
     }
 
     // See CodeGeneratorX64 calls to noteAsmJSGlobalAccess.
@@ -1264,6 +1333,10 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
         storeValue(JSVAL_TYPE_INT32, ScratchReg, Dest);
     }
 
+#ifdef JSGC_GENERATIONAL
+    void branchPtrInNurseryRange(Condition cond, Register ptr, Register temp, Label *label);
+    void branchValueIsNurseryObject(Condition cond, ValueOperand value, Register temp, Label *label);
+#endif
 };
 
 typedef MacroAssemblerX64 MacroAssemblerSpecific;

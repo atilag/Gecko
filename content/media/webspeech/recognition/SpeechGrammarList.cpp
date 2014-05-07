@@ -12,7 +12,7 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(SpeechGrammarList, mParent)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(SpeechGrammarList, mParent)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(SpeechGrammarList)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(SpeechGrammarList)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SpeechGrammarList)
@@ -38,9 +38,9 @@ SpeechGrammarList::Constructor(const GlobalObject& aGlobal,
 }
 
 JSObject*
-SpeechGrammarList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+SpeechGrammarList::WrapObject(JSContext* aCx)
 {
-  return SpeechGrammarListBinding::Wrap(aCx, aScope, this);
+  return SpeechGrammarListBinding::Wrap(aCx, this);
 }
 
 nsISupports*

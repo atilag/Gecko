@@ -13,7 +13,7 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(SpeechRecognitionResultList, mParent, mItems)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(SpeechRecognitionResultList, mParent, mItems)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(SpeechRecognitionResultList)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(SpeechRecognitionResultList)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SpeechRecognitionResultList)
@@ -34,14 +34,13 @@ SpeechRecognitionResultList::~SpeechRecognitionResultList()
 nsISupports*
 SpeechRecognitionResultList::GetParentObject() const
 {
-  return static_cast<nsDOMEventTargetHelper*>(mParent.get());
+  return static_cast<DOMEventTargetHelper*>(mParent.get());
 }
 
 JSObject*
-SpeechRecognitionResultList::WrapObject(JSContext* aCx,
-                                        JS::Handle<JSObject*> aScope)
+SpeechRecognitionResultList::WrapObject(JSContext* aCx)
 {
-  return SpeechRecognitionResultListBinding::Wrap(aCx, aScope, this);
+  return SpeechRecognitionResultListBinding::Wrap(aCx, this);
 }
 
 already_AddRefed<SpeechRecognitionResult>

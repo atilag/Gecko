@@ -23,8 +23,8 @@
 #include "nsLayoutUtils.h"
 
 #include "GLContextProvider.h"
-#include "gfxImageSurface.h"
 
+#include "mozilla/EnumeratedArray.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/Scoped.h"
@@ -152,8 +152,7 @@ public:
     NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(WebGLContext,
                                                            nsIDOMWebGLRenderingContext)
 
-    virtual JSObject* WrapObject(JSContext *cx,
-                                 JS::Handle<JSObject*> scope) = 0;
+    virtual JSObject* WrapObject(JSContext *cx) = 0;
 
     NS_DECL_NSIDOMWEBGLRENDERINGCONTEXT
 
@@ -167,15 +166,11 @@ public:
         { return NS_ERROR_NOT_IMPLEMENTED; }
     NS_IMETHOD Reset() MOZ_OVERRIDE
         { /* (InitializeWithSurface) */ return NS_ERROR_NOT_IMPLEMENTED; }
-    NS_IMETHOD Render(gfxContext *ctx,
-                      GraphicsFilter f,
-                      uint32_t aFlags = RenderFlagPremultAlpha) MOZ_OVERRIDE;
     virtual void GetImageBuffer(uint8_t** aImageBuffer, int32_t* aFormat);
     NS_IMETHOD GetInputStream(const char* aMimeType,
                               const char16_t* aEncoderOptions,
                               nsIInputStream **aStream) MOZ_OVERRIDE;
-    NS_IMETHOD GetThebesSurface(gfxASurface **surface) MOZ_OVERRIDE;
-    mozilla::TemporaryRef<mozilla::gfx::SourceSurface> GetSurfaceSnapshot() MOZ_OVERRIDE;
+    mozilla::TemporaryRef<mozilla::gfx::SourceSurface> GetSurfaceSnapshot(bool* aPremultAlpha) MOZ_OVERRIDE;
 
     NS_IMETHOD SetIsOpaque(bool b) MOZ_OVERRIDE { return NS_OK; };
     bool GetIsOpaque() MOZ_OVERRIDE { return false; }
@@ -235,16 +230,17 @@ public:
     // Returns null if the current bound FB is not likely complete.
     const WebGLRectangleObject* CurValidFBRectObject() const;
 
-    static const size_t sMaxColorAttachments = 16;
+    static const size_t kMaxColorAttachments = 16;
 
     // This is similar to GLContext::ClearSafely, but tries to minimize the
     // amount of work it does.
     // It only clears the buffers we specify, and can reset its state without
     // first having to query anything, as WebGL knows its state at all times.
-    void ForceClearFramebufferWithDefaultValues(GLbitfield mask, const bool colorAttachmentsMask[sMaxColorAttachments]);
+    void ForceClearFramebufferWithDefaultValues(GLbitfield mask, const bool colorAttachmentsMask[kMaxColorAttachments]);
 
     // Calls ForceClearFramebufferWithDefaultValues() for the Context's 'screen'.
     void ClearScreen();
+    void ClearBackbufferIfNeeded();
 
     bool MinCapabilityMode() const { return mMinCapability; }
 
@@ -843,7 +839,7 @@ protected:
     bool mLoseContextOnHeapMinimize;
     bool mCanLoseContextInForeground;
     bool mShouldPresent;
-    bool mIsScreenCleared;
+    bool mBackbufferNeedsClear;
     bool mDisableFragHighP;
 
     template<typename WebGLObjectType>
@@ -897,33 +893,11 @@ protected:
 
     // -------------------------------------------------------------------------
     // WebGL extensions (implemented in WebGLContextExtensions.cpp)
-    enum WebGLExtensionID {
-        EXT_color_buffer_half_float,
-        EXT_frag_depth,
-        EXT_sRGB,
-        EXT_texture_filter_anisotropic,
-        OES_element_index_uint,
-        OES_standard_derivatives,
-        OES_texture_float,
-        OES_texture_float_linear,
-        OES_texture_half_float,
-        OES_texture_half_float_linear,
-        OES_vertex_array_object,
-        WEBGL_color_buffer_float,
-        WEBGL_compressed_texture_atc,
-        WEBGL_compressed_texture_etc1,
-        WEBGL_compressed_texture_pvrtc,
-        WEBGL_compressed_texture_s3tc,
-        WEBGL_debug_renderer_info,
-        WEBGL_debug_shaders,
-        WEBGL_depth_texture,
-        WEBGL_lose_context,
-        WEBGL_draw_buffers,
-        ANGLE_instanced_arrays,
-        WebGLExtensionID_max,
-        WebGLExtensionID_unknown_extension
-    };
-    nsTArray<nsRefPtr<WebGLExtensionBase> > mExtensions;
+    typedef EnumeratedArray<WebGLExtensionID,
+                            WebGLExtensionID::Max,
+                            nsRefPtr<WebGLExtensionBase>> ExtensionsArrayType;
+
+    ExtensionsArrayType mExtensions;
 
     // enable an extension. the extension should not be enabled before.
     void EnableExtension(WebGLExtensionID ext);
@@ -1036,7 +1010,7 @@ protected:
         if (mPixelStoreColorspaceConversion == LOCAL_GL_NONE)
             flags |= nsLayoutUtils::SFE_NO_COLORSPACE_CONVERSION;
         if (!mPixelStorePremultiplyAlpha)
-            flags |= nsLayoutUtils::SFE_NO_PREMULTIPLY_ALPHA;
+            flags |= nsLayoutUtils::SFE_PREFER_NO_PREMULTIPLY_ALPHA;
         return nsLayoutUtils::SurfaceFromElement(aElement, flags);
     }
     template<class ElementType>
