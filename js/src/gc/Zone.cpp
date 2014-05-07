@@ -24,7 +24,6 @@ using namespace js::gc;
 JS::Zone::Zone(JSRuntime *rt)
   : JS::shadow::Zone(rt, &rt->gcMarker),
     allocator(this),
-    hold(false),
     ionUsingBarriers_(false),
     active(false),
     gcScheduled(false),
@@ -113,7 +112,7 @@ Zone::onTooMuchMalloc()
 }
 
 void
-Zone::sweep(FreeOp *fop, bool releaseTypes)
+Zone::sweep(FreeOp *fop, bool releaseTypes, bool *oom)
 {
     /*
      * Periodically release observed types for all scripts. This is safe to
@@ -124,7 +123,7 @@ Zone::sweep(FreeOp *fop, bool releaseTypes)
 
     {
         gcstats::AutoPhase ap(fop->runtime()->gcStats, gcstats::PHASE_DISCARD_ANALYSIS);
-        types.sweep(fop, releaseTypes);
+        types.sweep(fop, releaseTypes, oom);
     }
 
     if (!fop->runtime()->debuggerList.isEmpty())
@@ -254,4 +253,12 @@ js::ZoneOfObjectFromAnyThread(const JSObject &obj)
     return obj.zoneFromAnyThread();
 }
 
-
+bool
+Zone::hasMarkedCompartments()
+{
+    for (CompartmentsInZoneIter comp(this); !comp.done(); comp.next()) {
+        if (comp->marked)
+            return true;
+    }
+    return false;
+}

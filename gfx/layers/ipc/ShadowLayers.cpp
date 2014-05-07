@@ -464,7 +464,10 @@ ShadowLayerForwarder::RemoveTexture(TextureClient* aTexture)
 }
 
 bool
-ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies, bool aScheduleComposite, bool* aSent)
+ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies,
+                                     const nsIntRegion& aRegionToClear,
+                                     bool aScheduleComposite,
+                                     bool* aSent)
 {
   *aSent = false;
 
@@ -560,7 +563,11 @@ ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies, bool
 
   mWindowOverlayChanged = false;
 
-  TargetConfig targetConfig(mTxn->mTargetBounds, mTxn->mTargetRotation, mTxn->mClientBounds, mTxn->mTargetOrientation);
+  TargetConfig targetConfig(mTxn->mTargetBounds,
+                            mTxn->mTargetRotation,
+                            mTxn->mClientBounds,
+                            mTxn->mTargetOrientation,
+                            aRegionToClear);
 
   MOZ_LAYERS_LOG(("[LayersForwarder] syncing before send..."));
   PlatformSyncBeforeUpdate();
@@ -570,6 +577,7 @@ ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies, bool
     MOZ_LAYERS_LOG(("[LayersForwarder] sending transaction..."));
     RenderTraceScope rendertrace3("Forward Transaction", "000093");
     if (!HasShadowManager() ||
+        !mShadowManager->IPCOpen() ||
         !mShadowManager->SendUpdate(cset, targetConfig, mIsFirstPaint,
                                     aScheduleComposite, aReplies)) {
       MOZ_LAYERS_LOG(("[LayersForwarder] WARNING: sending transaction failed!"));
@@ -581,6 +589,7 @@ ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies, bool
     MOZ_LAYERS_LOG(("[LayersForwarder] sending no swap transaction..."));
     RenderTraceScope rendertrace3("Forward NoSwap Transaction", "000093");
     if (!HasShadowManager() ||
+        !mShadowManager->IPCOpen() ||
         !mShadowManager->SendUpdateNoSwap(cset, targetConfig, mIsFirstPaint, aScheduleComposite)) {
       MOZ_LAYERS_LOG(("[LayersForwarder] WARNING: sending transaction failed!"));
       return false;
@@ -599,6 +608,9 @@ ShadowLayerForwarder::AllocShmem(size_t aSize,
                                  ipc::Shmem* aShmem)
 {
   NS_ABORT_IF_FALSE(HasShadowManager(), "no shadow manager");
+  if (!mShadowManager->IPCOpen()) {
+    return false;
+  }
   return mShadowManager->AllocShmem(aSize, aType, aShmem);
 }
 bool
@@ -607,12 +619,18 @@ ShadowLayerForwarder::AllocUnsafeShmem(size_t aSize,
                                           ipc::Shmem* aShmem)
 {
   NS_ABORT_IF_FALSE(HasShadowManager(), "no shadow manager");
+  if (!mShadowManager->IPCOpen()) {
+    return false;
+  }
   return mShadowManager->AllocUnsafeShmem(aSize, aType, aShmem);
 }
 void
 ShadowLayerForwarder::DeallocShmem(ipc::Shmem& aShmem)
 {
   NS_ABORT_IF_FALSE(HasShadowManager(), "no shadow manager");
+  if (!mShadowManager->IPCOpen()) {
+    return;
+  }
   mShadowManager->DeallocShmem(aShmem);
 }
 
@@ -625,6 +643,9 @@ ShadowLayerForwarder::IPCOpen() const
 bool
 ShadowLayerForwarder::IsSameProcess() const
 {
+  if (!mShadowManager->IPCOpen()) {
+    return false;
+  }
   return mShadowManager->OtherProcess() == kInvalidProcessHandle;
 }
 
@@ -742,6 +763,9 @@ PLayerChild*
 ShadowLayerForwarder::ConstructShadowFor(ShadowableLayer* aLayer)
 {
   NS_ABORT_IF_FALSE(HasShadowManager(), "no manager to forward to");
+  if (!mShadowManager->IPCOpen()) {
+    return nullptr;
+  }
   return mShadowManager->SendPLayerConstructor(new ShadowLayerChild(aLayer));
 }
 
@@ -889,6 +913,9 @@ ShadowLayerForwarder::Connect(CompositableClient* aCompositable)
 #endif
   MOZ_ASSERT(aCompositable);
   MOZ_ASSERT(mShadowManager);
+  if (!mShadowManager->IPCOpen()) {
+    return;
+  }
   CompositableChild* child = static_cast<CompositableChild*>(
     mShadowManager->SendPCompositableConstructor(aCompositable->GetTextureInfo()));
   MOZ_ASSERT(child);
@@ -994,6 +1021,9 @@ PTextureChild*
 ShadowLayerForwarder::CreateTexture(const SurfaceDescriptor& aSharedData,
                                     TextureFlags aFlags)
 {
+  if (!mShadowManager->IPCOpen()) {
+    return nullptr;
+  }
   return mShadowManager->SendPTextureConstructor(aSharedData, aFlags);
 }
 

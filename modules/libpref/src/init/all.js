@@ -293,7 +293,7 @@ pref("media.tabstreaming.height", 240);
 pref("media.tabstreaming.time_per_frame", 40);
 
 // TextTrack support
-pref("media.webvtt.enabled", true);
+pref("media.webvtt.enabled", false);
 pref("media.webvtt.regions.enabled", false);
 
 // Whether to enable MediaSource support
@@ -1291,7 +1291,7 @@ pref("network.dir.format", 2);
 pref("network.prefetch-next", true);
 
 // enables the predictive service
-pref("network.seer.enabled", true);
+pref("network.seer.enabled", false);
 pref("network.seer.enable-hover-on-ssl", false);
 pref("network.seer.page-degradation.day", 0);
 pref("network.seer.page-degradation.week", 5);
@@ -1317,6 +1317,9 @@ pref("network.seer.preserve", 80); // percentage of seer data to keep when clean
 // the format:
 //   [scheme "://"] [host [":" port]]
 // For example, "foo.com" would match "http://www.foo.com/bar", etc.
+
+// Allow insecure NTLMv1 when needed.
+pref("network.negotiate-auth.allow-insecure-ntlm-v1", false);
 
 // This list controls which URIs can use the negotiate-auth protocol.  This
 // list should be limited to the servers you know you'll need to login to.
@@ -1510,6 +1513,14 @@ pref("font.mathfont-family", "MathJax_Main, STIXNonUnicode, STIXSizeOneSym, STIX
 // Some CJK fonts have bad underline offset, their CJK character glyphs are overlapped (or adjoined)  to its underline.
 // These fonts are ignored the underline offset, instead of it, the underline is lowered to bottom of its em descent.
 pref("font.blacklist.underline_offset", "FangSong,Gulim,GulimChe,MingLiU,MingLiU-ExtB,MingLiU_HKSCS,MingLiU-HKSCS-ExtB,MS Gothic,MS Mincho,MS PGothic,MS PMincho,MS UI Gothic,PMingLiU,PMingLiU-ExtB,SimHei,SimSun,SimSun-ExtB,Hei,Kai,Apple LiGothic,Apple LiSung,Osaka");
+
+#ifdef MOZ_WIDGET_GONK
+// Whitelist of fonts that ship with B2G that do not include space lookups in
+// default features. This allows us to skip analyzing the GSUB/GPOS tables
+// unless features are explicitly enabled.
+// Use NSPR_LOG_MODULES=fontinit:5 to dump out details of space lookups
+pref("font.whitelist.skip_default_features_space_check", "Fira Sans OT,Fira Mono OT");
+#endif
 
 pref("images.dither", "auto");
 pref("security.directory",              "");
@@ -1931,7 +1942,11 @@ pref("plugins.click_to_play", false);
 // Player ("Shockwave for Director"). To hide all plugins from enumeration, use
 // the empty string "" to match no plugin names. To allow all plugins to be
 // enumerated, use the string "*" to match all plugin names.
+#ifdef EARLY_BETA_OR_EARLIER
 pref("plugins.enumerable_names", "Java,Nexus Personal,QuickTime,Shockwave");
+#else
+pref("plugins.enumerable_names", "*");
+#endif
 
 // The default value for nsIPluginTag.enabledState (STATE_ENABLED = 2)
 pref("plugin.default.state", 2);
@@ -3121,13 +3136,16 @@ pref("print.print_paper_size", 0);
 // around the content of the page for Print Preview only
 pref("print.print_extra_margin", 0); // twips
 
+# ANDROID
+#endif
+
+#if defined(ANDROID) || defined(FXOS_SIMULATOR)
 // font names
 
 pref("font.alias-list", "sans,sans-serif,serif,monospace");
 
-// Gonk and Android ship different sets of fonts
-
-#ifdef MOZ_WIDGET_GONK
+// Gonk (along with FxOS Simulator) and Android ship different sets of fonts
+#if defined(MOZ_WIDGET_GONK) || defined(FXOS_SIMULATOR)
 
 // TODO: some entries could probably be cleaned up.
 
@@ -3195,7 +3213,8 @@ pref("font.name.monospace.zh-TW", "Fira Mono OT");
 
 #else
 
-// not MOZ_WIDGET_GONK (i.e. this is Firefox for Android) - here, we use the bundled fonts
+// not MOZ_WIDGET_GONK / FXOS_SIMULATOR
+// (i.e. this is Firefox for Android) - here, we use the bundled fonts
 
 // ar
 
@@ -3285,7 +3304,7 @@ pref("font.name-list.serif.zh-TW", "Droid Serif, Droid Sans Fallback");
 pref("font.name-list.sans-serif.zh-TW", "Roboto, Droid Sans, Droid Sans Fallback");
 pref("font.name-list.monospace.zh-TW", "Droid Sans Fallback");
 
-// end ! MOZ_WIDGET_GONK
+// end ! (MOZ_WIDGET_GONK || FXOS_SIMULATOR)
 
 #endif
 
@@ -3414,6 +3433,10 @@ pref("font.default.x-tibt", "serif");
 pref("font.size.variable.x-tibt", 16);
 pref("font.size.fixed.x-tibt", 13);
 
+# ANDROID || FXOS_SIMUALTOR
+#endif
+
+#ifdef ANDROID
 /* PostScript print module prefs */
 // pref("print.postscript.enabled",      true);
 pref("print.postscript.paper_size",    "letter");
@@ -4179,7 +4202,7 @@ pref("memory.blob_report.stack_frames", 0);
 pref("social.whitelist", "https://mozsocial.cliqz.com,https://now.msn.com,https://mixi.jp");
 // comma separated list of domain origins (e.g. https://domain.com) for
 // directory websites (e.g. AMO) that can install providers for other sites
-pref("social.directories", "https://activations.mozilla.org");
+pref("social.directories", "https://activations.cdn.mozilla.net");
 // remote-install allows any website to activate a provider, with extended UI
 // notifying user of installation. we can later pref off remote install if
 // necessary. This does not affect whitelisted and directory installs.

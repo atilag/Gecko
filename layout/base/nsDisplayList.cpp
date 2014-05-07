@@ -51,6 +51,7 @@
 #include "ActiveLayerTracker.h"
 #include "nsContentUtils.h"
 #include "nsPrintfCString.h"
+#include "UnitTransforms.h"
 
 #include <stdint.h>
 #include <algorithm>
@@ -537,7 +538,8 @@ nsDisplayListBuilder::nsDisplayListBuilder(nsIFrame* aReferenceFrame,
       mIsCompositingCheap(false),
       mContainsPluginItem(false),
       mContainsBlendMode(false),
-      mAncestorHasTouchEventHandler(false)
+      mAncestorHasTouchEventHandler(false),
+      mHaveScrollableDisplayPort(false)
 {
   MOZ_COUNT_CTOR(nsDisplayListBuilder);
   PL_InitArenaPool(&mPool, "displayListArena", 1024,
@@ -635,85 +637,6 @@ static bool GetApzcTreePrintPref() {
     initialized = true;
   }
   return gPrintApzcTree;
-}
-
-static CSSSize
-CalculateRootCompositionSize(FrameMetrics& aMetrics,
-                             bool aIsRootContentDocRootScrollFrame,
-                             nsPresContext* aPresContext,
-                             nsIFrame* aForFrame, nsIFrame* aScrollFrame)
-{
-
-  if (aIsRootContentDocRootScrollFrame) {
-    // convert from parent layer pixels to layer pixels to css pixels
-    return ParentLayerSize(aMetrics.mCompositionBounds.Size())
-                           * aMetrics.mResolution / aMetrics.LayersPixelsPerCSSPixel();
-  }
-  ParentLayerIntSize rootCompositionSize;
-  nsPresContext* rootPresContext =
-    aPresContext->GetToplevelContentDocumentPresContext();
-  if (!rootPresContext) {
-    rootPresContext = aPresContext->GetRootPresContext();
-  }
-  nsIPresShell* rootPresShell = nullptr;
-  if (rootPresContext) {
-    nsIPresShell* rootPresShell = rootPresContext->PresShell();
-    if (nsIFrame* rootFrame = rootPresShell->GetRootFrame()) {
-      if (nsView* view = rootFrame->GetView()) {
-        nsIWidget* widget = view->GetWidget();
-  #ifdef MOZ_WIDGET_ANDROID
-        // Android hack - temporary workaround for bug 983208 until we figure
-        // out what a proper fix is.
-        if (!widget) {
-          widget = rootFrame->GetNearestWidget();
-        }
-  #endif
-        if (widget) {
-          nsIntRect bounds;
-          widget->GetBounds(bounds);
-          rootCompositionSize = ParentLayerIntSize::FromUnknownSize(mozilla::gfx::IntSize(
-            bounds.width, bounds.height));
-        } else {
-          gfxSize res = rootPresShell->GetCumulativeResolution();
-          LayoutDeviceToParentLayerScale parentResolution(res.width);
-          int32_t rootAUPerDevPixel = rootPresContext->AppUnitsPerDevPixel();
-          nsRect viewBounds = view->GetBounds();
-          rootCompositionSize =
-            RoundedToInt(LayoutDeviceRect::FromAppUnits(viewBounds, rootAUPerDevPixel)
-            * parentResolution).Size();
-        }
-      }
-    }
-  } else {
-    nsIWidget* widget = (aScrollFrame ? aScrollFrame : aForFrame)->GetNearestWidget();
-    nsIntRect bounds;
-    widget->GetBounds(bounds);
-    rootCompositionSize = ParentLayerIntSize::FromUnknownSize(mozilla::gfx::IntSize(
-      bounds.width, bounds.height));
-  }
-
-  LayoutDeviceToParentLayerScale parentResolution(1.0f);
-  if (rootPresShell) {
-    parentResolution.scale =
-      rootPresShell->GetCumulativeResolution().width / rootPresShell->GetResolution().width;
-  }
-
-  CSSSize size =
-    ParentLayerSize(rootCompositionSize) / (parentResolution * aMetrics.mDevPixelsPerCSSPixel);
-
-  // Adjust composition size for the size of scroll bars.
-  nsIFrame* rootRootScrollFrame = rootPresShell ? rootPresShell->GetRootScrollFrame() : nullptr;
-  nsIScrollableFrame* rootScrollableFrame = nullptr;
-  if (rootRootScrollFrame) {
-    rootScrollableFrame = aScrollFrame->GetScrollTargetFrame();
-  }
-  if (rootScrollableFrame && !LookAndFeel::GetInt(LookAndFeel::eIntID_UseOverlayScrollbars)) {
-    CSSMargin margins = CSSMargin::FromAppUnits(rootScrollableFrame->GetActualScrollbarSizes());
-    size.width -= margins.LeftRight();
-    size.height -= margins.TopBottom();
-  }
-
-  return size;
 }
 
 static void RecordFrameMetrics(nsIFrame* aForFrame,
@@ -817,7 +740,7 @@ static void RecordFrameMetrics(nsIFrame* aForFrame,
   nsRect compositionBounds(frameForCompositionBoundsCalculation->GetOffsetToCrossDoc(aReferenceFrame),
                            frameForCompositionBoundsCalculation->GetSize());
   metrics.mCompositionBounds = RoundedToInt(LayoutDeviceRect::FromAppUnits(compositionBounds, auPerDevPixel)
-                             * metrics.GetParentResolution());
+                                            * metrics.GetParentResolution());
 
   // For the root scroll frame of the root content document, the above calculation
   // will yield the size of the viewport frame as the composition bounds, which
@@ -832,23 +755,35 @@ static void RecordFrameMetrics(nsIFrame* aForFrame,
   if (isRootContentDocRootScrollFrame) {
     if (nsIFrame* rootFrame = presShell->GetRootFrame()) {
       if (nsView* view = rootFrame->GetView()) {
-        nsIWidget* widget = view->GetWidget();
+        nsRect viewBoundsAppUnits = view->GetBounds() + rootFrame->GetOffsetToCrossDoc(aReferenceFrame);
+        ParentLayerIntRect viewBounds = RoundedToInt(LayoutDeviceRect::FromAppUnits(viewBoundsAppUnits, auPerDevPixel)
+                                                     * metrics.GetParentResolution());
+        // On Android, we need to do things a bit differently to get things
+        // right (see bug 983208, bug 988882). We use the bounds of the nearest
+        // widget, but clamp the height to the view bounds height. This clamping
+        // is done to get correct results for a page where the page is sized to
+        // the screen and thus the dynamic toolbar never disappears. In such a
+        // case, we want the composition bounds to exclude the toolbar height,
+        // but the widget bounds includes it. We don't currently have a good way
+        // of knowing about the toolbar height, but clamping to the view bounds
+        // height gives the correct answer in the cases we care about.
+        nsIWidget* widget =
 #ifdef MOZ_WIDGET_ANDROID
-        // Android hack - temporary workaround for bug 983208 until we figure
-        // out what a proper fix is.
-        if (!widget) {
-          widget = rootFrame->GetNearestWidget();
-        }
+            rootFrame->GetNearestWidget();
+#else
+            view->GetWidget();
 #endif
         if (widget) {
-          nsIntRect bounds;
-          widget->GetBounds(bounds);
-          metrics.mCompositionBounds = ParentLayerIntRect::FromUnknownRect(mozilla::gfx::IntRect(
-              bounds.x, bounds.y, bounds.width, bounds.height));
+          nsIntRect widgetBounds;
+          widget->GetBounds(widgetBounds);
+          metrics.mCompositionBounds = ViewAs<ParentLayerPixel>(widgetBounds);
+#ifdef MOZ_WIDGET_ANDROID
+          if (viewBounds.height < metrics.mCompositionBounds.height) {
+            metrics.mCompositionBounds.height = viewBounds.height;
+          }
+#endif
         } else {
-          nsRect viewBounds = view->GetBounds() + rootFrame->GetOffsetToCrossDoc(aReferenceFrame);
-          metrics.mCompositionBounds = RoundedToInt(LayoutDeviceRect::FromAppUnits(viewBounds, auPerDevPixel)
-                                     * metrics.GetParentResolution());
+          metrics.mCompositionBounds = viewBounds;
         }
       }
     }
@@ -863,8 +798,8 @@ static void RecordFrameMetrics(nsIFrame* aForFrame,
   }
 
   metrics.SetRootCompositionSize(
-    CalculateRootCompositionSize(metrics, isRootContentDocRootScrollFrame,
-                                 presContext, aForFrame, aScrollFrame));
+    nsLayoutUtils::CalculateRootCompositionSize(aScrollFrame ? aScrollFrame : aForFrame,
+                                                isRootContentDocRootScrollFrame, metrics));
 
   if (GetApzcTreePrintPref()) {
     if (nsIContent* content = frameForCompositionBoundsCalculation->GetContent()) {
@@ -3376,7 +3311,7 @@ nsDisplayOpacity::ShouldFlattenAway(nsDisplayListBuilder* aBuilder)
     return false;
   }
 
-  return child->ApplyOpacity(mFrame->StyleDisplay()->mOpacity);
+  return child->ApplyOpacity(aBuilder, mFrame->StyleDisplay()->mOpacity, mClip);
 }
 
 nsDisplayItem::LayerState
@@ -4698,26 +4633,26 @@ nsDisplayTransform::ShouldPrerenderTransformedContent(nsDisplayListBuilder* aBui
   }
 
   nsSize refSize = aBuilder->RootReferenceFrame()->GetSize();
-  // Only prerender if the transformed frame's size is <= the
-  // reference frame size (~viewport), allowing a 1/8th fuzz factor
-  // for shadows, borders, etc.
+  // Only prerender if the transformed frame's size (in the reference
+  // frames coordinate space) is <= the reference frame size (~viewport),
+  // allowing a 1/8th fuzz factor for shadows, borders, etc.
   refSize += nsSize(refSize.width / 8, refSize.height / 8);
-  nsSize frameSize = aFrame->GetVisualOverflowRectRelativeToSelf().Size();
-  if (frameSize <= refSize) {
-    // Bug 717521 - pre-render max 4096 x 4096 device pixels.
-    nscoord max = aFrame->PresContext()->DevPixelsToAppUnits(4096);
-    nsRect visual = aFrame->GetVisualOverflowRect();
-    if (visual.width <= max && visual.height <= max) {
-      return true;
-    }
+  nsRect frameRect = aFrame->GetVisualOverflowRectRelativeToSelf();
+
+  frameRect =
+    nsLayoutUtils::TransformFrameRectToAncestor(aFrame, frameRect,
+                                                aBuilder->RootReferenceFrame());
+
+  if (frameRect.Size() <= refSize) {
+    return true;
   }
 
   if (aLogAnimations) {
     nsCString message;
     message.AppendLiteral("Performance warning: Async animation disabled because frame size (");
-    message.AppendInt(nsPresContext::AppUnitsToIntCSSPixels(frameSize.width));
+    message.AppendInt(nsPresContext::AppUnitsToIntCSSPixels(frameRect.width));
     message.AppendLiteral(", ");
-    message.AppendInt(nsPresContext::AppUnitsToIntCSSPixels(frameSize.height));
+    message.AppendInt(nsPresContext::AppUnitsToIntCSSPixels(frameRect.height));
     message.AppendLiteral(") is bigger than the viewport (");
     message.AppendInt(nsPresContext::AppUnitsToIntCSSPixels(refSize.width));
     message.AppendLiteral(", ");
@@ -5155,6 +5090,36 @@ nsRect nsDisplayTransform::TransformRectOut(const nsRect &aUntransformedBounds,
     (aUntransformedBounds,
      GetResultingTransformMatrix(aFrame, aOrigin, factor, aBoundsOverride),
      factor);
+}
+
+bool nsDisplayTransform::UntransformRect(const nsRect &aTransformedBounds,
+                                         const nsRect &aChildBounds,
+                                         const nsIFrame* aFrame,
+                                         const nsPoint &aOrigin,
+                                         nsRect *aOutRect)
+{
+  NS_PRECONDITION(aFrame, "Can't take the transform based on a null frame!");
+
+  float factor = aFrame->PresContext()->AppUnitsPerDevPixel();
+
+  gfx3DMatrix transform = GetResultingTransformMatrix(aFrame, aOrigin, factor, nullptr);
+  if (transform.IsSingular()) {
+    return false;
+  }
+
+  gfxRect result(NSAppUnitsToFloatPixels(aTransformedBounds.x, factor),
+                 NSAppUnitsToFloatPixels(aTransformedBounds.y, factor),
+                 NSAppUnitsToFloatPixels(aTransformedBounds.width, factor),
+                 NSAppUnitsToFloatPixels(aTransformedBounds.height, factor));
+
+  gfxRect childGfxBounds(NSAppUnitsToFloatPixels(aChildBounds.x, factor),
+                         NSAppUnitsToFloatPixels(aChildBounds.y, factor),
+                         NSAppUnitsToFloatPixels(aChildBounds.width, factor),
+                         NSAppUnitsToFloatPixels(aChildBounds.height, factor));
+
+  result = transform.UntransformBounds(result, childGfxBounds);
+  *aOutRect = nsLayoutUtils::RoundGfxRectToAppRect(result, factor);
+  return true;
 }
 
 bool nsDisplayTransform::UntransformVisibleRect(nsDisplayListBuilder* aBuilder,

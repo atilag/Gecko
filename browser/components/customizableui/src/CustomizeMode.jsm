@@ -180,10 +180,10 @@ CustomizeMode.prototype = {
       // customization mode when pressing ESC.
       document.addEventListener("keypress", this);
 
-      // Same goes for the menu button - if we're customizing, a mousedown to the
+      // Same goes for the menu button - if we're customizing, a click on the
       // menu button means a quick exit from customization mode.
       window.PanelUI.hide();
-      window.PanelUI.menuButton.addEventListener("mousedown", this);
+      window.PanelUI.menuButton.addEventListener("command", this);
       window.PanelUI.menuButton.open = true;
       window.PanelUI.beginBatchUpdate();
 
@@ -236,11 +236,7 @@ CustomizeMode.prototype = {
       yield this._wrapToolbarItems();
       yield this.populatePalette();
 
-      this.visiblePalette.addEventListener("dragstart", this, true);
-      this.visiblePalette.addEventListener("dragover", this, true);
-      this.visiblePalette.addEventListener("dragexit", this, true);
-      this.visiblePalette.addEventListener("drop", this, true);
-      this.visiblePalette.addEventListener("dragend", this, true);
+      this._addDragHandlers(this.visiblePalette);
 
       window.gNavToolbox.addEventListener("toolbarvisibilitychange", this);
 
@@ -336,7 +332,7 @@ CustomizeMode.prototype = {
     CustomizableUI.removeListener(this);
 
     this.document.removeEventListener("keypress", this);
-    this.window.PanelUI.menuButton.removeEventListener("mousedown", this);
+    this.window.PanelUI.menuButton.removeEventListener("command", this);
     this.window.PanelUI.menuButton.open = false;
 
     this.window.PanelUI.beginBatchUpdate();
@@ -402,11 +398,7 @@ CustomizeMode.prototype = {
       window.gNavToolbox.removeEventListener("toolbarvisibilitychange", this);
 
       DragPositionManager.stop();
-      this.visiblePalette.removeEventListener("dragstart", this, true);
-      this.visiblePalette.removeEventListener("dragover", this, true);
-      this.visiblePalette.removeEventListener("dragexit", this, true);
-      this.visiblePalette.removeEventListener("drop", this, true);
-      this.visiblePalette.removeEventListener("dragend", this, true);
+      this._removeDragHandlers(this.visiblePalette);
 
       yield this._unwrapToolbarItems();
 
@@ -898,11 +890,7 @@ CustomizeMode.prototype = {
       this.areas = [];
       for (let area of CustomizableUI.areas) {
         let target = CustomizableUI.getCustomizeTargetForArea(area, window);
-        target.addEventListener("dragstart", this, true);
-        target.addEventListener("dragover", this, true);
-        target.addEventListener("dragexit", this, true);
-        target.addEventListener("drop", this, true);
-        target.addEventListener("dragend", this, true);
+        this._addDragHandlers(target);
         for (let child of target.children) {
           if (this.isCustomizableItem(child)) {
             yield this.deferredWrapToolbarItem(child, CustomizableUI.getPlaceForItem(child));
@@ -913,12 +901,28 @@ CustomizeMode.prototype = {
     }.bind(this)).then(null, ERROR);
   },
 
+  _addDragHandlers: function(aTarget) {
+    aTarget.addEventListener("dragstart", this, true);
+    aTarget.addEventListener("dragover", this, true);
+    aTarget.addEventListener("dragexit", this, true);
+    aTarget.addEventListener("drop", this, true);
+    aTarget.addEventListener("dragend", this, true);
+  },
+
   _wrapItemsInArea: function(target) {
     for (let child of target.children) {
       if (this.isCustomizableItem(child)) {
         this.wrapToolbarItem(child, CustomizableUI.getPlaceForItem(child));
       }
     }
+  },
+
+  _removeDragHandlers: function(aTarget) {
+    aTarget.removeEventListener("dragstart", this, true);
+    aTarget.removeEventListener("dragover", this, true);
+    aTarget.removeEventListener("dragexit", this, true);
+    aTarget.removeEventListener("drop", this, true);
+    aTarget.removeEventListener("dragend", this, true);
   },
 
   _unwrapItemsInArea: function(target) {
@@ -937,11 +941,7 @@ CustomizeMode.prototype = {
             yield this.deferredUnwrapToolbarItem(toolbarItem);
           }
         }
-        target.removeEventListener("dragstart", this, true);
-        target.removeEventListener("dragover", this, true);
-        target.removeEventListener("dragexit", this, true);
-        target.removeEventListener("drop", this, true);
-        target.removeEventListener("dragend", this, true);
+        this._removeDragHandlers(target);
       }
     }.bind(this)).then(null, ERROR);
   },
@@ -1116,6 +1116,25 @@ CustomizeMode.prototype = {
     }
   },
 
+  onAreaNodeRegistered: function(aArea, aContainer) {
+    if (aContainer.ownerDocument == this.document) {
+      this._wrapItemsInArea(aContainer);
+      this._addDragHandlers(aContainer);
+      DragPositionManager.add(this.window, aArea, aContainer);
+      this.areas.push(aContainer);
+    }
+  },
+
+  onAreaNodeUnregistered: function(aArea, aContainer, aReason) {
+    if (aContainer.ownerDocument == this.document && aReason == CustomizableUI.REASON_AREA_UNREGISTERED) {
+      this._unwrapItemsInArea(aContainer);
+      this._removeDragHandlers(aContainer);
+      DragPositionManager.remove(this.window, aArea, aContainer);
+      let index = this.areas.indexOf(aContainer);
+      this.areas.splice(index, 1);
+    }
+  },
+
   _onUIChange: function() {
     this._changed = true;
     if (!this.resetting) {
@@ -1161,13 +1180,13 @@ CustomizeMode.prototype = {
       case "dragend":
         this._onDragEnd(aEvent);
         break;
-      case "mousedown":
-        if (aEvent.button == 0 &&
-            (aEvent.originalTarget == this.window.PanelUI.menuButton)) {
+      case "command":
+        if (aEvent.originalTarget == this.window.PanelUI.menuButton) {
           this.exit();
           aEvent.preventDefault();
-          return;
         }
+        break;
+      case "mousedown":
         this._onMouseDown(aEvent);
         break;
       case "mouseup":
@@ -1603,6 +1622,7 @@ CustomizeMode.prototype = {
     }
     this._updateToolbarCustomizationOutline(this.window);
     this._showPanelCustomizationPlaceholders();
+    DragPositionManager.stop();
   },
 
   _isUnwantedDragDrop: function(aEvent) {

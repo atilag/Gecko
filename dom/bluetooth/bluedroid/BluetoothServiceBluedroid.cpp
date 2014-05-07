@@ -205,7 +205,22 @@ ClassToIcon(uint32_t aClass, nsAString& aRetIcon)
       }
       break;
   }
+
+  if (aRetIcon.IsEmpty()) {
+    if (HAS_AUDIO(aClass)) {
+      /**
+       * Property 'Icon' may be missed due to CoD of major class is TOY(0x08).
+       * But we need to assign Icon as audio-card if service class is 'Audio'.
+       * This is for PTS test case TC_AG_COD_BV_02_I. As HFP specification
+       * defines that service class is 'Audio' can be considered as HFP HF.
+       */
+      aRetIcon.AssignLiteral("audio-card");
+    } else {
+      BT_LOGR("No icon to match class: %x", aClass);
+    }
+  }
 }
+
 static ControlPlayStatus
 PlayStatusStringToControlPlayStatus(const nsAString& aPlayStatus)
 {
@@ -777,8 +792,6 @@ BluetoothServiceBluedroid::GetDefaultAdapterPathInternal(
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  nsRefPtr<BluetoothReplyRunnable> runnable(aRunnable);
-
   BluetoothValue v = InfallibleTArray<BluetoothNamedValue>();
 
   v.get_ArrayOfBluetoothNamedValue().AppendElement(
@@ -799,10 +812,7 @@ BluetoothServiceBluedroid::GetDefaultAdapterPathInternal(
     BluetoothNamedValue(NS_LITERAL_STRING("Devices"),
                         sAdapterBondedAddressArray));
 
-  nsAutoString replyError;
-  DispatchBluetoothReply(runnable.get(), v, replyError);
-
-  unused << runnable.forget(); // picked up in DispatchBluetoothReply
+  DispatchBluetoothReply(aRunnable, v, EmptyString());
 
   return NS_OK;
 }

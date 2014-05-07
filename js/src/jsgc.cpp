@@ -2816,8 +2816,10 @@ SweepZones(FreeOp *fop, bool lastGC)
     while (read < end) {
         Zone *zone = *read++;
 
-        if (!zone->hold && zone->wasGCStarted()) {
-            if (zone->allocator.arenas.arenaListsAreEmpty() || lastGC) {
+        if (zone->wasGCStarted()) {
+            if ((zone->allocator.arenas.arenaListsAreEmpty() && !zone->hasMarkedCompartments()) ||
+                lastGC)
+            {
                 zone->allocator.arenas.checkEmptyFreeLists();
                 if (callback)
                     callback(zone);
@@ -2996,7 +2998,7 @@ BeginMarkPhase(JSRuntime *rt)
         }
 
         zone->scheduledForDestruction = false;
-        zone->maybeAlive = zone->hold;
+        zone->maybeAlive = false;
         zone->setPreservingCode(false);
     }
 
@@ -3948,7 +3950,13 @@ BeginSweepingZoneGroup(JSRuntime *rt)
 
         for (GCZoneGroupIter zone(rt); !zone.done(); zone.next()) {
             gcstats::AutoSCC scc(rt->gcStats, rt->gcZoneGroupIndex);
-            zone->sweep(&fop, releaseTypes && !zone->isPreservingCode());
+            bool oom = false;
+            zone->sweep(&fop, releaseTypes && !zone->isPreservingCode(), &oom);
+            if (oom) {
+                zone->setPreservingCode(false);
+                zone->discardJitCode(&fop);
+                zone->types.clearAllNewScriptAddendumsOnOOM();
+            }
         }
     }
 

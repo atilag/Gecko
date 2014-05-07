@@ -5,15 +5,17 @@
 %include ../../shared/customizableui/panelUIOverlay.inc.css
 
 @media (min-resolution: 2dppx) {
-  toolbarbutton[panel-multiview-anchor=true] {
+  #PanelUI-help[panel-multiview-anchor="true"]::after,
+  toolbarbutton[panel-multiview-anchor="true"] {
     background-image: url(chrome://browser/skin/customizableui/subView-arrow-back-inverted@2x.png),
                       linear-gradient(rgba(255,255,255,0.3), rgba(255,255,255,0));
     background-size: 16px, auto;
   }
 
-  toolbarbutton[panel-multiview-anchor=true]:-moz-locale-dir(rtl) {
+  #PanelUI-help[panel-multiview-anchor="true"]:-moz-locale-dir(rtl)::after,
+  toolbarbutton[panel-multiview-anchor="true"]:-moz-locale-dir(rtl) {
     background-image: url(chrome://browser/skin/customizableui/subView-arrow-back-inverted-rtl@2x.png),
-                      linear-gradient(rgba(255,255,255,0), rgba(255,255,255,0.3));
+                      linear-gradient(rgba(255,255,255,0.3), rgba(255,255,255,0));
   }
 
   #PanelUI-fxa-status {
@@ -59,6 +61,11 @@
     -moz-image-region: rect(0, 96px, 32px, 64px);
   }
 
+  #PanelUI-help[panel-multiview-anchor="true"] {
+    -moz-image-region: rect(0, 128px, 32px, 96px);
+    background-size: auto;
+  }
+
   .subviewbutton[checked="true"] {
     background-image: url("chrome://global/skin/menu/shared-menu-check@2x.png");
   }
@@ -90,6 +97,10 @@
 
 .subviewbutton[checked="true"] {
   background-position: top 5px left 4px;
+}
+
+.subviewbutton[checked="true"]:-moz-locale-dir(rtl) {
+  background-position: top 5px right 4px;
 }
 
 .subviewbutton:not(:-moz-any([image],[targetURI],.cui-withicon, .bookmark-item)) > .menu-iconic-left {

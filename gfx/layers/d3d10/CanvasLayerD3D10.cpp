@@ -111,22 +111,23 @@ CanvasLayerD3D10::UpdateSurface()
   if (!IsDirty())
     return;
   Painted();
-
   if (mDrawTarget) {
     mDrawTarget->Flush();
   } else if (mIsD2DTexture) {
     return;
   }
+  if (!mTexture) {
+    return;
+  }
 
   if (mGLContext) {
     SharedSurface_GL* surf = mGLContext->RequestFrame();
-    if (!surf)
-        return;
-
+    if (!surf) {
+      return;
+    }
     switch (surf->Type()) {
       case SharedSurfaceType::EGLSurfaceANGLE: {
         SharedSurface_ANGLEShareHandle* shareSurf = SharedSurface_ANGLEShareHandle::Cast(surf);
-
         mSRView = shareSurf->GetSRV();
         return;
       }
@@ -145,9 +146,10 @@ CanvasLayerD3D10::UpdateSurface()
         DataSourceSurface* frameData = shareSurf->GetData();
         // Scope for DrawTarget, so it's destroyed before Unmap.
         {
+          IntSize boundsSize(mBounds.width, mBounds.height);
           RefPtr<DrawTarget> mapDt = Factory::CreateDrawTargetForData(BackendType::CAIRO,
                                                                       (uint8_t*)map.pData,
-                                                                      frameData->GetSize(),
+                                                                      boundsSize,
                                                                       map.RowPitch,
                                                                       SurfaceFormat::B8G8R8A8);
 

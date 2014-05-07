@@ -10,6 +10,8 @@ Cu.import("resource://gre/modules/Services.jsm")
 Cu.import("resource://gre/modules/AddonManager.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
+const AMO_ICON = "chrome://browser/skin/images/amo-logo.png";
+
 let gStringBundle = Services.strings.createBundle("chrome://browser/locale/aboutAddons.properties");
 
 XPCOMUtils.defineLazyGetter(window, "gChromeWin", function()
@@ -20,8 +22,6 @@ XPCOMUtils.defineLazyGetter(window, "gChromeWin", function()
     .QueryInterface(Ci.nsIInterfaceRequestor)
     .getInterface(Ci.nsIDOMWindow)
     .QueryInterface(Ci.nsIDOMChromeWindow));
-
-XPCOMUtils.defineLazyGetter(window, "SelectHelper", function() gChromeWin.SelectHelper);
 
 var ContextMenus = {
   target: null,
@@ -147,7 +147,7 @@ var Addons = {
 
     let img = document.createElement("img");
     img.className = "icon";
-    img.setAttribute("src", aAddon.iconURL);
+    img.setAttribute("src", aAddon.iconURL || AMO_ICON);
     outer.appendChild(img);
 
     let inner = document.createElement("div");
@@ -156,11 +156,6 @@ var Addons = {
     let details = document.createElement("div");
     details.className = "details";
     inner.appendChild(details);
-
-    let tagPart = document.createElement("div");
-    tagPart.textContent = gStringBundle.GetStringFromName("addonType." + aAddon.type);
-    tagPart.className = "tag";
-    details.appendChild(tagPart);
 
     let titlePart = document.createElement("div");
     titlePart.textContent = aAddon.name;
@@ -192,7 +187,7 @@ var Addons = {
 
     let img = document.createElement("img");
     img.className = "icon";
-    img.setAttribute("src", "chrome://browser/skin/images/amo-logo.png");
+    img.setAttribute("src", AMO_ICON);
     outer.appendChild(img);
 
     let inner = document.createElement("div");
@@ -302,14 +297,10 @@ var Addons = {
     let addon = detailItem.addon = aListItem.addon;
 
     let favicon = document.querySelector("#addons-details > .addon-item .icon");
-    if (addon.iconURL)
-      favicon.setAttribute("src", addon.iconURL);
-    else
-      favicon.removeAttribute("src");
+    favicon.setAttribute("src", addon.iconURL || AMO_ICON);
 
     detailItem.querySelector(".title").textContent = addon.name;
     detailItem.querySelector(".version").textContent = addon.version;
-    detailItem.querySelector(".tag").textContent = gStringBundle.GetStringFromName("addonType." + addon.type);
     detailItem.querySelector(".description-full").textContent = addon.description;
     detailItem.querySelector(".status-uninstalled").textContent =
       gStringBundle.formatStringFromName("addonStatus.uninstalled", [addon.name], 1);

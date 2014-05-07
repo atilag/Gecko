@@ -92,7 +92,7 @@ SyncScheduler.prototype = {
     Svc.Obs.add("weave:engine:sync:applied", this);
     Svc.Obs.add("weave:service:setup-complete", this);
     Svc.Obs.add("weave:service:start-over", this);
-    Svc.Obs.add("tokenserver:backoff:interval", this);
+    Svc.Obs.add("FxA:hawk:backoff:interval", this);
 
     if (Status.checkSetup() == STATUS_OK) {
       Svc.Idle.addIdleObserver(this, Svc.Prefs.get("scheduler.idleTime"));
@@ -182,7 +182,7 @@ SyncScheduler.prototype = {
         this.nextSync = 0;
         this.handleSyncError();
         break;
-      case "tokenserver:backoff:interval":
+      case "FxA:hawk:backoff:interval":
       case "weave:service:backoff:interval":
         let requested_interval = subject * 1000;
         this._log.debug("Got backoff notification: " + requested_interval + "ms");
@@ -500,6 +500,13 @@ ErrorHandler.prototype = {
    */
   dontIgnoreErrors: false,
 
+  /**
+   * Flag that indicates if we have already reported a prolonged failure.
+   * Once set, we don't report it again, meaning this error is only reported
+   * one per run.
+   */
+  didReportProlongedError: false,
+
   init: function init() {
     Svc.Obs.add("weave:engine:sync:applied", this);
     Svc.Obs.add("weave:engine:sync:error", this);
@@ -770,7 +777,13 @@ ErrorHandler.prototype = {
     if (lastSync && ((Date.now() - Date.parse(lastSync)) >
         Svc.Prefs.get("errorhandler.networkFailureReportTimeout") * 1000)) {
       Status.sync = PROLONGED_SYNC_FAILURE;
-      this._log.trace("shouldReportError: true (prolonged sync failure).");
+      if (this.didReportProlongedError) {
+        this._log.trace("shouldReportError: false (prolonged sync failure, but" +
+                        " we've already reported it).");
+        return false;
+      }
+      this._log.trace("shouldReportError: true (first prolonged sync failure).");
+      this.didReportProlongedError = true;
       return true;
     }
 

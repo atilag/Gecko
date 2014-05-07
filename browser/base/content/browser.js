@@ -1037,7 +1037,6 @@ var gBrowserInit = {
     IndexedDBPromptHelper.init();
     gFormSubmitObserver.init();
     gRemoteTabsUI.init();
-    gPageStyleMenu.init();
 
     // Initialize the full zoom setting.
     // We do this before the session restore service gets initialized so we can
@@ -1192,22 +1191,20 @@ var gBrowserInit = {
       let windows8WindowFrameColor = Cu.import("resource:///modules/Windows8WindowFrameColor.jsm", {}).Windows8WindowFrameColor;
       let windowFrameColor = windows8WindowFrameColor.get();
 
-      // Formula from W3C Techniques For Accessibility Evaluation And
-      // Repair Tools, Section 2.2 http://www.w3.org/TR/AERT#color
-      let brightnessThreshold = 125;
-      let colorThreshold = 500;
-      let bY = windowFrameColor[0] * .299 +
-               windowFrameColor[1] * .587 +
-               windowFrameColor[2] * .114;
-      let fY = 0; // Default to black for foreground text.
-      let brightnessDifference = Math.abs(bY - fY);
-      // Color difference calculation is simplified because black is 0 for R,G,B.
-      let colorDifference = windowFrameColor[0] + windowFrameColor[1] + windowFrameColor[2];
-
-      // Brightness is defined within {0, 255}. Set an attribute
-      // if the window frame color doesn't reach these thresholds
-      // so the theme can be adjusted for readability.
-      if (brightnessDifference < brightnessThreshold && colorDifference < colorThreshold) {
+      // Formula from W3C's WCAG 2.0 spec's color ratio and relative luminance,
+      // section 1.3.4, http://www.w3.org/TR/WCAG20/ .
+      windowFrameColor = windowFrameColor.map((color) => {
+        if (color <= 10) {
+          return color / 255 / 12.92;
+        }
+        return Math.pow(((color / 255) + 0.055) / 1.055, 2.4);
+      });
+      let backgroundLuminance = windowFrameColor[0] * 0.2126 +
+                                windowFrameColor[1] * 0.7152 +
+                                windowFrameColor[2] * 0.0722;
+      let foregroundLuminance = 0; // Default to black for foreground text.
+      let contrastRatio = (backgroundLuminance + 0.05) / (foregroundLuminance + 0.05);
+      if (contrastRatio < 3) {
         document.documentElement.setAttribute("darkwindowframe", "true");
       }
     }
@@ -1302,6 +1299,8 @@ var gBrowserInit = {
       gBrowser.removeTabsProgressListener(window.TabsProgressListener);
     } catch (ex) {
     }
+
+    PlacesToolbarHelper.uninit();
 
     BookmarkingUI.uninit();
 
@@ -4479,7 +4478,7 @@ var TabsInTitlebar = {
       let captionButtonsBoxWidth = rect($("titlebar-buttonbox-container")).width;
 
 #ifdef XP_MACOSX
-      let fullscreenButtonWidth = rect($("titlebar-fullscreen-button")).width;
+      let secondaryButtonsWidth = rect($("titlebar-secondary-buttonbox")).width;
       // No need to look up the menubar stuff on OS X:
       let menuHeight = 0;
       let fullMenuHeight = 0;
@@ -4555,7 +4554,7 @@ var TabsInTitlebar = {
 
       // Finally, size the placeholders:
 #ifdef XP_MACOSX
-      this._sizePlaceholder("fullscreen-button", fullscreenButtonWidth);
+      this._sizePlaceholder("fullscreen-button", secondaryButtonsWidth);
 #endif
       this._sizePlaceholder("caption-buttons", captionButtonsBoxWidth);
 
@@ -4578,6 +4577,10 @@ var TabsInTitlebar = {
       document.documentElement.removeAttribute("tabsintitlebar");
       updateTitlebarDisplay();
 
+#ifdef XP_MACOSX
+      let secondaryButtonsWidth = rect($("titlebar-secondary-buttonbox")).width;
+      this._sizePlaceholder("fullscreen-button", secondaryButtonsWidth);
+#endif
       // Reset the margins and padding that might have been modified:
       titlebarContent.style.marginTop = "";
       titlebarContent.style.marginBottom = "";
@@ -4622,7 +4625,8 @@ function updateTitlebarDisplay() {
     document.documentElement.setAttribute("chromemargin-nonlwtheme", "");
     let isCustomizing = document.documentElement.hasAttribute("customizing");
     let hasLWTheme = document.documentElement.hasAttribute("lwtheme");
-    if (!hasLWTheme || isCustomizing) {
+    let isPrivate = PrivateBrowsingUtils.isWindowPrivate(window);
+    if ((!hasLWTheme || isCustomizing) && !isPrivate) {
       document.documentElement.removeAttribute("chromemargin");
     }
     document.documentElement.setAttribute("drawtitle", "true");
@@ -5235,54 +5239,39 @@ function charsetLoadListener() {
 
 var gPageStyleMenu = {
 
-  // This maps from a <browser> element (or, more specifically, a
-  // browser's permanentKey) to a CPOW that gives synchronous access
-  // to the list of style sheets in a content window. The use of the
-  // permanentKey is to avoid issues with docshell swapping.
-  _pageStyleSyncHandlers: new WeakMap(),
-
-  init: function() {
-    let mm = window.messageManager;
-    mm.addMessageListener("PageStyle:SetSyncHandler", (msg) => {
-      this._pageStyleSyncHandlers.set(msg.target.permanentKey, msg.objects.syncHandler);
-    });
-  },
-
-  getAllStyleSheets: function () {
-    let handler = this._pageStyleSyncHandlers.get(gBrowser.selectedBrowser.permanentKey);
-    try {
-      return handler.getAllStyleSheets();
-    } catch (ex) {
-      // In case the child died or timed out.
-      return [];
+  _getAllStyleSheets: function (frameset) {
+    var styleSheetsArray = Array.slice(frameset.document.styleSheets);
+    for (let i = 0; i < frameset.frames.length; i++) {
+      let frameSheets = this._getAllStyleSheets(frameset.frames[i]);
+      styleSheetsArray = styleSheetsArray.concat(frameSheets);
     }
-  },
-
-  _getStyleSheetInfo: function (browser) {
-    let handler = this._pageStyleSyncHandlers.get(gBrowser.selectedBrowser.permanentKey);
-    try {
-      return handler.getStyleSheetInfo();
-    } catch (ex) {
-      // In case the child died or timed out.
-      return {styleSheets: [], authorStyleDisabled: false, preferredStyleSheetSet: true};
-    }
+    return styleSheetsArray;
   },
 
   fillPopup: function (menuPopup) {
-    let styleSheetInfo = this._getStyleSheetInfo(gBrowser.selectedBrowser);
     var noStyle = menuPopup.firstChild;
     var persistentOnly = noStyle.nextSibling;
     var sep = persistentOnly.nextSibling;
     while (sep.nextSibling)
       menuPopup.removeChild(sep.nextSibling);
 
-    let styleSheets = styleSheetInfo.styleSheets;
+    var styleSheets = this._getAllStyleSheets(window.content);
     var currentStyleSheets = {};
-    var styleDisabled = styleSheetInfo.authorStyleDisabled;
+    var styleDisabled = getMarkupDocumentViewer().authorStyleDisabled;
     var haveAltSheets = false;
     var altStyleSelected = false;
 
     for (let currentStyleSheet of styleSheets) {
+      if (!currentStyleSheet.title)
+        continue;
+
+      // Skip any stylesheets whose media attribute doesn't match.
+      if (currentStyleSheet.media.length > 0) {
+        let mediaQueryList = currentStyleSheet.media.mediaText;
+        if (!window.content.matchMedia(mediaQueryList).matches)
+          continue;
+      }
+
       if (!currentStyleSheet.disabled)
         altStyleSelected = true;
 
@@ -5308,29 +5297,51 @@ var gPageStyleMenu = {
 
     noStyle.setAttribute("checked", styleDisabled);
     persistentOnly.setAttribute("checked", !altStyleSelected && !styleDisabled);
-    persistentOnly.hidden = styleSheetInfo.preferredStyleSheetSet ? haveAltSheets : false;
+    persistentOnly.hidden = (window.content.document.preferredStyleSheetSet) ? haveAltSheets : false;
     sep.hidden = (noStyle.hidden && persistentOnly.hidden) || !haveAltSheets;
   },
 
-  switchStyleSheet: function (title) {
-    let mm = gBrowser.selectedBrowser.messageManager;
-    mm.sendAsyncMessage("PageStyle:Switch", {title: title});
+  _stylesheetInFrame: function (frame, title) {
+    return Array.some(frame.document.styleSheets,
+                      function (stylesheet) stylesheet.title == title);
+  },
+
+  _stylesheetSwitchFrame: function (frame, title) {
+    var docStyleSheets = frame.document.styleSheets;
+
+    for (let i = 0; i < docStyleSheets.length; ++i) {
+      let docStyleSheet = docStyleSheets[i];
+
+      if (docStyleSheet.title)
+        docStyleSheet.disabled = (docStyleSheet.title != title);
+      else if (docStyleSheet.disabled)
+        docStyleSheet.disabled = false;
+    }
+  },
+
+  _stylesheetSwitchAll: function (frameset, title) {
+    if (!title || this._stylesheetInFrame(frameset, title))
+      this._stylesheetSwitchFrame(frameset, title);
+
+    for (let i = 0; i < frameset.frames.length; i++)
+      this._stylesheetSwitchAll(frameset.frames[i], title);
+  },
+
+  switchStyleSheet: function (title, contentWindow) {
+    getMarkupDocumentViewer().authorStyleDisabled = false;
+    this._stylesheetSwitchAll(contentWindow || content, title);
   },
 
   disableStyle: function () {
-    let mm = gBrowser.selectedBrowser.messageManager;
-    mm.sendAsyncMessage("PageStyle:Disable");
+    getMarkupDocumentViewer().authorStyleDisabled = true;
   },
 };
 
 /* Legacy global page-style functions */
-var getAllStyleSheets   = gPageStyleMenu.getAllStyleSheets.bind(gPageStyleMenu);
+var getAllStyleSheets   = gPageStyleMenu._getAllStyleSheets.bind(gPageStyleMenu);
 var stylesheetFillPopup = gPageStyleMenu.fillPopup.bind(gPageStyleMenu);
 function stylesheetSwitchAll(contentWindow, title) {
-  // We ignore the contentWindow param. Add-ons don't appear to use
-  // it, and it's difficult to support in e10s (where it will be a
-  // CPOW).
-  gPageStyleMenu.switchStyleSheet(title);
+  gPageStyleMenu.switchStyleSheet(title, contentWindow);
 }
 function setStyleDisabled(disabled) {
   if (disabled)

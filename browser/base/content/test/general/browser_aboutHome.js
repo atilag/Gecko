@@ -107,7 +107,7 @@ let gTests = [
     }
 
     let numSearchesBefore = 0;
-    let deferred = Promise.defer();
+    let searchEventDeferred = Promise.defer();
     let doc = gBrowser.contentDocument;
     let engineName = doc.documentElement.getAttribute("searchEngineName");
 
@@ -121,22 +121,27 @@ let gTests = [
       executeSoon(function () {
         getNumberOfSearches(engineName).then(num => {
           is(num, numSearchesBefore + 1, "One more search recorded.");
-          deferred.resolve();
+          searchEventDeferred.resolve();
         });
       });
     }, true, true);
 
     // Get the current number of recorded searches.
+    let searchStr = "a search";
     getNumberOfSearches(engineName).then(num => {
       numSearchesBefore = num;
 
       info("Perform a search.");
-      doc.getElementById("searchText").value = "a search";
+      doc.getElementById("searchText").value = searchStr;
       doc.getElementById("searchSubmit").click();
-      gBrowser.stop();
     });
 
-    return deferred.promise;
+    let expectedURL = Services.search.currentEngine.
+                      getSubmission(searchStr, null, "homepage").
+                      uri.spec;
+    let loadPromise = waitForDocLoadAndStopIt(expectedURL);
+
+    return Promise.all([searchEventDeferred.promise, loadPromise]);
   }
 },
 

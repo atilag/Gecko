@@ -6,6 +6,7 @@
 #ifndef MOZILLA_GFX_COMPOSITOROGL_H
 #define MOZILLA_GFX_COMPOSITOROGL_H
 
+#include "gfx2DGlue.h"
 #include "GLContextTypes.h"             // for GLContext, etc
 #include "GLDefs.h"                     // for GLuint, LOCAL_GL_TEXTURE_2D, etc
 #include "OGLShaderProgram.h"           // for ShaderProgramOGL, etc
@@ -190,7 +191,7 @@ public:
                                const gfx::IntPoint &aSourcePoint) MOZ_OVERRIDE;
 
   virtual void SetRenderTarget(CompositingRenderTarget *aSurface) MOZ_OVERRIDE;
-  virtual CompositingRenderTarget* GetCurrentRenderTarget() MOZ_OVERRIDE;
+  virtual CompositingRenderTarget* GetCurrentRenderTarget() const MOZ_OVERRIDE;
 
   virtual void DrawQuad(const gfx::Rect& aRect,
                         const gfx::Rect& aClipRect,
@@ -284,6 +285,11 @@ private:
                                 const gfx::Matrix4x4 &aTransformi,
                                 GLuint aDrawMode);
 
+  virtual gfx::IntSize GetWidgetSize() const MOZ_OVERRIDE
+  {
+    return gfx::ToIntSize(mWidgetSize);
+  }
+
   /** 
    * Context target, nullptr when drawing directly to our swap chain.
    */
@@ -336,9 +342,9 @@ private:
   bool mFrameInProgress;
 
   /*
-   * Clear aRect on FrameBuffer.
+   * Clear aRect on current render target.
    */
-  virtual void clearFBRect(const gfx::Rect* aRect);
+  virtual void ClearRect(const gfx::Rect& aRect) MOZ_OVERRIDE;
 
   /* Start a new frame. If aClipRectIn is null and aClipRectOut is non-null,
    * sets *aClipRectOut to the screen dimensions.

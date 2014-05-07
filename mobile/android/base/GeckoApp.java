@@ -369,15 +369,21 @@ public abstract class GeckoApp
     }
 
     @Override
-    public void showMenu(View menu) {
-        // Hide the menu before we reshow it to avoid platform specific bugs like
-        // bug 794581 and bug 968182.
+    public void showMenu(final View menu) {
+        // On devices using the custom menu, focus is cleared from the menu when its tapped.
+        // Close and then reshow it to avoid these issues. See bug 794581 and bug 968182.
         closeMenu();
 
-        mMenuPanel.removeAllViews();
-        mMenuPanel.addView(menu);
-
-        openOptionsMenu();
+        // Post the reshow code back to the UI thread to avoid some optimizations Android
+        // has put in place for menus that hide/show themselves quickly. See bug 985400.
+        ThreadUtils.postToUiThread(new Runnable() {
+            @Override
+            public void run() {
+                mMenuPanel.removeAllViews();
+                mMenuPanel.addView(menu);
+                openOptionsMenu();
+            }
+        });
     }
 
     @Override
@@ -640,10 +646,6 @@ public abstract class GeckoApp
             } else if (event.equals("Share:Text")) {
                 String text = message.getString("text");
                 GeckoAppShell.openUriExternal(text, "text/plain", "", "", Intent.ACTION_SEND, "");
-            } else if (event.equals("Share:Image")) {
-                String src = message.getString("url");
-                String type = message.getString("mime");
-                GeckoAppShell.shareImage(src, type);
             } else if (event.equals("Image:SetAs")) {
                 String src = message.getString("url");
                 setImageAs(src);
@@ -721,7 +723,7 @@ public abstract class GeckoApp
                 setLocale(message.getString("locale"));
             } else if (event.equals("NativeApp:IsDebuggable")) {
                 JSONObject ret = new JSONObject();
-                ret.put("isDebuggable", getIsDebuggable() ? "true" : "false");
+                ret.put("isDebuggable", getIsDebuggable());
                 EventDispatcher.sendResponse(message, ret);
             } else if (event.equals("SystemUI:Visibility")) {
                 setSystemUiVisible(message.getBoolean("visible"));
@@ -1563,7 +1565,6 @@ public abstract class GeckoApp
 
         //register for events
         registerEventListener("log");
-        registerEventListener("Reader:ListCountRequest");
         registerEventListener("Reader:ListStatusRequest");
         registerEventListener("Reader:Added");
         registerEventListener("Reader:Removed");
@@ -1585,7 +1586,6 @@ public abstract class GeckoApp
         registerEventListener("Accessibility:Ready");
         registerEventListener("Shortcut:Remove");
         registerEventListener("Share:Text");
-        registerEventListener("Share:Image");
         registerEventListener("Image:SetAs");
         registerEventListener("Sanitize:ClearHistory");
         registerEventListener("Update:Check");
@@ -1825,7 +1825,7 @@ public abstract class GeckoApp
         } else if (mCameraView instanceof TextureView) {
             mCameraView.setAlpha(0.0f);
         }
-        RelativeLayout mCameraLayout = (RelativeLayout) findViewById(R.id.camera_layout);
+        ViewGroup mCameraLayout = (ViewGroup) findViewById(R.id.camera_layout);
         // Some phones (eg. nexus S) need at least a 8x16 preview size
         mCameraLayout.addView(mCameraView,
                               new AbsoluteLayout.LayoutParams(8, 16, 0, 0));
@@ -1836,7 +1836,7 @@ public abstract class GeckoApp
             mCameraOrientationEventListener.disable();
             mCameraOrientationEventListener = null;
         }
-        RelativeLayout mCameraLayout = (RelativeLayout) findViewById(R.id.camera_layout);
+        ViewGroup mCameraLayout = (ViewGroup) findViewById(R.id.camera_layout);
         mCameraLayout.removeView(mCameraView);
     }
 
@@ -2097,7 +2097,6 @@ public abstract class GeckoApp
     public void onDestroy()
     {
         unregisterEventListener("log");
-        unregisterEventListener("Reader:ListCountRequest");
         unregisterEventListener("Reader:ListStatusRequest");
         unregisterEventListener("Reader:Added");
         unregisterEventListener("Reader:Removed");
@@ -2119,7 +2118,6 @@ public abstract class GeckoApp
         unregisterEventListener("Accessibility:Ready");
         unregisterEventListener("Shortcut:Remove");
         unregisterEventListener("Share:Text");
-        unregisterEventListener("Share:Image");
         unregisterEventListener("Image:SetAs");
         unregisterEventListener("Sanitize:ClearHistory");
         unregisterEventListener("Update:Check");

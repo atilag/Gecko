@@ -7,6 +7,7 @@
 #define MOZILLA_GFX_COMPOSITORD3D9_H
 
 #include "mozilla/gfx/2D.h"
+#include "gfx2DGlue.h"
 #include "mozilla/layers/Compositor.h"
 #include "mozilla/layers/TextureD3D9.h"
 #include "DeviceManagerD3D9.h"
@@ -48,12 +49,14 @@ public:
                                  const gfx::IntPoint &aSourcePoint) MOZ_OVERRIDE;
 
   virtual void SetRenderTarget(CompositingRenderTarget *aSurface);
-  virtual CompositingRenderTarget* GetCurrentRenderTarget() MOZ_OVERRIDE
+  virtual CompositingRenderTarget* GetCurrentRenderTarget() const MOZ_OVERRIDE
   {
     return mCurrentRT;
   }
 
   virtual void SetDestinationSurfaceSize(const gfx::IntSize& aSize) MOZ_OVERRIDE {}
+
+  virtual void ClearRect(const gfx::Rect& aRect) MOZ_OVERRIDE;
 
   virtual void DrawQuad(const gfx::Rect &aRect,
                         const gfx::Rect &aClipRect,
@@ -150,6 +153,11 @@ private:
   void CheckResetCount();
 
   void ReportFailure(const nsACString &aMsg, HRESULT aCode);
+
+  virtual gfx::IntSize GetWidgetSize() const MOZ_OVERRIDE
+  {
+    return gfx::ToIntSize(mSize);
+  }
 
   /* Device manager instance for this compositor */
   nsRefPtr<DeviceManagerD3D9> mDeviceManager;

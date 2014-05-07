@@ -109,11 +109,23 @@
 %endif
 
 /* Make the menu inherit the toolbar's color. On non-compositor (Aero Basic, XP modern, classic)
- * this is defined above. Otherwise (Aero Glass, Windows 8 inactive windows), this is hardcoded
- * to black in browser-aero.css. */
-#main-menubar > menu:not(:-moz-lwtheme) {
-  color: inherit;
+ * this is defined above, but only for tabsintitlebar. Otherwise (Aero Glass, Windows 8),
+ * this is hardcoded to black in browser-aero.css, even without tabsintitlebar. */
+%ifdef WINDOWS_AERO
+@media not all and (-moz-windows-compositor) {
+%endif
+  #main-window[tabsintitlebar] #main-menubar > menu:not(:-moz-lwtheme) {
+    color: inherit;
+  }
+%ifdef WINDOWS_AERO
 }
+
+@media (-moz-windows-compositor) {
+  #main-menubar > menu:not(:-moz-lwtheme) {
+    color: inherit;
+  }
+}
+%endif
 
 /**
  * In the classic themes, the titlebar has a horizontal gradient, which is
@@ -123,19 +135,13 @@
  * text and icons to not appear fuzzy.
  */
 @media (-moz-windows-classic) {
-  #main-window[tabsintitlebar]:not([sizemode=fullscreen]) .tabbrowser-tab[selected=true] {
-    position: relative;
-    z-index: 3;
-  }
-
-  #main-window[tabsintitlebar]:not([sizemode=fullscreen]) .tabbrowser-tab:not([selected=true]) {
+  /**
+   * We need to bump up the z-index of the tabbrowser-tabs so that they appear
+   * over top of the fog we're applying for classic themes, as well as the nav-bar.
+   */
+  #main-window[tabsintitlebar]:not([sizemode=fullscreen]) #tabbrowser-tabs {
     position: relative;
     z-index: 2;
-  }
-
-  #main-window[tabsintitlebar]:not([sizemode=fullscreen]) .tabs-newtab-button {
-    position: relative;
-    z-index: 1;
   }
 
   #main-window[tabsintitlebar] #TabsToolbar:not(:-moz-lwtheme) {
@@ -159,7 +165,6 @@
     pointer-events: none;
     top: 100%;
     width: -moz-available;
-    z-index: 0;
   }
 
   #main-window[tabsintitlebar]:not([sizemode=fullscreen]) #TabsToolbar:not(:-moz-lwtheme):-moz-window-inactive::after {
@@ -176,15 +181,29 @@
     overflow: -moz-hidden-unscrollable;
   }
 
-  #main-window[tabsintitlebar][sizemode=normal] .tabbrowser-arrowscrollbox > .arrowscrollbox-scrollbox > .scrollbox-innerbox:not(:-moz-lwtheme) {
-    position: relative;
+  /**
+   * When the tabstrip is overflowed, pinned tab separators get position: absolute,
+   * which makes the pinned tab separators leak over the nav-bar highlight. Forcing
+   * the element to snap to the bottom of the client rect works around the issue.
+   */
+  #main-window[tabsintitlebar] #tabbrowser-tabs[positionpinnedtabs] > .tabbrowser-tab[pinned]::before {
+    bottom: 0px;
   }
 
-  #main-window[tabsintitlebar]:not([sizemode=fullscreen]) #TabsToolbar .toolbarbutton-1,
-  #main-window[tabsintitlebar]:not([sizemode=fullscreen]) .tabbrowser-arrowscrollbox > .scrollbutton-up,
-  #main-window[tabsintitlebar]:not([sizemode=fullscreen]) .tabbrowser-arrowscrollbox > .scrollbutton-down {
+  #main-window[tabsintitlebar]:not([sizemode=fullscreen]) #TabsToolbar .toolbarbutton-1 {
     position: relative;
     z-index: 1;
+  }
+
+  /**
+   * With the tabbrowser-tabs element z-index'd above the nav-bar, we now get the
+   * scrollbox button borders leaking over the nav-bar highlight. This transparent bottom
+   * border forces the scrollbox button borders to terminate a pixel early, working
+   * around the issue.
+   */
+  #main-window[tabsintitlebar]:not([sizemode=fullscreen]) .tabbrowser-arrowscrollbox > .scrollbutton-up,
+  #main-window[tabsintitlebar]:not([sizemode=fullscreen]) .tabbrowser-arrowscrollbox > .scrollbutton-down {
+    border-bottom: 1px solid transparent;
   }
 
   #main-window[tabsintitlebar]:not([inFullscreen]) .tab-close-button:not(:-moz-any(:hover,:-moz-lwtheme,[selected="true"])) {
@@ -267,7 +286,7 @@
 #nav-bar {
   background-image: linear-gradient(@toolbarHighlight@, rgba(255,255,255,0));
   box-shadow: 0 1px 0 @toolbarHighlight@ inset;
-  margin-top: -1px; /* Move up 1px into the TabsToolbar */
+  margin-top: -@tabToolbarNavbarOverlap@; /* Move up into the TabsToolbar */
   /* Position the toolbar above the bottom of background tabs */
   position: relative;
   z-index: 1;
@@ -634,7 +653,8 @@ toolbar .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker:-moz-lwtheme-bri
   #nav-bar .toolbarbutton-1 > .toolbarbutton-icon,
   #nav-bar .toolbarbutton-1 > .toolbarbutton-text,
   #nav-bar .toolbarbutton-1 > .toolbarbutton-badge-container,
-  #nav-bar .toolbarbutton-1 > .toolbarbutton-menubutton-button > .toolbarbutton-icon {
+  #nav-bar .toolbarbutton-1 > .toolbarbutton-menubutton-button > .toolbarbutton-icon,
+  #nav-bar .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon {
     background-color: hsla(210,32%,93%,0);
     background-origin: padding-box;
     border-radius: 2px;
@@ -805,7 +825,7 @@ toolbarbutton[sdk-button="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
     border-color: hsla(210,54%,20%,.3) hsla(210,54%,20%,.35) hsla(210,54%,20%,.4);
     box-shadow: 0 1px 1px hsla(210,54%,20%,.1) inset,
                 0 0 1px hsla(210,54%,20%,.2) inset,
-                /* allows windows-keyhole-forward-clip-path to be used for non-hover as well as hover: */
+                /* allows keyhole-forward-clip-path to be used for non-hover as well as hover: */
                 0 1px 0 hsla(210,54%,20%,0),
                 0 0 2px hsla(210,54%,20%,0);
     text-shadow: none;
@@ -831,6 +851,10 @@ toolbarbutton[sdk-button="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
   -moz-appearance: none;
   border-style: none;
   padding: 0 3px;
+}
+
+#TabsToolbar .toolbarbutton-1 {
+  margin-bottom: @tabToolbarNavbarOverlap@;
 }
 
 #TabsToolbar .toolbarbutton-1:not([disabled=true]):hover,
@@ -859,7 +883,7 @@ toolbarbutton[sdk-button="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
 #forward-button > .toolbarbutton-icon {
   background-clip: padding-box !important;
   /*mask: url(keyhole-forward-mask.svg#mask); XXX: this regresses twinopen */
-  clip-path: url(chrome://browser/content/browser.xul#windows-keyhole-forward-clip-path) !important;
+  clip-path: url(chrome://browser/content/browser.xul#keyhole-forward-clip-path) !important;
   margin-left: -6px !important;
   border-left-style: none !important;
   border-radius: 0 !important;
@@ -1038,6 +1062,16 @@ toolbarbutton[sdk-button="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
   -moz-image-region: rect(1px, 71px, 17px, 55px);
 }
 
+/* zoom control text (reset) button special case: */
+
+#nav-bar #zoom-reset-button > .toolbarbutton-text {
+  /* To make this line up with the icons, it needs the same height (18px) +
+   * padding (2 * 2px) + border (2 * 1px), but as a minimum because otherwise
+   * increase in text sizes would break things...
+   */
+  min-height: 24px;
+}
+
 /* ::::: fullscreen window controls ::::: */
 
 #window-controls {
@@ -1162,7 +1196,7 @@ toolbarbutton[sdk-button="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
 }
 
 @conditionalForwardWithUrlbar@[forwarddisabled] > #urlbar-wrapper {
-  clip-path: url("chrome://browser/content/browser.xul#windows-urlbar-back-button-clip-path");
+  clip-path: url("chrome://browser/content/browser.xul#urlbar-back-button-clip-path");
 }
 
 @conditionalForwardWithUrlbar@[forwarddisabled] > #urlbar-wrapper > #urlbar {
@@ -1796,6 +1830,39 @@ toolbarbutton[type="socialmark"] > .toolbarbutton-icon {
 
 %include ../shared/tabs.inc.css
 
+@media (min-resolution: 1.25dppx) {
+  /* image preloading hack from shared/tabs.inc.css */
+  #tabbrowser-tabs::before {
+    background-image:
+      url(chrome://browser/skin/tabbrowser/tab-background-end@2x.png),
+      url(chrome://browser/skin/tabbrowser/tab-background-middle@2x.png),
+      url(chrome://browser/skin/tabbrowser/tab-background-start@2x.png);
+  }
+
+  .tabbrowser-tab:hover > .tab-stack > .tab-background:not([selected=true]),
+  .tabs-newtab-button:hover {
+    background-image: url(chrome://browser/skin/tabbrowser/tab-background-start@2x.png),
+                      url(chrome://browser/skin/tabbrowser/tab-background-middle@2x.png),
+                      url(chrome://browser/skin/tabbrowser/tab-background-end@2x.png);
+  }
+
+  .tab-background-middle[selected=true] {
+    background-image: url(chrome://browser/skin/tabbrowser/tab-active-middle@2x.png),
+                      @fgTabTexture@,
+                      none;
+  }
+
+  .tab-background-start[selected=true]:-moz-locale-dir(ltr)::after,
+  .tab-background-end[selected=true]:-moz-locale-dir(rtl)::after {
+    background-image: url(chrome://browser/skin/tabbrowser/tab-stroke-start@2x.png);
+  }
+
+  .tab-background-end[selected=true]:-moz-locale-dir(ltr)::after,
+  .tab-background-start[selected=true]:-moz-locale-dir(rtl)::after {
+    background-image: url(chrome://browser/skin/tabbrowser/tab-stroke-end@2x.png);
+  }
+}
+
 %ifndef WINDOWS_AERO
 /* Use lighter colors of buttons and text in the titlebar on luna-blue */
 @media (-moz-windows-theme: luna-blue) {
@@ -1835,6 +1902,16 @@ toolbarbutton[type="socialmark"] > .toolbarbutton-icon {
   outline: 1px dotted;
 }
 
+/* Background tabs:
+ *
+ * Decrease the height of the hoverable region of background tabs whenever the tabs are at the top
+ * of the window (e.g. no menubar, tabs in titlebar, etc.) to make it easier to drag the window by
+ * the titlebar. We don't need this in fullscreen since window dragging is not an issue there.
+ */
+#main-window[tabsintitlebar][sizemode=normal] #toolbar-menubar[autohide="true"][inactive] + #TabsToolbar .tab-background-middle:not([selected=true]) {
+  clip-path: url(chrome://browser/content/browser.xul#tab-hover-clip-path);
+}
+
 /* Tab DnD indicator */
 .tab-drop-indicator {
   list-style-image: url(chrome://browser/skin/tabbrowser/tabDragIndicator.png);
@@ -1853,7 +1930,7 @@ toolbarbutton[type="socialmark"] > .toolbarbutton-icon {
 .tabbrowser-arrowscrollbox > .scrollbutton-up,
 .tabbrowser-arrowscrollbox > .scrollbutton-down {
   list-style-image: url("chrome://browser/skin/tabbrowser/tab-arrow-left.png");
-  margin: 0;
+  margin: 0 0 @tabToolbarNavbarOverlap@;
   padding-right: 2px;
   border-right: 2px solid transparent;
   background-origin: border-box;
@@ -2765,10 +2842,15 @@ chatbox {
   background-attachment: fixed;
 }
 
-#customization-container {
+#main-window[customize-entered] #browser-bottombox,
+#main-window[customize-entered] #customization-container {
   border-left: 1px solid @toolbarShadowColor@;
   border-right: 1px solid @toolbarShadowColor@;
   background-clip: padding-box;
+}
+
+#main-window[customize-entered] #browser-bottombox {
+  border-bottom: 1px solid @toolbarShadowColor@;
 }
 
 #customization-tipPanel > .panel-arrowcontainer > .panel-arrowbox > .panel-arrow[side="left"] {

@@ -108,8 +108,6 @@ struct Zone : public JS::shadow::Zone,
 
     js::CompartmentVector        compartments;
 
-    bool                         hold;
-
   private:
     bool                         ionUsingBarriers_;
 
@@ -318,7 +316,9 @@ struct Zone : public JS::shadow::Zone,
 
     js::types::TypeZone types;
 
-    void sweep(js::FreeOp *fop, bool releaseTypes);
+    void sweep(js::FreeOp *fop, bool releaseTypes, bool *oom);
+
+    bool hasMarkedCompartments();
 
   private:
     void sweepBreakpoints(js::FreeOp *fop);
