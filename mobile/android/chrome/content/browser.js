@@ -346,12 +346,19 @@ var BrowserApp = {
       });
     }, false);
 
-    window.addEventListener("mozfullscreenchange", function() {
+    window.addEventListener("mozfullscreenchange", function(e) {
+      // This event gets fired on the document and its entire ancestor chain
+      // of documents. When enabling fullscreen, it is fired on the top-level
+      // document first and goes down; when disabling the order is reversed
+      // (per spec). This means the last event on enabling will be for the innermost
+      // document, which will have mozFullScreenElement set correctly.
+      let doc = e.target;
       sendMessageToJava({
-        type: document.mozFullScreen ? "DOMFullScreen:Start" : "DOMFullScreen:Stop"
+        type: doc.mozFullScreen ? "DOMFullScreen:Start" : "DOMFullScreen:Stop",
+        rootElement: (doc.mozFullScreen && doc.mozFullScreenElement == doc.documentElement)
       });
 
-      if (document.mozFullScreen)
+      if (doc.mozFullScreen)
         showFullScreenWarning();
     }, false);
 
@@ -8094,6 +8101,10 @@ var ExternalApps = {
       icon: "drawable://icon_openinapp",
 
       clickCallback: () => {
+        // Create a relative timestamp for telemetry
+        let uptime = Date.now() - Services.startup.getStartupInfo().linkerInitialized;
+        UITelemetry.addEvent("launch.1", "pageaction", uptime, "helper");
+
         if (apps.length > 1) {
           // Use the HelperApps prompt here to filter out any Http handlers
           HelperApps.prompt(apps, {

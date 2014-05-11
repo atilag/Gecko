@@ -880,6 +880,11 @@ nsEventStatus AsyncPanZoomController::OnScaleBegin(const PinchGestureInput& aEve
 
 nsEventStatus AsyncPanZoomController::OnScale(const PinchGestureInput& aEvent) {
   APZC_LOG("%p got a scale in state %d\n", this, mState);
+
+  if (!TouchActionAllowPinchZoom()) {
+    return nsEventStatus_eIgnore;
+  }
+
   if (mState != PINCHING) {
     return nsEventStatus_eConsumeNoDefault;
   }
@@ -958,6 +963,10 @@ nsEventStatus AsyncPanZoomController::OnScale(const PinchGestureInput& aEvent) {
 
 nsEventStatus AsyncPanZoomController::OnScaleEnd(const PinchGestureInput& aEvent) {
   APZC_LOG("%p got a scale-end in state %d\n", this, mState);
+
+  if (!TouchActionAllowPinchZoom()) {
+    return nsEventStatus_eIgnore;
+  }
 
   SetState(NOTHING);
 
@@ -1485,11 +1494,7 @@ const LayerMargin AsyncPanZoomController::CalculatePendingDisplayPort(
   const ScreenPoint& aVelocity,
   double aEstimatedPaintDuration)
 {
-  CSSSize compositionBounds = aFrameMetrics.CalculateCompositedSizeInCssPixels();
-  CSSSize compositionSize = aFrameMetrics.GetRootCompositionSize();
-  compositionSize =
-    CSSSize(std::min(compositionBounds.width, compositionSize.width),
-            std::min(compositionBounds.height, compositionSize.height));
+  CSSSize compositionSize = aFrameMetrics.CalculateBoundedCompositedSizeInCssPixels();
   CSSPoint velocity = aVelocity / aFrameMetrics.GetZoom();
   CSSPoint scrollOffset = aFrameMetrics.GetScrollOffset();
   CSSRect scrollableRect = aFrameMetrics.GetExpandedScrollableRect();
@@ -1595,10 +1600,7 @@ GetDisplayPortRect(const FrameMetrics& aFrameMetrics)
   // This computation is based on what happens in CalculatePendingDisplayPort. If that
   // changes then this might need to change too
   CSSRect baseRect(aFrameMetrics.GetScrollOffset(),
-                   CSSSize(std::min(aFrameMetrics.CalculateCompositedSizeInCssPixels().width,
-                                    aFrameMetrics.GetRootCompositionSize().width),
-                           std::min(aFrameMetrics.CalculateCompositedSizeInCssPixels().height,
-                                    aFrameMetrics.GetRootCompositionSize().height)));
+                   aFrameMetrics.CalculateBoundedCompositedSizeInCssPixels());
   baseRect.Inflate(aFrameMetrics.GetDisplayPortMargins() / aFrameMetrics.LayersPixelsPerCSSPixel());
   return baseRect;
 }

@@ -306,9 +306,9 @@ public:
   Checkpoint(const char* aEvent)
   {
     TimeStamp now = TimeStamp::Now();
-    uint32_t dur = (uint32_t) ((now - mLastCheckpoint).ToMilliseconds());
-    if (dur > 0) {
-      printf("cc: %s took %dms\n", aEvent, dur);
+    double dur = (now - mLastCheckpoint).ToMilliseconds();
+    if (dur >= 0.5) {
+      printf("cc: %s took %.1fms\n", aEvent, dur);
     }
     mLastCheckpoint = now;
   }
@@ -1217,6 +1217,7 @@ public:
   void RemoveObjectFromGraph(void *aPtr);
 
   void PrepareForGarbageCollection();
+  void FinishAnyCurrentCollection();
 
   bool Collect(ccType aCCType,
                SliceBudget &aBudget,
@@ -1242,6 +1243,8 @@ private:
   void MarkRoots(SliceBudget &aBudget);
   void ScanRoots(bool aFullySynchGraphBuild);
   void ScanIncrementalRoots();
+  void ScanWhiteNodes(bool aFullySynchGraphBuild);
+  void ScanBlackNodes();
   void ScanWeakMaps();
 
   // returns whether anything was collected
@@ -2672,52 +2675,12 @@ private:
   bool &mFailed;
 };
 
-
-struct scanVisitor
+static void
+FloodBlackNode(uint32_t& aWhiteNodeCount, bool& aFailed, PtrInfo* aPi)
 {
-  scanVisitor(uint32_t &aWhiteNodeCount, bool &aFailed, bool aWasIncremental)
-    : mWhiteNodeCount(aWhiteNodeCount), mFailed(aFailed),
-      mWasIncremental(aWasIncremental)
-  {
-  }
-
-  bool ShouldVisitNode(PtrInfo const *pi)
-  {
-    return pi->mColor == grey;
-  }
-
-  MOZ_NEVER_INLINE void VisitNode(PtrInfo *pi)
-  {
-    if (pi->mInternalRefs > pi->mRefCount && pi->mRefCount > 0) {
-      // If we found more references to an object than its ref count, then
-      // the object should have already been marked as an incremental
-      // root. Note that this is imprecise, because pi could have been
-      // marked black for other reasons. Always fault if we weren't
-      // incremental, as there were no incremental roots in that case.
-      if (!mWasIncremental || pi->mColor != black) {
-        Fault("traversed refs exceed refcount", pi);
-      }
-    }
-
-    if (pi->mInternalRefs == pi->mRefCount || pi->mRefCount == 0) {
-      pi->mColor = white;
-      ++mWhiteNodeCount;
-    } else {
-      GraphWalker<ScanBlackVisitor>(ScanBlackVisitor(mWhiteNodeCount, mFailed)).Walk(pi);
-      MOZ_ASSERT(pi->mColor == black,
-                 "Why didn't ScanBlackVisitor make pi black?");
-    }
-  }
-
-  void Failed() {
-    mFailed = true;
-  }
-
-private:
-  uint32_t &mWhiteNodeCount;
-  bool &mFailed;
-  bool mWasIncremental;
-};
+    GraphWalker<ScanBlackVisitor>(ScanBlackVisitor(aWhiteNodeCount, aFailed)).Walk(aPi);
+    MOZ_ASSERT(aPi->mColor == black || !aPi->mParticipant, "FloodBlackNode should make aPi black");
+}
 
 // Iterate over the WeakMaps.  If we mark anything while iterating
 // over the WeakMaps, we must iterate over all of the WeakMaps again.
@@ -2737,22 +2700,18 @@ nsCycleCollector::ScanWeakMaps()
       uint32_t kdColor = wm->mKeyDelegate ? wm->mKeyDelegate->mColor : black;
       uint32_t vColor = wm->mVal ? wm->mVal->mColor : black;
 
-      // All non-null weak mapping maps, keys and values are
-      // roots (in the sense of WalkFromRoots) in the cycle
-      // collector graph, and thus should have been colored
-      // either black or white in ScanRoots().
       MOZ_ASSERT(mColor != grey, "Uncolored weak map");
       MOZ_ASSERT(kColor != grey, "Uncolored weak map key");
       MOZ_ASSERT(kdColor != grey, "Uncolored weak map key delegate");
       MOZ_ASSERT(vColor != grey, "Uncolored weak map value");
 
       if (mColor == black && kColor != black && kdColor == black) {
-        GraphWalker<ScanBlackVisitor>(ScanBlackVisitor(mWhiteNodeCount, failed)).Walk(wm->mKey);
+        FloodBlackNode(mWhiteNodeCount, failed, wm->mKey);
         anyChanged = true;
       }
 
       if (mColor == black && kColor == black && vColor != black) {
-        GraphWalker<ScanBlackVisitor>(ScanBlackVisitor(mWhiteNodeCount, failed)).Walk(wm->mVal);
+        FloodBlackNode(mWhiteNodeCount, failed, wm->mVal);
         anyChanged = true;
       }
     }
@@ -2797,7 +2756,7 @@ public:
     if (pi->mColor == black) {
       return;
     }
-    GraphWalker<ScanBlackVisitor>(ScanBlackVisitor(mCount, mFailed)).Walk(pi);
+    FloodBlackNode(mCount, mFailed, pi);
   }
 
 private:
@@ -2878,7 +2837,7 @@ nsCycleCollector::ScanIncrementalRoots()
         mListener->NoteIncrementalRoot((uint64_t)pi->mPointer);
       }
 
-      GraphWalker<ScanBlackVisitor>(ScanBlackVisitor(mWhiteNodeCount, failed)).Walk(pi);
+      FloodBlackNode(mWhiteNodeCount, failed, pi);
     }
 
     timeLog.Checkpoint("ScanIncrementalRoots::fix JS");
@@ -2886,6 +2845,68 @@ nsCycleCollector::ScanIncrementalRoots()
 
   if (failed) {
     NS_ASSERTION(false, "Ran out of memory in ScanIncrementalRoots");
+    CC_TELEMETRY(_OOM, true);
+  }
+}
+
+// Mark nodes white and make sure their refcounts are ok.
+// No nodes are marked black during this pass to ensure that refcount
+// checking is run on all nodes not marked black by ScanIncrementalRoots.
+void
+nsCycleCollector::ScanWhiteNodes(bool aFullySynchGraphBuild)
+{
+  NodePool::Enumerator nodeEnum(mGraph.mNodes);
+  while (!nodeEnum.IsDone()) {
+    PtrInfo* pi = nodeEnum.GetNext();
+    if (pi->mColor == black) {
+      // Incremental roots can be in a nonsensical state, so don't
+      // check them. This will miss checking nodes that are merely
+      // reachable from incremental roots.
+      MOZ_ASSERT(!aFullySynchGraphBuild,
+                 "In a synch CC, no nodes should be marked black early on.");
+      continue;
+    }
+    MOZ_ASSERT(pi->mColor == grey);
+
+    if (!pi->mParticipant) {
+      // This node has been deleted, so it could be in a mangled state, but
+      // that's okay because we're not going to look at it again.
+      continue;
+    }
+
+    if (pi->mInternalRefs == pi->mRefCount || pi->mRefCount == 0) {
+      pi->mColor = white;
+      ++mWhiteNodeCount;
+      continue;
+    }
+
+    if (MOZ_LIKELY(pi->mInternalRefs < pi->mRefCount)) {
+      // This node will get marked black in the next pass.
+      continue;
+    }
+
+    Fault("Traversed refs exceed refcount", pi);
+  }
+}
+
+// Any remaining grey nodes that haven't already been deleted must be alive,
+// so mark them and their children black. Any nodes that are black must have
+// already had their children marked black, so there's no need to look at them
+// again. This pass may turn some white nodes to black.
+void
+nsCycleCollector::ScanBlackNodes()
+{
+  bool failed = false;
+  NodePool::Enumerator nodeEnum(mGraph.mNodes);
+  while (!nodeEnum.IsDone()) {
+    PtrInfo* pi = nodeEnum.GetNext();
+    if (pi->mColor == grey && pi->mParticipant) {
+      FloodBlackNode(mWhiteNodeCount, failed, pi);
+    }
+  }
+
+  if (failed) {
+    NS_ASSERTION(false, "Ran out of memory in ScanBlackNodes");
     CC_TELEMETRY(_OOM, true);
   }
 }
@@ -2904,19 +2925,11 @@ nsCycleCollector::ScanRoots(bool aFullySynchGraphBuild)
   }
 
   TimeLog timeLog;
+  ScanWhiteNodes(aFullySynchGraphBuild);
+  timeLog.Checkpoint("ScanRoots::ScanWhiteNodes");
 
-  // On the assumption that most nodes will be black, it's
-  // probably faster to use a GraphWalker than a
-  // NodePool::Enumerator.
-  bool failed = false;
-  scanVisitor sv(mWhiteNodeCount, failed, !aFullySynchGraphBuild);
-  GraphWalker<scanVisitor>(sv).WalkFromRoots(mGraph);
-  timeLog.Checkpoint("ScanRoots::WalkFromRoots");
-
-  if (failed) {
-    NS_ASSERTION(false, "Ran out of memory in ScanRoots");
-    CC_TELEMETRY(_OOM, true);
-  }
+  ScanBlackNodes();
+  timeLog.Checkpoint("ScanRoots::ScanBlackNodes");
 
   // Scanning weak maps must be done last.
   ScanWeakMaps();
@@ -3032,6 +3045,8 @@ nsCycleCollector::CollectWhite()
   timeLog.Checkpoint("CollectWhite::Unroot");
 
   nsCycleCollector_dispatchDeferredDeletion(false);
+  timeLog.Checkpoint("CollectWhite::dispatchDeferredDeletion");
+
   mIncrementalPhase = CleanupPhase;
 
   return count > 0;
@@ -3212,7 +3227,7 @@ nsCycleCollector::FixGrayBits(bool aForceGC)
   if (!aForceGC) {
     mJSRuntime->FixWeakMappingGrayBits();
 
-    bool needGC = mJSRuntime->NeedCollect();
+    bool needGC = !mJSRuntime->AreGCGrayBitsValid();
     // Only do a telemetry ping for non-shutdown CCs.
     CC_TELEMETRY(_NEED_GC, needGC);
     if (!needGC)
@@ -3221,19 +3236,21 @@ nsCycleCollector::FixGrayBits(bool aForceGC)
   }
 
   TimeLog timeLog;
-  mJSRuntime->Collect(aForceGC ? JS::gcreason::SHUTDOWN_CC : JS::gcreason::CC_FORCED);
+  mJSRuntime->GarbageCollect(aForceGC ? JS::gcreason::SHUTDOWN_CC : JS::gcreason::CC_FORCED);
   timeLog.Checkpoint("GC()");
 }
 
 void
 nsCycleCollector::CleanupAfterCollection()
 {
+  TimeLog timeLog;
   MOZ_ASSERT(mIncrementalPhase == CleanupPhase);
   mGraph.Clear();
+  timeLog.Checkpoint("CleanupAfterCollection::mGraph.Clear()");
 
   uint32_t interval = (uint32_t) ((TimeStamp::Now() - mCollectionStart).ToMilliseconds());
 #ifdef COLLECT_TIME_DEBUG
-  printf("cc: total cycle collector time was %ums\n", interval);
+  printf("cc: total cycle collector time was %ums in %u slices\n", interval, mResults.mNumSlices);
   printf("cc: visited %u ref counted and %u GCed objects, freed %d ref counted and %d GCed objects",
          mResults.mVisitedRefCounted, mResults.mVisitedGCed,
          mResults.mFreedRefCounted, mResults.mFreedGCed);
@@ -3244,13 +3261,16 @@ nsCycleCollector::CleanupAfterCollection()
   }
   printf(".\ncc: \n");
 #endif
+
   CC_TELEMETRY( , interval);
   CC_TELEMETRY(_VISITED_REF_COUNTED, mResults.mVisitedRefCounted);
   CC_TELEMETRY(_VISITED_GCED, mResults.mVisitedGCed);
   CC_TELEMETRY(_COLLECTED, mWhiteNodeCount);
+  timeLog.Checkpoint("CleanupAfterCollection::telemetry");
 
   if (mJSRuntime) {
     mJSRuntime->EndCycleCollectionCallback(mResults);
+    timeLog.Checkpoint("CleanupAfterCollection::EndCycleCollectionCallback()");
   }
   mIncrementalPhase = IdlePhase;
 }
@@ -3296,8 +3316,12 @@ nsCycleCollector::Collect(ccType aCCType,
   // If the CC started idle, it will call BeginCollection, which
   // will do FreeSnowWhite, so it doesn't need to be done here.
   if (!startedIdle) {
+    TimeLog timeLog;
     FreeSnowWhite(true);
+    timeLog.Checkpoint("Collect::FreeSnowWhite");
   }
+
+  ++mResults.mNumSlices;
 
   bool finished = false;
   do {
@@ -3363,8 +3387,18 @@ nsCycleCollector::PrepareForGarbageCollection()
     return;
   }
 
+  FinishAnyCurrentCollection();
+}
+
+void
+nsCycleCollector::FinishAnyCurrentCollection()
+{
+  if (mIncrementalPhase == IdlePhase) {
+    return;
+  }
+
   SliceBudget unlimitedBudget;
-  PrintPhase("PrepareForGarbageCollection");
+  PrintPhase("FinishAnyCurrentCollection");
   // Use SliceCC because we only want to finish the CC in progress.
   Collect(SliceCC, unlimitedBudget, nullptr);
   MOZ_ASSERT(mIncrementalPhase == IdlePhase);
@@ -3871,10 +3905,25 @@ nsCycleCollector_collectSlice(int64_t aSliceTime)
 
   PROFILER_LABEL("CC", "nsCycleCollector_collectSlice");
   SliceBudget budget;
-  if (aSliceTime > 0) {
+  if (aSliceTime >= 0) {
     budget = SliceBudget::TimeBudget(aSliceTime);
-  } else if (aSliceTime == 0) {
-    budget = SliceBudget::WorkBudget(1);
+  }
+  data->mCollector->Collect(SliceCC, budget, nullptr);
+}
+
+void
+nsCycleCollector_collectSliceWork(int64_t aSliceWork)
+{
+  CollectorData *data = sCollectorData.get();
+
+  // We should have started the cycle collector by now.
+  MOZ_ASSERT(data);
+  MOZ_ASSERT(data->mCollector);
+
+  PROFILER_LABEL("CC", "nsCycleCollector_collectSliceWork");
+  SliceBudget budget;
+  if (aSliceWork >= 0) {
+    budget = SliceBudget::WorkBudget(aSliceWork);
   }
   data->mCollector->Collect(SliceCC, budget, nullptr);
 }
@@ -3891,6 +3940,20 @@ nsCycleCollector_prepareForGarbageCollection()
   }
 
   data->mCollector->PrepareForGarbageCollection();
+}
+
+void
+nsCycleCollector_finishAnyCurrentCollection()
+{
+    CollectorData *data = sCollectorData.get();
+
+    MOZ_ASSERT(data);
+
+    if (!data->mCollector) {
+        return;
+    }
+
+    data->mCollector->FinishAnyCurrentCollection();
 }
 
 void
