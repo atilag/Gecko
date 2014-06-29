@@ -16,11 +16,12 @@
 #include "mozilla/layers/PCompositorParent.h"
 #include "mozilla/layers/LayerManagerComposite.h"
 #include "gfxPrefs.h"
-
-using namespace mozilla::gfx;
+#include "gfxCrashReporterUtils.h"
 
 namespace mozilla {
 namespace layers {
+
+using namespace mozilla::gfx;
 
 CompositorD3D9::CompositorD3D9(PCompositorParent* aParent, nsIWidget *aWidget)
   : Compositor(aParent)
@@ -39,6 +40,10 @@ CompositorD3D9::~CompositorD3D9()
 bool
 CompositorD3D9::Initialize()
 {
+  bool force = gfxPrefs::LayersAccelerationForceEnabled();
+
+  ScopedGfxFeatureReporter reporter("D3D9 Layers", force);
+
   if (!gfxPlatform::CanUseDirect3D9()) {
     NS_WARNING("Direct3D 9-accelerated layers are not supported on this system.");
     return false;
@@ -56,6 +61,7 @@ CompositorD3D9::Initialize()
     return false;
   }
 
+  reporter.SetSuccessful();
   return true;
 }
 
@@ -591,14 +597,6 @@ CompositorD3D9::Ready()
   return false;
 }
 
-static void
-CancelCompositing(Rect* aRenderBoundsOut)
-{
-  if (aRenderBoundsOut) {
-    *aRenderBoundsOut = Rect(0, 0, 0, 0);
-  }
-}
-
 void
 CompositorD3D9::BeginFrame(const nsIntRegion& aInvalidRegion,
                            const Rect *aClipRectIn,
@@ -743,7 +741,7 @@ CompositorD3D9::PaintToTarget()
                                              SurfaceFormat::B8G8R8A8);
   mTarget->CopySurface(sourceSurface,
                        IntRect(0, 0, desc.Width, desc.Height),
-                       IntPoint());
+                       IntPoint(-mTargetBounds.x, -mTargetBounds.y));
   mTarget->Flush();
   destSurf->UnlockRect();
 }

@@ -38,8 +38,8 @@ mozilla::ThreadLocal<void *> tlsStackTop;
 // it as the flag itself.
 bool stack_key_initialized;
 
-TimeStamp   sLastTracerEvent; // is raced on
-TimeStamp   sStartTime;
+mozilla::TimeStamp   sLastTracerEvent; // is raced on
+mozilla::TimeStamp   sStartTime;
 int         sFrameNumber = 0;
 int         sLastFrameNumber = 0;
 int         sInitCount = 0; // Each init must have a matched shutdown.
@@ -97,6 +97,20 @@ void Sampler::Shutdown() {
   // we need to point to null to ignore such a call after shutdown.
   sRegisteredThreadsMutex = nullptr;
   sRegisteredThreads = nullptr;
+}
+
+ThreadInfo::ThreadInfo(const char* aName, int aThreadId,
+                       bool aIsMainThread, PseudoStack* aPseudoStack,
+                       void* aStackTop)
+  : mName(strdup(aName))
+  , mThreadId(aThreadId)
+  , mIsMainThread(aIsMainThread)
+  , mPseudoStack(aPseudoStack)
+  , mPlatformData(Sampler::AllocPlatformData(aThreadId))
+  , mProfile(nullptr)
+  , mStackTop(aStackTop)
+{
+  mThread = NS_GetCurrentThread();
 }
 
 ThreadInfo::~ThreadInfo() {
@@ -435,6 +449,45 @@ bool is_main_thread_name(const char* aName) {
   return strcmp(aName, gGeckoThreadName) == 0;
 }
 
+#ifdef HAVE_VA_COPY
+#define VARARGS_ASSIGN(foo, bar)        VA_COPY(foo,bar)
+#elif defined(HAVE_VA_LIST_AS_ARRAY)
+#define VARARGS_ASSIGN(foo, bar)     foo[0] = bar[0]
+#else
+#define VARARGS_ASSIGN(foo, bar)     (foo) = (bar)
+#endif
+
+static void
+profiler_log(const char *fmt, va_list args)
+{
+  if (profiler_is_active()) {
+    // nsAutoCString AppendPrintf would be nicer but
+    // this is mozilla external code
+    char buf[2048];
+    va_list argsCpy;
+    VARARGS_ASSIGN(argsCpy, args);
+    int required = vsnprintf(buf, sizeof(buf), fmt, argsCpy);
+    va_end(argsCpy);
+
+    if (required < 0) {
+      return; // silently drop for now
+    } else if (required < 2048) {
+      profiler_tracing("log", buf, TRACING_EVENT);
+    } else {
+      char* heapBuf = new char[required+1];
+      va_list argsCpy;
+      VARARGS_ASSIGN(argsCpy, args);
+      vsnprintf(heapBuf, required+1, fmt, argsCpy);
+      va_end(argsCpy);
+      // EVENT_BACKTRACE could be used to get a source
+      // for all log events. This could be a runtime
+      // flag later.
+      profiler_tracing("log", heapBuf, TRACING_EVENT);
+      delete[] heapBuf;
+    }
+  }
+}
+
 ////////////////////////////////////////////////////////////////////////
 // BEGIN externally visible functions
 
@@ -473,6 +526,8 @@ void mozilla_sampler_init(void* stackTop)
 
   // platform specific initialization
   OS::Startup();
+
+  set_stderr_callback(profiler_log);
 
   // We can't open pref so we use an environment variable
   // to know if we should trigger the profiler on startup
@@ -520,6 +575,8 @@ void mozilla_sampler_shutdown()
   }
 
   profiler_stop();
+
+  set_stderr_callback(nullptr);
 
   Sampler::Shutdown();
 
@@ -611,6 +668,8 @@ const char** mozilla_sampler_get_features()
     "privacy",
     // Add main thread I/O to the profile
     "mainthreadio",
+    // Add RSS collection
+    "memory",
 #if defined(XP_WIN)
     // Add power collection
     "power",
@@ -785,28 +844,11 @@ bool mozilla_sampler_is_active()
   return sIsProfiling;
 }
 
-static double sResponsivenessTimes[100];
-static unsigned int sResponsivenessLoc = 0;
-void mozilla_sampler_responsiveness(const TimeStamp& aTime)
+void mozilla_sampler_responsiveness(const mozilla::TimeStamp& aTime)
 {
-  if (!sLastTracerEvent.IsNull()) {
-    if (sResponsivenessLoc == 100) {
-      for(size_t i = 0; i < 100-1; i++) {
-        sResponsivenessTimes[i] = sResponsivenessTimes[i+1];
-      }
-      sResponsivenessLoc--;
-    }
-    TimeDuration delta = aTime - sLastTracerEvent;
-    sResponsivenessTimes[sResponsivenessLoc++] = delta.ToMilliseconds();
-  }
   sCurrentEventGeneration++;
 
   sLastTracerEvent = aTime;
-}
-
-const double* mozilla_sampler_get_responsiveness()
-{
-  return sResponsivenessTimes;
 }
 
 void mozilla_sampler_frame_number(int frameNumber)
@@ -879,18 +921,18 @@ void mozilla_sampler_sleep_end() {
     stack->setSleeping(0);
 }
 
-double mozilla_sampler_time(const TimeStamp& aTime)
+double mozilla_sampler_time(const mozilla::TimeStamp& aTime)
 {
   if (!mozilla_sampler_is_active()) {
     return 0.0;
   }
-  TimeDuration delta = aTime - sStartTime;
+  mozilla::TimeDuration delta = aTime - sStartTime;
   return delta.ToMilliseconds();
 }
 
 double mozilla_sampler_time()
 {
-  return mozilla_sampler_time(TimeStamp::Now());
+  return mozilla_sampler_time(mozilla::TimeStamp::Now());
 }
 
 ProfilerBacktrace* mozilla_sampler_get_backtrace()
@@ -927,6 +969,13 @@ void mozilla_sampler_tracing(const char* aCategory, const char* aInfo,
   mozilla_sampler_add_marker(aInfo, new ProfilerMarkerTracing(aCategory, aMetaData));
 }
 
+void mozilla_sampler_tracing(const char* aCategory, const char* aInfo,
+                             ProfilerBacktrace* aCause,
+                             TracingMetadata aMetaData)
+{
+  mozilla_sampler_add_marker(aInfo, new ProfilerMarkerTracing(aCategory, aMetaData, aCause));
+}
+
 void mozilla_sampler_add_marker(const char *aMarker, ProfilerMarkerPayload *aPayload)
 {
   // Note that aPayload may be allocated by the caller, so we need to make sure
@@ -951,7 +1000,7 @@ void mozilla_sampler_add_marker(const char *aMarker, ProfilerMarkerPayload *aPay
   if (!stack) {
     return;
   }
-  TimeDuration delta = TimeStamp::Now() - sStartTime;
+  mozilla::TimeDuration delta = mozilla::TimeStamp::Now() - sStartTime;
   stack->addMarker(aMarker, payload.forget(), static_cast<float>(delta.ToMilliseconds()));
 }
 

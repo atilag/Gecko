@@ -25,19 +25,19 @@ public:
   uint32_t Length() const
   {
     return mIsContentElement ? mContentElement->MatchedNodes().Length()
-                             : mChildrenElement->mInsertedChildren.Length();
+                             : mChildrenElement->InsertedChildrenLength();
   }
 
   nsIContent* operator[](int32_t aIndex) const
   {
     return mIsContentElement ? mContentElement->MatchedNodes()[aIndex]
-                             : mChildrenElement->mInsertedChildren[aIndex];
+                             : mChildrenElement->InsertedChild(aIndex);
   }
 
   bool IsEmpty() const
   {
     return mIsContentElement ? mContentElement->MatchedNodes().IsEmpty()
-                             : mChildrenElement->mInsertedChildren.IsEmpty();
+                             : !mChildrenElement->HasInsertedChildren();
   }
 protected:
   bool mIsContentElement;
@@ -190,8 +190,8 @@ ExplicitChildIterator::Get()
   MOZ_ASSERT(!mIsFirst);
 
   if (mIndexInInserted) {
-    XBLChildrenElement* point = static_cast<XBLChildrenElement*>(mChild);
-    return point->mInsertedChildren[mIndexInInserted - 1];
+    MatchedNodes assignedChildren = GetMatchedNodesForPoint(mChild);
+    return assignedChildren[mIndexInInserted - 1];
   } else if (mShadowIterator)  {
     return mShadowIterator->Get();
   }

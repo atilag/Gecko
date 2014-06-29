@@ -4,6 +4,7 @@
 #include "mozilla/dom/DesktopNotification.h"
 #include "mozilla/dom/DesktopNotificationBinding.h"
 #include "mozilla/dom/AppNotificationServiceOptionsBinding.h"
+#include "mozilla/dom/ToJSValue.h"
 #include "nsContentPermissionHelper.h"
 #include "nsXULAppAPI.h"
 #include "mozilla/dom/PBrowserChild.h"
@@ -28,6 +29,10 @@ class DesktopNotificationRequest : public nsIContentPermissionRequest,
                                    public PCOMContentPermissionRequestChild
 
 {
+  ~DesktopNotificationRequest()
+  {
+  }
+
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSICONTENTPERMISSIONREQUEST
@@ -43,10 +48,6 @@ public:
       prompt->Prompt(this);
     }
     return NS_OK;
-  }
-
-  ~DesktopNotificationRequest()
-  {
   }
 
   virtual bool Recv__delete__(const bool& aAllow,
@@ -101,7 +102,7 @@ DesktopNotification::PostDesktopNotification()
       ops.mTextClickable = true;
       ops.mManifestURL = manifestUrl;
 
-      if (!ops.ToObject(cx, &val)) {
+      if (!ToJSValue(cx, ops, &val)) {
         return NS_ERROR_FAILURE;
       }
 

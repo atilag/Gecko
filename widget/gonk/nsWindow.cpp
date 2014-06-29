@@ -26,6 +26,7 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "Framebuffer.h"
 #include "gfxContext.h"
+#include "gfxImageSurface.h"
 #include "gfxPlatform.h"
 #include "gfxUtils.h"
 #include "GLContextProvider.h"
@@ -160,8 +161,6 @@ nsWindow::nsWindow()
         // This has to happen after other init has finished.
         gfxPlatform::GetPlatform();
         sUsingOMTC = ShouldUseOffMainThreadCompositing();
-
-        property_get("ro.display.colorfill", propValue, "0");
 
         //Update sUsingHwc whenever layers.composer2d.enabled changes
         Preferences::AddBoolVarCache(&sUsingHwc, "layers.composer2d.enabled");
@@ -595,18 +594,6 @@ nsWindow::GetLayerManager(PLayerTransactionChild* aShadowManager,
     mUseLayersAcceleration = false;
 
     return mLayerManager;
-}
-
-gfxASurface *
-nsWindow::GetThebesSurface()
-{
-    /* This is really a dummy surface; this is only used when doing reflow, because
-     * we need a RenderingContext to measure text against.
-     */
-
-    // XXX this really wants to return already_AddRefed, but this only really gets used
-    // on direct assignment to a gfxASurface
-    return new gfxImageSurface(gfxIntSize(5,5), gfxImageFormat::RGB24);
 }
 
 void

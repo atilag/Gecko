@@ -155,17 +155,19 @@ class RefCounted
 };
 
 #ifdef MOZ_REFCOUNTED_LEAK_CHECKING
-#define MOZ_DECLARE_REFCOUNTED_TYPENAME(T) \
-  const char* typeName() const { return #T; } \
-  size_t typeSize() const { return sizeof(*this); }
-
 #define MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(T) \
   virtual const char* typeName() const { return #T; } \
   virtual size_t typeSize() const { return sizeof(*this); }
 #else
-#define MOZ_DECLARE_REFCOUNTED_TYPENAME(T)
 #define MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(T)
 #endif
+
+// Note that this macro is expanded unconditionally because it declares only
+// two small inline functions which will hopefully get eliminated by the linker
+// in non-leak-checking builds.
+#define MOZ_DECLARE_REFCOUNTED_TYPENAME(T) \
+  const char* typeName() const { return #T; } \
+  size_t typeSize() const { return sizeof(*this); }
 
 }
 
@@ -222,8 +224,8 @@ class RefPtr
   public:
     RefPtr() : ptr(0) { }
     RefPtr(const RefPtr& o) : ptr(ref(o.ptr)) {}
-    RefPtr(const TemporaryRef<T>& o) : ptr(o.drop()) {}
-    RefPtr(T* t) : ptr(ref(t)) {}
+    MOZ_IMPLICIT RefPtr(const TemporaryRef<T>& o) : ptr(o.drop()) {}
+    MOZ_IMPLICIT RefPtr(T* t) : ptr(ref(t)) {}
 
     template<typename U>
     RefPtr(const RefPtr<U>& o) : ptr(ref(o.get())) {}
@@ -297,7 +299,7 @@ class TemporaryRef
     typedef typename RefPtr<T>::DontRef DontRef;
 
   public:
-    TemporaryRef(T* t) : ptr(RefPtr<T>::ref(t)) {}
+    MOZ_IMPLICIT TemporaryRef(T* t) : ptr(RefPtr<T>::ref(t)) {}
     TemporaryRef(const TemporaryRef& o) : ptr(o.drop()) {}
 
     template<typename U>
@@ -348,7 +350,7 @@ class OutParamRef
     operator T**() { return &tmp; }
 
   private:
-    OutParamRef(RefPtr<T>& p) : refPtr(p), tmp(p.get()) {}
+    explicit OutParamRef(RefPtr<T>& p) : refPtr(p), tmp(p.get()) {}
 
     RefPtr<T>& refPtr;
     T* tmp;

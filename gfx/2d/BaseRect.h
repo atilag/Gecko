@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <ostream>
 
 #include "mozilla/Assertions.h"
 #include "mozilla/FloatingPoint.h"
@@ -92,7 +93,8 @@ struct BaseRect {
   // Always returns false if aRect is empty or 'this' is empty.
   bool Intersects(const Sub& aRect) const
   {
-    return x < aRect.XMost() && aRect.x < XMost() &&
+    return !IsEmpty() && !aRect.IsEmpty() &&
+           x < aRect.XMost() && aRect.x < XMost() &&
            y < aRect.YMost() && aRect.y < YMost();
   }
   // Returns the rectangle containing the intersection of the points
@@ -480,6 +482,11 @@ struct BaseRect {
     rect.x = std::min(rect.XMost(), aRect.XMost()) - rect.width;
     rect.y = std::min(rect.YMost(), aRect.YMost()) - rect.height;
     return rect;
+  }
+
+  friend std::ostream& operator<<(std::ostream& stream, const Sub& aRect) {
+    return stream << '(' << aRect.x << ',' << aRect.y << ','
+                  << aRect.width << ',' << aRect.height << ')';
   }
 
 private:

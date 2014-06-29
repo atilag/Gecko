@@ -33,7 +33,7 @@ nsSVGElement::LengthInfo SVGEllipseElement::sLengthInfo[4] =
 //----------------------------------------------------------------------
 // Implementation
 
-SVGEllipseElement::SVGEllipseElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+SVGEllipseElement::SVGEllipseElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
   : SVGEllipseElementBase(aNodeInfo)
 {
 }
@@ -125,7 +125,7 @@ SVGEllipseElement::BuildPath()
 
   RefPtr<PathBuilder> pathBuilder = CreatePathBuilder();
 
-  ArcToBezier(pathBuilder.get(), Point(x, y), Size(rx, ry), 0, Float(2*M_PI), false);
+  EllipseToBezier(pathBuilder.get(), Point(x, y), Size(rx, ry));
 
   return pathBuilder->Finish();
 }

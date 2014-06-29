@@ -157,7 +157,9 @@ nsICOEncoder::AddImageFrame(const uint8_t* aData,
     }
     mImageBufferCurr = mImageBufferStart;
 
-    // The icon buffer does not include the BFH at all.
+    // Icon files that wrap a BMP file must not include the BITMAPFILEHEADER
+    // section at the beginning of the encoded BMP data, so we must skip over
+    // BFH_LENGTH bytes when adding the BMP content to the icon file.
     mICODirEntry.mBytesInRes = BMPImageBufferSize - BFH_LENGTH + andMaskSize;
 
     // Encode the icon headers
@@ -305,10 +307,10 @@ nsICOEncoder::ParseOptions(const nsAString& aOptions, uint32_t* bpp,
 
     // Parse the bpp portion of the string format=<png|bmp>;bpp=<bpp_value>
     if (nameValuePair[0].Equals("bpp", nsCaseInsensitiveCStringComparator())) {
-      if (nameValuePair[1].Equals("24")) {
+      if (nameValuePair[1].EqualsLiteral("24")) {
         *bpp = 24;
       }
-      else if (nameValuePair[1].Equals("32")) {
+      else if (nameValuePair[1].EqualsLiteral("32")) {
         *bpp = 32;
       }
       else {

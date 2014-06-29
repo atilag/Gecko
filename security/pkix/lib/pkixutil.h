@@ -1,6 +1,13 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set ts=8 sts=2 et sw=2 tw=80: */
-/* Copyright 2013 Mozilla Foundation
+/* This code is made available to you under your choice of the following sets
+ * of licensing terms:
+ */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ */
+/* Copyright 2013 Mozilla Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +27,7 @@
 
 #include "pkix/enumclass.h"
 #include "pkix/pkixtypes.h"
+#include "pkixder.h"
 #include "prerror.h"
 #include "seccomon.h"
 #include "secerr.h"
@@ -88,22 +96,37 @@ public:
   MOZILLA_PKIX_ENUM_CLASS IncludeCN { No = 0, Yes = 1 };
 
   // nssCert and childCert must be valid for the lifetime of BackCert
-  BackCert(CERTCertificate* nssCert, BackCert* childCert, IncludeCN includeCN)
-    : encodedBasicConstraints(nullptr)
+  BackCert(BackCert* childCert, IncludeCN includeCN)
+    : encodedAuthorityInfoAccess(nullptr)
+    , encodedBasicConstraints(nullptr)
     , encodedCertificatePolicies(nullptr)
     , encodedExtendedKeyUsage(nullptr)
     , encodedKeyUsage(nullptr)
     , encodedNameConstraints(nullptr)
     , encodedInhibitAnyPolicy(nullptr)
     , childCert(childCert)
-    , nssCert(nssCert)
     , constrainedNames(nullptr)
     , includeCN(includeCN)
   {
   }
 
-  Result Init();
+  Result Init(const SECItem& certDER);
 
+  const SECItem& GetDER() const { return nssCert->derCert; }
+  const SECItem& GetIssuer() const { return nssCert->derIssuer; }
+  const SECItem& GetSerialNumber() const { return nssCert->serialNumber; }
+  const SECItem& GetSubject() const { return nssCert->derSubject; }
+  const SECItem& GetSubjectPublicKeyInfo() const
+  {
+    return nssCert->derPublicKey;
+  }
+
+  Result VerifyOwnSignatureWithKey(TrustDomain& trustDomain,
+                                   const SECItem& subjectPublicKeyInfo) const;
+
+  der::Version version;
+
+  const SECItem* encodedAuthorityInfoAccess;
   const SECItem* encodedBasicConstraints;
   const SECItem* encodedCertificatePolicies;
   const SECItem* encodedExtendedKeyUsage;
@@ -118,7 +141,7 @@ public:
   // requires it, and that is only because the implementation of
   // VerifyEncodedOCSPResponse does a CERT_DupCertificate. TODO: get rid
   // of that CERT_DupCertificate so that we can make all these things const.
-  /*const*/ CERTCertificate* GetNSSCert() const { return nssCert; }
+  /*const*/ CERTCertificate* GetNSSCert() const { return nssCert.get(); }
 
   // Returns the names that should be considered when evaluating name
   // constraints. The list is constructed lazily and cached. The result is a
@@ -126,14 +149,10 @@ public:
   // references to it.
   Result GetConstrainedNames(/*out*/ const CERTGeneralName** result);
 
-  // This is the only place where we should be dealing with non-const
-  // CERTCertificates.
-  Result PrependNSSCertToList(CERTCertList* results);
-
   PLArenaPool* GetArena();
 
 private:
-  CERTCertificate* nssCert;
+  ScopedCERTCertificate nssCert;
 
   ScopedPLArenaPool arena;
   CERTGeneralName* constrainedNames;

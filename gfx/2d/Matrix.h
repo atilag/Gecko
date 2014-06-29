@@ -73,6 +73,13 @@ public:
     return *this;
   }
 
+  Matrix &PostTranslate(Float aX, Float aY)
+  {
+    _31 += aX;
+    _32 += aY;
+    return *this;
+  }
+
   Matrix &Rotate(Float aAngle)
   {
     return *this = Matrix::Rotation(aAngle) * *this;
@@ -501,6 +508,10 @@ public:
          + _11 * _22 * _33 * _44;
   }
 
+  bool Invert();
+
+  // Set all the members of the matrix to NaN
+  void SetNAN();
 };
 
 class Matrix5x4

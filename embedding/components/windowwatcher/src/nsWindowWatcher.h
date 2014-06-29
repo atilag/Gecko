@@ -15,6 +15,7 @@
 #include "nsIWindowCreator.h" // for stupid compilers
 #include "nsIWindowWatcher.h"
 #include "nsIPromptFactory.h"
+#include "nsITabParent.h"
 #include "nsPIWindowWatcher.h"
 #include "nsTArray.h"
 #include "js/TypeDecls.h"
@@ -22,6 +23,7 @@
 class  nsIURI;
 class  nsIDocShellTreeItem;
 class  nsIDocShellTreeOwner;
+class nsPIDOMWindow;
 class  nsIWebBrowserChrome;
 class  nsString;
 class  nsWatcherWindowEnumerator;
@@ -49,6 +51,12 @@ public:
   NS_DECL_NSPIWINDOWWATCHER
   NS_DECL_NSIPROMPTFACTORY
 
+  static int32_t    GetWindowOpenLocation(nsIDOMWindow *aParent,
+                                          uint32_t aChromeFlags,
+                                          bool aCalledFromJS,
+                                          bool aPositionSpecified,
+                                          bool aSizeSpecified);
+
 protected:
   friend class nsPromptService;
   bool AddEnumerator(nsWatcherWindowEnumerator* inEnumerator);
@@ -64,7 +72,7 @@ protected:
   
   // Unlike GetWindowByName this will look for a caller on the JS
   // stack, and then fall back on aCurrentWindow if it can't find one.
-  already_AddRefed<nsIDOMWindow>
+  nsPIDOMWindow*
     SafeGetWindowByName(const nsAString& aName, nsIDOMWindow* aCurrentWindow);
 
   // Just like OpenWindowJS, but knows whether it got called via OpenWindowJS
@@ -76,6 +84,7 @@ protected:
                               bool aCalledFromJS,
                               bool aDialog,
                               bool aNavigate,
+                              nsITabParent *aOpeningTab,
                               nsIArray *argv,
                               nsIDOMWindow **_retval);
 
@@ -89,7 +98,8 @@ protected:
                                          bool aFeaturesSpecified,
                                          bool aDialog,
                                          bool aChromeURL,
-                                         bool aHasChromeParent);
+                                         bool aHasChromeParent,
+                                         bool aOpenedFromRemoteTab);
   static int32_t    WinHasOption(const char *aOptions, const char *aName,
                                  int32_t aDefault, bool *aPresenceFlag);
   /* Compute the right SizeSpec based on aFeatures */
@@ -100,6 +110,7 @@ protected:
                                             nsIDOMWindow **aOpenedWindow);
   static void       SizeOpenedDocShellItem(nsIDocShellTreeItem *aDocShellItem,
                                            nsIDOMWindow *aParent,
+                                           bool aIsCallerChrome,
                                            const SizeSpec & aSizeSpec);
   static void       GetWindowTreeItem(nsIDOMWindow *inWindow,
                                       nsIDocShellTreeItem **outTreeItem);

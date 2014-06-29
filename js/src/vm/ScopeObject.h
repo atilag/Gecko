@@ -71,7 +71,7 @@ class StaticScopeIter
                      obj->is<JSFunction>());
     }
 
-    StaticScopeIter(JSObject *obj)
+    explicit StaticScopeIter(JSObject *obj)
       : obj((ExclusiveContext *) nullptr, obj), onNamedLambda(false)
     {
         JS_STATIC_ASSERT(allowGC == NoGC);
@@ -92,6 +92,7 @@ class StaticScopeIter
     StaticBlockObject &block() const;
     StaticWithObject &staticWith() const;
     JSScript *funScript() const;
+    JSFunction &fun() const;
 };
 
 /*****************************************************************************/
@@ -116,7 +117,7 @@ class ScopeCoordinate
     static_assert(SCOPECOORD_SLOT_BITS <= 32, "We have enough bits below");
 
   public:
-    inline ScopeCoordinate(jsbytecode *pc)
+    explicit inline ScopeCoordinate(jsbytecode *pc)
       : hops_(GET_SCOPECOORD_HOPS(pc)), slot_(GET_SCOPECOORD_SLOT(pc + SCOPECOORD_HOPS_LEN))
     {
         JS_ASSERT(JOF_OPTYPE(*pc) == JOF_SCOPECOORD);
@@ -238,20 +239,18 @@ class CallObject : public ScopeObject
     /* These functions are internal and are exposed only for JITs. */
 
     /*
-     * Construct a bare-bones call object given a shape, a non-singleton type,
-     * and slots pointer.  The call object must be further initialized to be
-     * usable.
+     * Construct a bare-bones call object given a shape and a non-singleton
+     * type.  The call object must be further initialized to be usable.
      */
     static CallObject *
-    create(JSContext *cx, HandleShape shape, HandleTypeObject type, HeapSlot *slots);
+    create(JSContext *cx, HandleShape shape, HandleTypeObject type);
 
     /*
-     * Construct a bare-bones call object given a shape and slots pointer, and
-     * make it have singleton type.  The call object must be initialized to be
-     * usable.
+     * Construct a bare-bones call object given a shape and make it have
+     * singleton type.  The call object must be initialized to be usable.
      */
     static CallObject *
-    createSingleton(JSContext *cx, HandleShape shape, HeapSlot *slots);
+    createSingleton(JSContext *cx, HandleShape shape);
 
     static CallObject *
     createTemplateObject(JSContext *cx, HandleScript script, gc::InitialHeap heap);
@@ -693,7 +692,7 @@ class ScopeIterKey
     bool hasScopeObject_;
 
   public:
-    ScopeIterKey(const ScopeIter &si)
+    explicit ScopeIterKey(const ScopeIter &si)
       : frame_(si.frame()), cur_(si.cur_), staticScope_(si.staticScope_), type_(si.type_),
         hasScopeObject_(si.hasScopeObject_) {}
 
@@ -734,7 +733,7 @@ class ScopeIterVal
     static void staticAsserts();
 
   public:
-    ScopeIterVal(const ScopeIter &si)
+    explicit ScopeIterVal(const ScopeIter &si)
       : frame_(si.frame()), cur_(si.cur_), staticScope_(si.staticScope_), type_(si.type_),
         hasScopeObject_(si.hasScopeObject_) {}
 
@@ -845,7 +844,7 @@ class DebugScopes
                                                             ScopeObject *key);
 
   public:
-    DebugScopes(JSContext *c);
+    explicit DebugScopes(JSContext *c);
     ~DebugScopes();
 
   private:

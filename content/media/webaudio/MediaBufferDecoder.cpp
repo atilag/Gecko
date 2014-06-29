@@ -7,6 +7,7 @@
 #include "MediaBufferDecoder.h"
 #include "BufferDecoder.h"
 #include "mozilla/dom/AudioContextBinding.h"
+#include "mozilla/dom/ScriptSettings.h"
 #include <speex/speex_resampler.h>
 #include "nsXPCOMCIDInternal.h"
 #include "nsComponentManagerUtils.h"
@@ -15,10 +16,10 @@
 #include "DecoderTraits.h"
 #include "AudioContext.h"
 #include "AudioBuffer.h"
+#include "nsAutoPtr.h"
 #include "nsIScriptObjectPrincipal.h"
 #include "nsIScriptError.h"
 #include "nsMimeTypes.h"
-#include "nsCxPusher.h"
 #include "WebAudioUtils.h"
 
 namespace mozilla {
@@ -30,7 +31,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(WebAudioDecodeJob)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mOutput)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mSuccessCallback)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mFailureCallback)
-  tmp->mArrayBuffer = nullptr;
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(WebAudioDecodeJob)
@@ -42,9 +42,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(WebAudioDecodeJob)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(WebAudioDecodeJob)
-  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mArrayBuffer)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
-
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(WebAudioDecodeJob, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(WebAudioDecodeJob, Release)
 
@@ -123,12 +121,11 @@ private:
       mDecodeJob.OnFailure(aErrorCode);
     } else {
       // Take extra care to cleanup on the main thread
-      NS_DispatchToMainThread(NS_NewRunnableMethod(this, &MediaDecodeTask::Cleanup),
-                              NS_DISPATCH_NORMAL);
+      NS_DispatchToMainThread(NS_NewRunnableMethod(this, &MediaDecodeTask::Cleanup));
 
       nsCOMPtr<nsIRunnable> event =
         new ReportResultTask(mDecodeJob, &WebAudioDecodeJob::OnFailure, aErrorCode);
-      NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
+      NS_DispatchToMainThread(event);
     }
   }
 
@@ -143,6 +140,7 @@ private:
     // Destruct MediaDecoderReader first.
     mDecoderReader = nullptr;
     mBufferDecoder = nullptr;
+    JS_free(nullptr, mBuffer);
   }
 
 private:
@@ -154,7 +152,7 @@ private:
   nsCOMPtr<nsIThreadPool> mThreadPool;
   nsCOMPtr<nsIPrincipal> mPrincipal;
   nsRefPtr<BufferDecoder> mBufferDecoder;
-  nsAutoPtr<MediaDecoderReader> mDecoderReader;
+  nsRefPtr<MediaDecoderReader> mDecoderReader;
 };
 
 NS_IMETHODIMP
@@ -255,12 +253,25 @@ MediaDecodeTask::Decode()
     return;
   }
 
-  while (mDecoderReader->DecodeAudioData()) {
-    // consume all of the buffer
-    continue;
+  MediaQueue<AudioData> audioQueue;
+  nsRefPtr<AudioDecodeRendezvous> barrier(new AudioDecodeRendezvous());
+  mDecoderReader->SetCallback(barrier);
+  while (1) {
+    mDecoderReader->RequestAudioData();
+    nsAutoPtr<AudioData> audio;
+    if (NS_FAILED(barrier->Await(audio))) {
+      ReportFailureOnMainThread(WebAudioDecodeJob::InvalidContent);
+      return;
+    }
+    if (!audio) {
+      // End of stream.
+      break;
+    }
+    audioQueue.Push(audio.forget());
   }
+  mDecoderReader->Shutdown();
+  mDecoderReader->BreakCycles();
 
-  MediaQueue<AudioData>& audioQueue = mDecoderReader->AudioQueue();
   uint32_t frameCount = audioQueue.FrameCount();
   uint32_t channelCount = mediaInfo.mAudio.mChannels;
   uint32_t sampleRate = mediaInfo.mAudio.mRate;
@@ -402,20 +413,22 @@ WebAudioDecodeJob::AllocateBuffer()
   MOZ_ASSERT(!mOutput);
   MOZ_ASSERT(NS_IsMainThread());
 
-  // First, get a JSContext
-  AutoPushJSContext cx(mContext->GetJSContext());
-  if (!cx) {
+  AutoJSAPI jsapi;
+  if (NS_WARN_IF(!jsapi.Init(mContext->GetOwner()))) {
     return false;
   }
+  JSContext* cx = jsapi.cx();
 
   // Now create the AudioBuffer
-  mOutput = new AudioBuffer(mContext, mWriteIndex, mContext->SampleRate());
-  if (!mOutput->InitializeBuffers(mChannelBuffers.Length(), cx)) {
+  ErrorResult rv;
+  mOutput = AudioBuffer::Create(mContext, mChannelBuffers.Length(),
+                                mWriteIndex, mContext->SampleRate(), cx, rv);
+  if (rv.Failed()) {
     return false;
   }
 
   for (uint32_t i = 0; i < mChannelBuffers.Length(); ++i) {
-    mOutput->SetRawChannelContents(cx, i, mChannelBuffers[i]);
+    mOutput->SetRawChannelContents(i, mChannelBuffers[i]);
   }
 
   return true;
@@ -434,7 +447,8 @@ MediaBufferDecoder::AsyncDecodeMedia(const char* aContentType, uint8_t* aBuffer,
       new ReportResultTask(aDecodeJob,
                            &WebAudioDecodeJob::OnFailure,
                            WebAudioDecodeJob::UnknownContent);
-    NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
+    JS_free(nullptr, aBuffer);
+    NS_DispatchToMainThread(event);
     return;
   }
 
@@ -443,7 +457,8 @@ MediaBufferDecoder::AsyncDecodeMedia(const char* aContentType, uint8_t* aBuffer,
       new ReportResultTask(aDecodeJob,
                            &WebAudioDecodeJob::OnFailure,
                            WebAudioDecodeJob::UnknownError);
-    NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
+    JS_free(nullptr, aBuffer);
+    NS_DispatchToMainThread(event);
     return;
   }
 
@@ -456,7 +471,7 @@ MediaBufferDecoder::AsyncDecodeMedia(const char* aContentType, uint8_t* aBuffer,
       new ReportResultTask(aDecodeJob,
                            &WebAudioDecodeJob::OnFailure,
                            WebAudioDecodeJob::UnknownError);
-    NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
+    NS_DispatchToMainThread(event);
   } else {
     mThreadPool->Dispatch(task, nsIThreadPool::DISPATCH_NORMAL);
   }
@@ -466,17 +481,28 @@ bool
 MediaBufferDecoder::EnsureThreadPoolInitialized()
 {
   if (!mThreadPool) {
-    mThreadPool = SharedThreadPool::Get(NS_LITERAL_CSTRING("MediaBufferDecoder"));
+    mThreadPool = do_CreateInstance(NS_THREADPOOL_CONTRACTID);
     if (!mThreadPool) {
       return false;
     }
+    mThreadPool->SetName(NS_LITERAL_CSTRING("MediaBufferDecoder"));
   }
   return true;
 }
 
+void
+MediaBufferDecoder::Shutdown() {
+  if (mThreadPool) {
+    // Setting threadLimit to 0 causes threads to exit when all events have
+    // been run, like nsIThreadPool::Shutdown(), but doesn't run a nested event
+    // loop nor wait until this has happened.
+    mThreadPool->SetThreadLimit(0);
+    mThreadPool = nullptr;
+  }
+}
+
 WebAudioDecodeJob::WebAudioDecodeJob(const nsACString& aContentType,
                                      AudioContext* aContext,
-                                     const ArrayBuffer& aBuffer,
                                      DecodeSuccessCallback* aSuccessCallback,
                                      DecodeErrorCallback* aFailureCallback)
   : mContentType(aContentType)
@@ -489,18 +515,12 @@ WebAudioDecodeJob::WebAudioDecodeJob(const nsACString& aContentType,
   MOZ_ASSERT(aSuccessCallback);
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_COUNT_CTOR(WebAudioDecodeJob);
-
-  mArrayBuffer = aBuffer.Obj();
-
-  mozilla::HoldJSObjects(this);
 }
 
 WebAudioDecodeJob::~WebAudioDecodeJob()
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_COUNT_DTOR(WebAudioDecodeJob);
-  mArrayBuffer = nullptr;
-  mozilla::DropJSObjects(this);
 }
 
 void

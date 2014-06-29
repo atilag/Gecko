@@ -14,8 +14,6 @@
 #include "mozilla/RefPtr.h"
 #include "mozilla/gfx/Types.h"
 
-class gfxImageSurface;
-
 namespace mozilla {
 
 namespace gfx {
@@ -26,8 +24,6 @@ namespace gl {
 
 void ReadPixelsIntoDataSurface(GLContext* aGL,
                                gfx::DataSourceSurface* aSurface);
-void ReadPixelsIntoImageSurface(GLContext* aGL, gfxImageSurface* aSurface);
-void ReadScreenIntoImageSurface(GLContext* aGL, gfxImageSurface* aSurface);
 
 TemporaryRef<gfx::DataSourceSurface>
 ReadBackSurface(GLContext* gl, GLuint aTexture, bool aYInvert, gfx::SurfaceFormat aFormat);

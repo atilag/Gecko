@@ -36,8 +36,6 @@ public:
   nsresult Init(nsIDOMWindow *aWindow);
   nsresult Shutdown();
 
-  static bool CheckPermission(nsPIDOMWindow*);
-
   static already_AddRefed<PowerManager> CreateInstance(nsPIDOMWindow*);
 
   // WebIDL
@@ -55,12 +53,16 @@ public:
                         ErrorResult& aRv);
   bool ScreenEnabled();
   void SetScreenEnabled(bool aEnabled);
+  bool KeyLightEnabled();
+  void SetKeyLightEnabled(bool aEnabled);
   double ScreenBrightness();
   void SetScreenBrightness(double aBrightness, ErrorResult& aRv);
   bool CpuSleepAllowed();
   void SetCpuSleepAllowed(bool aAllowed);
 
 private:
+  ~PowerManager() {}
+
   nsCOMPtr<nsIDOMWindow> mWindow;
   nsTArray<nsCOMPtr<nsIDOMMozWakeLockListener> > mListeners;
 };

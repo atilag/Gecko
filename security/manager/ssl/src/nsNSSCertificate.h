@@ -12,7 +12,6 @@
 #include "nsIX509CertDB.h"
 #include "nsIX509CertList.h"
 #include "nsIASN1Object.h"
-#include "nsISMimeCert.h"
 #include "nsIIdentityInfo.h"
 #include "nsCOMPtr.h"
 #include "nsNSSShutDown.h"
@@ -28,7 +27,6 @@ class nsIASN1Sequence;
 
 class nsNSSCertificate : public nsIX509Cert3,
                          public nsIIdentityInfo,
-                         public nsISMimeCert,
                          public nsISerializable,
                          public nsIClassInfo,
                          public nsNSSShutDownObject
@@ -39,9 +37,10 @@ public:
   NS_DECL_NSIX509CERT2
   NS_DECL_NSIX509CERT3
   NS_DECL_NSIIDENTITYINFO
-  NS_DECL_NSISMIMECERT
   NS_DECL_NSISERIALIZABLE
   NS_DECL_NSICLASSINFO
+
+  friend class nsNSSCertificateFakeTransport;
 
   nsNSSCertificate(CERTCertificate* cert, SECOidTag* evOidPolicy = nullptr);
   nsNSSCertificate();
@@ -65,13 +64,23 @@ private:
   void destructorSafeDestroyNSSReference();
   bool InitFromDER(char* certDER, int derLen);  // return false on failure
 
+  nsresult GetCertificateHash(nsAString& aFingerprint, SECOidTag aHashAlg);
+
   enum {
-    ev_status_unknown = -1, ev_status_invalid = 0, ev_status_valid = 1
+    ev_status_invalid = 0, ev_status_valid = 1, ev_status_unknown = 2
   } mCachedEVStatus;
   SECOidTag mCachedEVOidTag;
   nsresult hasValidEVOidTag(SECOidTag& resultOidTag, bool& validEV);
   nsresult getValidEVOidTag(SECOidTag& resultOidTag, bool& validEV);
 };
+
+namespace mozilla {
+template<>
+struct HasDangerousPublicDestructor<nsNSSCertificate>
+{
+  static const bool value = true;
+};
+}
 
 class nsNSSCertList: public nsIX509CertList,
                      public nsNSSShutDownObject

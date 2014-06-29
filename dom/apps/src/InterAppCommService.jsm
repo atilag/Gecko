@@ -52,7 +52,7 @@ const kMessages =["Webapps:Connect",
 this.InterAppCommService = {
   init: function() {
     Services.obs.addObserver(this, "xpcom-shutdown", false);
-    Services.obs.addObserver(this, "inter-app-comm-select-app-result", false);
+    Services.obs.addObserver(this, "webapps-clear-data", false);
 
     kMessages.forEach(function(aMsg) {
       ppmm.addMessageListener(aMsg, this);
@@ -342,12 +342,17 @@ this.InterAppCommService = {
     let pubApp = appsService.getAppByManifestURL(aPubAppManifestURL);
     let subApp = appsService.getAppByManifestURL(aSubAppManifestURL);
 
+    let isPubAppCertified =
+      (pubApp.appStatus == Ci.nsIPrincipal.APP_STATUS_CERTIFIED);
+
+    let isSubAppCertified =
+      (subApp.appStatus == Ci.nsIPrincipal.APP_STATUS_CERTIFIED);
+
     // TODO Bug 907068 In the initiative step, we only expose this API to
     // certified apps to meet the time line. Eventually, we need to make
     // it available for the non-certified apps as well. For now, only the
     // certified apps can match the rules.
-    if (pubApp.appStatus != Ci.nsIPrincipal.APP_STATUS_CERTIFIED ||
-        subApp.appStatus != Ci.nsIPrincipal.APP_STATUS_CERTIFIED) {
+    if (!isPubAppCertified || !isSubAppCertified) {
       if (DEBUG) {
         debug("Only certified apps are allowed to do connections.");
       }
@@ -373,14 +378,14 @@ this.InterAppCommService = {
       return false;
     }
 
-    // Check installOrigins.
-    if (!this._matchInstallOrigins(aPubRules, subApp.installOrigin) ||
-        !this._matchInstallOrigins(aSubRules, pubApp.installOrigin)) {
+    // Check installOrigins. Note that we only check the install origin for the
+    // non-certified app, because the certified app doesn't have install origin.
+    if ((!isSubAppCertified &&
+         !this._matchInstallOrigins(aPubRules, subApp.installOrigin)) ||
+        (!isPubAppCertified &&
+         !this._matchInstallOrigins(aSubRules, pubApp.installOrigin))) {
       return false;
     }
-
-    // Check developers.
-    // TODO Do we really want to check this? This one seems naive.
 
     if (DEBUG) debug("All rules are matched.");
     return true;
@@ -461,6 +466,67 @@ this.InterAppCommService = {
                                oid: aOuterWindowID, requestID: aRequestID });
   },
 
+  /**
+   * Fetch the subscribers that are currently allowed to connect.
+   *
+   * @param aKeyword           The connection's keyword.
+   * @param aPubAppManifestURL The manifest URL of the publisher.
+   *
+   * @param return an array of manifest URLs of the subscribers.
+   */
+  _getAllowedSubAppManifestURLs: function(aKeyword, aPubAppManifestURL) {
+    let allowedPubAppManifestURLs = this._allowedConnections[aKeyword];
+    if (!allowedPubAppManifestURLs) {
+      return [];
+    }
+
+    let allowedSubAppManifestURLs =
+      allowedPubAppManifestURLs[aPubAppManifestURL];
+    if (!allowedSubAppManifestURLs) {
+      return [];
+    }
+
+    return allowedSubAppManifestURLs;
+  },
+
+  /**
+   * Add the newly selected apps into the allowed connections and return the
+   * aggregated allowed connections.
+   *
+   * @param aKeyword           The connection's keyword.
+   * @param aPubAppManifestURL The manifest URL of the publisher.
+   * @param aSelectedApps      An array of the subscribers' information.
+   *
+   * @param return an array of manifest URLs of the subscribers.
+   */
+  _addSelectedApps: function(aKeyword, aPubAppManifestURL, aSelectedApps) {
+    let allowedPubAppManifestURLs = this._allowedConnections[aKeyword];
+
+    // Add a new entry for |aKeyword|.
+    if (!allowedPubAppManifestURLs) {
+      allowedPubAppManifestURLs = this._allowedConnections[aKeyword] = {};
+    }
+
+    let allowedSubAppManifestURLs =
+      allowedPubAppManifestURLs[aPubAppManifestURL];
+
+    // Add a new entry for |aPubAppManifestURL|.
+    if (!allowedSubAppManifestURLs) {
+      allowedSubAppManifestURLs =
+        allowedPubAppManifestURLs[aPubAppManifestURL] = [];
+    }
+
+    // Add the selected apps into the existing set of allowed connections.
+    aSelectedApps.forEach(function(aSelectedApp) {
+      let allowedSubAppManifestURL = aSelectedApp.manifestURL;
+      if (allowedSubAppManifestURLs.indexOf(allowedSubAppManifestURL) == -1) {
+        allowedSubAppManifestURLs.push(allowedSubAppManifestURL);
+      }
+    });
+
+    return allowedSubAppManifestURLs;
+  },
+
   _connect: function(aMessage, aTarget) {
     let keyword = aMessage.keyword;
     let pubRules = aMessage.rules;
@@ -478,15 +544,11 @@ this.InterAppCommService = {
       return;
     }
 
-    // Fetch the apps that used to be allowed to connect before, so that
-    // users don't need to select/allow them again. That is, we only pop up
-    // the prompt UI for the *new* connections.
-    let allowedSubAppManifestURLs = [];
-    let allowedPubAppManifestURLs = this._allowedConnections[keyword];
-    if (allowedPubAppManifestURLs &&
-        allowedPubAppManifestURLs[pubAppManifestURL]) {
-      allowedSubAppManifestURLs = allowedPubAppManifestURLs[pubAppManifestURL];
-    }
+    // Fetch the apps that are currently allowed to connect, so that users
+    // don't need to select/allow them again, which means we only pop up the
+    // prompt UI for the *new* connections.
+    let allowedSubAppManifestURLs =
+      this._getAllowedSubAppManifestURLs(keyword, pubAppManifestURL);
 
     // Check rules to see if a subscribed app is allowed to connect.
     let appsToSelect = [];
@@ -539,30 +601,36 @@ this.InterAppCommService = {
       target: aTarget
     };
 
-    // TODO Bug 897169 Temporarily disable the notification for popping up
-    // the prompt until the UX/UI for the prompt is confirmed.
-    //
-    // TODO Bug 908191 We need to change the way of interaction between API and
-    // run-time prompt from observer notification to xpcom-interface caller.
-    //
-    /*
-    if (DEBUG) debug("appsToSelect: " + appsToSelect);
-    Services.obs.notifyObservers(null, "inter-app-comm-select-app",
-      JSON.stringify({ callerID: callerID,
-                       manifestURL: pubAppManifestURL,
-                       keyword: keyword,
-                       appsToSelect: appsToSelect }));
-    */
+    let glue = Cc["@mozilla.org/dom/apps/inter-app-comm-ui-glue;1"]
+                 .createInstance(Ci.nsIInterAppCommUIGlue);
+    if (glue) {
+      glue.selectApps(callerID, pubAppManifestURL, keyword, appsToSelect).then(
+        function(aData) {
+          this._handleSelectedApps(aData);
+        }.bind(this),
+        function(aError) {
+          if (DEBUG) {
+            debug("Error occurred in the UI glue component. " + aError)
+          }
 
-    // TODO Bug 897169 Simulate the return of the app-selected result by
-    // the prompt, which always allows the connection. This dummy codes
-    // will be removed when the UX/UI for the prompt is ready.
-    if (DEBUG) debug("appsToSelect: " + appsToSelect);
-    Services.obs.notifyObservers(null, 'inter-app-comm-select-app-result',
-      JSON.stringify({ callerID: callerID,
-                       manifestURL: pubAppManifestURL,
-                       keyword: keyword,
-                       selectedApps: appsToSelect }));
+          // Resolve the caller as if there were no selected apps.
+          this._handleSelectedApps({ callerID: callerID,
+                                     keyword: keyword,
+                                     manifestURL: pubAppManifestURL,
+                                     selectedApps: [] });
+        }.bind(this)
+      );
+    } else {
+      if (DEBUG) {
+        debug("Error! The UI glue component is not implemented.")
+      }
+
+      // Resolve the caller as if there were no selected apps.
+      this._handleSelectedApps({ callerID: callerID,
+                                 keyword: keyword,
+                                 manifestURL: pubAppManifestURL,
+                                 selectedApps: [] });
+    }
   },
 
   _getConnections: function(aMessage, aTarget) {
@@ -775,7 +843,7 @@ this.InterAppCommService = {
                                        message: message });
   },
 
-  _handleSelectcedApps: function(aData) {
+  _handleSelectedApps: function(aData) {
     let callerID = aData.callerID;
     let caller = this._promptUICallers[callerID];
     if (!caller) {
@@ -789,38 +857,31 @@ this.InterAppCommService = {
     let requestID = caller.requestID;
     let target = caller.target;
 
-    let manifestURL = aData.manifestURL;
+    let pubAppManifestURL = aData.manifestURL;
     let keyword = aData.keyword;
     let selectedApps = aData.selectedApps;
 
+    let allowedSubAppManifestURLs;
     if (selectedApps.length == 0) {
-      if (DEBUG) debug("No apps are selected to connect.")
-      this._dispatchMessagePorts(keyword, manifestURL, [],
-                                 target, outerWindowID, requestID);
-      return;
-    }
+      // Only do the connections for the existing allowed subscribers because
+      // no new apps are selected to connect.
+      if (DEBUG) debug("No new apps are selected to connect.")
 
-    // Find the entry of allowed connections to add the selected apps.
-    let allowedPubAppManifestURLs = this._allowedConnections[keyword];
-    if (!allowedPubAppManifestURLs) {
-      allowedPubAppManifestURLs = this._allowedConnections[keyword] = {};
-    }
-    let allowedSubAppManifestURLs = allowedPubAppManifestURLs[manifestURL];
-    if (!allowedSubAppManifestURLs) {
-      allowedSubAppManifestURLs = allowedPubAppManifestURLs[manifestURL] = [];
-    }
+      allowedSubAppManifestURLs =
+        this._getAllowedSubAppManifestURLs(keyword, pubAppManifestURL);
+    } else {
+      // Do connections for for the existing allowed subscribers and the newly
+      // selected subscribers.
+      if (DEBUG) debug("Some new apps are selected to connect.")
 
-    // Add the selected app into the existing set of allowed connections.
-    selectedApps.forEach(function(aSelectedApp) {
-      let allowedSubAppManifestURL = aSelectedApp.manifestURL;
-      if (allowedSubAppManifestURLs.indexOf(allowedSubAppManifestURL) == -1) {
-        allowedSubAppManifestURLs.push(allowedSubAppManifestURL);
-      }
-    });
+      allowedSubAppManifestURLs =
+        this._addSelectedApps(keyword, pubAppManifestURL, selectedApps);
+    }
 
     // Finally, dispatch the message ports for the allowed connections,
     // including the old connections and the newly selected connection.
-    this._dispatchMessagePorts(keyword, manifestURL, allowedSubAppManifestURLs,
+    this._dispatchMessagePorts(keyword, pubAppManifestURL,
+                               allowedSubAppManifestURLs,
                                target, outerWindowID, requestID);
   },
 
@@ -872,15 +933,79 @@ this.InterAppCommService = {
     switch (aTopic) {
       case "xpcom-shutdown":
         Services.obs.removeObserver(this, "xpcom-shutdown");
-        Services.obs.removeObserver(this, "inter-app-comm-select-app-result");
+        Services.obs.removeObserver(this, "webapps-clear-data");
         kMessages.forEach(function(aMsg) {
           ppmm.removeMessageListener(aMsg, this);
         }, this);
         ppmm = null;
         break;
-      case "inter-app-comm-select-app-result":
-        if (DEBUG) debug("inter-app-comm-select-app-result: " + aData);
-        this._handleSelectcedApps(JSON.parse(aData));
+      case "webapps-clear-data":
+        let params =
+          aSubject.QueryInterface(Ci.mozIApplicationClearPrivateDataParams);
+        if (!params) {
+          if (DEBUG) {
+            debug("Error updating registered/allowed connections for an " +
+                  "uninstalled app.");
+          }
+          return;
+        }
+
+        // Only update registered/allowed connections for apps.
+        if (params.browserOnly) {
+          if (DEBUG) {
+            debug("Only update registered/allowed connections for apps.");
+          }
+          return;
+        }
+
+        let manifestURL = appsService.getManifestURLByLocalId(params.appId);
+        if (!manifestURL) {
+          if (DEBUG) {
+            debug("Error updating registered/allowed connections for an " +
+                  "uninstalled app.");
+          }
+          return;
+        }
+
+        // Update registered connections.
+        for (let keyword in this._registeredConnections) {
+          let subAppManifestURLs = this._registeredConnections[keyword];
+          if (subAppManifestURLs[manifestURL]) {
+            delete subAppManifestURLs[manifestURL];
+            if (DEBUG) {
+              debug("Remove " + manifestURL + " from registered connections " +
+                    "due to app uninstallation.");
+            }
+          }
+        }
+
+        // Update allowed connections.
+        for (let keyword in this._allowedConnections) {
+          let allowedPubAppManifestURLs = this._allowedConnections[keyword];
+          if (allowedPubAppManifestURLs[manifestURL]) {
+            delete allowedPubAppManifestURLs[manifestURL];
+            if (DEBUG) {
+              debug("Remove " + manifestURL + " (as a pub app) from allowed " +
+                    "connections due to app uninstallation.");
+            }
+          }
+
+          for (let pubAppManifestURL in allowedPubAppManifestURLs) {
+            let subAppManifestURLs = allowedPubAppManifestURLs[pubAppManifestURL];
+            for (let i = subAppManifestURLs.length - 1; i >= 0; i--) {
+              if (subAppManifestURLs[i] === manifestURL) {
+                subAppManifestURLs.splice(i, 1);
+                if (DEBUG) {
+                  debug("Remove " + manifestURL + " (as a sub app to pub " +
+                        pubAppManifestURL + ") from allowed connections " +
+                        "due to app uninstallation.");
+                }
+              }
+            }
+          }
+        }
+        debug("Finish updating registered/allowed connections for an " +
+              "uninstalled app.");
         break;
     }
   }

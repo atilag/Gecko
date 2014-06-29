@@ -8,16 +8,18 @@
 
 #include "WebGLObjectModel.h"
 
-#include "nsWrapperCache.h"
-
-#include "mozilla/LinkedList.h"
-#include "mozilla/CheckedInt.h"
 #include <map>
+
+#include "mozilla/CheckedInt.h"
+#include "mozilla/LinkedList.h"
+#include "nsWrapperCache.h"
+#include "WebGLShader.h"
+#include "WebGLUniformInfo.h"
 
 namespace mozilla {
 
 class WebGLShader;
-class WebGLUniformInfo;
+struct WebGLUniformInfo;
 
 typedef nsDataHashtable<nsCStringHashKey, nsCString> CStringMap;
 typedef nsDataHashtable<nsCStringHashKey, WebGLUniformInfo> CStringToUniformInfoMap;
@@ -30,10 +32,6 @@ class WebGLProgram MOZ_FINAL
 {
 public:
     WebGLProgram(WebGLContext *context);
-
-    ~WebGLProgram() {
-        DeleteOnce();
-    }
 
     void Delete();
 
@@ -113,6 +111,9 @@ public:
     std::map<GLint, nsCString> mActiveAttribMap;
 
 protected:
+    ~WebGLProgram() {
+        DeleteOnce();
+    }
 
     GLuint mGLName;
     bool mLinkStatus;

@@ -37,7 +37,6 @@
 #include "jsstr.h"
 #include "jstypes.h"
 #include "jswatchpoint.h"
-#include "jsworkers.h"
 
 #include "gc/Marking.h"
 #ifdef JS_ION
@@ -45,8 +44,9 @@
 #endif
 #include "js/CharacterEncoding.h"
 #include "js/OldDebugAPI.h"
+#include "vm/Debugger.h"
+#include "vm/HelperThreads.h"
 #include "vm/Shape.h"
-#include "yarr/BumpPointerAllocator.h"
 
 #include "jsobjinlines.h"
 #include "jsscriptinlines.h"
@@ -232,10 +232,7 @@ js::DestroyContext(JSContext *cx, DestroyContextMode mode)
         MOZ_CRASH();
 #endif
 
-#if defined(JSGC_USE_EXACT_ROOTING) && defined(DEBUG)
-    for (int i = 0; i < THING_ROOT_LIMIT; ++i)
-        JS_ASSERT(cx->thingGCRooters[i] == nullptr);
-#endif
+    cx->checkNoGCRooters();
 
     if (mode != DCM_NEW_FAILED) {
         if (JSContextCallback cxCallback = rt->cxCallback) {
@@ -264,6 +261,14 @@ js::DestroyContext(JSContext *cx, DestroyContextMode mode)
         GC(rt, GC_NORMAL, JS::gcreason::DESTROY_CONTEXT);
     }
     js_delete_poison(cx);
+}
+
+void
+ContextFriendFields::checkNoGCRooters() {
+#if defined(JSGC_USE_EXACT_ROOTING) && defined(DEBUG)
+    for (int i = 0; i < THING_ROOT_LIMIT; ++i)
+        JS_ASSERT(thingGCRooters[i] == nullptr);
+#endif
 }
 
 bool
@@ -377,7 +382,7 @@ js_ReportOutOfMemory(ThreadSafeContext *cxArg)
     /* Report the oom. */
     if (JS::OutOfMemoryCallback oomCallback = cx->runtime()->oomCallback) {
         AutoSuppressGC suppressGC(cx);
-        oomCallback(cx);
+        oomCallback(cx, cx->runtime()->oomCallbackData);
     }
 
     if (JS_IsRunning(cx)) {
@@ -549,10 +554,14 @@ js::ReportUsageError(JSContext *cx, HandleObject callee, const char *msg)
     } else {
         JSString *str = usage.toString();
         JS::Anchor<JSString *> a_str(str);
-        const jschar *chars = JS_GetStringCharsZ(cx, str);
-        if (!chars)
+
+        if (!str->ensureFlat(cx))
             return;
-        JS_ReportError(cx, "%s. Usage: %hs", msg, chars);
+        AutoStableStringChars chars(cx);
+        if (!chars.initTwoByte(cx, str))
+            return;
+
+        JS_ReportError(cx, "%s. Usage: %hs", msg, chars.twoByteRange().start().get());
     }
 }
 
@@ -663,10 +672,12 @@ js_ExpandErrorArguments(ExclusiveContext *cx, JSErrorCallback callback,
     *messagep = nullptr;
 
     /* Most calls supply js_GetErrorMessage; if this is so, assume nullptr. */
-    if (!callback || callback == js_GetErrorMessage)
+    if (!callback || callback == js_GetErrorMessage) {
         efs = js_GetLocalizedErrorMessage(cx, userRef, nullptr, errorNumber);
-    else
+    } else {
+        AutoSuppressGC suppressGC(cx);
         efs = callback(userRef, nullptr, errorNumber);
+    }
     if (efs) {
         reportp->exnType = efs->exnType;
 
@@ -751,10 +762,10 @@ js_ExpandErrorArguments(ExclusiveContext *cx, JSErrorCallback callback,
                 JS_ASSERT(expandedArgs == argCount);
                 *out = 0;
                 js_free(buffer);
-                TwoByteChars ucmsg(reportp->ucmessage,
-                                   PointerRangeSize(static_cast<const jschar *>(reportp->ucmessage),
-                                                    static_cast<const jschar *>(out)));
-                *messagep = LossyTwoByteCharsToNewLatin1CharsZ(cx, ucmsg).c_str();
+                size_t msgLen = PointerRangeSize(static_cast<const jschar *>(reportp->ucmessage),
+                                                 static_cast<const jschar *>(out));
+                mozilla::Range<const jschar> ucmsg(reportp->ucmessage, msgLen);
+                *messagep = JS::LossyTwoByteCharsToNewLatin1CharsZ(cx, ucmsg).c_str();
                 if (!*messagep)
                     goto error;
             }
@@ -1033,14 +1044,46 @@ js::InvokeInterruptCallback(JSContext *cx)
     // if it re-enters the JS engine. The embedding must ensure that the
     // callback is disconnected before attempting such re-entry.
     JSInterruptCallback cb = cx->runtime()->interruptCallback;
-    if (!cb || cb(cx))
+    if (!cb)
         return true;
+
+    if (cb(cx)) {
+        // Debugger treats invoking the interrupt callback as a "step", so
+        // invoke the onStep handler.
+        if (cx->compartment()->debugMode()) {
+            ScriptFrameIter iter(cx);
+            if (iter.script()->stepModeEnabled()) {
+                RootedValue rval(cx);
+                switch (Debugger::onSingleStep(cx, &rval)) {
+                  case JSTRAP_ERROR:
+                    return false;
+                  case JSTRAP_CONTINUE:
+                    return true;
+                  case JSTRAP_RETURN:
+                    // See note in Debugger::propagateForcedReturn.
+                    Debugger::propagateForcedReturn(cx, iter.abstractFramePtr(), rval);
+                    return false;
+                  case JSTRAP_THROW:
+                    cx->setPendingException(rval);
+                    return false;
+                  default:;
+                }
+            }
+        }
+
+        return true;
+    }
 
     // No need to set aside any pending exception here: ComputeStackString
     // already does that.
-    Rooted<JSString*> stack(cx, ComputeStackString(cx));
-    const jschar *chars = stack ? stack->getCharsZ(cx) : nullptr;
-    if (!chars)
+    JSString *stack = ComputeStackString(cx);
+    JSFlatString *flat = stack ? stack->ensureFlat(cx) : nullptr;
+
+    const jschar *chars;
+    AutoStableStringChars stableChars(cx);
+    if (flat && stableChars.initTwoByte(cx, flat))
+        chars = stableChars.twoByteRange().start().get();
+    else
         chars = MOZ_UTF16("(stack not available)");
     JS_ReportErrorFlagsAndNumberUC(cx, JSREPORT_WARNING, js_GetErrorMessage, nullptr,
                                    JSMSG_TERMINATED, chars);
@@ -1096,6 +1139,7 @@ JSContext::JSContext(JSRuntime *rt)
     throwing(false),
     unwrappedException_(UndefinedValue()),
     options_(),
+    propagatingForcedReturn_(false),
     reportGranularity(JS_DEFAULT_JITREPORT_GRANULARITY),
     resolvingList(nullptr),
     generatingError(false),
@@ -1322,7 +1366,7 @@ JSContext::mark(JSTracer *trc)
 void *
 ThreadSafeContext::stackLimitAddressForJitCode(StackKind kind)
 {
-#ifdef JS_ARM_SIMULATOR
+#if defined(JS_ARM_SIMULATOR) || defined(JS_MIPS_SIMULATOR)
     return runtime_->mainThread.addressOfSimulatorStackLimit();
 #endif
     return stackLimitAddress(kind);

@@ -57,7 +57,6 @@ public:
     NS_DECL_NSISPECULATIVECONNECT
 
     nsHttpHandler();
-    virtual ~nsHttpHandler();
 
     nsresult Init();
     nsresult AddStandardRequestHeaders(nsHttpHeaderArray *);
@@ -77,7 +76,10 @@ public:
     uint8_t        RedirectionLimit()        { return mRedirectionLimit; }
     PRIntervalTime IdleTimeout()             { return mIdleTimeout; }
     PRIntervalTime SpdyTimeout()             { return mSpdyTimeout; }
-    PRIntervalTime ResponseTimeout()         { return mResponseTimeout; }
+    PRIntervalTime ResponseTimeout() {
+      return mResponseTimeoutEnabled ? mResponseTimeout : 0;
+    }
+    PRIntervalTime ResponseTimeoutEnabled()  { return mResponseTimeoutEnabled; }
     uint16_t       MaxRequestAttempts()      { return mMaxRequestAttempts; }
     const char    *DefaultSocketType()       { return mDefaultSocketType.get(); /* ok to return null */ }
     uint32_t       PhishyUserPassLength()    { return mPhishyUserPassLength; }
@@ -110,6 +112,7 @@ public:
     bool           CriticalRequestPrioritization() { return mCriticalRequestPrioritization; }
     double         BypassCacheLockThreshold() { return mBypassCacheLockThreshold; }
 
+    uint32_t       MaxConnectionsPerOrigin() { return mMaxPersistentConnectionsPerServer; }
     bool           UseRequestTokenBucket() { return mRequestTokenBucketEnabled; }
     uint16_t       RequestTokenBucketMinParallelism() { return mRequestTokenBucketMinParallelism; }
     uint32_t       RequestTokenBucketHz() { return mRequestTokenBucketHz; }
@@ -267,7 +270,7 @@ public:
     // Generates the host:port string for use in the Host: header as well as the
     // CONNECT line for proxies. This handles IPv6 literals correctly.
     static nsresult GenerateHostPort(const nsCString& host, int32_t port,
-                                     nsCString& hostLine);
+                                     nsACString& hostLine);
 
     bool GetPipelineAggressive()     { return mPipelineAggressive; }
     void GetMaxPipelineObjectSize(int64_t *outVal)
@@ -311,6 +314,7 @@ public:
     void ClearCacheSkippedUntil() { mCacheSkippedUntil = TimeStamp(); }
 
 private:
+    virtual ~nsHttpHandler();
 
     //
     // Useragent/prefs helper methods
@@ -361,6 +365,7 @@ private:
     PRIntervalTime mIdleTimeout;
     PRIntervalTime mSpdyTimeout;
     PRIntervalTime mResponseTimeout;
+    bool mResponseTimeoutEnabled;
 
     uint16_t mMaxRequestAttempts;
     uint16_t mMaxRequestDelay;
@@ -436,6 +441,7 @@ private:
 
     // for broadcasting safe hint;
     bool           mSafeHintEnabled;
+    bool           mParentalControlEnabled;
 
     // Whether telemetry is reported or not
     uint32_t           mTelemetryEnabled : 1;
@@ -543,6 +549,7 @@ class nsHttpsHandler : public nsIHttpProtocolHandler
                      , public nsSupportsWeakReference
                      , public nsISpeculativeConnect
 {
+    virtual ~nsHttpsHandler() { }
 public:
     // we basically just want to override GetScheme and GetDefaultPort...
     // all other methods should be forwarded to the nsHttpHandler instance.
@@ -554,7 +561,6 @@ public:
     NS_FORWARD_NSISPECULATIVECONNECT     (gHttpHandler->)
 
     nsHttpsHandler() { }
-    virtual ~nsHttpsHandler() { }
 
     nsresult Init();
 };

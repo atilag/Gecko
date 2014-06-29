@@ -45,9 +45,10 @@ class TabParent;
 
 class OverOutElementsWrapper MOZ_FINAL : public nsISupports
 {
+  ~OverOutElementsWrapper();
+
 public:
   OverOutElementsWrapper();
-  ~OverOutElementsWrapper();
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_CLASS(OverOutElementsWrapper)
@@ -72,9 +73,10 @@ class EventStateManager : public nsSupportsWeakReference,
   friend class mozilla::ScrollbarsForWheel;
   friend class mozilla::WheelTransaction;
 
+  virtual ~EventStateManager();
+
 public:
   EventStateManager();
-  virtual ~EventStateManager();
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_NSIOBSERVER
@@ -271,6 +273,15 @@ protected:
    */
   static int32_t GetAccessModifierMaskFor(nsISupports* aDocShell);
 
+  /*
+   * If aTargetFrame's widget has a cached cursor value, resets the cursor
+   * such that the next call to SetCursor on the widget will force an update
+   * of the native cursor. For use in getting puppet widget to update its
+   * cursor between mouse exit / enter transitions. This call basically wraps
+   * nsIWidget ClearCachedCursor.
+   */
+  void ClearCachedWidgetCursor(nsIFrame* aTargetFrame);
+
   void UpdateCursor(nsPresContext* aPresContext,
                     WidgetEvent* aEvent,
                     nsIFrame* aTargetFrame,
@@ -284,6 +295,10 @@ protected:
                                         uint32_t aMessage,
                                         nsIContent* aTargetContent,
                                         nsIContent* aRelatedContent);
+  /**
+   * Synthesize DOM pointerover and pointerout events
+   */
+  void GeneratePointerEnterExit(uint32_t aMessage, WidgetMouseEvent* aEvent);
   /**
    * Synthesize DOM and frame mouseover and mouseout events from this
    * MOUSE_MOVE or MOUSE_EXIT event.
@@ -783,7 +798,6 @@ protected:
                                  nsFrameLoader* aRemote,
                                  nsEventStatus *aStatus);
   bool HandleCrossProcessEvent(WidgetEvent* aEvent,
-                               nsIFrame* aTargetFrame,
                                nsEventStatus* aStatus);
 
   void ReleaseCurrentIMEContentObserver();
@@ -904,7 +918,9 @@ public:
 protected:
   bool mIsHandlingUserInput;
   bool mIsMouseDown;
-  bool mResetFMMouseDownState;
+  bool mResetFMMouseButtonHandlingState;
+
+  nsCOMPtr<nsIDocument> mMouseButtonEventHandlingDocument;
 
 private:
   // Hide so that this class can only be stack-allocated

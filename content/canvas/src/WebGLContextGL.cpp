@@ -42,6 +42,7 @@
 #include "nsCocoaFeatures.h"
 #endif
 
+#include "mozilla/DebugOnly.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/ImageData.h"
 #include "mozilla/dom/ToJSValue.h"
@@ -2126,7 +2127,8 @@ WebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
     if (!isReadTypeValid)
         return ErrorInvalidEnum("readPixels: Bad type", type);
 
-    int dataType = JS_GetArrayBufferViewType(pixels.Value().Obj());
+    const ArrayBufferView& pixbuf = pixels.Value();
+    int dataType = JS_GetArrayBufferViewType(pixbuf.Obj());
 
     // Check the pixels param type
     if (dataType != requiredDataType)
@@ -2144,11 +2146,15 @@ WebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
     if (!checked_neededByteLength.isValid())
         return ErrorInvalidOperation("readPixels: integer overflow computing the needed buffer size");
 
-    uint32_t dataByteLen = JS_GetTypedArrayByteLength(pixels.Value().Obj());
+    // Compute length and data.  Don't reenter after this point, lest the
+    // precomputed go out of sync with the instant length/data.
+    pixbuf.ComputeLengthAndData();
+
+    uint32_t dataByteLen = pixbuf.Length();
     if (checked_neededByteLength.value() > dataByteLen)
         return ErrorInvalidOperation("readPixels: buffer too small");
 
-    void* data = pixels.Value().Data();
+    void* data = pixbuf.Data();
     if (!data) {
         ErrorOutOfMemory("readPixels: buffer storage is null. Did we run out of memory?");
         return rv.Throw(NS_ERROR_OUT_OF_MEMORY);
@@ -2166,22 +2172,6 @@ WebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
         return ErrorInvalidOperation("readPixels: Invalid type floatness");
 
     // Check the format and type params to assure they are an acceptable pair (as per spec)
-    switch (format) {
-        case LOCAL_GL_RGBA: {
-            switch (type) {
-                case LOCAL_GL_UNSIGNED_BYTE:
-                    break;
-                case LOCAL_GL_FLOAT:
-                    break;
-                default:
-                    return ErrorInvalidOperation("readPixels: Invalid format/type pair");
-            }
-            break;
-        }
-        default:
-            return ErrorInvalidOperation("readPixels: Invalid format/type pair");
-    }
-
     MakeContextCurrent();
 
     if (mBoundFramebuffer) {
@@ -2197,6 +2187,41 @@ WebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
     } else {
       ClearBackbufferIfNeeded();
     }
+
+    bool isFormatAndTypeValid = false;
+
+    // OpenGL ES 2.0 $4.3.1 - IMPLEMENTATION_COLOR_READ_{TYPE/FORMAT} is a valid
+    // combination for glReadPixels().
+    if (gl->IsSupported(gl::GLFeature::ES2_compatibility)) {
+        GLenum implType = 0;
+        GLenum implFormat = 0;
+
+        gl->fGetIntegerv(LOCAL_GL_IMPLEMENTATION_COLOR_READ_TYPE,
+                         reinterpret_cast<GLint*>(&implType));
+        gl->fGetIntegerv(LOCAL_GL_IMPLEMENTATION_COLOR_READ_FORMAT,
+                         reinterpret_cast<GLint*>(&implFormat));
+
+        if (type == implType && format == implFormat) {
+            isFormatAndTypeValid = true;
+        }
+    }
+
+    switch (format) {
+        case LOCAL_GL_RGBA: {
+            switch (type) {
+                case LOCAL_GL_UNSIGNED_BYTE:
+                case LOCAL_GL_FLOAT:
+                    isFormatAndTypeValid = true;
+                    break;
+            }
+            break;
+        }
+    }
+
+    if (!isFormatAndTypeValid) {
+        return ErrorInvalidOperation("readPixels: Invalid format/type pair");
+    }
+
     // Now that the errors are out of the way, on to actually reading
 
     // If we won't be reading any pixels anyways, just skip the actual reading
@@ -2524,7 +2549,17 @@ WebGLContext::SurfaceFromElementResultToImageSurface(nsLayoutUtils::SurfaceFromE
     }
 
     if (!mPixelStorePremultiplyAlpha && res.mIsPremultiplied) {
-      data = gfxUtils::UnpremultiplyDataSurface(data);
+        switch (data->GetFormat()) {
+        case SurfaceFormat::B8G8R8X8:
+            // No alpha, so de-facto premult'd.
+            break;
+        case SurfaceFormat::B8G8R8A8:
+            data = gfxUtils::CreateUnpremultipliedDataSurface(data);
+            break;
+        default:
+            MOZ_ASSERT(false, "Format unsupported.");
+            break;
+        }
     }
 
     // We disallow loading cross-domain images and videos that have not been validated
@@ -3261,6 +3296,8 @@ WebGLContext::CompressedTexImage2D(GLenum target, GLint level, GLenum internalfo
         return;
     }
 
+    view.ComputeLengthAndData();
+
     uint32_t byteLength = view.Length();
     if (!ValidateCompTexImageDataSize(target, internalformat, width, height, byteLength, func)) {
         return;
@@ -3303,6 +3340,8 @@ WebGLContext::CompressedTexSubImage2D(GLenum target, GLint level, GLint xoffset,
     WebGLTexture *tex = activeBoundTextureForTarget(target);
     MOZ_ASSERT(tex);
     WebGLTexture::ImageInfo& levelInfo = tex->ImageInfoAt(target, level);
+
+    view.ComputeLengthAndData();
 
     uint32_t byteLength = view.Length();
     if (!ValidateCompTexImageDataSize(target, format, width, height, byteLength, func))
@@ -3670,10 +3709,24 @@ WebGLContext::TexImage2D(GLenum target, GLint level,
     if (IsContextLost())
         return;
 
+    void* data;
+    uint32_t length;
+    int jsArrayType;
+    if (pixels.IsNull()) {
+        data = nullptr;
+        length = 0;
+        jsArrayType = -1;
+    } else {
+        const ArrayBufferView& view = pixels.Value();
+        view.ComputeLengthAndData();
+
+        data = view.Data();
+        length = view.Length();
+        jsArrayType = int(JS_GetArrayBufferViewType(view.Obj()));
+    }
+
     return TexImage2D_base(target, level, internalformat, width, height, 0, border, format, type,
-                           pixels.IsNull() ? 0 : pixels.Value().Data(),
-                           pixels.IsNull() ? 0 : pixels.Value().Length(),
-                           pixels.IsNull() ? -1 : (int)JS_GetArrayBufferViewType(pixels.Value().Obj()),
+                           data, length, jsArrayType,
                            WebGLTexelFormat::Auto, false);
 }
 
@@ -3690,7 +3743,11 @@ WebGLContext::TexImage2D(GLenum target, GLint level,
         return ErrorInvalidValue("texImage2D: null ImageData");
     }
 
-    Uint8ClampedArray arr(pixels->GetDataObject());
+    Uint8ClampedArray arr;
+    DebugOnly<bool> inited = arr.Init(pixels->GetDataObject());
+    MOZ_ASSERT(inited);
+    arr.ComputeLengthAndData();
+
     return TexImage2D_base(target, level, internalformat, pixels->Width(),
                            pixels->Height(), 4*pixels->Width(), 0,
                            format, type, arr.Data(), arr.Length(), -1,
@@ -3799,10 +3856,13 @@ WebGLContext::TexSubImage2D(GLenum target, GLint level,
     if (pixels.IsNull())
         return ErrorInvalidValue("texSubImage2D: pixels must not be null!");
 
+    const ArrayBufferView& view = pixels.Value();
+    view.ComputeLengthAndData();
+
     return TexSubImage2D_base(target, level, xoffset, yoffset,
                               width, height, 0, format, type,
-                              pixels.Value().Data(), pixels.Value().Length(),
-                              JS_GetArrayBufferViewType(pixels.Value().Obj()),
+                              view.Data(), view.Length(),
+                              JS_GetArrayBufferViewType(view.Obj()),
                               WebGLTexelFormat::Auto, false);
 }
 
@@ -3818,7 +3878,11 @@ WebGLContext::TexSubImage2D(GLenum target, GLint level,
     if (!pixels)
         return ErrorInvalidValue("texSubImage2D: pixels must not be null!");
 
-    Uint8ClampedArray arr(pixels->GetDataObject());
+    Uint8ClampedArray arr;
+    DebugOnly<bool> inited = arr.Init(pixels->GetDataObject());
+    MOZ_ASSERT(inited);
+    arr.ComputeLengthAndData();
+
     return TexSubImage2D_base(target, level, xoffset, yoffset,
                               pixels->Width(), pixels->Height(),
                               4*pixels->Width(), format, type,
@@ -3827,27 +3891,33 @@ WebGLContext::TexSubImage2D(GLenum target, GLint level,
                               WebGLTexelFormat::RGBA8, false);
 }
 
-bool
+void
 WebGLContext::LoseContext()
 {
     if (IsContextLost())
-        return false;
+        return ErrorInvalidOperation("loseContext: Context is already lost.");
 
-    ForceLoseContext();
-
-    return true;
+    ForceLoseContext(true);
 }
 
-bool
+void
 WebGLContext::RestoreContext()
 {
-    if (!IsContextLost() || !mAllowRestore) {
-        return false;
+    if (!IsContextLost())
+        return ErrorInvalidOperation("restoreContext: Context is not lost.");
+
+    if (!mLastLossWasSimulated) {
+        return ErrorInvalidOperation("restoreContext: Context loss was not simulated."
+                                     " Cannot simulate restore.");
     }
+    // If we're currently lost, and the last loss was simulated, then
+    // we're currently only simulated-lost, allowing us to call
+    // restoreContext().
+
+    if (!mAllowContextRestore)
+        return ErrorInvalidOperation("restoreContext: Context cannot be restored.");
 
     ForceRestoreContext();
-
-    return true;
 }
 
 bool

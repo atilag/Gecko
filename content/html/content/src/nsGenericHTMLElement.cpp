@@ -52,6 +52,7 @@
 #include "nsScriptLoader.h"
 #include "nsRuleData.h"
 #include "nsIPrincipal.h"
+#include "nsContainerFrame.h"
 
 #include "nsPresState.h"
 #include "nsILayoutHistoryState.h"
@@ -165,14 +166,14 @@ private:
 
 class nsGenericHTMLElementTearoff : public nsIDOMElementCSSInlineStyle
 {
+  virtual ~nsGenericHTMLElementTearoff()
+  {
+  }
+
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
 
   nsGenericHTMLElementTearoff(nsGenericHTMLElement *aElement)
     : mElement(aElement)
-  {
-  }
-
-  virtual ~nsGenericHTMLElementTearoff()
   {
   }
 
@@ -990,7 +991,7 @@ nsGenericHTMLElement::ParseAttribute(int32_t aNamespaceID,
     }
   
     if (aAttribute == nsGkAtoms::tabindex) {
-      return aResult.ParseIntWithBounds(aValue, -32768, 32767);
+      return aResult.ParseIntValue(aValue);
     }
 
     if (aAttribute == nsGkAtoms::name) {
@@ -1713,7 +1714,7 @@ nsGenericHTMLElement::GetURIAttr(nsIAtom* aAttr, nsIAtom* aBaseAttr, nsIURI** aU
 nsGenericHTMLElement::IsScrollGrabAllowed(JSContext*, JSObject*)
 {
   // Only allow scroll grabbing in chrome and certified apps.
-  nsIPrincipal* prin = nsContentUtils::GetSubjectPrincipal();
+  nsIPrincipal* prin = nsContentUtils::SubjectPrincipal();
   return nsContentUtils::IsSystemPrincipal(prin) ||
     prin->GetAppStatus() == nsIPrincipal::APP_STATUS_CERTIFIED;
 }
@@ -1904,7 +1905,7 @@ nsGenericHTMLElement::TouchEventsEnabled(JSContext* /* unused */, JSObject* /* u
 
 //----------------------------------------------------------------------
 
-nsGenericHTMLFormElement::nsGenericHTMLFormElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+nsGenericHTMLFormElement::nsGenericHTMLFormElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo)
   , mForm(nullptr)
   , mFieldSet(nullptr)
@@ -2573,9 +2574,8 @@ bool
 nsGenericHTMLFormElement::IsLabelable() const
 {
   // TODO: keygen should be in that list, see bug 101019.
-  // TODO: NS_FORM_INPUT_HIDDEN should be removed, see bug 597650.
   uint32_t type = GetType();
-  return type & NS_FORM_INPUT_ELEMENT ||
+  return (type & NS_FORM_INPUT_ELEMENT && type != NS_FORM_INPUT_HIDDEN) ||
          type & NS_FORM_BUTTON_ELEMENT ||
          // type == NS_FORM_KEYGEN ||
          type == NS_FORM_OUTPUT ||
@@ -2926,7 +2926,7 @@ nsGenericHTMLElement::ChangeEditableState(int32_t aChange)
 //----------------------------------------------------------------------
 
 nsGenericHTMLFormElementWithState::nsGenericHTMLFormElementWithState(
-    already_AddRefed<nsINodeInfo>& aNodeInfo
+    already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo
   )
   : nsGenericHTMLFormElement(aNodeInfo)
 {
@@ -3035,38 +3035,36 @@ nsGenericHTMLFormElementWithState::RestoreFormControlState()
 }
 
 void
-nsGenericHTMLFormElementWithState::NodeInfoChanged(nsINodeInfo* aOldNodeInfo)
+nsGenericHTMLFormElementWithState::NodeInfoChanged(mozilla::dom::NodeInfo* aOldNodeInfo)
 {
   mStateKey.SetIsVoid(true);
 }
 
-JS::Value
+void
 nsGenericHTMLElement::GetItemValue(JSContext* aCx, JSObject* aScope,
+                                   JS::MutableHandle<JS::Value> aRetval,
                                    ErrorResult& aError)
 {
   JS::Rooted<JSObject*> scope(aCx, aScope);
   if (!HasAttr(kNameSpaceID_None, nsGkAtoms::itemprop)) {
-    return JS::NullValue();
+    aRetval.setNull();
+    return;
   }
 
   if (ItemScope()) {
     JS::Rooted<JS::Value> v(aCx);
     JSAutoCompartment ac(aCx, scope);
-    if (!mozilla::dom::WrapObject(aCx, this, &v)) {
+    if (!mozilla::dom::WrapObject(aCx, this, aRetval)) {
       aError.Throw(NS_ERROR_FAILURE);
-      return JS::UndefinedValue();
     }
-    return v;
+    return;
   }
 
   nsString string;
   GetItemValueText(string);
-  JS::Rooted<JS::Value> v(aCx);
-  if (!xpc::NonVoidStringToJsval(aCx, string, &v)) {
+  if (!xpc::NonVoidStringToJsval(aCx, string, aRetval)) {
     aError.Throw(NS_ERROR_FAILURE);
-    return JS::UndefinedValue();
   }
-  return v;
 }
 
 NS_IMETHODIMP
@@ -3136,81 +3134,6 @@ nsGenericHTMLElement::SetItemValueText(const nsAString& text)
 {
   mozilla::ErrorResult rv;
   SetTextContentInternal(text, rv);
-}
-
-static void
-nsDOMSettableTokenListPropertyDestructor(void *aObject, nsIAtom *aProperty,
-                                         void *aPropertyValue, void *aData)
-{
-  nsDOMSettableTokenList* list =
-    static_cast<nsDOMSettableTokenList*>(aPropertyValue);
-  NS_RELEASE(list);
-}
-
-static nsIAtom** sPropertiesToTraverseAndUnlink[] =
-  {
-    &nsGkAtoms::microdataProperties,
-    &nsGkAtoms::itemtype,
-    &nsGkAtoms::itemref,
-    &nsGkAtoms::itemprop,
-    &nsGkAtoms::sandbox,
-    &nsGkAtoms::sizes,
-    nullptr
-  };
-
-// static
-nsIAtom***
-nsGenericHTMLElement::PropertiesToTraverseAndUnlink()
-{
-  return sPropertiesToTraverseAndUnlink;
-}
-
-nsDOMSettableTokenList*
-nsGenericHTMLElement::GetTokenList(nsIAtom* aAtom)
-{
-#ifdef DEBUG
-    nsIAtom*** props =
-      nsGenericHTMLElement::PropertiesToTraverseAndUnlink();
-    bool found = false;
-    for (uint32_t i = 0; props[i]; ++i) {
-      if (*props[i] == aAtom) {
-        found = true;
-        break;
-      }
-    }
-    MOZ_ASSERT(found, "Trying to use an unknown tokenlist!");
-#endif
-
-  nsDOMSettableTokenList* list = nullptr;
-  if (HasProperties()) {
-    list = static_cast<nsDOMSettableTokenList*>(GetProperty(aAtom));
-  }
-  if (!list) {
-    list = new nsDOMSettableTokenList(this, aAtom);
-    NS_ADDREF(list);
-    SetProperty(aAtom, list, nsDOMSettableTokenListPropertyDestructor);
-  }
-  return list;
-}
-
-void
-nsGenericHTMLElement::GetTokenList(nsIAtom* aAtom, nsIVariant** aResult)
-{
-  nsISupports* itemType = GetTokenList(aAtom);
-  nsCOMPtr<nsIWritableVariant> out = new nsVariant();
-  out->SetAsInterface(NS_GET_IID(nsISupports), itemType);
-  out.forget(aResult);
-}
-
-nsresult
-nsGenericHTMLElement::SetTokenList(nsIAtom* aAtom, nsIVariant* aValue)
-{
-  nsDOMSettableTokenList* itemType = GetTokenList(aAtom);
-  nsAutoString string;
-  aValue->GetAsAString(string);
-  ErrorResult rv;
-  itemType->SetValue(string, rv);
-  return rv.ErrorCode();
 }
 
 static void

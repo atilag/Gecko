@@ -40,33 +40,6 @@ function getIntPref(prefName, def) {
   }
 }
 
-function exposeAll(obj) {
-  // Filter for Objects and Arrays.
-  if (typeof obj !== "object" || !obj)
-    return;
-
-  // Recursively expose our children.
-  Object.keys(obj).forEach(function(key) {
-    exposeAll(obj[key]);
-  });
-
-  // If we're not an Array, generate an __exposedProps__ object for ourselves.
-  if (obj instanceof Array)
-    return;
-  var exposed = {};
-  Object.keys(obj).forEach(function(key) {
-    exposed[key] = 'rw';
-  });
-  obj.__exposedProps__ = exposed;
-}
-
-function defineAndExpose(obj, name, value) {
-  obj[name] = value;
-  if (!('__exposedProps__' in obj))
-    obj.__exposedProps__ = {};
-  obj.__exposedProps__[name] = 'r';
-}
-
 function visibilityChangeHandler(e) {
   // The visibilitychange event's target is the document.
   let win = e.target.defaultView;
@@ -92,14 +65,11 @@ this.BrowserElementParentBuilder = {
   }
 }
 
-
-// The active input method iframe.
-let activeInputFrame = null;
-
 function BrowserElementParent(frameLoader, hasRemoteFrame, isPendingFrame) {
   debug("Creating new BrowserElementParent object for " + frameLoader);
   this._domRequestCounter = 0;
   this._pendingDOMRequests = {};
+  this._pendingSetInputMethodActive = [];
   this._hasRemoteFrame = hasRemoteFrame;
   this._nextPaintListeners = [];
 
@@ -139,12 +109,7 @@ function BrowserElementParent(frameLoader, hasRemoteFrame, isPendingFrame) {
 
   let defineDOMRequestMethod = function(domName, msgName) {
     XPCNativeWrapper.unwrap(self._frameElement)[domName] = function() {
-      if (!self._mm) {
-        return self._queueDOMRequest;
-      }
-      if (self._isAlive()) {
-        return self._sendDOMRequest(msgName);
-      }
+      return self._sendDOMRequest(msgName);
     };
   }
 
@@ -161,6 +126,7 @@ function BrowserElementParent(frameLoader, hasRemoteFrame, isPendingFrame) {
   defineNoReturnMethod('goForward', this._goForward);
   defineNoReturnMethod('reload', this._reload);
   defineNoReturnMethod('stop', this._stop);
+  defineMethod('download', this._download);
   defineDOMRequestMethod('purgeHistory', 'purge-history');
   defineMethod('getScreenshot', this._getScreenshot);
   defineMethod('addNextPaintListener', this._addNextPaintListener);
@@ -333,17 +299,15 @@ BrowserElementParent.prototype = {
 
       evt = this._createEvent('usernameandpasswordrequired', detail,
                               /* cancelable */ true);
-      defineAndExpose(evt.detail, 'authenticate', function(username, password) {
+      Cu.exportFunction(function(username, password) {
         if (callbackCalled)
           return;
         callbackCalled = true;
         callback(true, username, password);
-      });
+      }, evt.detail, { defineAs: 'authenticate' });
     }
 
-    defineAndExpose(evt.detail, 'cancel', function() {
-      cancelCallback();
-    });
+    Cu.exportFunction(cancelCallback, evt.detail, { defineAs: 'cancel' });
 
     this._frameElement.dispatchEvent(evt);
 
@@ -368,8 +332,6 @@ BrowserElementParent.prototype = {
 
   _recvHello: function() {
     debug("recvHello");
-
-    this._ready = true;
 
     // Inform our child if our owner element's document is invisible.  Note
     // that we must do so here, rather than in the BrowserElementParent
@@ -396,9 +358,9 @@ BrowserElementParent.prototype = {
 
     if (detail.contextmenu) {
       var self = this;
-      defineAndExpose(evt.detail, 'contextMenuItemSelected', function(id) {
+      Cu.exportFunction(function(id) {
         self._sendAsyncMsg('fire-ctx-callback', {menuitem: id});
-      });
+      }, evt.detail, { defineAs: 'contextMenuItemSelected' });
     }
 
     // The embedder may have default actions on context menu events, so
@@ -476,9 +438,7 @@ BrowserElementParent.prototype = {
       self._sendAsyncMsg('unblock-modal-prompt', data);
     }
 
-    defineAndExpose(evt.detail, 'unblock', function() {
-      sendUnblockMsg();
-    });
+    Cu.exportFunction(sendUnblockMsg, evt.detail, { defineAs: 'unblock' });
 
     this._frameElement.dispatchEvent(evt);
 
@@ -493,7 +453,7 @@ BrowserElementParent.prototype = {
     // This will have to change if we ever want to send a CustomEvent with null
     // detail.  For now, it's OK.
     if (detail !== undefined && detail !== null) {
-      exposeAll(detail);
+      detail = Cu.cloneInto(detail, this._window);
       return new this._window.CustomEvent('mozbrowser' + evtName,
                                           { bubbles: true,
                                             cancelable: cancelable,
@@ -503,32 +463,6 @@ BrowserElementParent.prototype = {
     return new this._window.Event('mozbrowser' + evtName,
                                   { bubbles: true,
                                     cancelable: cancelable });
-  },
-
-  /**
-   * If remote frame haven't been set up, we enqueue a function that get a
-   * DOMRequest until the remote frame is ready and return another DOMRequest
-   * to caller. When we get the real DOMRequest, we will help forward the
-   * success/error callback to the DOMRequest that caller got.
-   */
-  _queueDOMRequest: function(msgName, args) {
-    if (!this._pendingAPICalls) {
-      return;
-    }
-
-    let req = Services.DOMRequest.createRequest(this._window);
-    let self = this;
-    let getRealDOMRequest = function() {
-      let realReq = self._sendDOMRequest(msgName, args);
-      realReq.onsuccess = function(v) {
-        Services.DOMRequest.fireSuccess(req, v);
-      };
-      realReq.onerror = function(v) {
-        Services.DOMRequest.fireError(req, v);
-      };
-    };
-    this._pendingAPICalls.push(getRealDOMRequest);
-    return req;
   },
 
   /**
@@ -546,10 +480,22 @@ BrowserElementParent.prototype = {
   _sendDOMRequest: function(msgName, args) {
     let id = 'req_' + this._domRequestCounter++;
     let req = Services.DOMRequest.createRequest(this._window);
-    if (this._sendAsyncMsg(msgName, {id: id, args: args})) {
-      this._pendingDOMRequests[id] = req;
+    let self = this;
+    let send = function() {
+      if (!self._isAlive()) {
+        return;
+      }
+      if (self._sendAsyncMsg(msgName, {id: id, args: args})) {
+        self._pendingDOMRequests[id] = req;
+      } else {
+        Services.DOMRequest.fireErrorAsync(req, "fail");
+      }
+    };
+    if (this._mm) {
+      send();
     } else {
-      Services.DOMRequest.fireErrorAsync(req, "fail");
+      // Child haven't been loaded.
+      this._pendingAPICalls.push(send);
     }
     return req;
   },
@@ -645,6 +591,106 @@ BrowserElementParent.prototype = {
     this._sendAsyncMsg('stop');
   },
 
+  _download: function(_url, _options) {
+    let ioService =
+      Cc['@mozilla.org/network/io-service;1'].getService(Ci.nsIIOService);
+    let uri = ioService.newURI(_url, null, null);
+    let url = uri.QueryInterface(Ci.nsIURL);
+
+    // Ensure we have _options, we always use it to send the filename.
+    _options = _options || {};
+    if (!_options.filename) {
+      _options.filename = url.fileName;
+    }
+
+    debug('_options = ' + uneval(_options));
+
+    // Ensure we have a filename.
+    if (!_options.filename) {
+      throw Components.Exception("Invalid argument", Cr.NS_ERROR_INVALID_ARG);
+    }
+
+    let interfaceRequestor =
+      this._frameLoader.loadContext.QueryInterface(Ci.nsIInterfaceRequestor);
+    let req = Services.DOMRequest.createRequest(this._window);
+
+    function DownloadListener() {
+      debug('DownloadListener Constructor');
+    }
+    DownloadListener.prototype = {
+      extListener: null,
+      onStartRequest: function(aRequest, aContext) {
+        debug('DownloadListener - onStartRequest');
+        let extHelperAppSvc =
+          Cc['@mozilla.org/uriloader/external-helper-app-service;1'].
+          getService(Ci.nsIExternalHelperAppService);
+        let channel = aRequest.QueryInterface(Ci.nsIChannel);
+
+        this.extListener =
+          extHelperAppSvc.doContent(
+              channel.contentType,
+              aRequest,
+              interfaceRequestor,
+              true);
+        this.extListener.onStartRequest(aRequest, aContext);
+      },
+      onStopRequest: function(aRequest, aContext, aStatusCode) {
+        debug('DownloadListener - onStopRequest (aStatusCode = ' +
+               aStatusCode + ')');
+        if (aStatusCode == Cr.NS_OK) {
+          // Everything looks great.
+          debug('DownloadListener - Download Successful.');
+          Services.DOMRequest.fireSuccess(req, aStatusCode);
+        }
+        else {
+          // In case of failure, we'll simply return the failure status code.
+          debug('DownloadListener - Download Failed!');
+          Services.DOMRequest.fireError(req, aStatusCode);
+        }
+
+        if (this.extListener) {
+          this.extListener.onStopRequest(aRequest, aContext, aStatusCode);
+        }
+      },
+      onDataAvailable: function(aRequest, aContext, aInputStream,
+                                aOffset, aCount) {
+        this.extListener.onDataAvailable(aRequest, aContext, aInputStream,
+                                         aOffset, aCount);
+      },
+      QueryInterface: XPCOMUtils.generateQI([Ci.nsIStreamListener, 
+                                             Ci.nsIRequestObserver])
+    };
+
+    let channel = ioService.newChannelFromURI(url);
+
+    // XXX We would set private browsing information prior to calling this.
+    channel.notificationCallbacks = interfaceRequestor;
+
+    // Since we're downloading our own local copy we'll want to bypass the
+    // cache and local cache if the channel let's us specify this.
+    let flags = Ci.nsIChannel.LOAD_CALL_CONTENT_SNIFFERS |
+                Ci.nsIChannel.LOAD_BYPASS_CACHE;
+    if (channel instanceof Ci.nsICachingChannel) {
+      debug('This is a caching channel. Forcing bypass.');
+      flags |= Ci.nsICachingChannel.LOAD_BYPASS_LOCAL_CACHE_IF_BUSY;
+    }
+
+    channel.loadFlags |= flags;
+
+    if (channel instanceof Ci.nsIHttpChannel) {
+      debug('Setting HTTP referrer = ' + this._window.document.documentURIObject);
+      channel.referrer = this._window.document.documentURIObject;
+      if (channel instanceof Ci.nsIHttpChannelInternal) {
+        channel.forceAllowThirdPartyCookie = true;
+      }
+    }
+
+    // Set-up complete, let's get things started.
+    channel.asyncOpen(new DownloadListener(), null);
+
+    return req;
+  },
+
   _getScreenshot: function(_width, _height, _mimeType) {
     let width = parseInt(_width);
     let height = parseInt(_height);
@@ -653,13 +699,6 @@ BrowserElementParent.prototype = {
     if (isNaN(width) || isNaN(height) || width < 0 || height < 0) {
       throw Components.Exception("Invalid argument",
                                  Cr.NS_ERROR_INVALID_ARG);
-    }
-
-    if (!this._mm) {
-      // Child haven't been loaded.
-      return this._queueDOMRequest('get-screenshot',
-                                   {width: width, height: height,
-                                    mimeType: mimeType});
     }
 
     return this._sendDOMRequest('get-screenshot',
@@ -724,62 +763,8 @@ BrowserElementParent.prototype = {
                                  Cr.NS_ERROR_INVALID_ARG);
     }
 
-    let req = Services.DOMRequest.createRequest(this._window);
-
-    // Deactivate the old input method if needed.
-    if (activeInputFrame && isActive) {
-      if (Cu.isDeadWrapper(activeInputFrame)) {
-        // If the activeInputFrame is already a dead object,
-        // we should simply set it to null directly.
-        activeInputFrame = null;
-        this._sendSetInputMethodActiveDOMRequest(req, isActive);
-      } else {
-        let reqOld = XPCNativeWrapper.unwrap(activeInputFrame)
-                                     .setInputMethodActive(false);
-
-        // We wan't to continue regardless whether this req succeeded
-        reqOld.onsuccess = reqOld.onerror = function() {
-          let setActive = function() {
-            activeInputFrame = null;
-            this._sendSetInputMethodActiveDOMRequest(req, isActive);
-          }.bind(this);
-
-          if (this._ready) {
-            setActive();
-            return;
-          }
-
-          // Wait for the hello event from BrowserElementChild
-          let onReady = function(aMsg) {
-            if (this._isAlive() && (aMsg.data.msg_name === 'hello')) {
-              setActive();
-
-              this._mm.removeMessageListener('browser-element-api:call',
-                onReady);
-            }
-          }.bind(this);
-
-          this._mm.addMessageListener('browser-element-api:call', onReady);
-        }.bind(this);
-      }
-    } else {
-      this._sendSetInputMethodActiveDOMRequest(req, isActive);
-    }
-    return req;
-  },
-
-  _sendSetInputMethodActiveDOMRequest: function(req, isActive) {
-    let id = 'req_' + this._domRequestCounter++;
-    let data = {
-      id : id,
-      args: { isActive: isActive }
-    };
-    if (this._sendAsyncMsg('set-input-method-active', data)) {
-      activeInputFrame = this._frameElement;
-      this._pendingDOMRequests[id] = req;
-    } else {
-      Services.DOMRequest.fireErrorAsync(req, 'fail');
-    }
+    return this._sendDOMRequest('set-input-method-active',
+                                {isActive: isActive});
   },
 
   _fireKeyEvent: function(data) {

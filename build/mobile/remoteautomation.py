@@ -48,7 +48,7 @@ class RemoteAutomation(Automation):
         self._remoteLog = logfile
 
     # Set up what we need for the remote environment
-    def environment(self, env=None, xrePath=None, crashreporter=True, debugger=False, dmdPath=None):
+    def environment(self, env=None, xrePath=None, crashreporter=True, debugger=False, dmdPath=None, lsanPath=None):
         # Because we are running remote, we don't want to mimic the local env
         # so no copying of os.environ
         if env is None:
@@ -69,6 +69,9 @@ class RemoteAutomation(Automation):
             env['MOZ_CRASHREPORTER'] = '1'
         else:
             env['MOZ_CRASHREPORTER_DISABLE'] = '1'
+
+        # Crash on non-local network connections.
+        env['MOZ_DISABLE_NONLOCAL_CONNECTIONS'] = '1'
 
         return env
 

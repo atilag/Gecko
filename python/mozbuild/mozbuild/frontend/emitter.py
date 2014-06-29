@@ -15,7 +15,7 @@ from mach.mixin.logging import LoggingMixin
 
 import mozpack.path as mozpath
 import manifestparser
-
+import reftest
 import mozinfo
 
 from .data import (
@@ -249,6 +249,7 @@ class TreeMetadataEmitter(LoggingMixin):
             'DEFFILE',
             'SDK_LIBRARY',
             'WIN32_EXE_LDFLAGS',
+            'LD_VERSION_SCRIPT',
         ]
         for v in varlist:
             if v in sandbox and sandbox[v]:
@@ -275,6 +276,7 @@ class TreeMetadataEmitter(LoggingMixin):
                 '.mm': 'CMMSRCS',
                 '.cc': 'CPPSRCS',
                 '.cpp': 'CPPSRCS',
+                '.cxx': 'CPPSRCS',
                 '.S': 'SSRCS',
             },
             HOST_SOURCES={
@@ -282,12 +284,14 @@ class TreeMetadataEmitter(LoggingMixin):
                 '.mm': 'HOST_CMMSRCS',
                 '.cc': 'HOST_CPPSRCS',
                 '.cpp': 'HOST_CPPSRCS',
+                '.cxx': 'HOST_CPPSRCS',
             },
             UNIFIED_SOURCES={
                 '.c': 'UNIFIED_CSRCS',
                 '.mm': 'UNIFIED_CMMSRCS',
                 '.cc': 'UNIFIED_CPPSRCS',
                 '.cpp': 'UNIFIED_CPPSRCS',
+                '.cxx': 'UNIFIED_CPPSRCS',
             }
         )
         varmap.update(dict(('GENERATED_%s' % k, v) for k, v in varmap.items()
@@ -415,6 +419,11 @@ class TreeMetadataEmitter(LoggingMixin):
                 for obj in self._process_test_manifest(sandbox, info, path):
                     yield obj
 
+        for flavor in ('crashtest', 'reftest'):
+            for path in sandbox.get('%s_MANIFESTS' % flavor.upper(), []):
+                for obj in self._process_reftest_manifest(sandbox, flavor, path):
+                    yield obj
+
         jar_manifests = sandbox.get('JAR_MANIFESTS', [])
         if len(jar_manifests) > 1:
             raise SandboxValidationError('While JAR_MANIFESTS is a list, '
@@ -481,7 +490,7 @@ class TreeMetadataEmitter(LoggingMixin):
             if filter_inactive:
                 # We return tests that don't exist because we want manifests
                 # defining tests that don't exist to result in error.
-                filtered = m.active_tests(exists=False, disabled=False,
+                filtered = m.active_tests(exists=False, disabled=True,
                     **self.info)
 
                 missing = [t['name'] for t in filtered if not os.path.exists(t['path'])]
@@ -596,6 +605,38 @@ class TreeMetadataEmitter(LoggingMixin):
             raise SandboxValidationError('Error processing test '
                 'manifest file %s: %s' % (path,
                     '\n'.join(traceback.format_exception(*sys.exc_info()))))
+
+    def _process_reftest_manifest(self, sandbox, flavor, manifest_path):
+        manifest_path = mozpath.normpath(manifest_path)
+        manifest_full_path = mozpath.normpath(mozpath.join(
+            sandbox['SRCDIR'], manifest_path))
+        manifest_reldir = mozpath.dirname(mozpath.relpath(manifest_full_path,
+            sandbox['TOPSRCDIR']))
+
+        manifest = reftest.ReftestManifest()
+        manifest.load(manifest_full_path)
+
+        # reftest manifests don't come from manifest parser. But they are
+        # similar enough that we can use the same emitted objects. Note
+        # that we don't perform any installs for reftests.
+        obj = TestManifest(sandbox, manifest_full_path, manifest,
+                flavor=flavor, install_prefix='%s/' % flavor,
+                relpath=mozpath.join(manifest_reldir,
+                    mozpath.basename(manifest_path)))
+
+        for test in sorted(manifest.files):
+            obj.tests.append({
+                'path': test,
+                'here': mozpath.dirname(test),
+                'manifest': manifest_full_path,
+                'name': mozpath.basename(test),
+                'head': '',
+                'tail': '',
+                'support-files': '',
+                'subsuite': '',
+            })
+
+        yield obj
 
     def _emit_directory_traversal_from_sandbox(self, sandbox):
         o = DirectoryTraversal(sandbox)

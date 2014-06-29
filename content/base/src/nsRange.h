@@ -15,6 +15,7 @@
 #include "nsINode.h"
 #include "nsIDocument.h"
 #include "nsIDOMNode.h"
+#include "nsLayoutUtils.h"
 #include "prmon.h"
 #include "nsStubMutationObserver.h"
 #include "nsWrapperCache.h"
@@ -37,6 +38,8 @@ class nsRange MOZ_FINAL : public nsIDOMRange,
   typedef mozilla::dom::DOMRect DOMRect;
   typedef mozilla::dom::DOMRectList DOMRectList;
 
+  virtual ~nsRange();
+
 public:
   nsRange(nsINode* aNode)
     : mRoot(nullptr)
@@ -58,7 +61,6 @@ public:
     MOZ_ASSERT(aNode, "range isn't in a document!");
     mOwner = aNode->OwnerDoc();
   }
-  virtual ~nsRange();
 
   static nsresult CreateRange(nsIDOMNode* aStartParent, int32_t aStartOffset,
                               nsIDOMNode* aEndParent, int32_t aEndOffset,
@@ -215,8 +217,8 @@ public:
   void SetStartAfter(nsINode& aNode, ErrorResult& aErr);
   void SetStartBefore(nsINode& aNode, ErrorResult& aErr);
   void SurroundContents(nsINode& aNode, ErrorResult& aErr);
-  already_AddRefed<DOMRect> GetBoundingClientRect();
-  already_AddRefed<DOMRectList> GetClientRects();
+  already_AddRefed<DOMRect> GetBoundingClientRect(bool aClampToEdge = true);
+  already_AddRefed<DOMRectList> GetClientRects(bool aClampToEdge = true);
 
   nsINode* GetParentObject() const { return mOwner; }
   virtual JSObject* WrapObject(JSContext* cx) MOZ_OVERRIDE MOZ_FINAL;
@@ -253,6 +255,12 @@ public:
 
   static bool IsNodeSelected(nsINode* aNode, uint32_t aStartOffset,
                              uint32_t aEndOffset);
+
+  static void CollectClientRects(nsLayoutUtils::RectCallback* aCollector,
+                                 nsRange* aRange,
+                                 nsINode* aStartParent, int32_t aStartOffset,
+                                 nsINode* aEndParent, int32_t aEndOffset,
+                                 bool aClampToEdge);
 
   typedef nsTHashtable<nsPtrHashKey<nsRange> > RangeHashTable;
 protected:

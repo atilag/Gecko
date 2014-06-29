@@ -1,4 +1,4 @@
-// -*- Mode: Java; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+// -*- indent-tabs-mode: nil; js-indent-level: 4 -*-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -146,8 +146,8 @@ Sanitizer.prototype = {
         catch (e) { }
 
         try {
-          var seer = Cc["@mozilla.org/network/seer;1"].getService(Ci.nsINetworkSeer);
-          seer.reset();
+          var predictor = Cc["@mozilla.org/network/predictor;1"].getService(Ci.nsINetworkPredictor);
+          predictor.reset();
         } catch (e) { }
       },
 

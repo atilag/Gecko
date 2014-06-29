@@ -20,7 +20,7 @@
 
 #include "CameraCommon.h"
 #include "GonkCameraControl.h"
-#include "mozilla/Preferences.h"
+#include "CameraPreferences.h"
 #include "TestGonkCameraControl.h"
 
 using namespace mozilla;
@@ -54,15 +54,15 @@ ICameraControl::GetCameraName(uint32_t aDeviceNum, nsCString& aDeviceName)
 
   switch (info.facing) {
     case CAMERA_FACING_BACK:
-      aDeviceName.Assign("back");
+      aDeviceName.AssignLiteral("back");
       break;
 
     case CAMERA_FACING_FRONT:
-      aDeviceName.Assign("front");
+      aDeviceName.AssignLiteral("front");
       break;
 
     default:
-      aDeviceName.Assign("extra-camera-");
+      aDeviceName.AssignLiteral("extra-camera-");
       aDeviceName.AppendInt(deviceNum);
       break;
   }
@@ -117,13 +117,12 @@ ICameraControl::GetListOfCameras(nsTArray<nsString>& aList)
   return NS_OK;
 }
 
-static const char* sTestModeEnabled = "camera.control.test.enabled";
-
 // implementation-specific camera factory
 already_AddRefed<ICameraControl>
 ICameraControl::Create(uint32_t aCameraId)
 {
-  const nsAdoptingCString& test = Preferences::GetCString(sTestModeEnabled);
+  nsCString test;
+  CameraPreferences::GetPref("camera.control.test.enabled", test);
   nsRefPtr<nsGonkCameraControl> control;
   if (test.EqualsASCII("control")) {
     NS_WARNING("Using test CameraControl layer");

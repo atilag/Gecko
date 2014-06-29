@@ -24,7 +24,7 @@ class nsImageMap;
 class nsIURI;
 class nsILoadGroup;
 struct nsHTMLReflowState;
-struct nsHTMLReflowMetrics;
+class nsHTMLReflowMetrics;
 class nsDisplayImage;
 class nsPresContext;
 class nsImageFrame;
@@ -41,9 +41,11 @@ namespace layers {
 
 class nsImageListener : public imgINotificationObserver
 {
+protected:
+  virtual ~nsImageListener();
+
 public:
   nsImageListener(nsImageFrame *aFrame);
-  virtual ~nsImageListener();
 
   NS_DECL_ISUPPORTS
   NS_DECL_IMGINOTIFICATIONOBSERVER
@@ -71,9 +73,11 @@ public:
   NS_DECL_QUERYFRAME
 
   virtual void DestroyFrom(nsIFrame* aDestructRoot) MOZ_OVERRIDE;
-  virtual void Init(nsIContent*      aContent,
-                    nsIFrame*        aParent,
-                    nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
+  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) MOZ_OVERRIDE;
+
+  virtual void Init(nsIContent*       aContent,
+                    nsContainerFrame* aParent,
+                    nsIFrame*         aPrevInFlow) MOZ_OVERRIDE;
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) MOZ_OVERRIDE;
@@ -81,10 +85,10 @@ public:
   virtual nscoord GetPrefWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
   virtual mozilla::IntrinsicSize GetIntrinsicSize() MOZ_OVERRIDE;
   virtual nsSize GetIntrinsicRatio() MOZ_OVERRIDE;
-  virtual nsresult Reflow(nsPresContext*          aPresContext,
-                          nsHTMLReflowMetrics&     aDesiredSize,
-                          const nsHTMLReflowState& aReflowState,
-                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  virtual void Reflow(nsPresContext*           aPresContext,
+                      nsHTMLReflowMetrics&     aDesiredSize,
+                      const nsHTMLReflowState& aReflowState,
+                      nsReflowStatus&          aStatus) MOZ_OVERRIDE;
   
   virtual nsresult  GetContentForEvent(mozilla::WidgetEvent* aEvent,
                                        nsIContent** aContent) MOZ_OVERRIDE;
@@ -331,6 +335,8 @@ private:
     }
 
   private:
+    ~IconLoad() {}
+
     void GetPrefs();
     nsTObserverArray<nsImageFrame*> mIconObservers;
 

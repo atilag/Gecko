@@ -373,9 +373,9 @@ nsHtml5StreamParser::SniffBOMlessUTF16BasicLatin(const uint8_t* aFromSegment,
   }
 
   if (byteNonZero[0]) {
-    mCharset.Assign("UTF-16LE");
+    mCharset.AssignLiteral("UTF-16LE");
   } else {
-    mCharset.Assign("UTF-16BE");
+    mCharset.AssignLiteral("UTF-16BE");
   }
   mCharsetSource = kCharsetFromIrreversibleAutoDetection;
   mTreeBuilder->SetDocumentCharset(mCharset, mCharsetSource);
@@ -933,14 +933,18 @@ nsHtml5StreamParser::OnStartRequest(nsIRequest* aRequest, nsISupports* aContext)
       mReparseForbidden = true;
       mFeedChardet = false; // can't restart anyway
     }
+  }
 
-    // Attempt to retarget delivery of data (via OnDataAvailable) to the parser
-    // thread, rather than through the main thread.
-    nsCOMPtr<nsIThreadRetargetableRequest> threadRetargetableRequest =
-      do_QueryInterface(mRequest);
-    if (threadRetargetableRequest) {
-      threadRetargetableRequest->RetargetDeliveryTo(mThread);
-    }
+  // Attempt to retarget delivery of data (via OnDataAvailable) to the parser
+  // thread, rather than through the main thread.
+  nsCOMPtr<nsIThreadRetargetableRequest> threadRetargetableRequest =
+    do_QueryInterface(mRequest, &rv);
+  if (threadRetargetableRequest) {
+    rv = threadRetargetableRequest->RetargetDeliveryTo(mThread);
+  }
+
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Failed to retarget HTML data delivery to the parser thread.");
   }
 
   if (mCharsetSource == kCharsetFromParentFrame) {
@@ -1201,7 +1205,7 @@ nsHtml5StreamParser::PreferredForInternalEncodingDecl(nsACString& aEncoding)
     mTreeBuilder->MaybeComplainAboutCharset("EncMetaUtf16",
                                             true,
                                             mTokenizer->getLineNumber());
-    newEncoding.Assign("UTF-8");
+    newEncoding.AssignLiteral("UTF-8");
   }
 
   if (newEncoding.EqualsLiteral("x-user-defined")) {
@@ -1209,7 +1213,7 @@ nsHtml5StreamParser::PreferredForInternalEncodingDecl(nsACString& aEncoding)
     mTreeBuilder->MaybeComplainAboutCharset("EncMetaUserDefined",
                                             true,
                                             mTokenizer->getLineNumber());
-    newEncoding.Assign("windows-1252");
+    newEncoding.AssignLiteral("windows-1252");
   }
 
   if (newEncoding.Equals(mCharset)) {

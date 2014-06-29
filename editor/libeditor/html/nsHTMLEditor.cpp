@@ -36,8 +36,8 @@
 #include "nsILinkHandler.h"
 #include "nsIInlineSpellChecker.h"
 
+#include "mozilla/CSSStyleSheet.h"
 #include "mozilla/css/Loader.h"
-#include "nsCSSStyleSheet.h"
 #include "nsIDOMStyleSheet.h"
 
 #include "nsIContent.h"
@@ -500,9 +500,10 @@ nsHTMLEditor::SetFlags(uint32_t aFlags)
 NS_IMETHODIMP
 nsHTMLEditor::InitRules()
 {
-  MOZ_ASSERT(!mRules);
-  // instantiate the rules for the html editor
-  mRules = new nsHTMLEditRules();
+  if (!mRules) {
+    // instantiate the rules for the html editor
+    mRules = new nsHTMLEditRules();
+  }
   return mRules->Init(static_cast<nsPlaintextEditor*>(this));
 }
 
@@ -531,16 +532,16 @@ nsHTMLEditor::BeginningOfDocument()
   while (!done)
   {
     nsWSRunObject wsObj(this, curNode, curOffset);
-    nsCOMPtr<nsIDOMNode> visNode;
     int32_t visOffset=0;
     WSType visType;
-    wsObj.NextVisibleNode(curNode, curOffset, address_of(visNode), &visOffset, &visType);
+    nsCOMPtr<nsINode> visNode, curNode_(do_QueryInterface(curNode));
+    wsObj.NextVisibleNode(curNode_, curOffset, address_of(visNode), &visOffset, &visType);
     if (visType == WSType::normalWS || visType == WSType::text) {
-      selNode = visNode;
+      selNode = GetAsDOMNode(visNode);
       selOffset = visOffset;
       done = true;
     } else if (visType == WSType::br || visType == WSType::special) {
-      selNode = GetNodeLocation(visNode, &selOffset);
+      selNode = GetNodeLocation(GetAsDOMNode(visNode), &selOffset);
       done = true;
     } else if (visType == WSType::otherBlock) {
       // By definition of nsWSRunObject, a block element terminates 
@@ -558,22 +559,22 @@ nsHTMLEditor::BeginningOfDocument()
         // like a <hr>
         // We want to place the caret in front of that block.
 
-        selNode = GetNodeLocation(visNode, &selOffset);
+        selNode = GetNodeLocation(GetAsDOMNode(visNode), &selOffset);
         done = true;
       }
       else
       {
         bool isEmptyBlock;
-        if (NS_SUCCEEDED(IsEmptyNode(visNode, &isEmptyBlock)) &&
+        if (NS_SUCCEEDED(IsEmptyNode(GetAsDOMNode(visNode), &isEmptyBlock)) &&
             isEmptyBlock)
         {
           // skip the empty block
-          curNode = GetNodeLocation(visNode, &curOffset);
+          curNode = GetNodeLocation(GetAsDOMNode(visNode), &curOffset);
           ++curOffset;
         }
         else
         {
-          curNode = visNode;
+          curNode = GetAsDOMNode(visNode);
           curOffset = 0;
         }
         // keep looping
@@ -969,11 +970,11 @@ nsHTMLEditor::IsVisBreak(nsINode* aNode)
   nsCOMPtr<nsINode> selNode = GetNodeLocation(aNode, &selOffset);
   // Let's look after the break
   selOffset++;
-  nsWSRunObject wsObj(this, selNode->AsDOMNode(), selOffset);
-  nsCOMPtr<nsIDOMNode> visNode;
+  nsWSRunObject wsObj(this, selNode, selOffset);
+  nsCOMPtr<nsINode> unused;
   int32_t visOffset = 0;
   WSType visType;
-  wsObj.NextVisibleNode(selNode->AsDOMNode(), selOffset, address_of(visNode),
+  wsObj.NextVisibleNode(selNode, selOffset, address_of(unused),
                         &visOffset, &visType);
   if (visType & WSType::block) {
     return false;
@@ -1452,14 +1453,14 @@ nsHTMLEditor::NormalizeEOLInsertPosition(nsIDOMNode *firstNodeToInsert,
     return;
 
   nsWSRunObject wsObj(this, *insertParentNode, *insertOffset);
-  nsCOMPtr<nsIDOMNode> nextVisNode;
-  nsCOMPtr<nsIDOMNode> prevVisNode;
+  nsCOMPtr<nsINode> nextVisNode, prevVisNode;
   int32_t nextVisOffset=0;
   WSType nextVisType;
   int32_t prevVisOffset=0;
   WSType prevVisType;
 
-  wsObj.NextVisibleNode(*insertParentNode, *insertOffset, address_of(nextVisNode), &nextVisOffset, &nextVisType);
+  nsCOMPtr<nsINode> parent(do_QueryInterface(*insertParentNode));
+  wsObj.NextVisibleNode(parent, *insertOffset, address_of(nextVisNode), &nextVisOffset, &nextVisType);
   if (!nextVisNode)
     return;
 
@@ -1467,7 +1468,7 @@ nsHTMLEditor::NormalizeEOLInsertPosition(nsIDOMNode *firstNodeToInsert,
     return;
   }
 
-  wsObj.PriorVisibleNode(*insertParentNode, *insertOffset, address_of(prevVisNode), &prevVisOffset, &prevVisType);
+  wsObj.PriorVisibleNode(parent, *insertOffset, address_of(prevVisNode), &prevVisOffset, &prevVisType);
   if (!prevVisNode)
     return;
 
@@ -1480,7 +1481,7 @@ nsHTMLEditor::NormalizeEOLInsertPosition(nsIDOMNode *firstNodeToInsert,
   }
 
   int32_t brOffset=0;
-  nsCOMPtr<nsIDOMNode> brNode = GetNodeLocation(nextVisNode, &brOffset);
+  nsCOMPtr<nsIDOMNode> brNode = GetNodeLocation(GetAsDOMNode(nextVisNode), &brOffset);
 
   *insertParentNode = brNode;
   *insertOffset = brOffset + 1;
@@ -2302,7 +2303,7 @@ nsHTMLEditor::GetElementOrParentByTagName(const nsAString& aTagName,
   bool getLink = IsLinkTag(tagName);
   bool getNamedAnchor = IsNamedAnchorTag(tagName);
   if (getLink || getNamedAnchor) {
-    tagName.AssignLiteral("a");
+    tagName.Assign('a');
   }
   bool findTableCell = tagName.EqualsLiteral("td");
   bool findList = tagName.EqualsLiteral("list");
@@ -2576,7 +2577,7 @@ nsHTMLEditor::CreateElementWithDefaults(const nsAString& aTagName)
   nsAutoString realTagName;
 
   if (IsLinkTag(tagName) || IsNamedAnchorTag(tagName)) {
-    realTagName.AssignLiteral("a");
+    realTagName.Assign('a');
   } else {
     realTagName = tagName;
   }
@@ -2853,7 +2854,7 @@ nsHTMLEditor::ReplaceStyleSheet(const nsAString& aURL)
 NS_IMETHODIMP
 nsHTMLEditor::RemoveStyleSheet(const nsAString &aURL)
 {
-  nsRefPtr<nsCSSStyleSheet> sheet;
+  nsRefPtr<CSSStyleSheet> sheet;
   nsresult rv = GetStyleSheetForURL(aURL, getter_AddRefs(sheet));
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(sheet, NS_ERROR_UNEXPECTED);
@@ -2893,7 +2894,7 @@ nsHTMLEditor::AddOverrideStyleSheet(const nsAString& aURL)
   // We MUST ONLY load synchronous local files (no @import)
   // XXXbz Except this will actually try to load remote files
   // synchronously, of course..
-  nsRefPtr<nsCSSStyleSheet> sheet;
+  nsRefPtr<CSSStyleSheet> sheet;
   // Editor override style sheets may want to style Gecko anonymous boxes
   rv = ps->GetDocument()->CSSLoader()->
     LoadSheetSync(uaURI, true, true, getter_AddRefs(sheet));
@@ -2937,7 +2938,7 @@ nsHTMLEditor::ReplaceOverrideStyleSheet(const nsAString& aURL)
 NS_IMETHODIMP
 nsHTMLEditor::RemoveOverrideStyleSheet(const nsAString &aURL)
 {
-  nsRefPtr<nsCSSStyleSheet> sheet;
+  nsRefPtr<CSSStyleSheet> sheet;
   GetStyleSheetForURL(aURL, getter_AddRefs(sheet));
 
   // Make sure we remove the stylesheet from our internal list in all
@@ -2960,7 +2961,7 @@ nsHTMLEditor::RemoveOverrideStyleSheet(const nsAString &aURL)
 NS_IMETHODIMP
 nsHTMLEditor::EnableStyleSheet(const nsAString &aURL, bool aEnable)
 {
-  nsRefPtr<nsCSSStyleSheet> sheet;
+  nsRefPtr<CSSStyleSheet> sheet;
   nsresult rv = GetStyleSheetForURL(aURL, getter_AddRefs(sheet));
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(sheet, NS_OK); // Don't fail if sheet not found
@@ -2975,7 +2976,7 @@ nsHTMLEditor::EnableStyleSheet(const nsAString &aURL, bool aEnable)
 bool
 nsHTMLEditor::EnableExistingStyleSheet(const nsAString &aURL)
 {
-  nsRefPtr<nsCSSStyleSheet> sheet;
+  nsRefPtr<CSSStyleSheet> sheet;
   nsresult rv = GetStyleSheetForURL(aURL, getter_AddRefs(sheet));
   NS_ENSURE_SUCCESS(rv, false);
 
@@ -2994,7 +2995,7 @@ nsHTMLEditor::EnableExistingStyleSheet(const nsAString &aURL)
 
 nsresult
 nsHTMLEditor::AddNewStyleSheetToList(const nsAString &aURL,
-                                     nsCSSStyleSheet *aStyleSheet)
+                                     CSSStyleSheet* aStyleSheet)
 {
   uint32_t countSS = mStyleSheets.Length();
   uint32_t countU = mStyleSheetURLs.Length();
@@ -3026,7 +3027,7 @@ nsHTMLEditor::RemoveStyleSheetFromList(const nsAString &aURL)
 
 NS_IMETHODIMP
 nsHTMLEditor::GetStyleSheetForURL(const nsAString &aURL,
-                                  nsCSSStyleSheet **aStyleSheet)
+                                  CSSStyleSheet** aStyleSheet)
 {
   NS_ENSURE_ARG_POINTER(aStyleSheet);
   *aStyleSheet = 0;
@@ -3046,7 +3047,7 @@ nsHTMLEditor::GetStyleSheetForURL(const nsAString &aURL,
 }
 
 NS_IMETHODIMP
-nsHTMLEditor::GetURLForStyleSheet(nsCSSStyleSheet *aStyleSheet,
+nsHTMLEditor::GetURLForStyleSheet(CSSStyleSheet* aStyleSheet,
                                   nsAString &aURL)
 {
   // is it already in the list?
@@ -3424,7 +3425,7 @@ nsHTMLEditor::DebugUnitTests(int32_t *outNumTests, int32_t *outNumTestsFailed)
 
 
 NS_IMETHODIMP 
-nsHTMLEditor::StyleSheetLoaded(nsCSSStyleSheet* aSheet, bool aWasAlternate,
+nsHTMLEditor::StyleSheetLoaded(CSSStyleSheet* aSheet, bool aWasAlternate,
                                nsresult aStatus)
 {
   nsresult rv = NS_OK;
@@ -4383,15 +4384,14 @@ nsHTMLEditor::IsVisTextNode(nsIContent* aNode,
   {
     if (aNode->TextIsOnlyWhitespace())
     {
-      nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aNode);
-      nsWSRunObject wsRunObj(this, node, 0);
-      nsCOMPtr<nsIDOMNode> visNode;
+      nsWSRunObject wsRunObj(this, aNode, 0);
+      nsCOMPtr<nsINode> visNode;
       int32_t outVisOffset=0;
       WSType visType;
-      wsRunObj.NextVisibleNode(node, 0, address_of(visNode),
+      wsRunObj.NextVisibleNode(aNode, 0, address_of(visNode),
                                &outVisOffset, &visType);
       if (visType == WSType::normalWS || visType == WSType::text) {
-        *outIsEmptyNode = (node != visNode);
+        *outIsEmptyNode = (aNode != visNode);
       }
     }
     else
@@ -4574,7 +4574,7 @@ nsHTMLEditor::SetAttributeOrEquivalent(nsIDOMElement * aElement,
         bool wasSet = false;
         res = GetAttributeValue(aElement, NS_LITERAL_STRING("style"), existingValue, &wasSet);
         NS_ENSURE_SUCCESS(res, res);
-        existingValue.AppendLiteral(" ");
+        existingValue.Append(' ');
         existingValue.Append(aValue);
         if (aSuppressTransaction)
           res = aElement->SetAttribute(aAttribute, existingValue);

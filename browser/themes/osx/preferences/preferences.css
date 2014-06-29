@@ -134,12 +134,15 @@ caption {
   -moz-box-align: center;
 }
 
-#popupPolicyRow,
-#enableSoftwareInstallRow,
-#enableImagesRow {
+#popupPolicyRow {
   margin-bottom: 4px !important;
   padding-bottom: 4px !important;
   border-bottom: 1px solid #ccc;
+}
+
+#translationAttributionImage {
+  width: 70px;
+  cursor: pointer;
 }
 
 #browserUseCurrent,

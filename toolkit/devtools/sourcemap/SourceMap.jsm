@@ -1,4 +1,4 @@
-/* -*- Mode: js; js-indent-level: 2; -*- */
+/* -*- js-indent-level: 2; indent-tabs-mode: nil -*- */
 /*
  * Copyright 2011 Mozilla Foundation and contributors
  * Licensed under the New BSD license. See LICENSE or:
@@ -1406,7 +1406,8 @@ define('source-map/source-map-generator', ['require', 'exports', 'module' ,  'so
         map.sourceRoot = this._sourceRoot;
       }
       if (this._sourcesContents) {
-        map.sourcesContent = this._generateSourcesContent(map.sources, map.sourceRoot);
+        map.sourcesContent = this._generateSourcesContent(map.sources,
+                                                          map.sourceRoot || undefined);
       }
 
       return map;

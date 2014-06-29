@@ -65,6 +65,8 @@ private:
 class nsCacheService : public nsICacheServiceInternal,
                        public nsIMemoryReporter
 {
+    virtual ~nsCacheService();
+
 public:
     NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSICACHESERVICE
@@ -72,7 +74,6 @@ public:
     NS_DECL_NSIMEMORYREPORTER
 
     nsCacheService();
-    virtual ~nsCacheService();
 
     // Define a Create method to be used with a factory:
     static nsresult
@@ -227,6 +228,14 @@ public:
     bool             IsDoomListEmpty();
 
     typedef bool (*DoomCheckFn)(nsCacheEntry* entry);
+
+    // Accessors to the disabled functionality
+    nsresult CreateSessionInternal(const char *          clientID,
+                                   nsCacheStoragePolicy  storagePolicy,
+                                   bool                  streamBased,
+                                   nsICacheSession     **result);
+    nsresult VisitEntriesInternal(nsICacheVisitor *visitor);
+    nsresult EvictEntriesInternal(nsCacheStoragePolicy storagePolicy);
 
 private:
     friend class nsCacheServiceAutoLock;

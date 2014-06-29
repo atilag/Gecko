@@ -55,15 +55,6 @@ public:
 
   virtual gfx::IntSize GetSize() const { return mSize; }
 
-  virtual TextureClientData* DropTextureData() MOZ_OVERRIDE
-  {
-    // XXX - right now the code paths using this are managing the shared texture
-    // data, although they should use a TextureClientData for this to ensure that
-    // the destruction sequence is race-free.
-    MarkInvalid();
-    return nullptr;
-  }
-
   virtual gfx::SurfaceFormat GetFormat() const MOZ_OVERRIDE
   {
     return gfx::SurfaceFormat::UNKNOWN;
@@ -80,50 +71,6 @@ protected:
   gl::SharedTextureShareType mShareType;
   bool mInverted;
   bool mIsLocked;
-};
-
-/**
- * A TextureClient implementation to share SurfaceStream.
- */
-class StreamTextureClientOGL : public TextureClient
-{
-public:
-  StreamTextureClientOGL(TextureFlags aFlags);
-
-  ~StreamTextureClientOGL();
-
-  virtual bool IsAllocated() const MOZ_OVERRIDE;
-
-  virtual bool Lock(OpenMode mode) MOZ_OVERRIDE;
-
-  virtual void Unlock() MOZ_OVERRIDE;
-
-  virtual bool IsLocked() const MOZ_OVERRIDE { return mIsLocked; }
-
-  virtual bool ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor) MOZ_OVERRIDE;
-
-  virtual TextureClientData* DropTextureData() MOZ_OVERRIDE { return nullptr; }
-
-  virtual bool HasInternalBuffer() const MOZ_OVERRIDE { return false; }
-
-  void InitWith(gfx::SurfaceStream* aStream);
-
-  virtual gfx::IntSize GetSize() const { return gfx::IntSize(); }
-
-  virtual gfx::SurfaceFormat GetFormat() const MOZ_OVERRIDE
-  {
-    return gfx::SurfaceFormat::UNKNOWN;
-  }
-
-  virtual bool AllocateForSurface(gfx::IntSize aSize, TextureAllocationFlags aFlags) MOZ_OVERRIDE
-  {
-    return false;
-  }
-
-protected:
-  bool mIsLocked;
-  RefPtr<gfx::SurfaceStream> mStream;
-  RefPtr<gl::GLContext> mGL;
 };
 
 } // namespace

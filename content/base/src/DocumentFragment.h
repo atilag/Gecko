@@ -11,7 +11,6 @@
 #include "mozilla/dom/FragmentOrElement.h"
 #include "nsIDOMDocumentFragment.h"
 
-class nsINodeInfo;
 class nsIAtom;
 class nsAString;
 class nsIDocument;
@@ -51,7 +50,7 @@ public:
   // interface nsIDOMDocumentFragment
   NS_DECL_NSIDOMDOCUMENTFRAGMENT
 
-  DocumentFragment(already_AddRefed<nsINodeInfo>& aNodeInfo)
+  DocumentFragment(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
     : FragmentOrElement(aNodeInfo), mHost(nullptr)
   {
     Init();
@@ -103,9 +102,6 @@ public:
 
   virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 
-  virtual nsIAtom* DoGetID() const MOZ_OVERRIDE;
-  virtual nsIAtom *GetIDAttributeName() const MOZ_OVERRIDE;
-
   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                               nsIContent* aBindingParent,
                               bool aCompileEventHandlers) MOZ_OVERRIDE
@@ -144,7 +140,7 @@ public:
 #endif
 
 protected:
-  nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
+  nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
   nsIContent* mHost; // Weak
 };
 

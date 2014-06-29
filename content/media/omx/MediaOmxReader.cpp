@@ -47,9 +47,6 @@ MediaOmxReader::MediaOmxReader(AbstractMediaDecoder *aDecoder)
   , mVideoSeekTimeUs(-1)
   , mAudioSeekTimeUs(-1)
   , mSkipCount(0)
-#ifdef DEBUG
-  , mIsActive(true)
-#endif
 {
 #ifdef PR_LOGGING
   if (!gMediaDecoderLog) {
@@ -62,14 +59,20 @@ MediaOmxReader::MediaOmxReader(AbstractMediaDecoder *aDecoder)
 
 MediaOmxReader::~MediaOmxReader()
 {
-  ReleaseMediaResources();
-  ReleaseDecoder();
-  mOmxDecoder.clear();
 }
 
 nsresult MediaOmxReader::Init(MediaDecoderReader* aCloneDonor)
 {
   return NS_OK;
+}
+
+void MediaOmxReader::Shutdown()
+{
+  ReleaseMediaResources();
+  if (mOmxDecoder.get()) {
+    mOmxDecoder->ReleaseDecoder();
+  }
+  mOmxDecoder.clear();
 }
 
 bool MediaOmxReader::IsWaitingMediaResources()
@@ -102,13 +105,6 @@ void MediaOmxReader::ReleaseMediaResources()
   }
 }
 
-void MediaOmxReader::ReleaseDecoder()
-{
-  if (mOmxDecoder.get()) {
-    mOmxDecoder->ReleaseDecoder();
-  }
-}
-
 nsresult MediaOmxReader::InitOmxDecoder()
 {
   if (!mOmxDecoder.get()) {
@@ -135,7 +131,7 @@ nsresult MediaOmxReader::ReadMetadata(MediaInfo* aInfo,
                                       MetadataTags** aTags)
 {
   NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
-  MOZ_ASSERT(mIsActive);
+  EnsureActive();
 
   *aTags = nullptr;
 
@@ -164,9 +160,6 @@ nsresult MediaOmxReader::ReadMetadata(MediaInfo* aInfo,
     ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
     mDecoder->SetMediaDuration(durationUs);
   }
-
-  // Check the MediaExtract flag if the source is seekable.
-  mDecoder->SetMediaSeekable(mExtractor->flags() & MediaExtractor::CAN_SEEK);
 
   if (mOmxDecoder->HasVideo()) {
     int32_t displayWidth, displayHeight, width, height;
@@ -208,10 +201,18 @@ nsresult MediaOmxReader::ReadMetadata(MediaInfo* aInfo,
   return NS_OK;
 }
 
+bool
+MediaOmxReader::IsMediaSeekable()
+{
+  // Check the MediaExtract flag if the source is seekable.
+  return (mExtractor->flags() & MediaExtractor::CAN_SEEK);
+}
+
 bool MediaOmxReader::DecodeVideoFrame(bool &aKeyframeSkip,
                                       int64_t aTimeThreshold)
 {
-  MOZ_ASSERT(mIsActive);
+  NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
+  EnsureActive();
 
   // Record number of frames decoded and parsed. Automatically update the
   // stats counters using the AutoNotifyDecoded stack-based class.
@@ -341,7 +342,7 @@ void MediaOmxReader::NotifyDataArrived(const char* aBuffer, uint32_t aLength, in
 bool MediaOmxReader::DecodeAudioData()
 {
   NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
-  MOZ_ASSERT(mIsActive);
+  EnsureActive();
 
   // This is the approximate byte position in the stream.
   int64_t pos = mDecoder->GetResource()->Tell();
@@ -375,9 +376,8 @@ bool MediaOmxReader::DecodeAudioData()
 nsresult MediaOmxReader::Seek(int64_t aTarget, int64_t aStartTime, int64_t aEndTime, int64_t aCurrentTime)
 {
   NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
-  MOZ_ASSERT(mIsActive);
+  EnsureActive();
 
-  ResetDecode();
   VideoFrameContainer* container = mDecoder->GetVideoFrameContainer();
   if (container && container->GetImageContainer()) {
     container->GetImageContainer()->ClearAllImagesExceptFront();
@@ -402,27 +402,14 @@ nsresult MediaOmxReader::Seek(int64_t aTarget, int64_t aStartTime, int64_t aEndT
   return NS_OK;
 }
 
-static uint64_t BytesToTime(int64_t offset, uint64_t length, uint64_t durationUs) {
-  double perc = double(offset) / double(length);
-  if (perc > 1.0)
-    perc = 1.0;
-  return uint64_t(double(durationUs) * perc);
-}
-
 void MediaOmxReader::SetIdle() {
-#ifdef DEBUG
-  mIsActive = false;
-#endif
   if (!mOmxDecoder.get()) {
     return;
   }
   mOmxDecoder->Pause();
 }
 
-void MediaOmxReader::SetActive() {
-#ifdef DEBUG
-  mIsActive = true;
-#endif
+void MediaOmxReader::EnsureActive() {
   if (!mOmxDecoder.get()) {
     return;
   }

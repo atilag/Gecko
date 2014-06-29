@@ -6,6 +6,7 @@
 
 PARALLEL_DIRS += [
   'encoder',
+  'gmp',
   'mediasource',
   'ogg',
   'webaudio',
@@ -49,6 +50,8 @@ if CONFIG['MOZ_OMX_DECODER']:
 
 PARALLEL_DIRS += ['webspeech']
 
+PARALLEL_DIRS += ['eme']
+
 TEST_DIRS += [
     'test',
     'gtest',
@@ -75,6 +78,7 @@ EXPORTS += [
     'Latency.h',
     'MediaCache.h',
     'MediaData.h',
+    'MediaDataDecodedListener.h',
     'MediaDecoder.h',
     'MediaDecoderOwner.h',
     'MediaDecoderReader.h',
@@ -88,6 +92,7 @@ EXPORTS += [
     'MediaStreamGraph.h',
     'MediaTaskQueue.h',
     'MP3FrameParser.h',
+    'nsIDocumentActivity.h',
     'RtspMediaResource.h',
     'SharedBuffer.h',
     'SharedThreadPool.h',
@@ -119,6 +124,7 @@ UNIFIED_SOURCES += [
     'AudioNodeExternalInputStream.cpp',
     'AudioNodeStream.cpp',
     'AudioSegment.cpp',
+    'AudioSink.cpp',
     'AudioStream.cpp',
     'AudioStreamTrack.cpp',
     'BufferDecoder.cpp',

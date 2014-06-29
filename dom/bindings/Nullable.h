@@ -9,6 +9,9 @@
 
 #include "mozilla/Assertions.h"
 #include "nsTArrayForwardDeclare.h"
+#include "mozilla/Move.h"
+
+class nsCycleCollectionTraversalCallback;
 
 namespace mozilla {
 namespace dom {
@@ -32,6 +35,22 @@ public:
     : mIsNull(false)
     , mValue(aValue)
   {}
+
+  explicit Nullable(Nullable<T>&& aOther)
+    : mIsNull(aOther.mIsNull)
+    , mValue(mozilla::Move(aOther.mValue))
+  {}
+
+  Nullable(const Nullable<T>& aOther)
+    : mIsNull(aOther.mIsNull)
+    , mValue(aOther.mValue)
+  {}
+
+  void operator=(const Nullable<T>& aOther)
+  {
+    mIsNull = aOther.mIsNull;
+    mValue = aOther.mValue;
+  }
 
   void SetValue(T aValue) {
     mValue = aValue;
@@ -98,6 +117,28 @@ public:
     return *reinterpret_cast<const Nullable< FallibleTArray<U> >*>(this);
   }
 };
+
+
+template<typename T>
+void
+ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& aCallback,
+                            Nullable<T>& aNullable,
+                            const char* aName,
+                            uint32_t aFlags = 0)
+{
+  if (!aNullable.IsNull()) {
+    ImplCycleCollectionTraverse(aCallback, aNullable.Value(), aName, aFlags);
+  }
+}
+
+template<typename T>
+void
+ImplCycleCollectionUnlink(Nullable<T>& aNullable)
+{
+  if (!aNullable.IsNull()) {
+    ImplCycleCollectionUnlink(aNullable.Value());
+  }
+}
 
 } // namespace dom
 } // namespace mozilla

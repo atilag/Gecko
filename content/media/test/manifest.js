@@ -18,6 +18,18 @@ var gSmallTests = [
   { name:"bogus.duh", type:"bogus/duh" }
 ];
 
+if (SpecialPowers.Services.appinfo.name != "B2G") {
+  // We only run mochitests on b2g desktop and b2g emulator. The 3gp codecs
+  // aren't present on desktop, and the emulator codecs (which are different
+  // from the real device codecs) don't pass all of our tests, so we need
+  // to disable them.
+
+  gSmallTests = gSmallTests.concat([
+    { name:"sample.3gp", type:"video/3gpp", duration:4.933 },
+    { name:"sample.3g2", type:"video/3gpp2", duration:4.933 }
+  ]);
+}
+
 // Used by test_bug654550.html, for videoStats preference
 var gVideoTests = [
   { name:"320x240.ogv", type:"video/ogg", width:320, height:240, duration:0.266 },
@@ -377,7 +389,7 @@ var gUnseekableTests = [
   { name:"bogus.duh", type:"bogus/duh"}
 ];
 // Unfortunately big-buck-bunny-unseekable.mp4 is doesn't play on Windows 7, so
-// only include it in the unseekable tests if we're on later versions of Windows. 
+// only include it in the unseekable tests if we're on later versions of Windows.
 // This test actually only passes on win8 at the moment.
 if (navigator.userAgent.indexOf("Windows") != -1 && IsWindows8OrLater()) {
   gUnseekableTests = gUnseekableTests.concat([
@@ -665,6 +677,14 @@ function MediaTestManager() {
     is(this.numTestsRunning, this.tokens.length, "[started " + token + "] Length of array should match number of running tests");
   }
 
+  this.watchdog = null;
+
+  this.watchdogFn = function() {
+    if (this.tokens.length > 0) {
+      info("Watchdog remaining tests= " + this.tokens);
+    }
+  }
+
   // Registers that the test corresponding to 'token' has finished. Call when
   // you've finished your test. If all tests are complete this will finish the
   // run, otherwise it may start up the next run. It's ok to call multiple times
@@ -675,10 +695,18 @@ function MediaTestManager() {
       // Remove the element from the list of running tests.
       this.tokens.splice(i, 1);
     }
+
+    if (this.watchdog) {
+      clearTimeout(this.watchdog);
+      this.watchdog = null;
+    }
+
+    info("[finished " + token + "] remaining= " + this.tokens);
     this.numTestsRunning--;
     is(this.numTestsRunning, this.tokens.length, "[finished " + token + "] Length of array should match number of running tests");
     if (this.tokens.length < PARALLEL_TESTS) {
       this.nextTest();
+      this.watchdog = setTimeout(this.watchdogFn.bind(this), 10000);
     }
   }
 

@@ -29,13 +29,13 @@ class inDeepTreeWalker : public inIDeepTreeWalker
 {
 public:
 	NS_DECL_ISUPPORTS
-	NS_DECL_NSIDOMTREEWALKER
 	NS_DECL_INIDEEPTREEWALKER
 
   inDeepTreeWalker();
-  virtual ~inDeepTreeWalker();
 
 protected:
+  virtual ~inDeepTreeWalker();
+
   void PushNode(nsIDOMNode* aNode);
 
   bool mShowAnonymousContent;

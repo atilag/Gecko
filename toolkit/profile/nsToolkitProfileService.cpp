@@ -53,9 +53,9 @@ public:
     nsRefPtr<nsToolkitProfile> mNext;
     nsToolkitProfile          *mPrev;
 
+private:
     ~nsToolkitProfile() { }
 
-private:
     nsToolkitProfile(const nsACString& aName,
                      nsIFile* aRootDir,
                      nsIFile* aLocalDir,
@@ -82,9 +82,10 @@ public:
                   nsIProfileUnlocker* *aUnlocker);
 
     nsToolkitProfileLock() { }
-    ~nsToolkitProfileLock();
 
 private:
+    ~nsToolkitProfileLock();
+
     nsRefPtr<nsToolkitProfile> mProfile;
     nsCOMPtr<nsIFile> mDirectory;
     nsCOMPtr<nsIFile> mLocalDirectory;
@@ -94,6 +95,7 @@ private:
 
 class nsToolkitProfileFactory MOZ_FINAL : public nsIFactory
 {
+    ~nsToolkitProfileFactory() {}
 public:
     NS_DECL_ISUPPORTS
     NS_DECL_NSIFACTORY
@@ -122,7 +124,7 @@ private:
         gService = nullptr;
     }
 
-    NS_HIDDEN_(nsresult) Init();
+    nsresult Init();
 
     nsresult CreateTimesInternal(nsIFile *profileDir);
 

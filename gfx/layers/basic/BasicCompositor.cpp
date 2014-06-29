@@ -291,7 +291,7 @@ BasicCompositor::DrawQuad(const gfx::Rect& aRect,
     transformBounds.MoveTo(0, 0);
   }
 
-  newTransform.Translate(-offset.x, -offset.y);
+  newTransform.PostTranslate(-offset.x, -offset.y);
   buffer->SetTransform(newTransform);
 
   RefPtr<SourceSurface> sourceMask;
@@ -319,11 +319,25 @@ BasicCompositor::DrawQuad(const gfx::Rect& aRect,
           static_cast<TexturedEffect*>(aEffectChain.mPrimaryEffect.get());
       TextureSourceBasic* source = texturedEffect->mTexture->AsSourceBasic();
 
-      DrawSurfaceWithTextureCoords(dest, aRect,
-                                   source->GetSurface(dest),
-                                   texturedEffect->mTextureCoords,
-                                   texturedEffect->mFilter,
-                                   aOpacity, sourceMask, &maskTransform);
+      if (texturedEffect->mPremultiplied) {
+          DrawSurfaceWithTextureCoords(dest, aRect,
+                                       source->GetSurface(dest),
+                                       texturedEffect->mTextureCoords,
+                                       texturedEffect->mFilter,
+                                       aOpacity, sourceMask, &maskTransform);
+      } else {
+          RefPtr<DataSourceSurface> srcData = source->GetSurface(dest)->GetDataSurface();
+
+          // Yes, we re-create the premultiplied data every time.
+          // This might be better with a cache, eventually.
+          RefPtr<DataSourceSurface> premultData = gfxUtils::CreatePremultipliedDataSurface(srcData);
+
+          DrawSurfaceWithTextureCoords(dest, aRect,
+                                       premultData,
+                                       texturedEffect->mTextureCoords,
+                                       texturedEffect->mFilter,
+                                       aOpacity, sourceMask, &maskTransform);
+      }
       break;
     }
     case EffectTypes::YCBCR: {
@@ -374,6 +388,12 @@ BasicCompositor::DrawQuad(const gfx::Rect& aRect,
 }
 
 void
+BasicCompositor::ClearRect(const gfx::Rect& aRect)
+{
+  mRenderTarget->mDrawTarget->ClearRect(aRect);
+}
+
+void
 BasicCompositor::BeginFrame(const nsIntRegion& aInvalidRegion,
                             const gfx::Rect *aClipRectIn,
                             const gfx::Matrix& aTransform,
@@ -394,9 +414,6 @@ BasicCompositor::BeginFrame(const nsIntRegion& aInvalidRegion,
   nsIntRegion invalidRegionSafe;
   invalidRegionSafe.And(aInvalidRegion, intRect);
 
-  // FIXME: Redraw the whole screen in every frame to work around bug 972728.
-  invalidRegionSafe = intRect;
-
   nsIntRect invalidRect = invalidRegionSafe.GetBounds();
   mInvalidRect = IntRect(invalidRect.x, invalidRect.y, invalidRect.width, invalidRect.height);
   mInvalidRegion = invalidRegionSafe;
@@ -409,10 +426,10 @@ BasicCompositor::BeginFrame(const nsIntRegion& aInvalidRegion,
     return;
   }
 
-  if (mCopyTarget) {
+  if (mTarget) {
     // If we have a copy target, then we don't have a widget-provided mDrawTarget (currently). Create a dummy
     // placeholder so that CreateRenderTarget() works.
-    mDrawTarget = gfxPlatform::GetPlatform()->CreateOffscreenCanvasDrawTarget(IntSize(1,1), SurfaceFormat::B8G8R8A8);
+    mDrawTarget = gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(IntSize(1,1), SurfaceFormat::B8G8R8A8);
   } else {
     mDrawTarget = mWidget->StartRemoteDrawing();
   }
@@ -421,7 +438,7 @@ BasicCompositor::BeginFrame(const nsIntRegion& aInvalidRegion,
   }
 
   // Setup an intermediate render target to buffer all compositing. We will
-  // copy this into mDrawTarget (the widget), and/or mCopyTarget in EndFrame()
+  // copy this into mDrawTarget (the widget), and/or mTarget in EndFrame()
   RefPtr<CompositingRenderTarget> target = CreateRenderTarget(mInvalidRect, INIT_MODE_CLEAR);
   SetRenderTarget(target);
 
@@ -468,8 +485,10 @@ BasicCompositor::EndFrame()
   // Note: Most platforms require us to buffer drawing to the widget surface.
   // That's why we don't draw to mDrawTarget directly.
   RefPtr<SourceSurface> source = mRenderTarget->mDrawTarget->Snapshot();
-  RefPtr<DrawTarget> dest(mCopyTarget ? mCopyTarget : mDrawTarget);
-  
+  RefPtr<DrawTarget> dest(mTarget ? mTarget : mDrawTarget);
+
+  nsIntPoint offset = mTarget ? mTargetBounds.TopLeft() : nsIntPoint();
+
   // The source DrawTarget is clipped to the invalidation region, so we have
   // to copy the individual rectangles in the region or else we'll draw blank
   // pixels.
@@ -477,9 +496,9 @@ BasicCompositor::EndFrame()
   for (const nsIntRect *r = iter.Next(); r; r = iter.Next()) {
     dest->CopySurface(source,
                       IntRect(r->x - mInvalidRect.x, r->y - mInvalidRect.y, r->width, r->height),
-                      IntPoint(r->x, r->y));
+                      IntPoint(r->x - offset.x, r->y - offset.y));
   }
-  if (!mCopyTarget) {
+  if (!mTarget) {
     mWidget->EndRemoteDrawing();
   }
 

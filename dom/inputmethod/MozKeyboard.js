@@ -32,7 +32,7 @@ let WindowMap = {
     if (!this._map || !win) {
       return false;
     }
-    return this._map.get(win, false);
+    return this._map.get(win) || false;
   },
 
   /*
@@ -574,7 +574,7 @@ MozInputContext.prototype = {
         contextId: self._contextId,
         requestId: resolverId,
         text: text,
-        cursor: cursor || text.length,
+        cursor: (typeof cursor !== 'undefined') ? cursor : text.length,
         clauses: clauses || null
       });
     });

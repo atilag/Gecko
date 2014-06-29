@@ -42,6 +42,7 @@
 #include "nsIWebShellServices.h"
 #include "nsILinkHandler.h"
 #include "nsIClipboardCommands.h"
+#include "nsITabParent.h"
 #include "nsCRT.h"
 #include "prtime.h"
 #include "nsRect.h"
@@ -209,6 +210,7 @@ public:
     NS_IMETHOD GetAssociatedWindow(nsIDOMWindow**);
     NS_IMETHOD GetTopWindow(nsIDOMWindow**);
     NS_IMETHOD GetTopFrameElement(nsIDOMElement**);
+    NS_IMETHOD GetNestedFrameId(uint64_t*);
     NS_IMETHOD IsAppOfType(uint32_t, bool*);
     NS_IMETHOD GetIsContent(bool*);
     NS_IMETHOD GetUsePrivateBrowsing(bool*);
@@ -902,6 +904,8 @@ private:
     nsTObserverArray<nsWeakPtr> mReflowObservers;
     nsTObserverArray<nsWeakPtr> mScrollObservers;
     nsCString         mOriginalUriString;
+    nsWeakPtr mOpener;
+    nsWeakPtr mOpenedRemote;
 
     // Separate function to do the actual name (i.e. not _top, _self etc.)
     // searching for FindItemWithName.
@@ -919,11 +923,11 @@ public:
     class InterfaceRequestorProxy : public nsIInterfaceRequestor {
     public:
         InterfaceRequestorProxy(nsIInterfaceRequestor* p);
-        virtual ~InterfaceRequestorProxy();
         NS_DECL_THREADSAFE_ISUPPORTS
         NS_DECL_NSIINTERFACEREQUESTOR
  
     protected:
+        virtual ~InterfaceRequestorProxy();
         InterfaceRequestorProxy() {}
         nsWeakPtr mWeakPtr;
     };

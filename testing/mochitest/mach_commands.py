@@ -57,6 +57,14 @@ If you do not have a non-debug gaia profile, you can build one:
 The profile should be generated in a directory called 'profile'.
 '''.lstrip()
 
+# Maps test flavors to mochitest suite type.
+FLAVORS = {
+    'mochitest': 'plain',
+    'chrome': 'chrome',
+    'browser-chrome': 'browser',
+    'a11y': 'a11y',
+    'webapprt-chrome': 'webapprt-chrome',
+}
 
 class UnexpectedFilter(logging.Filter):
     def filter(self, record):
@@ -178,7 +186,7 @@ class MochitestRunner(MozbuildObject):
             return 1
 
         options.b2gPath = b2g_home
-        options.logcat_dir = self.mochitest_dir
+        options.logdir = self.mochitest_dir
         options.httpdPath = self.mochitest_dir
         options.xrePath = xre_path
         return mochitest.run_remote_mochitests(parser, options)
@@ -190,7 +198,7 @@ class MochitestRunner(MozbuildObject):
         jsdebugger=False, debug_on_failure=False, start_at=None, end_at=None,
         e10s=False, dmd=False, dump_output_directory=None,
         dump_about_memory_after_test=False, dump_dmd_after_test=False,
-        install_extension=None, quiet=False, environment=[], app_override=None,
+        install_extension=None, quiet=False, environment=[], app_override=None, runByDir=False,
         useTestMediaDevices=False, **kwargs):
         """Runs a mochitest.
 
@@ -316,6 +324,7 @@ class MochitestRunner(MozbuildObject):
         options.dumpOutputDirectory = dump_output_directory
         options.quiet = quiet
         options.environment = environment
+        options.runByDir = runByDir
         options.useTestMediaDevices = useTestMediaDevices
 
         options.failureFile = failure_file_path
@@ -476,10 +485,6 @@ def MochitestCommand(func):
         help='If running tests by chunks, the number of the chunk to run.')
     func = this_chunk(func)
 
-    hide_subtests = CommandArgument('--hide-subtests', action='store_true',
-        help='If specified, will only log subtest results on failure or timeout.')
-    func = hide_subtests(func)
-
     debug_on_failure = CommandArgument('--debug-on-failure', action='store_true',
         help='Breaks execution and enters the JS debugger on a test failure. ' \
              'Should be used together with --jsdebugger.')
@@ -530,6 +535,12 @@ def MochitestCommand(func):
                              help="Sets the given variable in the application's environment")
     func = setenv(func)
 
+    runbydir = CommandArgument('--run-by-dir', default=False,
+                                 action='store_true',
+                                 dest='runByDir',
+        help='Run each directory in a single browser instance with a fresh profile.')
+    func = runbydir(func)
+
     test_media = CommandArgument('--use-test-media-devices', default=False,
                                  action='store_true',
                                  dest='useTestMediaDevices',
@@ -552,9 +563,9 @@ def B2GCommand(func):
         help='Path to busybox binary to install on device')
     func = busybox(func)
 
-    logcatdir = CommandArgument('--logcat-dir', default=None,
-        help='directory to store logcat dump files')
-    func = logcatdir(func)
+    logdir = CommandArgument('--logdir', default=None,
+        help='directory to store log files')
+    func = logdir(func)
 
     profile = CommandArgument('--profile', default=None,
         help='for desktop testing, the path to the \
@@ -585,10 +596,6 @@ def B2GCommand(func):
     this_chunk = CommandArgument('--this-chunk', type=int,
         help='If running tests by chunks, the number of the chunk to run.')
     func = this_chunk(func)
-
-    hide_subtests = CommandArgument('--hide-subtests', action='store_true',
-        help='If specified, will only log subtest results on failure or timeout.')
-    func = hide_subtests(func)
 
     path = CommandArgument('test_paths', default=None, nargs='*',
         metavar='TEST',
@@ -659,13 +666,68 @@ class MachCommands(MachCommandBase):
     def run_mochitest_webapprt_content(self, test_paths, **kwargs):
         return self.run_mochitest(test_paths, 'webapprt-content', **kwargs)
 
-    def run_mochitest(self, test_paths, flavor, **kwargs):
+    @Command('mochitest', category='testing',
+        conditions=[conditions.is_firefox],
+        description='Run any flavor of mochitest.')
+    @MochitestCommand
+    @CommandArgument('-f', '--flavor', choices=FLAVORS.keys(),
+        help='Only run tests of this flavor.')
+    def run_mochitest_general(self, test_paths, flavor=None, test_objects=None,
+            **kwargs):
+        self._preruntest()
+
+        from mozbuild.testing import TestResolver
+
+        if test_objects:
+            tests = test_objects
+        else:
+            resolver = self._spawn(TestResolver)
+            tests = list(resolver.resolve_tests(paths=test_paths,
+                cwd=self._mach_context.cwd))
+
+        # Our current approach is to group the tests by suite and then perform
+        # an invocation for each suite. Ideally, this would be done
+        # automatically inside of core mochitest code. But it wasn't designed
+        # to do that.
+        #
+        # This does mean our output is less than ideal. When running tests from
+        # multiple suites, we see redundant summary lines. Hopefully once we
+        # have better machine readable output coming from mochitest land we can
+        # aggregate that here and improve the output formatting.
+
+        suites = {}
+        for test in tests:
+            # Filter out non-mochitests.
+            if test['flavor'] not in FLAVORS:
+                continue
+
+            if flavor and test['flavor'] != flavor:
+                continue
+
+            suite = FLAVORS[test['flavor']]
+            suites.setdefault(suite, []).append(test)
+
+        mochitest = self._spawn(MochitestRunner)
+        overall = None
+        for suite, tests in sorted(suites.items()):
+            result = mochitest.run_desktop_test(self._mach_context,
+                test_paths=[test['file_relpath'] for test in tests], suite=suite,
+                **kwargs)
+            if result:
+                overall = result
+
+        return overall
+
+    def _preruntest(self):
         from mozbuild.controller.building import BuildDriver
 
         self._ensure_state_subdir_exists('.')
 
         driver = self._spawn(BuildDriver)
         driver.install_tests(remove=False)
+
+    def run_mochitest(self, test_paths, flavor, **kwargs):
+        self._preruntest()
 
         mochitest = self._spawn(MochitestRunner)
 
@@ -677,7 +739,10 @@ class MachCommands(MachCommandBase):
 # they should be modified to work with all devices.
 def is_emulator(cls):
     """Emulator needs to be configured."""
-    return cls.device_name.startswith('emulator')
+    try:
+        return cls.device_name.startswith('emulator')
+    except AttributeError:
+        return False
 
 
 @CommandProvider

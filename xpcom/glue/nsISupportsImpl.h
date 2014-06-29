@@ -24,20 +24,21 @@
 #endif
 #include "mozilla/Attributes.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/Compiler.h"
 #include "mozilla/Likely.h"
 #include "mozilla/MacroArgs.h"
 #include "mozilla/MacroForEach.h"
 
 inline nsISupports*
-ToSupports(nsISupports* p)
+ToSupports(nsISupports* aSupports)
 {
-    return p;
+  return aSupports;
 }
 
 inline nsISupports*
-ToCanonicalSupports(nsISupports* p)
+ToCanonicalSupports(nsISupports* aSupports)
 {
-    return nullptr;
+  return nullptr;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -45,13 +46,14 @@ ToCanonicalSupports(nsISupports* p)
 
 #if (defined(DEBUG) || (defined(NIGHTLY_BUILD) && !defined(MOZ_PROFILING))) && !defined(XPCOM_GLUE_AVOID_NSPR)
 
-class nsAutoOwningThread {
+class nsAutoOwningThread
+{
 public:
-    nsAutoOwningThread() { mThread = PR_GetCurrentThread(); }
-    void *GetThread() const { return mThread; }
+  nsAutoOwningThread() { mThread = PR_GetCurrentThread(); }
+  void* GetThread() const { return mThread; }
 
 private:
-    void *mThread;
+  void* mThread;
 };
 
 #define NS_DECL_OWNINGTHREAD            nsAutoOwningThread _mOwningThread;
@@ -131,24 +133,23 @@ do {                                                              \
 #define NS_REFCOUNT_CHANGE (1 << NS_NUMBER_OF_FLAGS_IN_REFCNT)
 #define NS_REFCOUNT_VALUE(_val) (_val >> NS_NUMBER_OF_FLAGS_IN_REFCNT)
 
-class nsCycleCollectingAutoRefCnt {
-
+class nsCycleCollectingAutoRefCnt
+{
 public:
-  nsCycleCollectingAutoRefCnt()
-    : mRefCntAndFlags(0)
-  {}
+  nsCycleCollectingAutoRefCnt() : mRefCntAndFlags(0) {}
 
-  nsCycleCollectingAutoRefCnt(uintptr_t aValue)
+  explicit nsCycleCollectingAutoRefCnt(uintptr_t aValue)
     : mRefCntAndFlags(aValue << NS_NUMBER_OF_FLAGS_IN_REFCNT)
   {
   }
 
-  MOZ_ALWAYS_INLINE uintptr_t incr(nsISupports *owner)
+  MOZ_ALWAYS_INLINE uintptr_t incr(nsISupports* aOwner)
   {
-    return incr(owner, nullptr);
+    return incr(aOwner, nullptr);
   }
 
-  MOZ_ALWAYS_INLINE uintptr_t incr(void *owner, nsCycleCollectionParticipant *p)
+  MOZ_ALWAYS_INLINE uintptr_t incr(void* aOwner,
+                                   nsCycleCollectionParticipant* aCp)
   {
     mRefCntAndFlags += NS_REFCOUNT_CHANGE;
     mRefCntAndFlags &= ~NS_IS_PURPLE;
@@ -158,7 +159,7 @@ public:
       mRefCntAndFlags |= NS_IN_PURPLE_BUFFER;
       // Refcount isn't zero, so Suspect won't delete anything.
       MOZ_ASSERT(get() > 0);
-      NS_CycleCollectorSuspect3(owner, p, this, nullptr);
+      NS_CycleCollectorSuspect3(aOwner, aCp, this, nullptr);
     }
     return NS_REFCOUNT_VALUE(mRefCntAndFlags);
   }
@@ -170,22 +171,23 @@ public:
     mRefCntAndFlags = NS_REFCOUNT_CHANGE | NS_IN_PURPLE_BUFFER;
   }
 
-  MOZ_ALWAYS_INLINE uintptr_t decr(nsISupports *owner,
-                                   bool *shouldDelete = nullptr)
+  MOZ_ALWAYS_INLINE uintptr_t decr(nsISupports* aOwner,
+                                   bool* aShouldDelete = nullptr)
   {
-    return decr(owner, nullptr, shouldDelete);
+    return decr(aOwner, nullptr, aShouldDelete);
   }
 
-  MOZ_ALWAYS_INLINE uintptr_t decr(void *owner, nsCycleCollectionParticipant *p,
-                                   bool *shouldDelete = nullptr)
+  MOZ_ALWAYS_INLINE uintptr_t decr(void* aOwner,
+                                   nsCycleCollectionParticipant* aCp,
+                                   bool* aShouldDelete = nullptr)
   {
     MOZ_ASSERT(get() > 0);
     if (!IsInPurpleBuffer()) {
       mRefCntAndFlags -= NS_REFCOUNT_CHANGE;
       mRefCntAndFlags |= (NS_IN_PURPLE_BUFFER | NS_IS_PURPLE);
       uintptr_t retval = NS_REFCOUNT_VALUE(mRefCntAndFlags);
-      // Suspect may delete 'owner' and 'this'!
-      NS_CycleCollectorSuspect3(owner, p, this, shouldDelete);
+      // Suspect may delete 'aOwner' and 'this'!
+      NS_CycleCollectorSuspect3(aOwner, aCp, this, aShouldDelete);
       return retval;
     }
     mRefCntAndFlags -= NS_REFCOUNT_CHANGE;
@@ -225,54 +227,58 @@ public:
     return get();
   }
 
- private:
+private:
   uintptr_t mRefCntAndFlags;
 };
 
-class nsAutoRefCnt {
+class nsAutoRefCnt
+{
+public:
+  nsAutoRefCnt() : mValue(0) {}
+  explicit nsAutoRefCnt(nsrefcnt aValue) : mValue(aValue) {}
 
- public:
-    nsAutoRefCnt() : mValue(0) {}
-    nsAutoRefCnt(nsrefcnt aValue) : mValue(aValue) {}
+  // only support prefix increment/decrement
+  nsrefcnt operator++() { return ++mValue; }
+  nsrefcnt operator--() { return --mValue; }
 
-    // only support prefix increment/decrement
-    nsrefcnt operator++() { return ++mValue; }
-    nsrefcnt operator--() { return --mValue; }
+  nsrefcnt operator=(nsrefcnt aValue) { return (mValue = aValue); }
+  operator nsrefcnt() const { return mValue; }
+  nsrefcnt get() const { return mValue; }
 
-    nsrefcnt operator=(nsrefcnt aValue) { return (mValue = aValue); }
-    operator nsrefcnt() const { return mValue; }
-    nsrefcnt get() const { return mValue; }
-
-    static const bool isThreadSafe = false;
- private:
-    nsrefcnt operator++(int) MOZ_DELETE;
-    nsrefcnt operator--(int) MOZ_DELETE;
-    nsrefcnt mValue;
+  static const bool isThreadSafe = false;
+private:
+  nsrefcnt operator++(int) MOZ_DELETE;
+  nsrefcnt operator--(int) MOZ_DELETE;
+  nsrefcnt mValue;
 };
 
 #ifndef XPCOM_GLUE
 namespace mozilla {
-class ThreadSafeAutoRefCnt {
- public:
-    ThreadSafeAutoRefCnt() : mValue(0) {}
-    ThreadSafeAutoRefCnt(nsrefcnt aValue) : mValue(aValue) {}
-    
-    // only support prefix increment/decrement
-    MOZ_ALWAYS_INLINE nsrefcnt operator++() { return ++mValue; }
-    MOZ_ALWAYS_INLINE nsrefcnt operator--() { return --mValue; }
+class ThreadSafeAutoRefCnt
+{
+public:
+  ThreadSafeAutoRefCnt() : mValue(0) {}
+  explicit ThreadSafeAutoRefCnt(nsrefcnt aValue) : mValue(aValue) {}
 
-    MOZ_ALWAYS_INLINE nsrefcnt operator=(nsrefcnt aValue) { return (mValue = aValue); }
-    MOZ_ALWAYS_INLINE operator nsrefcnt() const { return mValue; }
-    MOZ_ALWAYS_INLINE nsrefcnt get() const { return mValue; }
+  // only support prefix increment/decrement
+  MOZ_ALWAYS_INLINE nsrefcnt operator++() { return ++mValue; }
+  MOZ_ALWAYS_INLINE nsrefcnt operator--() { return --mValue; }
 
-    static const bool isThreadSafe = true;
- private:
-    nsrefcnt operator++(int) MOZ_DELETE;
-    nsrefcnt operator--(int) MOZ_DELETE;
-    // In theory, RelaseAcquire consistency (but no weaker) is sufficient for
-    // the counter. Making it weaker could speed up builds on ARM (but not x86),
-    // but could break pre-existing code that assumes sequential consistency.
-    Atomic<nsrefcnt> mValue;
+  MOZ_ALWAYS_INLINE nsrefcnt operator=(nsrefcnt aValue)
+  {
+    return (mValue = aValue);
+  }
+  MOZ_ALWAYS_INLINE operator nsrefcnt() const { return mValue; }
+  MOZ_ALWAYS_INLINE nsrefcnt get() const { return mValue; }
+
+  static const bool isThreadSafe = true;
+private:
+  nsrefcnt operator++(int) MOZ_DELETE;
+  nsrefcnt operator--(int) MOZ_DELETE;
+  // In theory, RelaseAcquire consistency (but no weaker) is sufficient for
+  // the counter. Making it weaker could speed up builds on ARM (but not x86),
+  // but could break pre-existing code that assumes sequential consistency.
+  Atomic<nsrefcnt> mValue;
 };
 }
 #endif
@@ -404,6 +410,78 @@ public:
  */
 #define NS_INIT_ISUPPORTS() ((void)0)
 
+namespace mozilla {
+template<typename T>
+struct HasDangerousPublicDestructor
+{
+  static const bool value = false;
+};
+}
+
+#if defined(__clang__)
+   // bug 1028428 shows that at least in FreeBSD 10.0 with Clang 3.4 and libc++ 3.4,
+   // std::is_destructible is buggy in that it returns false when it should return true
+   // on ipc::SharedMemory. On the other hand, all Clang versions currently in use
+   // seem to handle the fallback just fine.
+#  define MOZ_CAN_USE_IS_DESTRUCTIBLE_FALLBACK
+#elif defined(__GNUC__)
+   // GCC 4.7 is has buggy std::is_destructible
+#  if MOZ_USING_LIBSTDCXX && MOZ_GCC_VERSION_AT_LEAST(4, 8, 0)
+#    define MOZ_HAVE_STD_IS_DESTRUCTIBLE
+   // Some GCC versions have an ICE when using destructors in decltype().
+   // Works for me on GCC 4.8.2 on Fedora 20 x86-64.
+#  elif MOZ_GCC_VERSION_AT_LEAST(4, 8, 2)
+#    define MOZ_CAN_USE_IS_DESTRUCTIBLE_FALLBACK
+#  endif
+#endif
+
+#ifdef MOZ_HAVE_STD_IS_DESTRUCTIBLE
+#  include <type_traits>
+#  define MOZ_IS_DESTRUCTIBLE(X) (std::is_destructible<X>::value)
+#elif defined MOZ_CAN_USE_IS_DESTRUCTIBLE_FALLBACK
+  namespace mozilla {
+    struct IsDestructibleFallbackImpl
+    {
+      template<typename T> static T&& Declval();
+
+      template<typename T, typename = decltype(Declval<T>().~T())>
+      static TrueType Test(int);
+
+      template<typename>
+      static FalseType Test(...);
+
+      template<typename T>
+      struct Selector
+      {
+        typedef decltype(Test<T>(0)) type;
+      };
+    };
+
+    template<typename T>
+    struct IsDestructibleFallback
+      : IsDestructibleFallbackImpl::Selector<T>::type
+    {
+    };
+  }
+#  define MOZ_IS_DESTRUCTIBLE(X) (mozilla::IsDestructibleFallback<X>::value)
+#endif
+
+#ifdef MOZ_IS_DESTRUCTIBLE
+#define MOZ_ASSERT_TYPE_OK_FOR_REFCOUNTING(X) \
+  static_assert(!MOZ_IS_DESTRUCTIBLE(X) || \
+                mozilla::HasDangerousPublicDestructor<X>::value, \
+                "Reference-counted classes should not have a public destructor. " \
+                "Try to make this class's destructor non-public. If that is really " \
+                "not possible, you can whitelist this class by providing a " \
+                "HasDangerousPublicDestructor specialization for it."); \
+  static_assert(!mozilla::HasDangerousPublicDestructor<X>::value || \
+                MOZ_IS_DESTRUCTIBLE(X), \
+                "This class has no public destructor. That's good! So please " \
+                "remove the HasDangerousPublicDestructor specialization for it.");
+#else
+#define MOZ_ASSERT_TYPE_OK_FOR_REFCOUNTING(X)
+#endif
+
 /**
  * Use this macro to declare and implement the AddRef & Release methods for a
  * given non-XPCOM <i>_class</i>.
@@ -413,6 +491,7 @@ public:
 #define NS_INLINE_DECL_REFCOUNTING(_class)                                    \
 public:                                                                       \
   NS_METHOD_(MozExternalRefCountType) AddRef(void) {                          \
+    MOZ_ASSERT_TYPE_OK_FOR_REFCOUNTING(_class)                                \
     MOZ_ASSERT(int32_t(mRefCnt) >= 0, "illegal refcnt");                      \
     NS_ASSERT_OWNINGTHREAD(_class);                                           \
     ++mRefCnt;                                                                \
@@ -448,6 +527,7 @@ public:
 #define NS_INLINE_DECL_THREADSAFE_REFCOUNTING(_class)                         \
 public:                                                                       \
   NS_METHOD_(MozExternalRefCountType) AddRef(void) {                          \
+    MOZ_ASSERT_TYPE_OK_FOR_REFCOUNTING(_class)                                \
     MOZ_ASSERT(int32_t(mRefCnt) >= 0, "illegal refcnt");                      \
     nsrefcnt count = ++mRefCnt;                                               \
     NS_LOG_ADDREF(this, count, #_class, sizeof(*this));                       \
@@ -639,13 +719,13 @@ NS_IMETHODIMP_(void) _class::DeleteCycleCollectable(void)                     \
 
 struct QITableEntry
 {
-  const nsIID *iid;     // null indicates end of the QITableEntry array
+  const nsIID* iid;     // null indicates end of the QITableEntry array
   int32_t   offset;
 };
 
 NS_COM_GLUE nsresult NS_FASTCALL
 NS_TableDrivenQI(void* aThis, REFNSIID aIID,
-                 void **aInstancePtr, const QITableEntry* entries);
+                 void** aInstancePtr, const QITableEntry* aEntries);
 
 /**
  * Implement table-driven queryinterface
@@ -662,14 +742,14 @@ NS_IMETHODIMP _class::QueryInterface(REFNSIID aIID, void** aInstancePtr)      \
   static const QITableEntry table[] = {
 
 #define NS_INTERFACE_TABLE_ENTRY(_class, _interface)                          \
-  { &_interface::COMTypeInfo<int>::kIID,                                      \
+  { &NS_GET_IID(_interface),                                                  \
     int32_t(reinterpret_cast<char*>(                                          \
                         static_cast<_interface*>((_class*) 0x1000)) -         \
                reinterpret_cast<char*>((_class*) 0x1000))                     \
   },
 
 #define NS_INTERFACE_TABLE_ENTRY_AMBIGUOUS(_class, _interface, _implClass)    \
-  { &_interface::COMTypeInfo<int>::kIID,                                      \
+  { &NS_GET_IID(_interface),                                                  \
     int32_t(reinterpret_cast<char*>(                                          \
                         static_cast<_interface*>(                             \
                                        static_cast<_implClass*>(              \
@@ -800,12 +880,12 @@ NS_IMETHODIMP _class::QueryInterface(REFNSIID aIID, void** aInstancePtr)      \
   NS_IMPL_QUERY_TAIL_GUTS
 
 
-  /*
-    This is the new scheme.  Using this notation now will allow us to switch to
-    a table driven mechanism when it's ready.  Note the difference between this
-    and the (currently) underlying NS_IMPL_QUERY_INTERFACE mechanism.  You must
-    explicitly mention |nsISupports| when using the interface maps.
-  */
+/*
+  This is the new scheme.  Using this notation now will allow us to switch to
+  a table driven mechanism when it's ready.  Note the difference between this
+  and the (currently) underlying NS_IMPL_QUERY_INTERFACE mechanism.  You must
+  explicitly mention |nsISupports| when using the interface maps.
+*/
 #define NS_INTERFACE_MAP_BEGIN(_implClass)      NS_IMPL_QUERY_HEAD(_implClass)
 #define NS_INTERFACE_MAP_ENTRY(_interface)      NS_IMPL_QUERY_BODY(_interface)
 #define NS_INTERFACE_MAP_ENTRY_CONDITIONAL(_interface, condition)             \

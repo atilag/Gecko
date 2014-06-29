@@ -42,17 +42,26 @@ typedef double (*UnaryFunType)(double);
 
 class MathCache
 {
+  public:
+    enum MathFuncId {
+        Zero,
+        Sin, Cos, Tan, Sinh, Cosh, Tanh, Asin, Acos, Atan, Asinh, Acosh, Atanh,
+        Sqrt, Log, Log10, Log2, Log1p, Exp, Expm1, Cbrt, Trunc, Sign
+    };
+
+  private:
     static const unsigned SizeLog2 = 12;
     static const unsigned Size = 1 << SizeLog2;
-    struct Entry { double in; UnaryFunType f; double out; };
+    struct Entry { double in; MathFuncId id; double out; };
     Entry table[Size];
 
   public:
     MathCache();
 
-    unsigned hash(double x) {
+    unsigned hash(double x, MathFuncId id) {
         union { double d; struct { uint32_t one, two; } s; } u = { x };
         uint32_t hash32 = u.s.one ^ u.s.two;
+        hash32 += uint32_t(id) << 8;
         uint16_t hash16 = uint16_t(hash32 ^ (hash32 >> 16));
         return (hash16 & (Size - 1)) ^ (hash16 >> (16 - SizeLog2));
     }
@@ -61,13 +70,13 @@ class MathCache
      * N.B. lookup uses double-equality. This is only safe if hash() maps +0
      * and -0 to different table entries, which is asserted in MathCache().
      */
-    double lookup(UnaryFunType f, double x) {
-        unsigned index = hash(x);
+    double lookup(UnaryFunType f, double x, MathFuncId id) {
+        unsigned index = hash(x, id);
         Entry &e = table[index];
-        if (e.in == x && e.f == f)
+        if (e.in == x && e.id == id)
             return e.out;
         e.in = x;
-        e.f = f;
+        e.id = id;
         return e.out = f(x);
     }
 
@@ -100,6 +109,9 @@ js_math_min(JSContext *cx, unsigned argc, js::Value *vp);
 
 extern bool
 js_math_sqrt(JSContext *cx, unsigned argc, js::Value *vp);
+
+extern bool
+js_math_pow_handle(JSContext *cx, js::HandleValue base, js::HandleValue power, js::MutableHandleValue result);
 
 extern bool
 js_math_pow(JSContext *cx, unsigned argc, js::Value *vp);
@@ -260,10 +272,16 @@ extern bool
 math_clz32(JSContext *cx, unsigned argc, Value *vp);
 
 extern bool
+math_floor_handle(JSContext *cx, HandleValue v, MutableHandleValue r);
+
+extern bool
 math_floor(JSContext *cx, unsigned argc, Value *vp);
 
 extern double
 math_floor_impl(double x);
+
+extern bool
+math_round_handle(JSContext *cx, HandleValue arg, MutableHandleValue res);
 
 extern bool
 math_round(JSContext *cx, unsigned argc, Value *vp);

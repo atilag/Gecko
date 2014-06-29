@@ -19,7 +19,7 @@ class AutoInflatedString {
     size_t length_;
 
   public:
-    AutoInflatedString(JSContext *cx) : cx(cx), chars_(nullptr), length_(0) { }
+    explicit AutoInflatedString(JSContext *cx) : cx(cx), chars_(nullptr), length_(0) { }
     ~AutoInflatedString() {
         JS_free(cx, chars_);
     }
@@ -72,7 +72,7 @@ BEGIN_TEST(testParseJSON_success)
     JS::Rooted<JSFlatString*> str(cx);
 
     const jschar emptystr[] = { '\0' };
-    str = js_NewStringCopyN<CanGC>(cx, emptystr, 0);
+    str = js::NewStringCopyN<CanGC>(cx, emptystr, 0);
     CHECK(str);
     expected = STRING_TO_JSVAL(str);
     CHECK(TryParse(cx, "\"\"", expected));
@@ -138,7 +138,7 @@ BEGIN_TEST(testParseJSON_success)
 template<size_t N> static JSFlatString *
 NewString(JSContext *cx, const jschar (&chars)[N])
 {
-    return js_NewStringCopyN<CanGC>(cx, chars, N);
+    return js::NewStringCopyN<CanGC>(cx, chars, N);
 }
 
 template<size_t N> inline bool

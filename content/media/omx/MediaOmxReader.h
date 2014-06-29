@@ -49,6 +49,10 @@ protected:
   // information used for creating OMX decoder such as video/audio codec.
   virtual nsresult InitOmxDecoder();
 
+  // Called inside DecodeVideoFrame, DecodeAudioData, ReadMetadata and Seek
+  // to activate the decoder automatically.
+  virtual void EnsureActive();
+
 public:
   MediaOmxReader(AbstractMediaDecoder* aDecoder);
   ~MediaOmxReader();
@@ -76,14 +80,15 @@ public:
   virtual bool IsDormantNeeded();
   virtual void ReleaseMediaResources();
 
-  virtual void ReleaseDecoder() MOZ_OVERRIDE;
-
   virtual nsresult ReadMetadata(MediaInfo* aInfo,
                                 MetadataTags** aTags);
   virtual nsresult Seek(int64_t aTime, int64_t aStartTime, int64_t aEndTime, int64_t aCurrentTime);
 
+  virtual bool IsMediaSeekable() MOZ_OVERRIDE;
+
   virtual void SetIdle() MOZ_OVERRIDE;
-  virtual void SetActive() MOZ_OVERRIDE;
+
+  virtual void Shutdown() MOZ_OVERRIDE;
 
   void SetAudioChannel(dom::AudioChannel aAudioChannel) {
     mAudioChannel = aAudioChannel;
@@ -99,12 +104,6 @@ public:
   // ANDROID_VERSION < 19
   void CheckAudioOffload();
 #endif
-
-private:
-  // This flag is true when SetActive() has been called without a matching
-  // SetIdle(). This is used to sanity check the SetIdle/SetActive calls, to
-  // ensure SetActive has been called before a decode call.
-  DebugOnly<bool> mIsActive;
 };
 
 } // namespace mozilla

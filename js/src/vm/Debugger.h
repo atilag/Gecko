@@ -8,6 +8,7 @@
 #define vm_Debugger_h
 
 #include "mozilla/LinkedList.h"
+#include "mozilla/Range.h"
 
 #include "jsclist.h"
 #include "jscntxt.h"
@@ -70,7 +71,6 @@ class DebuggerWeakMap : private WeakMap<Key, Value, DefaultHasher<Key> >
 
     /* Expose WeakMap public interface */
 
-    using Base::clearWithoutCallingDestructors;
     using Base::lookupForAdd;
     using Base::all;
     using Base::trace;
@@ -443,6 +443,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     static JSTrapStatus onSingleStep(JSContext *cx, MutableHandleValue vp);
     static bool handleBaselineOsr(JSContext *cx, InterpreterFrame *from, jit::BaselineFrame *to);
     static bool handleIonBailout(JSContext *cx, jit::RematerializedFrame *from, jit::BaselineFrame *to);
+    static void propagateForcedReturn(JSContext *cx, AbstractFramePtr frame, HandleValue rval);
 
     /************************************* Functions for use by Debugger.cpp. */
 
@@ -507,6 +508,8 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
      * happens in the target compartment--rotational symmetry.)
      */
     bool unwrapDebuggeeValue(JSContext *cx, MutableHandleValue vp);
+    bool unwrapPropDescInto(JSContext *cx, HandleObject obj, Handle<PropDesc> wrapped,
+                            MutableHandle<PropDesc> unwrapped);
 
     /*
      * Store the Debugger.Frame object for frame in *vp.
@@ -760,7 +763,7 @@ Debugger::onNewGlobalObject(JSContext *cx, Handle<GlobalObject *> global)
 
 extern bool
 EvaluateInEnv(JSContext *cx, Handle<Env*> env, HandleValue thisv, AbstractFramePtr frame,
-              ConstTwoByteChars chars, unsigned length, const char *filename, unsigned lineno,
+              mozilla::Range<const jschar> chars, const char *filename, unsigned lineno,
               MutableHandleValue rval);
 
 }

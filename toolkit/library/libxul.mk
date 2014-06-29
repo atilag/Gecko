@@ -168,7 +168,11 @@ EXTRA_DSO_LDOPTS += $(MOZ_DBUS_GLIB_LIBS)
 endif
 
 ifdef MOZ_WIDGET_GTK
+ifdef MOZ_ENABLE_GTK3
+EXTRA_DSO_LDOPTS += $(filter-out -lgtk-3 -lgdk-3,$(TK_LIBS)) -lmozgtk_stub
+else
 EXTRA_DSO_LDOPTS += $(TK_LIBS)
+endif
 EXTRA_DSO_LDOPTS += $(XLDFLAGS) $(XLIBS) $(XEXT_LIBS) $(XCOMPOSITE_LIBS) $(MOZ_PANGO_LIBS) $(XT_LIBS) -lgthread-2.0
 EXTRA_DSO_LDOPTS += $(FT2_LIBS)
 endif
@@ -198,16 +202,12 @@ EXTRA_DSO_LDOPTS += -lelf -ldemangle
 endif
 endif
 
-ifneq (,$(filter DragonFly FreeBSD NetBSD OpenBSD,$(OS_ARCH)))
-OS_LIBS += $(call EXPAND_LIBNAME,kvm)
-endif
-
 ifeq ($(OS_ARCH),FreeBSD)
 OS_LIBS += $(call EXPAND_LIBNAME,util)
 endif
 
 ifeq ($(OS_ARCH),WINNT)
-OS_LIBS += $(call EXPAND_LIBNAME,shell32 ole32 version winspool comdlg32 imm32 msimg32 shlwapi psapi ws2_32 dbghelp rasapi32 rasdlg iphlpapi uxtheme setupapi secur32 sensorsapi portabledeviceguids windowscodecs wininet wbemuuid wintrust)
+OS_LIBS += $(call EXPAND_LIBNAME,shell32 ole32 version winspool comdlg32 imm32 msimg32 shlwapi psapi ws2_32 dbghelp rasapi32 rasdlg iphlpapi uxtheme setupapi secur32 sensorsapi portabledeviceguids windowscodecs wininet wbemuuid wintrust wtsapi32)
 ifdef ACCESSIBILITY
 OS_LIBS += $(call EXPAND_LIBNAME,oleacc)
 endif
@@ -245,4 +245,29 @@ OS_LIBS += $(LIBICONV)
 
 ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
 OS_LIBS += $(call EXPAND_LIBNAME,usp10 oleaut32)
+endif
+
+EXTRA_DSO_LDOPTS += $(call EXPAND_LIBNAME_PATH,StaticXULComponentsEnd,$(DEPTH)/toolkit/library/StaticXULComponentsEnd)
+
+# BFD ld doesn't create multiple PT_LOADs as usual when an unknown section
+# exists. Using an implicit linker script to make it fold that section in
+# .data.rel.ro makes it create multiple PT_LOADs. That implicit linker
+# script however makes gold misbehave, first because it doesn't like that
+# the linker script is given after crtbegin.o, and even past that, replaces
+# the default section rules with those from the script instead of
+# supplementing them. Which leads to a lib with a huge load of sections.
+ifdef LD_IS_BFD
+EXTRA_DSO_LDOPTS += $(topsrcdir)/toolkit/library/StaticXULComponents.ld
+endif
+
+ifeq (WINNT,$(OS_TARGET))
+get_first_and_last = dumpbin -exports $1 | grep _NSModule@@ | sort -k 3 | sed -n 's/^.*?\([^@]*\)@@.*$$/\1/;1p;$$p'
+else
+get_first_and_last = $(TOOLCHAIN_PREFIX)nm -g $1 | grep _NSModule$$ | sort | sed -n 's/^.* _*\([^ ]*\)$$/\1/;1p;$$p'
+endif
+
+LOCAL_CHECKS = test "$$($(get_first_and_last) | xargs echo)" != "start_kPStaticModules_NSModule end_kPStaticModules_NSModule" && echo "NSModules are not ordered appropriately" && exit 1 || exit 0
+
+ifeq (Linux,$(OS_ARCH))
+LOCAL_CHECKS += ; test "$$($(TOOLCHAIN_PREFIX)readelf -l $1 | awk '$1 == "LOAD" { t += 1 } END { print t }')" -le 1 && echo "Only one PT_LOAD segment" && exit 1 || exit 0
 endif

@@ -26,7 +26,7 @@ class LinearScanVirtualRegister : public VirtualRegister
     bool finished_ : 1;
 
   public:
-    LinearScanVirtualRegister(TempAllocator &alloc)
+    explicit LinearScanVirtualRegister(TempAllocator &alloc)
       : VirtualRegister(alloc)
     {}
     void setCanonicalSpill(LAllocation *alloc) {
@@ -103,7 +103,7 @@ class LinearScanAllocator
 
     uint32_t allocateSlotFor(const LiveInterval *interval);
     bool splitInterval(LiveInterval *interval, CodePosition pos);
-    bool splitBlockingIntervals(LAllocation allocation);
+    bool splitBlockingIntervals(AnyRegister allocatedReg);
     bool assign(LAllocation allocation);
     bool spill();
     void freeAllocation(LiveInterval *interval, LAllocation *alloc);

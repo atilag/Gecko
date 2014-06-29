@@ -67,10 +67,9 @@ class nsMIMEInfoBase : public nsIMIMEInfo {
     };
 
     // nsMIMEInfoBase methods
-    nsMIMEInfoBase(const char *aMIMEType = "") NS_HIDDEN;
-    nsMIMEInfoBase(const nsACString& aMIMEType) NS_HIDDEN;
-    nsMIMEInfoBase(const nsACString& aType, HandlerClass aClass) NS_HIDDEN;
-    virtual ~nsMIMEInfoBase();        // must be virtual, as the the base class's Release should call the subclass's destructor
+    nsMIMEInfoBase(const char *aMIMEType = "");
+    nsMIMEInfoBase(const nsACString& aMIMEType);
+    nsMIMEInfoBase(const nsACString& aType, HandlerClass aClass);
 
     void SetMIMEType(const nsACString & aMIMEType) { mSchemeOrType = aMIMEType; }
 
@@ -92,6 +91,8 @@ class nsMIMEInfoBase : public nsIMIMEInfo {
     bool HasExtensions() const { return mExtensions.Length() != 0; }
 
   protected:
+    virtual ~nsMIMEInfoBase();        // must be virtual, as the the base class's Release should call the subclass's destructor
+
     /**
      * Launch the default application for the given file.
      * For even more control over the launching, override launchWithFile.
@@ -99,14 +100,14 @@ class nsMIMEInfoBase : public nsIMIMEInfo {
      *
      * @param aFile The file that should be opened
      */
-    virtual NS_HIDDEN_(nsresult) LaunchDefaultWithFile(nsIFile* aFile) = 0;
+    virtual nsresult LaunchDefaultWithFile(nsIFile* aFile) = 0;
 
     /**
      * Loads the URI with the OS default app.
      *
      * @param aURI The URI to pass off to the OS.
      */
-    virtual NS_HIDDEN_(nsresult) LoadUriInternal(nsIURI *aURI) = 0;
+    virtual nsresult LoadUriInternal(nsIURI *aURI) = 0;
 
     static already_AddRefed<nsIProcess> InitProcess(nsIFile* aApp,
                                                     nsresult* aResult);
@@ -120,9 +121,9 @@ class nsMIMEInfoBase : public nsIMIMEInfo {
      * @param aApp The application to launch (may not be null)
      * @param aArg The argument to pass on the command line
      */
-    static NS_HIDDEN_(nsresult) LaunchWithIProcess(nsIFile* aApp,
+    static nsresult LaunchWithIProcess(nsIFile* aApp,
                                                    const nsCString &aArg);
-    static NS_HIDDEN_(nsresult) LaunchWithIProcess(nsIFile* aApp,
+    static nsresult LaunchWithIProcess(nsIFile* aApp,
                                                    const nsString &aArg);
 
     /**
@@ -131,7 +132,7 @@ class nsMIMEInfoBase : public nsIMIMEInfo {
      * @param  aURI      the file: URI in question
      * @param  aFile     the associated nsIFile (out param)
      */
-    static NS_HIDDEN_(nsresult) GetLocalFileFromURI(nsIURI *aURI,
+    static nsresult GetLocalFileFromURI(nsIURI *aURI,
                                                     nsIFile **aFile);
 
     // member variables
@@ -181,13 +182,13 @@ class nsMIMEInfoImpl : public nsMIMEInfoBase {
      * The base class implementation is to use LaunchWithIProcess in combination
      * with mDefaultApplication. Subclasses can override that behaviour.
      */
-    virtual NS_HIDDEN_(nsresult) LaunchDefaultWithFile(nsIFile* aFile);
+    virtual nsresult LaunchDefaultWithFile(nsIFile* aFile);
 
     /**
      * Loads the URI with the OS default app.  This should be overridden by each
      * OS's implementation.
      */
-    virtual NS_HIDDEN_(nsresult) LoadUriInternal(nsIURI *aURI) = 0;
+    virtual nsresult LoadUriInternal(nsIURI *aURI) = 0;
 
     nsCOMPtr<nsIFile>      mDefaultApplication; ///< default application associated with this type.
 };

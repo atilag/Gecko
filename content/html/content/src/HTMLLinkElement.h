@@ -8,6 +8,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/Link.h"
+#include "ImportManager.h"
 #include "nsGenericHTMLElement.h"
 #include "nsIDOMHTMLLinkElement.h"
 #include "nsStyleLinkElement.h"
@@ -23,7 +24,7 @@ class HTMLLinkElement MOZ_FINAL : public nsGenericHTMLElement,
                                   public Link
 {
 public:
-  HTMLLinkElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
+  HTMLLinkElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo);
   virtual ~HTMLLinkElement();
 
   // nsISupports
@@ -42,13 +43,15 @@ public:
   void LinkAdded();
   void LinkRemoved();
 
+  void UpdateImport();
+
   // nsIDOMEventTarget
   virtual nsresult PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
   virtual nsresult PostHandleEvent(
                      EventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
 
   // nsINode
-  virtual nsresult Clone(nsINodeInfo* aNodeInfo, nsINode** aResult) const MOZ_OVERRIDE;
+  virtual nsresult Clone(mozilla::dom::NodeInfo* aNodeInfo, nsINode** aResult) const MOZ_OVERRIDE;
   virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
 
   // nsIContent
@@ -134,6 +137,12 @@ public:
     SetHTMLAttr(nsGkAtoms::target, aTarget, aRv);
   }
 
+  already_AddRefed<nsIDocument> GetImport();
+  already_AddRefed<ImportLoader> GetImportLoader()
+  {
+    return nsRefPtr<ImportLoader>(mImportLoader).forget();
+  }
+
 protected:
   // nsStyleLinkElement
   virtual already_AddRefed<nsIURI> GetStyleSheetURL(bool* aIsInline) MOZ_OVERRIDE;
@@ -148,6 +157,8 @@ protected:
   virtual void GetItemValueText(nsAString& text) MOZ_OVERRIDE;
   virtual void SetItemValueText(const nsAString& text) MOZ_OVERRIDE;
   nsRefPtr<nsDOMTokenList > mRelList;
+private:
+  nsRefPtr<ImportLoader> mImportLoader;
 };
 
 } // namespace dom

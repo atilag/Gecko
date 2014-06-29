@@ -6,7 +6,7 @@
 #include "URL.h"
 
 #include "nsGlobalWindow.h"
-#include "nsIDOMFile.h"
+#include "nsDOMFile.h"
 #include "DOMMediaStream.h"
 #include "mozilla/dom/MediaSource.h"
 #include "mozilla/dom/URLBinding.h"
@@ -15,6 +15,7 @@
 #include "nsIIOService.h"
 #include "nsEscape.h"
 #include "nsNetCID.h"
+#include "nsNetUtil.h"
 #include "nsIURL.h"
 
 namespace mozilla {
@@ -115,7 +116,10 @@ URL::CreateObjectURL(const GlobalObject& aGlobal,
                      nsString& aResult,
                      ErrorResult& aError)
 {
-  CreateObjectURLInternal(aGlobal, aBlob,
+  DOMFile* blob = static_cast<DOMFile*>(aBlob);
+  MOZ_ASSERT(blob);
+
+  CreateObjectURLInternal(aGlobal, blob->Impl(),
                           NS_LITERAL_CSTRING(BLOBURI_SCHEME), aOptions, aResult,
                           aError);
 }
@@ -148,7 +152,7 @@ URL::CreateObjectURLInternal(const GlobalObject& aGlobal, nsISupports* aObject,
                              const objectURLOptions& aOptions,
                              nsString& aResult, ErrorResult& aError)
 {
-  nsCOMPtr<nsIPrincipal> principal = nsContentUtils::GetObjectPrincipal(aGlobal.Get());
+  nsCOMPtr<nsIPrincipal> principal = nsContentUtils::ObjectPrincipal(aGlobal.Get());
 
   nsCString url;
   nsresult rv = nsHostObjectProtocolHandler::AddDataEntry(aScheme, aObject,
@@ -181,7 +185,7 @@ URL::CreateObjectURLInternal(const GlobalObject& aGlobal, nsISupports* aObject,
 void
 URL::RevokeObjectURL(const GlobalObject& aGlobal, const nsAString& aURL)
 {
-  nsIPrincipal* principal = nsContentUtils::GetObjectPrincipal(aGlobal.Get());
+  nsIPrincipal* principal = nsContentUtils::ObjectPrincipal(aGlobal.Get());
 
   NS_LossyConvertUTF16toASCII asciiurl(aURL);
 
@@ -262,7 +266,34 @@ URL::SetProtocol(const nsAString& aProtocol)
   nsAString::const_iterator iter(start);
 
   FindCharInReadable(':', iter, end);
-  mURI->SetScheme(NS_ConvertUTF16toUTF8(Substring(start, iter)));
+
+  // Changing the protocol of a URL, changes the "nature" of the URI
+  // implementation. In order to do this properly, we have to serialize the
+  // existing URL and reparse it in a new object.
+  nsCOMPtr<nsIURI> clone;
+  nsresult rv = mURI->Clone(getter_AddRefs(clone));
+  if (NS_WARN_IF(NS_FAILED(rv)) || !clone) {
+    return;
+  }
+
+  rv = clone->SetScheme(NS_ConvertUTF16toUTF8(Substring(start, iter)));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return;
+  }
+
+  nsAutoCString href;
+  rv = clone->GetSpec(href);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return;
+  }
+
+  nsCOMPtr<nsIURI> uri;
+  rv = NS_NewURI(getter_AddRefs(uri), href);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return;
+  }
+
+  mURI = uri;
 }
 
 #define URL_GETTER( value, func ) \
@@ -341,7 +372,18 @@ URL::UpdateURLSearchParams()
 void
 URL::GetHostname(nsString& aHostname) const
 {
-  URL_GETTER(aHostname, GetHost);
+  aHostname.Truncate();
+  nsAutoCString tmp;
+  nsresult rv = mURI->GetHost(tmp);
+  if (NS_SUCCEEDED(rv)) {
+    if (tmp.FindChar(':') != -1) { // Escape IPv6 address
+      MOZ_ASSERT(!tmp.Length() ||
+        (tmp[0] !='[' && tmp[tmp.Length() - 1] != ']'));
+      tmp.Insert('[', 0);
+      tmp.Append(']');
+    }
+    CopyUTF8toUTF16(tmp, aHostname);
+  }
 }
 
 void

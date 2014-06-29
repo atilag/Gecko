@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 4 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -203,6 +203,11 @@ var gPermissionManager = {
   {
     if (aTopic == "perm-changed") {
       var permission = aSubject.QueryInterface(Components.interfaces.nsIPermission);
+
+      // Ignore unrelated permission types.
+      if (permission.type != this._type)
+        return;
+
       if (aData == "added") {
         this._addPermissionToList(permission);
         ++this._view._rowCount;
@@ -276,7 +281,11 @@ var gPermissionManager = {
   
   onPermissionKeyPress: function (aEvent)
   {
-    if (aEvent.keyCode == 46)
+    if (aEvent.keyCode == KeyEvent.DOM_VK_DELETE
+#ifdef XP_MACOSX
+        || aEvent.keyCode == KeyEvent.DOM_VK_BACK_SPACE
+#endif
+       )
       this.onPermissionDeleted();
   },
   

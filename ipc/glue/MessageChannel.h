@@ -35,6 +35,9 @@ class RefCountedMonitor : public Monitor
     {}
 
     NS_INLINE_DECL_THREADSAFE_REFCOUNTING(RefCountedMonitor)
+
+  private:
+    ~RefCountedMonitor() {}
 };
 
 class MessageChannel : HasResultCodes
@@ -159,6 +162,8 @@ class MessageChannel : HasResultCodes
   protected:
     // The deepest sync stack frame for this channel.
     SyncStackFrame* mTopFrame;
+
+    bool mIsSyncWaitingOnNonMainThread;
 
     // The deepest sync stack frame on any channel.
     static SyncStackFrame* sStaticTopFrame;
@@ -379,7 +384,9 @@ class MessageChannel : HasResultCodes
         RefCountedTask(CancelableTask* aTask)
           : mTask(aTask)
         { }
+      private:
         ~RefCountedTask() { delete mTask; }
+      public:
         void Run() { mTask->Run(); }
         void Cancel() { mTask->Cancel(); }
 

@@ -9,13 +9,11 @@
 #define nsCSSValue_h___
 
 #include "mozilla/Attributes.h"
-#include "mozilla/FloatingPoint.h"
 #include "mozilla/MemoryReporting.h"
 
 #include "nsIPrincipal.h"
 #include "nsIURI.h"
 #include "nsCOMPtr.h"
-#include "nsCRTGlue.h"
 #include "nsCSSKeywords.h"
 #include "nsCSSProperty.h"
 #include "nsColor.h"
@@ -25,15 +23,19 @@
 #include "nsStringBuffer.h"
 #include "nsTArray.h"
 #include "nsStyleConsts.h"
+#include "gfxFontFamilyList.h"
 
 class imgRequestProxy;
-class nsCSSStyleSheet;
 class nsIDocument;
 class nsIPrincipal;
 class nsIURI;
 class nsPresContext;
 template <class T>
 class nsPtrHashKey;
+
+namespace mozilla {
+class CSSStyleSheet;
+} // namespace mozilla
 
 // Deletes a linked list iteratively to avoid blowing up the stack (bug 456196).
 #define NS_CSS_DELETE_LIST_MEMBER(type_, ptr_, member_)                        \
@@ -84,8 +86,10 @@ struct URLValue {
   URLValue(nsIURI* aURI, nsStringBuffer* aString, nsIURI* aReferrer,
            nsIPrincipal* aOriginPrincipal);
 
+protected:
   ~URLValue();
 
+public:
   bool operator==(const URLValue& aOther) const;
 
   // URIEquals only compares URIs and principals (unlike operator==, which
@@ -125,8 +129,10 @@ struct ImageValue : public URLValue {
   // aString must not be null.
   ImageValue(nsIURI* aURI, nsStringBuffer* aString, nsIURI* aReferrer,
              nsIPrincipal* aOriginPrincipal, nsIDocument* aDocument);
+private:
   ~ImageValue();
 
+public:
   // Inherit operator== from URLValue
 
   nsRefPtrHashtable<nsPtrHashKey<nsISupports>, imgRequestProxy> mRequests; 
@@ -214,7 +220,6 @@ enum nsCSSUnit {
 
   eCSSUnit_String       = 11,     // (char16_t*) a string value
   eCSSUnit_Ident        = 12,     // (char16_t*) a string value
-  eCSSUnit_Families     = 13,     // (char16_t*) a string value
   eCSSUnit_Attr         = 14,     // (char16_t*) a attr(string) value
   eCSSUnit_Local_Font   = 15,     // (char16_t*) a local font name
   eCSSUnit_Font_Format  = 16,     // (char16_t*) a font format name
@@ -265,6 +270,8 @@ enum nsCSSUnit {
   eCSSUnit_PairList     = 56,     // (nsCSSValuePairList*) list of value pairs
   eCSSUnit_PairListDep  = 57,     // (nsCSSValuePairList*) same as PairList
                                   //   but does not own the list
+
+  eCSSUnit_FontFamilyList = 58,   // (FontFamilyList*) value
 
   eCSSUnit_Integer      = 70,     // (int) simple value
   eCSSUnit_Enumerated   = 71,     // (int) value has enumerated meaning
@@ -364,6 +371,7 @@ public:
   explicit nsCSSValue(nsCSSValueGradient* aValue);
   explicit nsCSSValue(nsCSSValueTokenStream* aValue);
   explicit nsCSSValue(mozilla::css::GridTemplateAreasValue* aValue);
+  explicit nsCSSValue(mozilla::FontFamilyList* aValue);
   nsCSSValue(const nsCSSValue& aCopy);
   ~nsCSSValue() { Reset(); }
 
@@ -542,6 +550,15 @@ public:
     return mValue.mSharedList;
   }
 
+  mozilla::FontFamilyList* GetFontFamilyListValue() const
+  {
+    NS_ABORT_IF_FALSE(mUnit == eCSSUnit_FontFamilyList,
+                      "not a font family list value");
+    NS_ASSERTION(mValue.mFontFamilyList != nullptr,
+                 "font family list value should never be null");
+    return mValue.mFontFamilyList;
+  }
+
   // bodies of these are below
   inline nsCSSValuePair& GetPairValue();
   inline const nsCSSValuePair& GetPairValue() const;
@@ -622,6 +639,7 @@ public:
   void SetGradientValue(nsCSSValueGradient* aGradient);
   void SetTokenStreamValue(nsCSSValueTokenStream* aTokenStream);
   void SetGridTemplateAreas(mozilla::css::GridTemplateAreasValue* aValue);
+  void SetFontFamilyListValue(mozilla::FontFamilyList* aFontListValue);
   void SetPairValue(const nsCSSValuePair* aPair);
   void SetPairValue(const nsCSSValue& xValue, const nsCSSValue& yValue);
   void SetSharedListValue(nsCSSValueSharedList* aList);
@@ -689,6 +707,7 @@ protected:
     nsCSSValuePairList_heap* mPairList;
     nsCSSValuePairList* mPairListDependent;
     nsCSSValueFloatColor* mFloatColor;
+    mozilla::FontFamilyList* mFontFamilyList;
   } mValue;
 };
 
@@ -1440,7 +1459,7 @@ public:
   nsCOMPtr<nsIURI> mBaseURI;
   nsCOMPtr<nsIURI> mSheetURI;
   nsCOMPtr<nsIPrincipal> mSheetPrincipal;
-  nsCSSStyleSheet* mSheet;
+  mozilla::CSSStyleSheet* mSheet;
   uint32_t mLineNumber;
   uint32_t mLineOffset;
 

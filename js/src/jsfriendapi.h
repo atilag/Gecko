@@ -7,6 +7,7 @@
 #ifndef jsfriendapi_h
 #define jsfriendapi_h
 
+#include "mozilla/Casting.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/TypedEnum.h"
 
@@ -36,7 +37,7 @@ class JSAtom;
 struct JSErrorFormatString;
 class JSLinearString;
 struct JSJitInfo;
-class JSErrorReport;
+struct JSErrorReport;
 
 namespace JS {
 template <class T>
@@ -48,9 +49,6 @@ JS_SetGrayGCRootsTracer(JSRuntime *rt, JSTraceDataOp traceOp, void *data);
 
 extern JS_FRIEND_API(JSString *)
 JS_GetAnonymousString(JSRuntime *rt);
-
-extern JS_FRIEND_API(void)
-JS_SetIsWorkerRuntime(JSRuntime *rt);
 
 extern JS_FRIEND_API(JSObject *)
 JS_FindCompilationScope(JSContext *cx, JS::HandleObject obj);
@@ -123,6 +121,12 @@ JS_GetCompartmentPrincipals(JSCompartment *compartment);
 
 extern JS_FRIEND_API(void)
 JS_SetCompartmentPrincipals(JSCompartment *compartment, JSPrincipals *principals);
+
+extern JS_FRIEND_API(JSPrincipals *)
+JS_GetScriptPrincipals(JSScript *script);
+
+extern JS_FRIEND_API(JSPrincipals *)
+JS_GetScriptOriginPrincipals(JSScript *script);
 
 /* Safe to call with input obj == nullptr. Returns non-nullptr iff obj != nullptr. */
 extern JS_FRIEND_API(JSObject *)
@@ -285,8 +289,7 @@ namespace js {
             js::proxy_SetElement,                                                       \
             js::proxy_GetGenericAttributes,                                             \
             js::proxy_SetGenericAttributes,                                             \
-            js::proxy_DeleteProperty,                                                   \
-            js::proxy_DeleteElement,                                                    \
+            js::proxy_DeleteGeneric,                                                    \
             js::proxy_Watch, js::proxy_Unwatch,                                         \
             js::proxy_Slice,                                                            \
             nullptr,             /* enumerate       */                                  \
@@ -351,10 +354,7 @@ proxy_GetGenericAttributes(JSContext *cx, JS::HandleObject obj, JS::HandleId id,
 extern JS_FRIEND_API(bool)
 proxy_SetGenericAttributes(JSContext *cx, JS::HandleObject obj, JS::HandleId id, unsigned *attrsp);
 extern JS_FRIEND_API(bool)
-proxy_DeleteProperty(JSContext *cx, JS::HandleObject obj, JS::Handle<PropertyName*> name,
-                     bool *succeeded);
-extern JS_FRIEND_API(bool)
-proxy_DeleteElement(JSContext *cx, JS::HandleObject obj, uint32_t index, bool *succeeded);
+proxy_DeleteGeneric(JSContext *cx, JS::HandleObject obj, JS::HandleId id, bool *succeeded);
 
 extern JS_FRIEND_API(void)
 proxy_Trace(JSTracer *trc, JSObject *obj);
@@ -447,16 +447,6 @@ IsSystemZone(JS::Zone *zone);
 
 extern JS_FRIEND_API(bool)
 IsAtomsCompartment(JSCompartment *comp);
-
-/*
- * Check whether it is OK to assign an undeclared variable with the name
- * |propname| at the current location in script.  It is not an error if there is
- * no current script location, or if that location is not an assignment to an
- * undeclared variable.  Reports an error if one needs to be reported (and,
- * particularly, always reports when it returns false).
- */
-extern JS_FRIEND_API(bool)
-ReportIfUndeclaredVarAssignment(JSContext *cx, JS::HandleString propname);
 
 /*
  * Returns whether we're in a non-strict property set (in that we're in a
@@ -586,9 +576,16 @@ struct Function {
 };
 
 struct Atom {
-    static const size_t LENGTH_SHIFT = 4;
-    size_t lengthAndFlags;
-    const jschar *chars;
+    static const uint32_t INLINE_CHARS_BIT = JS_BIT(2);
+    static const uint32_t LATIN1_CHARS_BIT = JS_BIT(6);
+    uint32_t flags;
+    uint32_t length;
+    union {
+        const JS::Latin1Char *nonInlineCharsLatin1;
+        const jschar *nonInlineCharsTwoByte;
+        JS::Latin1Char inlineStorageLatin1[1];
+        jschar inlineStorageTwoByte[1];
+    };
 };
 
 } /* namespace shadow */
@@ -681,7 +678,7 @@ NotifyAnimationActivity(JSObject *obj);
  * thus it will really return the outermost enclosing function *since the
  * innermost eval*.
  */
-JS_FRIEND_API(JSScript *)
+JS_FRIEND_API(JSFunction *)
 GetOutermostEnclosingFunctionOfScriptedCaller(JSContext *cx);
 
 JS_FRIEND_API(JSFunction *)
@@ -767,14 +764,20 @@ GetObjectSlot(JSObject *obj, size_t slot)
 inline const jschar *
 GetAtomChars(JSAtom *atom)
 {
-    return reinterpret_cast<shadow::Atom *>(atom)->chars;
+    using shadow::Atom;
+    Atom *atom_ = reinterpret_cast<Atom *>(atom);
+    JS_ASSERT(!(atom_->flags & Atom::LATIN1_CHARS_BIT));
+    if (atom_->flags & Atom::INLINE_CHARS_BIT) {
+        char *p = reinterpret_cast<char *>(atom);
+        return reinterpret_cast<const jschar *>(p + offsetof(Atom, inlineStorageTwoByte));
+    }
+    return atom_->nonInlineCharsTwoByte;
 }
 
 inline size_t
 GetAtomLength(JSAtom *atom)
 {
-    using shadow::Atom;
-    return reinterpret_cast<Atom*>(atom)->lengthAndFlags >> Atom::LENGTH_SHIFT;
+    return reinterpret_cast<shadow::Atom*>(atom)->length;
 }
 
 inline JSLinearString *
@@ -807,10 +810,12 @@ IsObjectInContextCompartment(JSObject *obj, const JSContext *cx);
  * XDR_BYTECODE_VERSION.
  */
 #define JSITER_ENUMERATE  0x1   /* for-in compatible hidden default iterator */
-#define JSITER_FOREACH    0x2   /* return [key, value] pair rather than key */
-#define JSITER_KEYVALUE   0x4   /* destructuring for-in wants [key, value] */
+#define JSITER_FOREACH    0x2   /* get obj[key] for each property */
+#define JSITER_KEYVALUE   0x4   /* obsolete destructuring for-in wants [key, value] */
 #define JSITER_OWNONLY    0x8   /* iterate over obj's own properties only */
 #define JSITER_HIDDEN     0x10  /* also enumerate non-enumerable properties */
+#define JSITER_SYMBOLS    0x20  /* also include symbol property keys */
+#define JSITER_SYMBOLSONLY 0x40 /* exclude string property keys */
 
 JS_FRIEND_API(bool)
 RunningWithTrustedPrincipals(JSContext *cx);
@@ -916,9 +921,10 @@ extern JS_FRIEND_API(bool)
 IsContextRunningJS(JSContext *cx);
 
 typedef bool
-(* DOMInstanceClassMatchesProto)(JSObject *protoObject, uint32_t protoID, uint32_t depth);
+(* DOMInstanceClassHasProtoAtDepth)(const Class *instanceClass,
+                                    uint32_t protoID, uint32_t depth);
 struct JSDOMCallbacks {
-    DOMInstanceClassMatchesProto instanceClassMatchesProto;
+    DOMInstanceClassHasProtoAtDepth instanceClassMatchesProto;
 };
 typedef struct JSDOMCallbacks DOMCallbacks;
 
@@ -988,13 +994,13 @@ struct ChromeCompartmentsOnly : public CompartmentFilter {
 
 struct SingleCompartment : public CompartmentFilter {
     JSCompartment *ours;
-    SingleCompartment(JSCompartment *c) : ours(c) {}
+    explicit SingleCompartment(JSCompartment *c) : ours(c) {}
     virtual bool match(JSCompartment *c) const { return c == ours; }
 };
 
 struct CompartmentsWithPrincipals : public CompartmentFilter {
     JSPrincipals *principals;
-    CompartmentsWithPrincipals(JSPrincipals *p) : principals(p) {}
+    explicit CompartmentsWithPrincipals(JSPrincipals *p) : principals(p) {}
     virtual bool match(JSCompartment *c) const {
         return JS_GetCompartmentPrincipals(c) == principals;
     }
@@ -1282,6 +1288,93 @@ extern JS_FRIEND_API(bool)
 JS_IsFloat64Array(JSObject *obj);
 
 /*
+ * Test for specific typed array types (ArrayBufferView subtypes) and return
+ * the unwrapped object if so, else nullptr.  Never throws.
+ */
+
+namespace js {
+
+extern JS_FRIEND_API(JSObject *)
+UnwrapInt8Array(JSObject *obj);
+extern JS_FRIEND_API(JSObject *)
+UnwrapUint8Array(JSObject *obj);
+extern JS_FRIEND_API(JSObject *)
+UnwrapUint8ClampedArray(JSObject *obj);
+extern JS_FRIEND_API(JSObject *)
+UnwrapInt16Array(JSObject *obj);
+extern JS_FRIEND_API(JSObject *)
+UnwrapUint16Array(JSObject *obj);
+extern JS_FRIEND_API(JSObject *)
+UnwrapInt32Array(JSObject *obj);
+extern JS_FRIEND_API(JSObject *)
+UnwrapUint32Array(JSObject *obj);
+extern JS_FRIEND_API(JSObject *)
+UnwrapFloat32Array(JSObject *obj);
+extern JS_FRIEND_API(JSObject *)
+UnwrapFloat64Array(JSObject *obj);
+
+extern JS_FRIEND_API(JSObject *)
+UnwrapArrayBuffer(JSObject *obj);
+
+extern JS_FRIEND_API(JSObject *)
+UnwrapArrayBufferView(JSObject *obj);
+
+namespace detail {
+
+extern JS_FRIEND_DATA(const Class* const) Int8ArrayClassPtr;
+extern JS_FRIEND_DATA(const Class* const) Uint8ArrayClassPtr;
+extern JS_FRIEND_DATA(const Class* const) Uint8ClampedArrayClassPtr;
+extern JS_FRIEND_DATA(const Class* const) Int16ArrayClassPtr;
+extern JS_FRIEND_DATA(const Class* const) Uint16ArrayClassPtr;
+extern JS_FRIEND_DATA(const Class* const) Int32ArrayClassPtr;
+extern JS_FRIEND_DATA(const Class* const) Uint32ArrayClassPtr;
+extern JS_FRIEND_DATA(const Class* const) Float32ArrayClassPtr;
+extern JS_FRIEND_DATA(const Class* const) Float64ArrayClassPtr;
+
+const size_t TypedArrayLengthSlot = 1;
+
+} // namespace detail
+
+/*
+ * Test for specific typed array types (ArrayBufferView subtypes) and return
+ * the unwrapped object if so, else nullptr.  Never throws.
+ */
+
+#define JS_DEFINE_DATA_AND_LENGTH_ACCESSOR(Type, type) \
+inline void \
+Get ## Type ## ArrayLengthAndData(JSObject *obj, uint32_t *length, type **data) \
+{ \
+    JS_ASSERT(GetObjectClass(obj) == detail::Type ## ArrayClassPtr); \
+    const JS::Value &slot = GetReservedSlot(obj, detail::TypedArrayLengthSlot); \
+    *length = mozilla::SafeCast<uint32_t>(slot.toInt32()); \
+    *data = static_cast<type*>(GetObjectPrivate(obj)); \
+}
+
+JS_DEFINE_DATA_AND_LENGTH_ACCESSOR(Int8, int8_t)
+JS_DEFINE_DATA_AND_LENGTH_ACCESSOR(Uint8, uint8_t)
+JS_DEFINE_DATA_AND_LENGTH_ACCESSOR(Uint8Clamped, uint8_t)
+JS_DEFINE_DATA_AND_LENGTH_ACCESSOR(Int16, int16_t)
+JS_DEFINE_DATA_AND_LENGTH_ACCESSOR(Uint16, uint16_t)
+JS_DEFINE_DATA_AND_LENGTH_ACCESSOR(Int32, int32_t)
+JS_DEFINE_DATA_AND_LENGTH_ACCESSOR(Uint32, uint32_t)
+JS_DEFINE_DATA_AND_LENGTH_ACCESSOR(Float32, float)
+JS_DEFINE_DATA_AND_LENGTH_ACCESSOR(Float64, double)
+
+#undef JS_DEFINE_DATA_AND_LENGTH_ACCESSOR
+
+// This one isn't inlined because it's rather tricky (by dint of having to deal
+// with a dozen-plus classes and varying slot layouts.
+extern JS_FRIEND_API(void)
+GetArrayBufferViewLengthAndData(JSObject *obj, uint32_t *length, uint8_t **data);
+
+// This one isn't inlined because there are a bunch of different ArrayBuffer
+// classes that would have to be individually handled here.
+extern JS_FRIEND_API(void)
+GetArrayBufferLengthAndData(JSObject *obj, uint32_t *length, uint8_t **data);
+
+} // namespace js
+
+/*
  * Unwrap Typed arrays all at once. Return nullptr without throwing if the
  * object cannot be viewed as the correct typed array, or the typed array
  * object on success, filling both outparameters.
@@ -1463,6 +1556,14 @@ typedef enum {
 extern JS_FRIEND_API(bool)
 JS_NeuterArrayBuffer(JSContext *cx, JS::HandleObject obj,
                      NeuterDataDisposition changeData);
+
+/*
+ * Check whether the obj is ArrayBufferObject and neutered. Note that this
+ * may return false if a security wrapper is encountered that denies the
+ * unwrapping.
+ */
+extern JS_FRIEND_API(bool)
+JS_IsNeuteredArrayBufferObject(JSObject *obj);
 
 /*
  * Check whether obj supports JS_GetDataView* APIs.
@@ -1773,12 +1874,18 @@ struct JSJitInfo {
                                   not be enough (e.g. in cases when it can
                                   throw). */
     // XXXbz should we have a JSValueType for the type of the member?
-    uint32_t isInSlot : 1;     /* True if this is a getter that can get a member
-                                  from a slot of the "this" object directly. */
+    uint32_t isAlwaysInSlot : 1; /* True if this is a getter that can always
+                                    get the value from a slot of the "this"
+                                    object. */
+    uint32_t isLazilyCachedInSlot : 1; /* True if this is a getter that can
+                                          sometimes (if the slot doesn't contain
+                                          UndefinedValue()) get the value from a
+                                          slot of the "this" object. */
     uint32_t isTypedMethod : 1; /* True if this is an instance of
                                    JSTypedMethodJitInfo. */
-    uint32_t slotIndex : 12;   /* If isInSlot is true, the index of the slot to
-                                  get the value from.  Otherwise 0. */
+    uint32_t slotIndex : 11;   /* If isAlwaysInSlot or isSometimesInSlot is
+                                  true, the index of the slot to get the value
+                                  from.  Otherwise 0. */
 };
 
 static_assert(sizeof(JSJitInfo) == (sizeof(void*) + 2 * sizeof(uint32_t)),
@@ -1836,7 +1943,7 @@ inline int CheckIsParallelNative(JSParallelNative parallelNative);
  */
 #define JS_JITINFO_NATIVE_PARALLEL(infoName, parallelOp)                \
     const JSJitInfo infoName =                                          \
-        {{JS_CAST_PARALLEL_NATIVE_TO(parallelOp, JSJitGetterOp)},0,0,JSJitInfo::ParallelNative,JSJitInfo::AliasEverything,JSVAL_TYPE_MISSING,false,false,false,false,0}
+        {{JS_CAST_PARALLEL_NATIVE_TO(parallelOp, JSJitGetterOp)},0,0,JSJitInfo::ParallelNative,JSJitInfo::AliasEverything,JSVAL_TYPE_MISSING,false,false,false,false,false,0}
 
 #define JS_JITINFO_NATIVE_PARALLEL_THREADSAFE(infoName, wrapperName, serialOp) \
     bool wrapperName##_ParallelNativeThreadSafeWrapper(js::ForkJoinContext *cx, unsigned argc, \
@@ -1941,16 +2048,13 @@ IdToValue(jsid id)
 {
     if (JSID_IS_STRING(id))
         return JS::StringValue(JSID_TO_STRING(id));
-    if (MOZ_LIKELY(JSID_IS_INT(id)))
+    if (JSID_IS_INT(id))
         return JS::Int32Value(JSID_TO_INT(id));
-    if (MOZ_LIKELY(JSID_IS_OBJECT(id)))
-        return JS::ObjectValue(*JSID_TO_OBJECT(id));
+    if (JSID_IS_SYMBOL(id))
+        return JS::SymbolValue(JSID_TO_SYMBOL(id));
     JS_ASSERT(JSID_IS_VOID(id));
     return JS::UndefinedValue();
 }
-
-extern JS_FRIEND_API(bool)
-IsTypedArrayThisCheck(JS::IsAcceptableThis test);
 
 /*
  * If the embedder has registered a default JSContext callback, returns the

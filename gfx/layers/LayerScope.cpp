@@ -80,6 +80,7 @@ public:
         : mState(NoHandshake)
     { }
 
+private:
     virtual ~LayerScopeWebSocketHandler()
     {
         if (mTransport) {
@@ -87,6 +88,7 @@ public:
         }
     }
 
+public:
     void OpenStream(nsISocketTransport* aTransport) {
         MOZ_ASSERT(aTransport);
 
@@ -223,7 +225,9 @@ private:
             return false;
         }
 
-        if (!(version.Equals("7") || version.Equals("8") || version.Equals("13"))) {
+        if (!(version.EqualsLiteral("7") ||
+              version.EqualsLiteral("8") ||
+              version.EqualsLiteral("13"))) {
             return false;
         }
 
@@ -243,10 +247,10 @@ private:
         Base64Encode(newString, res);
 
         nsCString response("HTTP/1.1 101 Switching Protocols\r\n");
-        response.Append("Upgrade: websocket\r\n");
-        response.Append("Connection: Upgrade\r\n");
+        response.AppendLiteral("Upgrade: websocket\r\n");
+        response.AppendLiteral("Connection: Upgrade\r\n");
         response.Append(nsCString("Sec-WebSocket-Accept: ") + res + nsCString("\r\n"));
-        response.Append("Sec-WebSocket-Protocol: binary\r\n\r\n");
+        response.AppendLiteral("Sec-WebSocket-Protocol: binary\r\n\r\n");
         uint32_t written = 0;
         uint32_t size = response.Length();
         while (written < size) {
@@ -548,12 +552,13 @@ CheckSender()
 
 class DebugListener : public nsIServerSocketListener
 {
+    virtual ~DebugListener() { }
+
 public:
 
     NS_DECL_THREADSAFE_ISUPPORTS
 
     DebugListener() { }
-    virtual ~DebugListener() { }
 
     /* nsIServerSocketListener */
 
@@ -580,16 +585,16 @@ NS_IMPL_ISUPPORTS(DebugListener, nsIServerSocketListener);
 
 class DebugDataSender : public nsIRunnable
 {
+    virtual ~DebugDataSender() {
+        Cleanup();
+    }
+
 public:
 
     NS_DECL_THREADSAFE_ISUPPORTS
 
     DebugDataSender() {
         mList = new LinkedList<DebugGLData>();
-    }
-
-    virtual ~DebugDataSender() {
-        Cleanup();
     }
 
     void Append(DebugGLData *d) {

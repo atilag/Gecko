@@ -1,4 +1,4 @@
-/* -*- tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -124,7 +124,7 @@ ActorPool.prototype = {
   },
 
   get: function AP_get(aActorID) {
-    return this._actors[aActorID];
+    return this._actors[aActorID] || undefined;
   },
 
   has: function AP_has(aActorID) {

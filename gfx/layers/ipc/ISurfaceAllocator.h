@@ -53,8 +53,7 @@ class MemoryTextureHost;
 enum BufferCapabilities {
   DEFAULT_BUFFER_CAPS = 0,
   /**
-   * The allocated buffer must be efficiently mappable as a
-   * gfxImageSurface.
+   * The allocated buffer must be efficiently mappable as a DataSourceSurface.
    */
   MAP_AS_IMAGE_SURFACE = 1 << 0,
   /**
@@ -86,7 +85,9 @@ class ISurfaceAllocator : public AtomicRefCountedWithFinalize<ISurfaceAllocator>
 {
 public:
   MOZ_DECLARE_REFCOUNTED_TYPENAME(ISurfaceAllocator)
-  ISurfaceAllocator() {}
+  ISurfaceAllocator()
+    : mDefaultMessageLoop(MessageLoop::current())
+  {}
 
   void Finalize();
 
@@ -164,6 +165,11 @@ public:
   virtual bool IPCOpen() const { return true; }
   virtual bool IsSameProcess() const = 0;
 
+  virtual MessageLoop * GetMessageLoop() const
+  {
+    return mDefaultMessageLoop;
+  }
+
   // Returns true if aSurface wraps a Shmem.
   static bool IsShmem(SurfaceDescriptor* aSurface);
 
@@ -178,11 +184,15 @@ protected:
   // This is used to implement an extremely simple & naive heap allocator.
   std::vector<mozilla::ipc::Shmem> mUsedShmems;
 
+  MessageLoop* mDefaultMessageLoop;
+
   friend class AtomicRefCountedWithFinalize<ISurfaceAllocator>;
 };
 
 class GfxMemoryImageReporter MOZ_FINAL : public nsIMemoryReporter
 {
+  ~GfxMemoryImageReporter() {}
+
 public:
   NS_DECL_ISUPPORTS
 
@@ -211,7 +221,7 @@ public:
   }
 
   NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
-                            nsISupports* aData)
+                            nsISupports* aData, bool aAnonymize)
   {
     return MOZ_COLLECT_REPORT(
       "explicit/gfx/heap-textures", KIND_HEAP, UNITS_BYTES, sAmount,

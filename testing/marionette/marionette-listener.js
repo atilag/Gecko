@@ -1,4 +1,4 @@
-/* -*- Mode: javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -495,6 +495,7 @@ function executeScript(msg, directInject) {
                       createInstance(Components.interfaces.nsIFileInputStream);
         stream.init(importedScripts, -1, 0, 0);
         let data = NetUtil.readInputStreamToString(stream, stream.available());
+        stream.close();
         script = data + script;
       }
       let res = Cu.evalInSandbox(script, sandbox, "1.8", "dummy file" ,0);
@@ -526,6 +527,7 @@ function executeScript(msg, directInject) {
                       createInstance(Components.interfaces.nsIFileInputStream);
         stream.init(importedScripts, -1, 0, 0);
         let data = NetUtil.readInputStreamToString(stream, stream.available());
+        stream.close();
         script = data + script;
       }
       let res = Cu.evalInSandbox(script, sandbox, "1.8", "dummy file", 0);
@@ -662,6 +664,7 @@ function executeWithCallback(msg, useFinish) {
                       createInstance(Ci.nsIFileInputStream);
       stream.init(importedScripts, -1, 0, 0);
       let data = NetUtil.readInputStreamToString(stream, stream.available());
+      stream.close();
       scriptSrc = data + scriptSrc;
     }
     Cu.evalInSandbox(scriptSrc, sandbox, "1.8", "dummy file", 0);
@@ -966,7 +969,7 @@ function actions(chain, touchId, command_id, i) {
   let el;
   let c;
   i++;
-  if (command != 'press') {
+  if (command != 'press' && command != 'wait') {
     //if mouseEventsOnly, then touchIds isn't used
     if (!(touchId in touchIds) && !mouseEventsOnly) {
       sendError("Element has not been pressed", 500, null, command_id);
@@ -1560,11 +1563,6 @@ function sendKeysToElement(msg) {
 
   let el = elementManager.getKnownElement(msg.json.id, curFrame);
   if (checkVisible(el)) {
-    if (el.mozIsTextField && el.mozIsTextField(false)) {
-      var currentTextLength = el.value ? el.value.length : 0;
-      el.selectionStart = currentTextLength;
-      el.selectionEnd = currentTextLength;
-    }
     el.focus();
     var value = msg.json.value.join("");
     let hasShift = null;
@@ -1855,7 +1853,7 @@ function switchToFrame(msg) {
           }
         }
       }
-      if (foundFrame == null) {
+      if (foundFrame === null) {
         // Either the frame has been removed or we have a OOP frame
         // so lets just get all the iframes and do a quick loop before
         // throwing in the towel
@@ -1869,12 +1867,26 @@ function switchToFrame(msg) {
       }
     }
   }
-  if (foundFrame == null) {
+  if (foundFrame === null) {
     if (typeof(msg.json.id) === 'number') {
       try {
         foundFrame = frames[msg.json.id].frameElement;
-        curFrame = foundFrame;
-        foundFrame = elementManager.addToKnownElements(curFrame);
+        if (foundFrame !== null) {
+          curFrame = foundFrame;
+          foundFrame = elementManager.addToKnownElements(curFrame);
+        }
+        else {
+          // If foundFrame is null at this point then we have the top level browsing
+          // context so should treat it accordingly.
+          sendSyncMessage("Marionette:switchedToFrame", { frameValue: null});
+          curFrame = content;
+          if(msg.json.focus == true) {
+            curFrame.focus();
+          }
+          sandbox = null;
+          checkTimer.initWithCallback(checkLoad, 100, Ci.nsITimer.TYPE_ONE_SHOT);
+          return;
+        }
       } catch (e) {
         // Since window.frames does not return OOP frames it will throw
         // and we land up here. Let's not give up and check if there are
@@ -1885,7 +1897,7 @@ function switchToFrame(msg) {
       }
     }
   }
-  if (foundFrame == null) {
+  if (foundFrame === null) {
     sendError("Unable to locate frame: " + (msg.json.id || msg.json.element), 8, null, command_id);
     return true;
   }

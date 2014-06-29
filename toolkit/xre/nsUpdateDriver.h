@@ -48,7 +48,7 @@ class nsIFile;
  *
  * This function does not modify appDir.
  */
-NS_HIDDEN_(nsresult) ProcessUpdates(nsIFile *greDir, nsIFile *appDir,
+nsresult ProcessUpdates(nsIFile *greDir, nsIFile *appDir,
                                     nsIFile *updRootDir,
                                     int argc, char **argv,
                                     const char *appVersion,
@@ -71,6 +71,8 @@ public:
   NS_DECL_NSIUPDATEPROCESSOR
 
 private:
+  ~nsUpdateProcessor();
+
   struct StagedUpdateInfo {
     StagedUpdateInfo()
       : mArgc(0),

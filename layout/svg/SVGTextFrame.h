@@ -265,21 +265,23 @@ protected:
     AddStateBits(NS_STATE_SVG_POSITIONING_DIRTY);
   }
 
+  ~SVGTextFrame() {}
+
 public:
   NS_DECL_QUERYFRAME_TARGET(SVGTextFrame)
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS
 
   // nsIFrame:
-  virtual void Init(nsIContent* aContent,
-                    nsIFrame*   aParent,
-                    nsIFrame*   aPrevInFlow) MOZ_OVERRIDE;
+  virtual void Init(nsIContent*       aContent,
+                    nsContainerFrame* aParent,
+                    nsIFrame*         aPrevInFlow) MOZ_OVERRIDE;
 
   virtual nsresult AttributeChanged(int32_t aNamespaceID,
                                     nsIAtom* aAttribute,
                                     int32_t aModType) MOZ_OVERRIDE;
 
-  virtual nsIFrame* GetContentInsertionFrame() MOZ_OVERRIDE
+  virtual nsContainerFrame* GetContentInsertionFrame() MOZ_OVERRIDE
   {
     return GetFirstPrincipalChild()->GetContentInsertionFrame();
   }
@@ -694,5 +696,13 @@ private:
    */
   float mLengthAdjustScaleFactor;
 };
+
+namespace mozilla {
+template<>
+struct HasDangerousPublicDestructor<SVGTextFrame::MutationObserver>
+{
+  static const bool value = true;
+};
+}
 
 #endif

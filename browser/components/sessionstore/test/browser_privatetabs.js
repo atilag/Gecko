@@ -34,10 +34,8 @@ add_task(function() {
     SyncHandlers.get(tab2.linkedBrowser).flush();
 
     info("Checking out state");
-    yield SessionSaver.run();
-    let path = OS.Path.join(OS.Constants.Path.profileDir, "sessionstore.js");
-    let data = yield OS.File.read(path);
-    let state = new TextDecoder().decode(data);
+    let state = yield promiseRecoveryFileContents();
+
     info("State: " + state);
     // Ensure that sessionstore.js only knows about the public tab
     ok(state.indexOf(URL_PUBLIC) != -1, "State contains public tab");
@@ -76,7 +74,8 @@ add_task(function () {
 
   // Create a new window to attach our frame script to.
   let win = yield promiseNewWindowLoaded();
-  win.messageManager.loadFrameScript(FRAME_SCRIPT, true);
+  let mm = win.getGroupMessageManager("browsers");
+  mm.loadFrameScript(FRAME_SCRIPT, true);
 
   // Create a new tab in the new window that will load the frame script.
   let tab = win.gBrowser.addTab("about:mozilla");

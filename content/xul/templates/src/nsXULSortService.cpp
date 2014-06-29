@@ -310,7 +310,7 @@ XULSortServiceImpl::SortContainer(nsIContent *aContainer, nsSortState* aSortStat
       for (nsIContent* grandchild = child->GetFirstChild();
            grandchild;
            grandchild = grandchild->GetNextSibling()) {
-        nsINodeInfo *ni = grandchild->NodeInfo();
+        mozilla::dom::NodeInfo *ni = grandchild->NodeInfo();
         nsIAtom *localName = ni->NameAtom();
         if (ni->NamespaceID() == kNameSpaceID_XUL &&
             (localName == nsGkAtoms::treechildren ||
@@ -373,7 +373,7 @@ XULSortServiceImpl::InitializeSortState(nsIContent* aRootElement,
       if (!sortResource2.IsEmpty()) {
         nsCOMPtr<nsIAtom> sortkeyatom2 = do_GetAtom(sortResource2);
         aSortState->sortKeys.AppendObject(sortkeyatom2);
-        sort.AppendLiteral(" ");
+        sort.Append(' ');
         sort.Append(sortResource2);
       }
     }

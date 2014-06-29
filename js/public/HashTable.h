@@ -73,7 +73,7 @@ class HashMap
 
     // HashMap construction is fallible (due to OOM); thus the user must call
     // init after constructing a HashMap and check the return value.
-    HashMap(AllocPolicy a = AllocPolicy()) : impl(a)  {}
+    explicit HashMap(AllocPolicy a = AllocPolicy()) : impl(a)  {}
     bool init(uint32_t len = 16)                      { return impl.init(len); }
     bool initialized() const                          { return impl.initialized(); }
 
@@ -181,9 +181,6 @@ class HashMap
     // Remove all entries. This does not shrink the table. For that consider
     // using the finish() method.
     void clear()                                      { impl.clear(); }
-
-    // Remove all entries without triggering destructors. This method is unsafe.
-    void clearWithoutCallingDestructors()             { impl.clearWithoutCallingDestructors(); }
 
     // Remove all the entries and release all internal buffers. The map must
     // be initialized again before any use.
@@ -317,7 +314,7 @@ class HashSet
 
     // HashSet construction is fallible (due to OOM); thus the user must call
     // init after constructing a HashSet and check the return value.
-    HashSet(AllocPolicy a = AllocPolicy()) : impl(a)  {}
+    explicit HashSet(AllocPolicy a = AllocPolicy()) : impl(a)  {}
     bool init(uint32_t len = 16)                      { return impl.init(len); }
     bool initialized() const                          { return impl.initialized(); }
 
@@ -480,6 +477,13 @@ class HashSet
     void rekeyAs(const Lookup &old_lookup, const Lookup &new_lookup, const T &new_value) {
         if (Ptr p = lookup(old_lookup))
             impl.rekeyAndMaybeRehash(p, new_lookup, new_value);
+    }
+
+    // Infallibly rekey one entry with a new key that is equivalent.
+    void rekeyInPlace(Ptr p, const T &new_value)
+    {
+        MOZ_ASSERT(HashPolicy::match(*p, new_value));
+        impl.rekeyInPlace(p, new_value);
     }
 
     // HashSet is movable
@@ -1065,7 +1069,7 @@ class HashTable : private AllocPolicy
     }
 
   public:
-    HashTable(AllocPolicy ap)
+    explicit HashTable(AllocPolicy ap)
       : AllocPolicy(ap),
         hashShift(sHashBits),
         entryCount(0),
@@ -1630,6 +1634,14 @@ class HashTable : private AllocPolicy
     {
         rekeyWithoutRehash(p, l, k);
         checkOverRemoved();
+    }
+
+    void rekeyInPlace(Ptr p, const Key &k)
+    {
+        MOZ_ASSERT(table);
+        mozilla::ReentrancyGuard g(*this);
+        MOZ_ASSERT(p.found());
+        HashPolicy::rekey(const_cast<Key &>(*p), const_cast<Key &>(k));
     }
 
 #undef METER

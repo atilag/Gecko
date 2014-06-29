@@ -356,6 +356,16 @@ GetObjectElementOperation(JSContext *cx, JSOp op, JSObject *objArg, bool wasObje
             break;
         }
 
+        if (rref.isSymbol()) {
+            RootedObject obj(cx, objArg);
+            RootedId id(cx, SYMBOL_TO_JSID(rref.toSymbol()));
+            if (!JSObject::getGeneric(cx, obj, obj, id, res))
+                return false;
+
+            objArg = obj;
+            break;
+        }
+
         JSAtom *name = ToAtom<NoGC>(cx, rref);
         if (name) {
             if (name->isIndex(&index)) {
@@ -485,13 +495,16 @@ InitArrayElemOperation(JSContext *cx, jsbytecode *pc, HandleObject obj, uint32_t
      * If val is a hole, do not call JSObject::defineElement. In this case,
      * if the current op is the last element initialiser, set the array length
      * to one greater than id.
+     *
+     * If val is a hole and current op is JSOP_INITELEM_INC, always call
+     * SetLengthProperty even if it is not the last element initialiser,
+     * because it may be followed by JSOP_SPREAD, which will not set the array
+     * length if nothing is spreaded.
      */
     if (val.isMagic(JS_ELEMENTS_HOLE)) {
         JSOp next = JSOp(*GetNextPc(pc));
 
-        if ((op == JSOP_INITELEM_ARRAY && next == JSOP_ENDINIT) ||
-            (op == JSOP_INITELEM_INC && next == JSOP_POP))
-        {
+        if ((op == JSOP_INITELEM_ARRAY && next == JSOP_ENDINIT) || op == JSOP_INITELEM_INC) {
             if (!SetLengthProperty(cx, obj, index + 1))
                 return false;
         }

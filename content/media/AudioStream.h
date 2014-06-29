@@ -32,6 +32,7 @@ class SoundTouch;
 namespace mozilla {
 
 class AudioStream;
+class FrameHistory;
 
 class AudioClock
 {
@@ -42,60 +43,41 @@ public:
   void Init();
   // Update the number of samples that has been written in the audio backend.
   // Called on the state machine thread.
-  void UpdateWritePosition(uint32_t aCount);
+  void UpdateFrameHistory(uint32_t aServiced, uint32_t aUnderrun);
   // Get the read position of the stream, in microseconds.
   // Called on the state machine thead.
-  uint64_t GetPosition();
+  // Assumes the AudioStream lock is held and thus calls Unlocked versions
+  // of AudioStream funcs.
+  int64_t GetPositionUnlocked() const;
   // Get the read position of the stream, in frames.
   // Called on the state machine thead.
-  uint64_t GetPositionInFrames();
+  int64_t GetPositionInFrames() const;
   // Set the playback rate.
   // Called on the audio thread.
-  void SetPlaybackRate(double aPlaybackRate);
+  // Assumes the AudioStream lock is held and thus calls Unlocked versions
+  // of AudioStream funcs.
+  void SetPlaybackRateUnlocked(double aPlaybackRate);
   // Get the current playback rate.
   // Called on the audio thread.
-  double GetPlaybackRate();
+  double GetPlaybackRate() const;
   // Set if we are preserving the pitch.
   // Called on the audio thread.
   void SetPreservesPitch(bool aPreservesPitch);
   // Get the current pitch preservation state.
   // Called on the audio thread.
-  bool GetPreservesPitch();
-  // Get the number of frames written to the backend.
-  int64_t GetWritten();
+  bool GetPreservesPitch() const;
 private:
   // This AudioStream holds a strong reference to this AudioClock. This
   // pointer is garanteed to always be valid.
-  AudioStream* mAudioStream;
-  // The old output rate, to compensate audio latency for the period inbetween
-  // the moment resampled buffers are pushed to the hardware and the moment the
-  // clock should take the new rate into account for A/V sync.
-  int mOldOutRate;
-  // Position at which the last playback rate change occured
-  int64_t mBasePosition;
-  // Offset, in frames, at which the last playback rate change occured
-  int64_t mBaseOffset;
-  // Old base offset (number of samples), used when changing rate to compute the
-  // position in the stream.
-  int64_t mOldBaseOffset;
-  // Old base position (number of microseconds), when changing rate. This is the
-  // time in the media, not wall clock position.
-  int64_t mOldBasePosition;
-  // Write position at which the playbackRate change occured.
-  int64_t mPlaybackRateChangeOffset;
-  // The previous position reached in the media, used when compensating
-  // latency, to have the position at which the playbackRate change occured.
-  int64_t mPreviousPosition;
-  // Number of samples effectivelly written in backend, i.e. write position.
-  int64_t mWritten;
+  AudioStream* const mAudioStream;
   // Output rate in Hz (characteristic of the playback rate)
   int mOutRate;
   // Input rate in Hz (characteristic of the media being played)
   int mInRate;
   // True if the we are timestretching, false if we are resampling.
   bool mPreservesPitch;
-  // True if we are playing at the old playbackRate after it has been changed.
-  bool mCompensatingLatency;
+  // The history of frames sent to the audio engine in each Datacallback.
+  const nsAutoPtr<FrameHistory> mFrameHistory;
 };
 
 class CircularByteBuffer
@@ -191,6 +173,8 @@ class AudioInitTask;
 // is thread-safe without external synchronization.
 class AudioStream MOZ_FINAL
 {
+  virtual ~AudioStream();
+
 public:
   // Initialize Audio Library. Some Audio backends require initializing the
   // library before using it.
@@ -212,7 +196,6 @@ public:
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(AudioStream)
   AudioStream();
-  virtual ~AudioStream();
 
   enum LatencyRequest {
     HighLatency,
@@ -246,6 +229,9 @@ public:
   // Block until buffered audio data has been consumed.
   void Drain();
 
+  // Break any blocking operation and set the stream to shutdown.
+  void Cancel();
+
   // Start the stream.
   void Start();
 
@@ -267,11 +253,6 @@ public:
   // was opened, of the audio hardware.  Thread-safe.
   int64_t GetPositionInFrames();
 
-  // Return the position, measured in audio framed played since the stream was
-  // opened, of the audio hardware, not adjusted for the changes of playback
-  // rate.
-  int64_t GetPositionInFramesInternal();
-
   // Returns true when the audio stream is paused.
   bool IsPaused();
 
@@ -279,8 +260,6 @@ public:
   int GetChannels() { return mChannels; }
   int GetOutChannels() { return mOutChannels; }
 
-  // This should be called before attempting to use the time stretcher.
-  nsresult EnsureTimeStretcherInitialized();
   // Set playback rate as a multiple of the intrinsic playback rate. This is to
   // be called only with aPlaybackRate > 0.0.
   nsresult SetPlaybackRate(double aPlaybackRate);
@@ -288,6 +267,15 @@ public:
   nsresult SetPreservesPitch(bool aPreservesPitch);
 
   size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const;
+
+protected:
+  friend class AudioClock;
+
+  // Return the position, measured in audio frames played since the stream was
+  // opened, of the audio hardware, not adjusted for the changes of playback
+  // rate or underrun frames.
+  // Caller must own the monitor.
+  int64_t GetPositionInFramesUnlocked();
 
 private:
   friend class AudioInitTask;
@@ -300,6 +288,7 @@ private:
 
   static void PrefChanged(const char* aPref, void* aClosure);
   static double GetVolumeScale();
+  static bool GetFirstStream();
   static cubeb* GetCubebContext();
   static cubeb* GetCubebContextUnlocked();
   static uint32_t GetCubebLatency();
@@ -324,10 +313,6 @@ private:
   long GetUnprocessed(void* aBuffer, long aFrames, int64_t &aTime);
   long GetTimeStretched(void* aBuffer, long aFrames, int64_t &aTime);
   long GetUnprocessedWithSilencePadding(void* aBuffer, long aFrames, int64_t &aTime);
-
-  // Shared implementation of underflow adjusted position calculation.
-  // Caller must own the monitor.
-  int64_t GetPositionInFramesUnlocked();
 
   int64_t GetLatencyInFrames();
   void GetBufferInsertTime(int64_t &aTimeMs);
@@ -366,10 +351,6 @@ private:
     int64_t mFrames;
   };
   nsAutoTArray<Inserts, 8> mInserts;
-
-  // Sum of silent frames written when DataCallback requests more frames
-  // than are available in mBuffer.
-  uint64_t mLostFrames;
 
   // Output file for dumping audio
   FILE* mDumpFile;
@@ -415,6 +396,7 @@ private:
 
   StreamState mState;
   bool mNeedsStart; // needed in case Start() is called before cubeb is open
+  bool mIsFirst;
 
   // This mutex protects the static members below.
   static StaticMutex sMutex;

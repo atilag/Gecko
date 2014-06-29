@@ -1,4 +1,4 @@
-/* -*- Mode: Javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -107,7 +107,7 @@ let onConnectionReady = Task.async(function*(aType, aTraits) {
   parent = document.getElementById("tabActors");
 
   // Add Global Process debugging...
-  let globals = JSON.parse(JSON.stringify(response));
+  let globals = Cu.cloneInto(response, {});
   delete globals.tabs;
   delete globals.selected;
   // ...only if there are appropriate actors (a 'from' property will always

@@ -4,12 +4,25 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "gfxUtils.h"
+
+#include "cairo.h"
 #include "gfxContext.h"
+#include "gfxImageSurface.h"
 #include "gfxPlatform.h"
 #include "gfxDrawable.h"
+#include "imgIEncoder.h"
+#include "mozilla/Base64.h"
 #include "mozilla/gfx/2D.h"
+#include "mozilla/gfx/DataSurfaceHelpers.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/Vector.h"
+#include "nsComponentManagerUtils.h"
+#include "nsIClipboardHelper.h"
+#include "nsIFile.h"
+#include "nsIPresShell.h"
+#include "nsPresContext.h"
 #include "nsRegion.h"
+#include "nsServiceManagerUtils.h"
 #include "yuv_convert.h"
 #include "ycbcr_to_rgb565.h"
 #include "GeckoProfiler.h"
@@ -35,221 +48,277 @@ static const uint8_t UnpremultiplyValue(uint8_t a, uint8_t v) {
     return gfxUtils::sUnpremultiplyTable[a*256+v];
 }
 
-void
-gfxUtils::PremultiplyImageSurface(gfxImageSurface *aSourceSurface,
-                                  gfxImageSurface *aDestSurface)
+static void
+PremultiplyData(const uint8_t* srcData,
+                size_t srcStride,  // row-to-row stride in bytes
+                uint8_t* destData,
+                size_t destStride, // row-to-row stride in bytes
+                size_t pixelWidth,
+                size_t rowCount)
 {
-    if (!aDestSurface)
-        aDestSurface = aSourceSurface;
+    MOZ_ASSERT(srcData && destData);
 
-    MOZ_ASSERT(aSourceSurface->Format() == aDestSurface->Format() &&
-               aSourceSurface->Width()  == aDestSurface->Width() &&
-               aSourceSurface->Height() == aDestSurface->Height() &&
-               aSourceSurface->Stride() == aDestSurface->Stride(),
-               "Source and destination surfaces don't have identical characteristics");
+    for (size_t y = 0; y < rowCount; ++y) {
+        const uint8_t* src  = srcData  + y * srcStride;
+        uint8_t* dest       = destData + y * destStride;
 
-    MOZ_ASSERT(aSourceSurface->Stride() == aSourceSurface->Width() * 4,
-               "Source surface stride isn't tightly packed");
-
-    // Only premultiply ARGB32
-    if (aSourceSurface->Format() != gfxImageFormat::ARGB32) {
-        if (aDestSurface != aSourceSurface) {
-            memcpy(aDestSurface->Data(), aSourceSurface->Data(),
-                   aSourceSurface->Stride() * aSourceSurface->Height());
-        }
-        return;
-    }
-
-    uint8_t *src = aSourceSurface->Data();
-    uint8_t *dst = aDestSurface->Data();
-
-    uint32_t dim = aSourceSurface->Width() * aSourceSurface->Height();
-    for (uint32_t i = 0; i < dim; ++i) {
+        for (size_t x = 0; x < pixelWidth; ++x) {
 #ifdef IS_LITTLE_ENDIAN
-        uint8_t b = *src++;
-        uint8_t g = *src++;
-        uint8_t r = *src++;
-        uint8_t a = *src++;
+            uint8_t b = *src++;
+            uint8_t g = *src++;
+            uint8_t r = *src++;
+            uint8_t a = *src++;
 
-        *dst++ = PremultiplyValue(a, b);
-        *dst++ = PremultiplyValue(a, g);
-        *dst++ = PremultiplyValue(a, r);
-        *dst++ = a;
+            *dest++ = PremultiplyValue(a, b);
+            *dest++ = PremultiplyValue(a, g);
+            *dest++ = PremultiplyValue(a, r);
+            *dest++ = a;
 #else
-        uint8_t a = *src++;
-        uint8_t r = *src++;
-        uint8_t g = *src++;
-        uint8_t b = *src++;
+            uint8_t a = *src++;
+            uint8_t r = *src++;
+            uint8_t g = *src++;
+            uint8_t b = *src++;
 
-        *dst++ = a;
-        *dst++ = PremultiplyValue(a, r);
-        *dst++ = PremultiplyValue(a, g);
-        *dst++ = PremultiplyValue(a, b);
+            *dest++ = a;
+            *dest++ = PremultiplyValue(a, r);
+            *dest++ = PremultiplyValue(a, g);
+            *dest++ = PremultiplyValue(a, b);
 #endif
+        }
+    }
+}
+static void
+UnpremultiplyData(const uint8_t* srcData,
+                  size_t srcStride,  // row-to-row stride in bytes
+                  uint8_t* destData,
+                  size_t destStride, // row-to-row stride in bytes
+                  size_t pixelWidth,
+                  size_t rowCount)
+{
+    MOZ_ASSERT(srcData && destData);
+
+    for (size_t y = 0; y < rowCount; ++y) {
+        const uint8_t* src  = srcData  + y * srcStride;
+        uint8_t* dest       = destData + y * destStride;
+
+        for (size_t x = 0; x < pixelWidth; ++x) {
+#ifdef IS_LITTLE_ENDIAN
+            uint8_t b = *src++;
+            uint8_t g = *src++;
+            uint8_t r = *src++;
+            uint8_t a = *src++;
+
+            *dest++ = UnpremultiplyValue(a, b);
+            *dest++ = UnpremultiplyValue(a, g);
+            *dest++ = UnpremultiplyValue(a, r);
+            *dest++ = a;
+#else
+            uint8_t a = *src++;
+            uint8_t r = *src++;
+            uint8_t g = *src++;
+            uint8_t b = *src++;
+
+            *dest++ = a;
+            *dest++ = UnpremultiplyValue(a, r);
+            *dest++ = UnpremultiplyValue(a, g);
+            *dest++ = UnpremultiplyValue(a, b);
+#endif
+        }
     }
 }
 
-void
-gfxUtils::UnpremultiplyImageSurface(gfxImageSurface *aSourceSurface,
-                                    gfxImageSurface *aDestSurface)
+static bool
+MapSrcDest(DataSourceSurface* srcSurf,
+           DataSourceSurface* destSurf,
+           DataSourceSurface::MappedSurface* out_srcMap,
+           DataSourceSurface::MappedSurface* out_destMap)
 {
-    if (!aDestSurface)
-        aDestSurface = aSourceSurface;
+    MOZ_ASSERT(srcSurf && destSurf);
+    MOZ_ASSERT(out_srcMap && out_destMap);
 
-    MOZ_ASSERT(aSourceSurface->Format() == aDestSurface->Format() &&
-               aSourceSurface->Width()  == aDestSurface->Width() &&
-               aSourceSurface->Height() == aDestSurface->Height(),
-               "Source and destination surfaces don't have identical characteristics");
-
-    // Only premultiply ARGB32
-    if (aSourceSurface->Format() != gfxImageFormat::ARGB32) {
-        if (aDestSurface != aSourceSurface) {
-            aDestSurface->CopyFrom(aSourceSurface);
-        }
-        return;
+    if (srcSurf->GetFormat()  != SurfaceFormat::B8G8R8A8 ||
+        destSurf->GetFormat() != SurfaceFormat::B8G8R8A8)
+    {
+        MOZ_ASSERT(false, "Only operate on BGRA8 surfs.");
+        return false;
     }
 
-    uint8_t *src = aSourceSurface->Data();
-    uint8_t *dst = aDestSurface->Data();
-
-    for (int32_t i = 0; i < aSourceSurface->Height(); ++i) {
-        uint8_t *srcRow = src + (i * aSourceSurface->Stride());
-        uint8_t *dstRow = dst + (i * aDestSurface->Stride());
-
-        for (int32_t j = 0; j < aSourceSurface->Width(); ++j) {
-#ifdef IS_LITTLE_ENDIAN
-          uint8_t b = *srcRow++;
-          uint8_t g = *srcRow++;
-          uint8_t r = *srcRow++;
-          uint8_t a = *srcRow++;
-
-          *dstRow++ = UnpremultiplyValue(a, b);
-          *dstRow++ = UnpremultiplyValue(a, g);
-          *dstRow++ = UnpremultiplyValue(a, r);
-          *dstRow++ = a;
-#else
-          uint8_t a = *srcRow++;
-          uint8_t r = *srcRow++;
-          uint8_t g = *srcRow++;
-          uint8_t b = *srcRow++;
-
-          *dstRow++ = a;
-          *dstRow++ = UnpremultiplyValue(a, r);
-          *dstRow++ = UnpremultiplyValue(a, g);
-          *dstRow++ = UnpremultiplyValue(a, b);
-#endif
-        }
+    if (srcSurf->GetSize().width  != destSurf->GetSize().width ||
+        srcSurf->GetSize().height != destSurf->GetSize().height)
+    {
+        MOZ_ASSERT(false, "Width and height must match.");
+        return false;
     }
+
+    if (srcSurf == destSurf) {
+        DataSourceSurface::MappedSurface map;
+        if (!srcSurf->Map(DataSourceSurface::MapType::READ_WRITE, &map)) {
+            NS_WARNING("Couldn't Map srcSurf/destSurf.");
+            return false;
+        }
+
+        *out_srcMap = map;
+        *out_destMap = map;
+        return true;
+    }
+
+    // Map src for reading.
+    DataSourceSurface::MappedSurface srcMap;
+    if (!srcSurf->Map(DataSourceSurface::MapType::READ, &srcMap)) {
+        NS_WARNING("Couldn't Map srcSurf.");
+        return false;
+    }
+
+    // Map dest for writing.
+    DataSourceSurface::MappedSurface destMap;
+    if (!destSurf->Map(DataSourceSurface::MapType::WRITE, &destMap)) {
+        NS_WARNING("Couldn't Map aDest.");
+        srcSurf->Unmap();
+        return false;
+    }
+
+    *out_srcMap = srcMap;
+    *out_destMap = destMap;
+    return true;
+}
+
+static void
+UnmapSrcDest(DataSourceSurface* srcSurf,
+             DataSourceSurface* destSurf)
+{
+    if (srcSurf == destSurf) {
+        srcSurf->Unmap();
+    } else {
+        srcSurf->Unmap();
+        destSurf->Unmap();
+    }
+}
+
+bool
+gfxUtils::PremultiplyDataSurface(DataSourceSurface* srcSurf,
+                                 DataSourceSurface* destSurf)
+{
+    MOZ_ASSERT(srcSurf && destSurf);
+
+    DataSourceSurface::MappedSurface srcMap;
+    DataSourceSurface::MappedSurface destMap;
+    if (!MapSrcDest(srcSurf, destSurf, &srcMap, &destMap))
+        return false;
+
+    PremultiplyData(srcMap.mData, srcMap.mStride,
+                    destMap.mData, destMap.mStride,
+                    srcSurf->GetSize().width,
+                    srcSurf->GetSize().height);
+
+    UnmapSrcDest(srcSurf, destSurf);
+    return true;
+}
+
+bool
+gfxUtils::UnpremultiplyDataSurface(DataSourceSurface* srcSurf,
+                                   DataSourceSurface* destSurf)
+{
+    MOZ_ASSERT(srcSurf && destSurf);
+
+    DataSourceSurface::MappedSurface srcMap;
+    DataSourceSurface::MappedSurface destMap;
+    if (!MapSrcDest(srcSurf, destSurf, &srcMap, &destMap))
+        return false;
+
+    UnpremultiplyData(srcMap.mData, srcMap.mStride,
+                      destMap.mData, destMap.mStride,
+                      srcSurf->GetSize().width,
+                      srcSurf->GetSize().height);
+
+    UnmapSrcDest(srcSurf, destSurf);
+    return true;
+}
+
+static bool
+MapSrcAndCreateMappedDest(DataSourceSurface* srcSurf,
+                          RefPtr<DataSourceSurface>* out_destSurf,
+                          DataSourceSurface::MappedSurface* out_srcMap,
+                          DataSourceSurface::MappedSurface* out_destMap)
+{
+    MOZ_ASSERT(srcSurf);
+    MOZ_ASSERT(out_destSurf && out_srcMap && out_destMap);
+
+    if (srcSurf->GetFormat() != SurfaceFormat::B8G8R8A8) {
+        MOZ_ASSERT(false, "Only operate on BGRA8.");
+        return false;
+    }
+
+    // Ok, map source for reading.
+    DataSourceSurface::MappedSurface srcMap;
+    if (!srcSurf->Map(DataSourceSurface::MapType::READ, &srcMap)) {
+        MOZ_ASSERT(false, "Couldn't Map srcSurf.");
+        return false;
+    }
+
+    // Make our dest surface based on the src.
+    RefPtr<DataSourceSurface> destSurf =
+        Factory::CreateDataSourceSurfaceWithStride(srcSurf->GetSize(),
+                                                   srcSurf->GetFormat(),
+                                                   srcMap.mStride);
+
+    DataSourceSurface::MappedSurface destMap;
+    if (!destSurf->Map(DataSourceSurface::MapType::WRITE, &destMap)) {
+        MOZ_ASSERT(false, "Couldn't Map destSurf.");
+        srcSurf->Unmap();
+        return false;
+    }
+
+    *out_destSurf = destSurf;
+    *out_srcMap = srcMap;
+    *out_destMap = destMap;
+    return true;
 }
 
 TemporaryRef<DataSourceSurface>
-gfxUtils::UnpremultiplyDataSurface(DataSourceSurface* aSurface)
+gfxUtils::CreatePremultipliedDataSurface(DataSourceSurface* srcSurf)
 {
-    // Only premultiply ARGB32
-    if (aSurface->GetFormat() != SurfaceFormat::B8G8R8A8) {
-        return aSurface;
-    }
-
-    DataSourceSurface::MappedSurface map;
-    if (!aSurface->Map(DataSourceSurface::MapType::READ, &map)) {
-        return nullptr;
-    }
-
-    RefPtr<DataSourceSurface> dest = Factory::CreateDataSourceSurfaceWithStride(aSurface->GetSize(),
-                                                                                aSurface->GetFormat(),
-                                                                                map.mStride);
-
+    RefPtr<DataSourceSurface> destSurf;
+    DataSourceSurface::MappedSurface srcMap;
     DataSourceSurface::MappedSurface destMap;
-    if (!dest->Map(DataSourceSurface::MapType::WRITE, &destMap)) {
-        aSurface->Unmap();
-        return nullptr;
+    if (!MapSrcAndCreateMappedDest(srcSurf, &destSurf, &srcMap, &destMap)) {
+        MOZ_ASSERT(false, "MapSrcAndCreateMappedDest failed.");
+        return srcSurf;
     }
 
-    uint8_t *src = map.mData;
-    uint8_t *dst = destMap.mData;
+    PremultiplyData(srcMap.mData, srcMap.mStride,
+                    destMap.mData, destMap.mStride,
+                    srcSurf->GetSize().width,
+                    srcSurf->GetSize().height);
 
-    for (int32_t i = 0; i < aSurface->GetSize().height; ++i) {
-        uint8_t *srcRow = src + (i * map.mStride);
-        uint8_t *dstRow = dst + (i * destMap.mStride);
-
-        for (int32_t j = 0; j < aSurface->GetSize().width; ++j) {
-#ifdef IS_LITTLE_ENDIAN
-          uint8_t b = *srcRow++;
-          uint8_t g = *srcRow++;
-          uint8_t r = *srcRow++;
-          uint8_t a = *srcRow++;
-
-          *dstRow++ = UnpremultiplyValue(a, b);
-          *dstRow++ = UnpremultiplyValue(a, g);
-          *dstRow++ = UnpremultiplyValue(a, r);
-          *dstRow++ = a;
-#else
-          uint8_t a = *srcRow++;
-          uint8_t r = *srcRow++;
-          uint8_t g = *srcRow++;
-          uint8_t b = *srcRow++;
-
-          *dstRow++ = a;
-          *dstRow++ = UnpremultiplyValue(a, r);
-          *dstRow++ = UnpremultiplyValue(a, g);
-          *dstRow++ = UnpremultiplyValue(a, b);
-#endif
-        }
-    }
-
-    aSurface->Unmap();
-    dest->Unmap();
-    return dest;
+    UnmapSrcDest(srcSurf, destSurf);
+    return destSurf;
 }
 
-void
-gfxUtils::ConvertBGRAtoRGBA(gfxImageSurface *aSourceSurface,
-                            gfxImageSurface *aDestSurface) {
-    if (!aDestSurface)
-        aDestSurface = aSourceSurface;
-
-    MOZ_ASSERT(aSourceSurface->Format() == aDestSurface->Format() &&
-               aSourceSurface->Width()  == aDestSurface->Width() &&
-               aSourceSurface->Height() == aDestSurface->Height() &&
-               aSourceSurface->Stride() == aDestSurface->Stride(),
-               "Source and destination surfaces don't have identical characteristics");
-
-    MOZ_ASSERT(aSourceSurface->Stride() == aSourceSurface->Width() * 4,
-               "Source surface stride isn't tightly packed");
-
-    MOZ_ASSERT(aSourceSurface->Format() == gfxImageFormat::ARGB32 || aSourceSurface->Format() == gfxImageFormat::RGB24,
-               "Surfaces must be ARGB32 or RGB24");
-
-    uint8_t *src = aSourceSurface->Data();
-    uint8_t *dst = aDestSurface->Data();
-
-    uint32_t dim = aSourceSurface->Width() * aSourceSurface->Height();
-    uint8_t *srcEnd = src + 4*dim;
-
-    if (src == dst) {
-        uint8_t buffer[4];
-        for (; src != srcEnd; src += 4) {
-            buffer[0] = src[2];
-            buffer[1] = src[1];
-            buffer[2] = src[0];
-
-            src[0] = buffer[0];
-            src[1] = buffer[1];
-            src[2] = buffer[2];
-        }
-    } else {
-        for (; src != srcEnd; src += 4, dst += 4) {
-            dst[0] = src[2];
-            dst[1] = src[1];
-            dst[2] = src[0];
-            dst[3] = src[3];
-        }
+TemporaryRef<DataSourceSurface>
+gfxUtils::CreateUnpremultipliedDataSurface(DataSourceSurface* srcSurf)
+{
+    RefPtr<DataSourceSurface> destSurf;
+    DataSourceSurface::MappedSurface srcMap;
+    DataSourceSurface::MappedSurface destMap;
+    if (!MapSrcAndCreateMappedDest(srcSurf, &destSurf, &srcMap, &destMap)) {
+        MOZ_ASSERT(false, "MapSrcAndCreateMappedDest failed.");
+        return srcSurf;
     }
+
+    UnpremultiplyData(srcMap.mData, srcMap.mStride,
+                      destMap.mData, destMap.mStride,
+                      srcSurf->GetSize().width,
+                      srcSurf->GetSize().height);
+
+    UnmapSrcDest(srcSurf, destSurf);
+    return destSurf;
 }
 
 void
 gfxUtils::ConvertBGRAtoRGBA(uint8_t* aData, uint32_t aLength)
 {
+    MOZ_ASSERT((aLength % 4) == 0, "Loop below will pass srcEnd!");
+
     uint8_t *src = aData;
     uint8_t *srcEnd = src + aLength;
 
@@ -301,9 +370,11 @@ CreateSamplingRestrictedDrawable(gfxDrawable* aDrawable,
                                  const gfxMatrix& aUserSpaceToImageSpace,
                                  const gfxRect& aSourceRect,
                                  const gfxRect& aSubimage,
-                                 const gfxImageFormat aFormat)
+                                 const SurfaceFormat aFormat)
 {
-    PROFILER_LABEL("gfxUtils", "CreateSamplingRestricedDrawable");
+    PROFILER_LABEL("gfxUtils", "CreateSamplingRestricedDrawable",
+      js::ProfileEntry::Category::GRAPHICS);
+
     gfxRect userSpaceClipExtents = aContext->GetClipExtents();
     // This isn't optimal --- if aContext has a rotation then GetClipExtents
     // will have to do a bounding-box computation, and TransformBounds might
@@ -335,9 +406,9 @@ CreateSamplingRestrictedDrawable(gfxDrawable* aDrawable,
       nsRefPtr<gfxASurface> temp = image->GetSubimage(needed);
       drawable = new gfxSurfaceDrawable(temp, size, gfxMatrix().Translate(-needed.TopLeft()));
     } else {
-      mozilla::RefPtr<mozilla::gfx::DrawTarget> target =
+      RefPtr<DrawTarget> target =
         gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(ToIntSize(size),
-                                                                     ImageFormatToSurfaceFormat(aFormat));
+                                                                     aFormat);
       if (!target) {
         return nullptr;
       }
@@ -367,17 +438,17 @@ struct MOZ_STACK_CLASS AutoCairoPixmanBugWorkaround
         if (!aSurface || aSurface->GetType() == gfxSurfaceType::Quartz)
             return;
 
-        if (!IsSafeImageTransformComponent(aDeviceSpaceToImageSpace.xx) ||
-            !IsSafeImageTransformComponent(aDeviceSpaceToImageSpace.xy) ||
-            !IsSafeImageTransformComponent(aDeviceSpaceToImageSpace.yx) ||
-            !IsSafeImageTransformComponent(aDeviceSpaceToImageSpace.yy)) {
+        if (!IsSafeImageTransformComponent(aDeviceSpaceToImageSpace._11) ||
+            !IsSafeImageTransformComponent(aDeviceSpaceToImageSpace._21) ||
+            !IsSafeImageTransformComponent(aDeviceSpaceToImageSpace._12) ||
+            !IsSafeImageTransformComponent(aDeviceSpaceToImageSpace._22)) {
             NS_WARNING("Scaling up too much, bailing out");
             mSucceeded = false;
             return;
         }
 
-        if (IsSafeImageTransformComponent(aDeviceSpaceToImageSpace.x0) &&
-            IsSafeImageTransformComponent(aDeviceSpaceToImageSpace.y0))
+        if (IsSafeImageTransformComponent(aDeviceSpaceToImageSpace._31) &&
+            IsSafeImageTransformComponent(aDeviceSpaceToImageSpace._32))
             return;
 
         // We'll push a group, which will hopefully reduce our transform's
@@ -505,11 +576,13 @@ gfxUtils::DrawPixelSnapped(gfxContext*      aContext,
                            const gfxRect&   aSourceRect,
                            const gfxRect&   aImageRect,
                            const gfxRect&   aFill,
-                           const gfxImageFormat aFormat,
+                           const SurfaceFormat aFormat,
                            GraphicsFilter aFilter,
                            uint32_t         aImageFlags)
 {
-    PROFILER_LABEL("gfxUtils", "DrawPixelSnapped");
+    PROFILER_LABEL("gfxUtils", "DrawPixelSnapped",
+      js::ProfileEntry::Category::GRAPHICS);
+
     bool doTile = !aImageRect.Contains(aSourceRect) &&
                   !(aImageFlags & imgIContainer::FLAG_CLAMP);
 
@@ -537,9 +610,9 @@ gfxUtils::DrawPixelSnapped(gfxContext*      aContext,
     // we know we have the pixman limits. 16384.0 is a somewhat arbitrary
     // large number to make sure we avoid the expensive fmod when we can, but
     // still maintain a safe margin from the actual limit
-    if (doTile && (userSpaceToImageSpace.y0 > 16384.0 || userSpaceToImageSpace.x0 > 16384.0)) {
-        userSpaceToImageSpace.x0 = fmod(userSpaceToImageSpace.x0, aImageRect.width);
-        userSpaceToImageSpace.y0 = fmod(userSpaceToImageSpace.y0, aImageRect.height);
+    if (doTile && (userSpaceToImageSpace._32 > 16384.0 || userSpaceToImageSpace._31 > 16384.0)) {
+        userSpaceToImageSpace._31 = fmod(userSpaceToImageSpace._31, aImageRect.width);
+        userSpaceToImageSpace._32 = fmod(userSpaceToImageSpace._32, aImageRect.height);
     }
 #else
     // OK now, the hard part left is to account for the subimage sampling
@@ -740,19 +813,19 @@ gfxUtils::TransformRectToRect(const gfxRect& aFrom, const gfxPoint& aToTopLeft,
   gfxMatrix m;
   if (aToTopRight.y == aToTopLeft.y && aToTopRight.x == aToBottomRight.x) {
     // Not a rotation, so xy and yx are zero
-    m.xy = m.yx = 0.0;
-    m.xx = (aToBottomRight.x - aToTopLeft.x)/aFrom.width;
-    m.yy = (aToBottomRight.y - aToTopLeft.y)/aFrom.height;
-    m.x0 = aToTopLeft.x - m.xx*aFrom.x;
-    m.y0 = aToTopLeft.y - m.yy*aFrom.y;
+    m._21 = m._12 = 0.0;
+    m._11 = (aToBottomRight.x - aToTopLeft.x)/aFrom.width;
+    m._22 = (aToBottomRight.y - aToTopLeft.y)/aFrom.height;
+    m._31 = aToTopLeft.x - m._11*aFrom.x;
+    m._32 = aToTopLeft.y - m._22*aFrom.y;
   } else {
     NS_ASSERTION(aToTopRight.y == aToBottomRight.y && aToTopRight.x == aToTopLeft.x,
                  "Destination rectangle not axis-aligned");
-    m.xx = m.yy = 0.0;
-    m.xy = (aToBottomRight.x - aToTopLeft.x)/aFrom.height;
-    m.yx = (aToBottomRight.y - aToTopLeft.y)/aFrom.width;
-    m.x0 = aToTopLeft.x - m.xy*aFrom.y;
-    m.y0 = aToTopLeft.y - m.yx*aFrom.x;
+    m._11 = m._22 = 0.0;
+    m._21 = (aToBottomRight.x - aToTopLeft.x)/aFrom.height;
+    m._12 = (aToBottomRight.y - aToTopLeft.y)/aFrom.width;
+    m._31 = aToTopLeft.x - m._21*aFrom.y;
+    m._32 = aToTopLeft.y - m._12*aFrom.x;
   }
   return m;
 }
@@ -781,6 +854,9 @@ gfxUtils::TransformRectToRect(const gfxRect& aFrom, const IntPoint& aToTopLeft,
   return m;
 }
 
+/* This function is sort of shitty. We truncate doubles
+ * to ints then convert those ints back to doubles to make sure that
+ * they equal the doubles that we got in. */
 bool
 gfxUtils::GfxRectToIntRect(const gfxRect& aIn, nsIntRect* aOut)
 {
@@ -929,6 +1005,21 @@ gfxUtils::ConvertYCbCrToRGB(const PlanarYCbCrData& aData,
   }
 }
 
+/* static */ void gfxUtils::ClearThebesSurface(gfxASurface* aSurface)
+{
+  if (aSurface->CairoStatus()) {
+    return;
+  }
+  cairo_surface_t* surf = aSurface->CairoSurface();
+  if (cairo_surface_status(surf)) {
+    return;
+  }
+  cairo_t* ctx = cairo_create(surf);
+  cairo_set_operator(ctx, CAIRO_OPERATOR_CLEAR);
+  cairo_paint_with_alpha(ctx, 1.0);
+  cairo_destroy(ctx);
+}
+
 /* static */ TemporaryRef<DataSourceSurface>
 gfxUtils::CopySurfaceToDataSourceSurfaceWithFormat(SourceSurface* aSurface,
                                                    SurfaceFormat aFormat)
@@ -1024,83 +1115,258 @@ gfxUtils::GetColorForFrameNumber(uint64_t aFrameNumber)
     return colors[aFrameNumber % sNumFrameColors];
 }
 
-#ifdef MOZ_DUMP_PAINTING
+/* static */ nsresult
+gfxUtils::EncodeSourceSurface(SourceSurface* aSurface,
+                              const nsACString& aMimeType,
+                              const nsAString& aOutputOptions,
+                              BinaryOrData aBinaryOrData,
+                              FILE* aFile)
+{
+  MOZ_ASSERT(aBinaryOrData == eDataURIEncode || aFile,
+             "Copying binary encoding to clipboard not currently supported");
+
+  const IntSize size = aSurface->GetSize();
+  if (size.IsEmpty()) {
+    return NS_ERROR_INVALID_ARG;
+  }
+  const Size floatSize(size.width, size.height);
+
+  RefPtr<DataSourceSurface> dataSurface;
+  if (aSurface->GetFormat() != SurfaceFormat::B8G8R8A8) {
+    // FIXME bug 995807 (B8G8R8X8), bug 831898 (R5G6B5)
+    dataSurface =
+      CopySurfaceToDataSourceSurfaceWithFormat(aSurface,
+                                               SurfaceFormat::B8G8R8A8);
+  } else {
+    dataSurface = aSurface->GetDataSurface();
+  }
+  if (!dataSurface) {
+    return NS_ERROR_FAILURE;
+  }
+
+  DataSourceSurface::MappedSurface map;
+  if (!dataSurface->Map(DataSourceSurface::MapType::READ, &map)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsAutoCString encoderCID(
+    NS_LITERAL_CSTRING("@mozilla.org/image/encoder;2?type=") + aMimeType);
+  nsCOMPtr<imgIEncoder> encoder = do_CreateInstance(encoderCID.get());
+  if (!encoder) {
+#ifdef DEBUG
+    int32_t w = std::min(size.width, 8);
+    int32_t h = std::min(size.height, 8);
+    printf("Could not create encoder. Top-left %dx%d pixels contain:\n", w, h);
+    for (int32_t y = 0; y < h; ++y) {
+      for (int32_t x = 0; x < w; ++x) {
+        printf("%x ", reinterpret_cast<uint32_t*>(map.mData)[y*map.mStride+x]);
+      }
+    }
+#endif
+    dataSurface->Unmap();
+    return NS_ERROR_FAILURE;
+  }
+
+  nsresult rv = encoder->InitFromData(map.mData,
+                                      BufferSizeFromStrideAndHeight(map.mStride, size.height),
+                                      size.width,
+                                      size.height,
+                                      map.mStride,
+                                      imgIEncoder::INPUT_FORMAT_HOSTARGB,
+                                      aOutputOptions);
+  dataSurface->Unmap();
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCOMPtr<nsIInputStream> imgStream;
+  CallQueryInterface(encoder.get(), getter_AddRefs(imgStream));
+  if (!imgStream) {
+    return NS_ERROR_FAILURE;
+  }
+
+  uint64_t bufSize64;
+  rv = imgStream->Available(&bufSize64);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  NS_ENSURE_TRUE(bufSize64 < UINT32_MAX - 16, NS_ERROR_FAILURE);
+
+  uint32_t bufSize = (uint32_t)bufSize64;
+
+  // ...leave a little extra room so we can call read again and make sure we
+  // got everything. 16 bytes for better padding (maybe)
+  bufSize += 16;
+  uint32_t imgSize = 0;
+  Vector<char> imgData;
+  if (!imgData.initCapacity(bufSize)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+  uint32_t numReadThisTime = 0;
+  while ((rv = imgStream->Read(imgData.begin() + imgSize,
+                               bufSize - imgSize,
+                               &numReadThisTime)) == NS_OK && numReadThisTime > 0)
+  {
+    imgSize += numReadThisTime;
+    if (imgSize == bufSize) {
+      // need a bigger buffer, just double
+      bufSize *= 2;
+      if (!imgData.resizeUninitialized(bufSize)) {
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
+    }
+  }
+
+  if (aBinaryOrData == eBinaryEncode) {
+    if (aFile) {
+      fwrite(imgData.begin(), 1, imgSize, aFile);
+    }
+    return NS_OK;
+  }
+
+  // base 64, result will be null-terminated
+  nsCString encodedImg;
+  rv = Base64Encode(Substring(imgData.begin(), imgSize), encodedImg);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCString string("data:");
+  string.Append(aMimeType);
+  string.Append(";base64,");
+  string.Append(encodedImg);
+
+  if (aFile) {
+#ifdef ANDROID
+    if (aFile == stdout || aFile == stderr) {
+      // ADB logcat cuts off long strings so we will break it down
+      const char* cStr = string.BeginReading();
+      size_t len = strlen(cStr);
+      while (true) {
+        printf_stderr("IMG: %.140s\n", cStr);
+        if (len <= 140)
+          break;
+        len -= 140;
+        cStr += 140;
+      }
+    }
+#endif
+    fprintf(aFile, "%s", string.BeginReading());
+  } else {
+    nsCOMPtr<nsIClipboardHelper> clipboard(do_GetService("@mozilla.org/widget/clipboardhelper;1", &rv));
+    if (clipboard) {
+      clipboard->CopyString(NS_ConvertASCIItoUTF16(string), nullptr);
+    }
+  }
+  return NS_OK;
+}
+
+/* static */ void
+gfxUtils::WriteAsPNG(SourceSurface* aSurface, const nsAString& aFile)
+{
+  WriteAsPNG(aSurface, NS_ConvertUTF16toUTF8(aFile).get());
+}
+
+/* static */ void
+gfxUtils::WriteAsPNG(SourceSurface* aSurface, const char* aFile)
+{
+  FILE* file = fopen(aFile, "wb");
+
+  if (!file) {
+    // Maybe the directory doesn't exist; try creating it, then fopen again.
+    nsresult rv = NS_ERROR_FAILURE;
+    nsCOMPtr<nsIFile> comFile = do_CreateInstance("@mozilla.org/file/local;1");
+    if (comFile) {
+      NS_ConvertUTF8toUTF16 utf16path((nsDependentCString(aFile)));
+      rv = comFile->InitWithPath(utf16path);
+      if (NS_SUCCEEDED(rv)) {
+        nsCOMPtr<nsIFile> dirPath;
+        comFile->GetParent(getter_AddRefs(dirPath));
+        if (dirPath) {
+          rv = dirPath->Create(nsIFile::DIRECTORY_TYPE, 0777);
+          if (NS_SUCCEEDED(rv) || rv == NS_ERROR_FILE_ALREADY_EXISTS) {
+            file = fopen(aFile, "wb");
+          }
+        }
+      }
+    }
+    if (!file) {
+      NS_WARNING("Failed to open file to create PNG!\n");
+      return;
+    }
+  }
+
+  EncodeSourceSurface(aSurface, NS_LITERAL_CSTRING("image/png"),
+                      EmptyString(), eBinaryEncode, file);
+  fclose(file);
+}
+
+/* static */ void
+gfxUtils::WriteAsPNG(DrawTarget* aDT, const nsAString& aFile)
+{
+  WriteAsPNG(aDT, NS_ConvertUTF16toUTF8(aFile).get());
+}
+
 /* static */ void
 gfxUtils::WriteAsPNG(DrawTarget* aDT, const char* aFile)
 {
-  aDT->Flush();
-  nsRefPtr<gfxASurface> surf = gfxPlatform::GetPlatform()->GetThebesSurfaceForDrawTarget(aDT);
-  if (surf) {
-    surf->WriteAsPNG(aFile);
+  RefPtr<SourceSurface> surface = aDT->Snapshot();
+  if (surface) {
+    WriteAsPNG(surface, aFile);
   } else {
-    NS_WARNING("Failed to get Thebes surface!");
+    NS_WARNING("Failed to get surface!");
   }
 }
 
 /* static */ void
-gfxUtils::DumpAsDataURL(DrawTarget* aDT)
+gfxUtils::WriteAsPNG(nsIPresShell* aShell, const char* aFile)
 {
-  aDT->Flush();
-  nsRefPtr<gfxASurface> surf = gfxPlatform::GetPlatform()->GetThebesSurfaceForDrawTarget(aDT);
-  if (surf) {
-    surf->DumpAsDataURL();
+  int32_t width = 1000, height = 1000;
+  nsRect r(0, 0, aShell->GetPresContext()->DevPixelsToAppUnits(width),
+           aShell->GetPresContext()->DevPixelsToAppUnits(height));
+
+  RefPtr<mozilla::gfx::DrawTarget> dt = gfxPlatform::GetPlatform()->
+    CreateOffscreenContentDrawTarget(IntSize(width, height),
+                                     SurfaceFormat::B8G8R8A8);
+  NS_ENSURE_TRUE(dt, /*void*/);
+
+  nsRefPtr<gfxContext> context = new gfxContext(dt);
+  aShell->RenderDocument(r, 0, NS_RGB(255, 255, 0), context);
+  WriteAsPNG(dt.get(), aFile);
+}
+
+/* static */ void
+gfxUtils::DumpAsDataURI(SourceSurface* aSurface, FILE* aFile)
+{
+  EncodeSourceSurface(aSurface, NS_LITERAL_CSTRING("image/png"),
+                      EmptyString(), eDataURIEncode, aFile);
+}
+
+/* static */ void
+gfxUtils::DumpAsDataURI(DrawTarget* aDT, FILE* aFile)
+{
+  RefPtr<SourceSurface> surface = aDT->Snapshot();
+  if (surface) {
+    DumpAsDataURI(surface, aFile);
   } else {
-    NS_WARNING("Failed to get Thebes surface!");
+    NS_WARNING("Failed to get surface!");
   }
 }
 
 /* static */ void
-gfxUtils::CopyAsDataURL(DrawTarget* aDT)
+gfxUtils::CopyAsDataURI(SourceSurface* aSurface)
 {
-  aDT->Flush();
-  nsRefPtr<gfxASurface> surf = gfxPlatform::GetPlatform()->GetThebesSurfaceForDrawTarget(aDT);
-  if (surf) {
-    surf->CopyAsDataURL();
+  EncodeSourceSurface(aSurface, NS_LITERAL_CSTRING("image/png"),
+                      EmptyString(), eDataURIEncode, nullptr);
+}
+
+/* static */ void
+gfxUtils::CopyAsDataURI(DrawTarget* aDT)
+{
+  RefPtr<SourceSurface> surface = aDT->Snapshot();
+  if (surface) {
+    CopyAsDataURI(surface);
   } else {
-    NS_WARNING("Failed to get Thebes surface!");
+    NS_WARNING("Failed to get surface!");
   }
 }
 
-/* static */ void
-gfxUtils::WriteAsPNG(RefPtr<gfx::SourceSurface> aSourceSurface, const char* aFile)
-{
-  RefPtr<gfx::DataSourceSurface> dataSurface = aSourceSurface->GetDataSurface();
-  RefPtr<gfx::DrawTarget> dt
-            = gfxPlatform::GetPlatform()
-                ->CreateDrawTargetForData(dataSurface->GetData(),
-                                          dataSurface->GetSize(),
-                                          dataSurface->Stride(),
-                                          aSourceSurface->GetFormat());
-  gfxUtils::WriteAsPNG(dt.get(), aFile);
-}
-
-/* static */ void
-gfxUtils::DumpAsDataURL(RefPtr<gfx::SourceSurface> aSourceSurface)
-{
-  RefPtr<gfx::DataSourceSurface> dataSurface = aSourceSurface->GetDataSurface();
-  RefPtr<gfx::DrawTarget> dt
-            = gfxPlatform::GetPlatform()
-                ->CreateDrawTargetForData(dataSurface->GetData(),
-                                          dataSurface->GetSize(),
-                                          dataSurface->Stride(),
-                                          aSourceSurface->GetFormat());
-  gfxUtils::DumpAsDataURL(dt.get());
-}
-
-/* static */ void
-gfxUtils::CopyAsDataURL(RefPtr<gfx::SourceSurface> aSourceSurface)
-{
-  RefPtr<gfx::DataSourceSurface> dataSurface = aSourceSurface->GetDataSurface();
-  RefPtr<gfx::DrawTarget> dt
-            = gfxPlatform::GetPlatform()
-                ->CreateDrawTargetForData(dataSurface->GetData(),
-                                          dataSurface->GetSize(),
-                                          dataSurface->Stride(),
-                                          aSourceSurface->GetFormat());
-
-  gfxUtils::CopyAsDataURL(dt.get());
-}
-
+#ifdef MOZ_DUMP_PAINTING
 static bool sDumpPaintList = getenv("MOZ_DUMP_PAINT_LIST") != 0;
 
 /* static */ bool

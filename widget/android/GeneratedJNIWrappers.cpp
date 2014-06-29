@@ -20,6 +20,8 @@ jmethodID GeckoAppShell::jCheckURIVisited = 0;
 jmethodID GeckoAppShell::jClearMessageList = 0;
 jmethodID GeckoAppShell::jCloseCamera = 0;
 jmethodID GeckoAppShell::jCloseNotification = 0;
+jmethodID GeckoAppShell::jConnectionGetMimeType = 0;
+jmethodID GeckoAppShell::jCreateInputStream = 0;
 jmethodID GeckoAppShell::jCreateMessageListWrapper = 0;
 jmethodID GeckoAppShell::jCreateShortcut = 0;
 jmethodID GeckoAppShell::jDeleteMessageWrapper = 0;
@@ -34,6 +36,7 @@ jmethodID GeckoAppShell::jEnableNetworkNotifications = 0;
 jmethodID GeckoAppShell::jEnableScreenOrientationNotifications = 0;
 jmethodID GeckoAppShell::jEnableSensor = 0;
 jmethodID GeckoAppShell::jGamepadAdded = 0;
+jmethodID GeckoAppShell::jGetConnection = 0;
 jmethodID GeckoAppShell::jGetContext = 0;
 jmethodID GeckoAppShell::jGetCurrentBatteryInformationWrapper = 0;
 jmethodID GeckoAppShell::jGetCurrentNetworkInformationWrapper = 0;
@@ -102,6 +105,8 @@ void GeckoAppShell::InitStubs(JNIEnv *jEnv) {
     jClearMessageList = getStaticMethod("clearMessageList", "(I)V");
     jCloseCamera = getStaticMethod("closeCamera", "()V");
     jCloseNotification = getStaticMethod("closeNotification", "(Ljava/lang/String;)V");
+    jConnectionGetMimeType = getStaticMethod("connectionGetMimeType", "(Ljava/net/URLConnection;)Ljava/lang/String;");
+    jCreateInputStream = getStaticMethod("createInputStream", "(Ljava/net/URLConnection;)Ljava/io/InputStream;");
     jCreateMessageListWrapper = getStaticMethod("createMessageList", "(JJ[Ljava/lang/String;IIZI)V");
     jCreateShortcut = getStaticMethod("createShortcut", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
     jDeleteMessageWrapper = getStaticMethod("deleteMessage", "(II)V");
@@ -116,6 +121,7 @@ void GeckoAppShell::InitStubs(JNIEnv *jEnv) {
     jEnableScreenOrientationNotifications = getStaticMethod("enableScreenOrientationNotifications", "()V");
     jEnableSensor = getStaticMethod("enableSensor", "(I)V");
     jGamepadAdded = getStaticMethod("gamepadAdded", "(II)V");
+    jGetConnection = getStaticMethod("getConnection", "(Ljava/lang/String;)Ljava/net/URLConnection;");
     jGetContext = getStaticMethod("getContext", "()Landroid/content/Context;");
     jGetCurrentBatteryInformationWrapper = getStaticMethod("getCurrentBatteryInformation", "()[D");
     jGetCurrentNetworkInformationWrapper = getStaticMethod("getCurrentNetworkInformation", "()[D");
@@ -293,6 +299,32 @@ void GeckoAppShell::CloseNotification(const nsAString& a0) {
     env->CallStaticVoidMethod(mGeckoAppShellClass, jCloseNotification, j0);
     AndroidBridge::HandleUncaughtException(env);
     env->PopLocalFrame(nullptr);
+}
+
+jstring GeckoAppShell::ConnectionGetMimeType(jobject a0) {
+    JNIEnv *env = GetJNIForThread();
+    if (env->PushLocalFrame(2) != 0) {
+        AndroidBridge::HandleUncaughtException(env);
+        MOZ_CRASH("Exception should have caused crash.");
+    }
+
+    jobject temp = env->CallStaticObjectMethod(mGeckoAppShellClass, jConnectionGetMimeType, a0);
+    AndroidBridge::HandleUncaughtException(env);
+    jstring ret = static_cast<jstring>(env->PopLocalFrame(temp));
+    return ret;
+}
+
+jobject GeckoAppShell::CreateInputStream(jobject a0) {
+    JNIEnv *env = GetJNIForThread();
+    if (env->PushLocalFrame(2) != 0) {
+        AndroidBridge::HandleUncaughtException(env);
+        MOZ_CRASH("Exception should have caused crash.");
+    }
+
+    jobject temp = env->CallStaticObjectMethod(mGeckoAppShellClass, jCreateInputStream, a0);
+    AndroidBridge::HandleUncaughtException(env);
+    jobject ret = static_cast<jobject>(env->PopLocalFrame(temp));
+    return ret;
 }
 
 void GeckoAppShell::CreateMessageListWrapper(int64_t a0, int64_t a1, jobjectArray a2, int32_t a3, int32_t a4, bool a5, int32_t a6) {
@@ -476,6 +508,21 @@ void GeckoAppShell::GamepadAdded(int32_t a0, int32_t a1) {
     env->CallStaticVoidMethod(mGeckoAppShellClass, jGamepadAdded, a0, a1);
     AndroidBridge::HandleUncaughtException(env);
     env->PopLocalFrame(nullptr);
+}
+
+jobject GeckoAppShell::GetConnection(const nsACString& a0) {
+    JNIEnv *env = GetJNIForThread();
+    if (env->PushLocalFrame(2) != 0) {
+        AndroidBridge::HandleUncaughtException(env);
+        MOZ_CRASH("Exception should have caused crash.");
+    }
+
+    jstring j0 = AndroidBridge::NewJavaString(env, a0);
+
+    jobject temp = env->CallStaticObjectMethod(mGeckoAppShellClass, jGetConnection, j0);
+    AndroidBridge::HandleUncaughtException(env);
+    jobject ret = static_cast<jobject>(env->PopLocalFrame(temp));
+    return ret;
 }
 
 jobject GeckoAppShell::GetContext() {
@@ -1984,9 +2031,7 @@ jclass ProgressiveUpdateData::mProgressiveUpdateDataClass = 0;
 jmethodID ProgressiveUpdateData::jProgressiveUpdateData = 0;
 jmethodID ProgressiveUpdateData::jsetViewport = 0;
 jfieldID ProgressiveUpdateData::jabort = 0;
-jfieldID ProgressiveUpdateData::jheight = 0;
 jfieldID ProgressiveUpdateData::jscale = 0;
-jfieldID ProgressiveUpdateData::jwidth = 0;
 jfieldID ProgressiveUpdateData::jx = 0;
 jfieldID ProgressiveUpdateData::jy = 0;
 void ProgressiveUpdateData::InitStubs(JNIEnv *jEnv) {
@@ -1996,9 +2041,7 @@ void ProgressiveUpdateData::InitStubs(JNIEnv *jEnv) {
     jProgressiveUpdateData = getMethod("<init>", "()V");
     jsetViewport = getMethod("setViewport", "(Lorg/mozilla/gecko/gfx/ImmutableViewportMetrics;)V");
     jabort = getField("abort", "Z");
-    jheight = getField("height", "F");
     jscale = getField("scale", "F");
-    jwidth = getField("width", "F");
     jx = getField("x", "F");
     jy = getField("y", "F");
 }
@@ -2043,16 +2086,6 @@ void ProgressiveUpdateData::setabort(bool a0) {
     env->SetBooleanField(wrapped_obj, jabort, a0);
 }
 
-jfloat ProgressiveUpdateData::getheight() {
-    JNIEnv *env = GetJNIForThread();
-    return env->GetFloatField(wrapped_obj, jheight);
-}
-
-void ProgressiveUpdateData::setheight(jfloat a0) {
-    JNIEnv *env = GetJNIForThread();
-    env->SetFloatField(wrapped_obj, jheight, a0);
-}
-
 jfloat ProgressiveUpdateData::getscale() {
     JNIEnv *env = GetJNIForThread();
     return env->GetFloatField(wrapped_obj, jscale);
@@ -2061,16 +2094,6 @@ jfloat ProgressiveUpdateData::getscale() {
 void ProgressiveUpdateData::setscale(jfloat a0) {
     JNIEnv *env = GetJNIForThread();
     env->SetFloatField(wrapped_obj, jscale, a0);
-}
-
-jfloat ProgressiveUpdateData::getwidth() {
-    JNIEnv *env = GetJNIForThread();
-    return env->GetFloatField(wrapped_obj, jwidth);
-}
-
-void ProgressiveUpdateData::setwidth(jfloat a0) {
-    JNIEnv *env = GetJNIForThread();
-    env->SetFloatField(wrapped_obj, jwidth, a0);
 }
 
 jfloat ProgressiveUpdateData::getx() {

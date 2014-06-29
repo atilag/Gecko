@@ -235,6 +235,14 @@
      };
 
      /**
+      * Set the file's access permission bits.
+      * Not implemented for Windows (bug 1022816).
+      */
+     File.prototype.setPermissions = function setPermissions(options = {}) {
+         // do nothing
+     };
+
+     /**
       * Flushes the file's buffers and causes all buffered data
       * to be written.
       * Disk flushes are very expensive and therefore should be used carefully,
@@ -414,9 +422,13 @@
            return;
          }
        } else if (ctypes.winLastError == Const.ERROR_ACCESS_DENIED) {
+         // Save winLastError before another ctypes call.
+         let lastError = ctypes.winLastError;
          let attributes = WinFile.GetFileAttributes(path);
-         if (attributes != Const.INVALID_FILE_ATTRIBUTES &&
-             attributes & Const.FILE_ATTRIBUTE_READONLY) {
+         if (attributes != Const.INVALID_FILE_ATTRIBUTES) {
+           if (!(attributes & Const.FILE_ATTRIBUTE_READONLY)) {
+             throw new File.Error("remove", lastError, path);
+           }
            let newAttributes = attributes & ~Const.FILE_ATTRIBUTE_READONLY;
            if (WinFile.SetFileAttributes(path, newAttributes) &&
                WinFile.DeleteFile(path)) {
@@ -950,6 +962,14 @@
      };
 
      /**
+      * Set the file's access permission bits.
+      * Not implemented for Windows (bug 1022816).
+      */
+     File.setPermissions = function setPermissions(path, options = {}) {
+         // do nothing
+     };
+
+     /**
       * Set the last access and modification date of the file.
       * The time stamp resolution is 1 second at best, but might be worse
       * depending on the platform.
@@ -1011,7 +1031,7 @@
       * @throws {OS.File.Error} In case of I/O error, in particular if |path| is
       *         not a directory.
       */
-     File.removeDir = function(path, options) {
+     File.removeDir = function(path, options = {}) {
        // We can't use File.stat here because it will follow the symlink.
        let attributes = WinFile.GetFileAttributes(path);
        if (attributes == Const.INVALID_FILE_ATTRIBUTES) {

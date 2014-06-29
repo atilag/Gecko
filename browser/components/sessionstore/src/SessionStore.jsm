@@ -36,6 +36,7 @@ const OBSERVING = [
   "quit-application", "browser:purge-session-history",
   "browser:purge-domain-data",
   "gather-telemetry",
+  "idle-daily",
 ];
 
 // XUL Window properties to (re)store
@@ -384,15 +385,14 @@ let SessionStoreInternal = {
    * Initialize the session using the state provided by SessionStartup
    */
   initSession: function () {
+    TelemetryStopwatch.start("FX_SESSION_RESTORE_STARTUP_INIT_SESSION_MS");
     let state;
     let ss = gSessionStartup;
 
-    try {
-      if (ss.doRestore() ||
-          ss.sessionType == Ci.nsISessionStartup.DEFER_SESSION)
-        state = ss.state;
+    if (ss.doRestore() ||
+        ss.sessionType == Ci.nsISessionStartup.DEFER_SESSION) {
+      state = ss.state;
     }
-    catch(ex) { dump(ex + "\n"); } // no state to restore, which is ok
 
     if (state) {
       try {
@@ -464,38 +464,8 @@ let SessionStoreInternal = {
         this._prefBranch.getBoolPref("sessionstore.resume_session_once"))
       this._prefBranch.setBoolPref("sessionstore.resume_session_once", false);
 
-    this._performUpgradeBackup();
-
+    TelemetryStopwatch.finish("FX_SESSION_RESTORE_STARTUP_INIT_SESSION_MS");
     return state;
-  },
-
-  /**
-   * If this is the first time we launc this build of Firefox,
-   * backup sessionstore.js.
-   */
-  _performUpgradeBackup: function ssi_performUpgradeBackup() {
-    // Perform upgrade backup, if necessary
-    const PREF_UPGRADE = "sessionstore.upgradeBackup.latestBuildID";
-
-    let buildID = Services.appinfo.platformBuildID;
-    let latestBackup = this._prefBranch.getCharPref(PREF_UPGRADE);
-    if (latestBackup == buildID) {
-      return Promise.resolve();
-    }
-    return Task.spawn(function task() {
-      try {
-        // Perform background backup
-        yield SessionFile.createBackupCopy("-" + buildID);
-
-        this._prefBranch.setCharPref(PREF_UPGRADE, buildID);
-
-        // In case of success, remove previous backup.
-        yield SessionFile.removeBackupCopy("-" + latestBackup);
-      } catch (ex) {
-        debug("Could not perform upgrade backup " + ex);
-        debug(ex.stack);
-      }
-    }.bind(this));
   },
 
   _initPrefs : function() {
@@ -569,6 +539,9 @@ let SessionStoreInternal = {
         break;
       case "gather-telemetry":
         this.onGatherTelemetry();
+        break;
+      case "idle-daily":
+        this.onIdleDaily();
         break;
     }
   },
@@ -760,7 +733,7 @@ let SessionStoreInternal = {
     // internal data about the window.
     aWindow.__SSi = this._generateWindowID();
 
-    let mm = aWindow.messageManager;
+    let mm = aWindow.getGroupMessageManager("browsers");
     MESSAGES.forEach(msg => mm.addMessageListener(msg, this));
 
     // Load the frame script after registering listeners.
@@ -966,7 +939,10 @@ let SessionStoreInternal = {
       } else {
         let initialState = this.initSession();
         this._sessionInitialized = true;
+
+        TelemetryStopwatch.start("FX_SESSION_RESTORE_STARTUP_ONLOAD_INITIAL_WINDOW_MS");
         this.onLoad(aWindow, initialState);
+        TelemetryStopwatch.finish("FX_SESSION_RESTORE_STARTUP_ONLOAD_INITIAL_WINDOW_MS");
 
         // Let everyone know we're done.
         this._deferredInitialized.resolve();
@@ -1086,7 +1062,7 @@ let SessionStoreInternal = {
     // Cache the window state until it is completely gone.
     DyingWindowCache.set(aWindow, winData);
 
-    let mm = aWindow.messageManager;
+    let mm = aWindow.getGroupMessageManager("browsers");
     MESSAGES.forEach(msg => mm.removeMessageListener(msg, this));
 
     delete aWindow.__SSi;
@@ -1425,6 +1401,39 @@ let SessionStoreInternal = {
     return SessionFile.gatherTelemetry(stateString);
   },
 
+  // Clean up data that has been closed a long time ago.
+  // Do not reschedule a save. This will wait for the next regular
+  // save.
+  onIdleDaily: function() {
+    // Remove old closed windows
+    this._cleanupOldData([this._closedWindows]);
+
+    // Remove closed tabs of closed windows
+    this._cleanupOldData([winData._closedTabs for (winData of this._closedWindows)]);
+
+    // Remove closed tabs of open windows
+    this._cleanupOldData([this._windows[key]._closedTabs for (key of Object.keys(this._windows))]);
+  },
+
+  // Remove "old" data from an array
+  _cleanupOldData: function(targets) {
+    const TIME_TO_LIVE = this._prefBranch.getIntPref("sessionstore.cleanup.forget_closed_after");
+    const now = Date.now();
+
+    for (let array of targets) {
+      for (let i = array.length - 1; i >= 0; --i)  {
+        let data = array[i];
+        // Make sure that we have a timestamp to tell us when the target
+        // has been closed. If we don't have a timestamp, default to a
+        // safe timestamp: just now.
+        data.closedAt = data.closedAt || now;
+        if (now - data.closedAt > TIME_TO_LIVE) {
+          array.splice(i, 1);
+        }
+      }
+    }
+  },
+
   /* ........ nsISessionStore API .............. */
 
   getBrowserState: function ssi_getBrowserState() {
@@ -1668,6 +1677,8 @@ let SessionStoreInternal = {
 
     // reopen the window
     let state = { windows: this._closedWindows.splice(aIndex, 1) };
+    delete state.windows[0].closedAt; // Window is now open.
+
     let window = this._openWindowWithState(state);
     this.windowToFocus = window;
     return window;
@@ -2092,17 +2103,21 @@ let SessionStoreInternal = {
       recentCrashes: this._recentCrashes
     };
 
-    // get open Scratchpad window states too
-    let scratchpads = ScratchpadManager.getSessionState();
-
     let state = {
       windows: total,
       selectedWindow: ix + 1,
       _closedWindows: lastClosedWindowsCopy,
       session: session,
-      scratchpads: scratchpads,
       global: this._globalState.getState()
     };
+
+    if (Cu.isModuleLoaded("resource:///modules/devtools/scratchpad-manager.jsm")) {
+      // get open Scratchpad window states too
+      let scratchpads = ScratchpadManager.getSessionState();
+      if (scratchpads && scratchpads.length) {
+        state.scratchpads = scratchpads;
+      }
+    }
 
     // Persist the last session if we deferred restoring it
     if (LastSession.canRestore) {
@@ -2469,6 +2484,7 @@ let SessionStoreInternal = {
       } else {
         delete tab.__SS_extdata;
       }
+      delete tabData.closedAt; // Tab is now open.
 
       // Flush all data from the content script synchronously. This is done so
       // that all async messages that are still on their way to chrome will
@@ -2487,7 +2503,7 @@ let SessionStoreInternal = {
       // attribute so that it runs in a content process.
       let activePageData = tabData.entries[activeIndex] || null;
       let uri = activePageData ? activePageData.url || null : null;
-      tabbrowser.updateBrowserRemoteness(browser, uri);
+      tabbrowser.updateBrowserRemotenessByURL(browser, uri);
 
       // Start a new epoch and include the epoch in the restoreHistory
       // message. If a message is received that relates to a previous epoch, we
@@ -3031,7 +3047,8 @@ let SessionStoreInternal = {
     return aTabState.entries.length &&
            !(aTabState.entries.length == 1 &&
                 (aTabState.entries[0].url == "about:blank" ||
-                 aTabState.entries[0].url == "about:newtab") &&
+                 aTabState.entries[0].url == "about:newtab" ||
+                 aTabState.entries[0].url == "about:privatebrowsing") &&
                  !aTabState.userTypedValue);
   },
 
@@ -3371,7 +3388,7 @@ let SessionStoreInternal = {
    * with respect to |browser|.
    */
   isCurrentEpoch: function (browser, epoch) {
-    return this._browserEpochs.get(browser.permanentKey, 0) == epoch;
+    return (this._browserEpochs.get(browser.permanentKey) || 0) == epoch;
   },
 
 };

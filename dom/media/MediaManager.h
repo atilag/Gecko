@@ -36,7 +36,7 @@
 
 namespace mozilla {
 namespace dom {
-class MediaStreamConstraints;
+struct MediaStreamConstraints;
 class NavigatorUserMediaSuccessCallback;
 class NavigatorUserMediaErrorCallback;
 }
@@ -382,7 +382,7 @@ public:
                                               mWindowID, mError.forget());
           // event must always be released on mainthread due to the JS callbacks
           // in the TracksAvailableCallback
-          NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
+          NS_DispatchToMainThread(event);
         }
         break;
 
@@ -409,7 +409,7 @@ public:
                                               mWindowID);
           // event must always be released on mainthread due to the JS callbacks
           // in the TracksAvailableCallback
-          NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
+          NS_DispatchToMainThread(event);
         }
         break;
 
@@ -444,8 +444,8 @@ public:
   static MediaDevice* Create(MediaEngineVideoSource* source);
   static MediaDevice* Create(MediaEngineAudioSource* source);
 
-  virtual ~MediaDevice() {}
 protected:
+  virtual ~MediaDevice() {}
   MediaDevice(MediaEngineSource* aSource);
   nsString mName;
   nsString mID;

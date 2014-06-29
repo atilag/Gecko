@@ -5,11 +5,17 @@
 #ifndef VIDEO_SESSION_H_
 #define VIDEO_SESSION_H_
 
+#include "nsAutoPtr.h"
 #include "mozilla/Attributes.h"
 
 #include "MediaConduitInterface.h"
 #include "MediaEngineWrapper.h"
+#include "CodecStatistics.h"
+#include "LoadManagerFactory.h"
+#include "LoadManager.h"
 
+// conflicts with #include of scoped_ptr.h
+#undef FF
 // Video Engine Includes
 #include "webrtc/common_types.h"
 #ifdef FF
@@ -146,14 +152,14 @@ public:
    * Set an external encoder object |encoder| to the payload type |pltype|
    * for sender side codec.
    */
-  virtual MediaConduitErrorCode SetExternalSendCodec(int pltype,
+  virtual MediaConduitErrorCode SetExternalSendCodec(VideoCodecConfig* config,
                                                      VideoEncoder* encoder);
 
   /**
    * Set an external decoder object |decoder| to the payload type |pltype|
    * for receiver side codec.
    */
-  virtual MediaConduitErrorCode SetExternalRecvCodec(int pltype,
+  virtual MediaConduitErrorCode SetExternalRecvCodec(VideoCodecConfig* config,
                                                      VideoDecoder* decoder);
 
 
@@ -215,28 +221,8 @@ public:
     return 0;
   }
 
-  WebrtcVideoConduit():
-                      mOtherDirection(nullptr),
-                      mShutDown(false),
-                      mVideoEngine(nullptr),
-                      mTransport(nullptr),
-                      mRenderer(nullptr),
-                      mPtrExtCapture(nullptr),
-                      mEngineTransmitting(false),
-                      mEngineReceiving(false),
-                      mChannel(-1),
-                      mCapId(-1),
-                      mCurSendCodecConfig(nullptr),
-                      mSendingWidth(0),
-		      mSendingHeight(0),
-		      mReceivingWidth(640),
-		      mReceivingHeight(480),
-		      mVideoLatencyTestEnable(false),
-		      mVideoLatencyAvg(0)
-  {
-  }
-
-  virtual ~WebrtcVideoConduit() ;
+  WebrtcVideoConduit();
+  virtual ~WebrtcVideoConduit();
 
   MediaConduitErrorCode Init(WebrtcVideoConduit *other);
 
@@ -244,6 +230,16 @@ public:
   webrtc::VideoEngine* GetVideoEngine() { return mVideoEngine; }
   bool GetLocalSSRC(unsigned int* ssrc);
   bool GetRemoteSSRC(unsigned int* ssrc);
+  bool GetVideoEncoderStats(double* framerateMean,
+                            double* framerateStdDev,
+                            double* bitrateMean,
+                            double* bitrateStdDev,
+                            uint32_t* droppedFrames);
+  bool GetVideoDecoderStats(double* framerateMean,
+                            double* framerateStdDev,
+                            double* bitrateMean,
+                            double* bitrateStdDev,
+                            uint32_t* discardedPackets);
   bool GetAVStats(int32_t* jitterBufferDelayMs,
                   int32_t* playoutBufferDelayMs,
                   int32_t* avSyncOffsetMs);
@@ -326,12 +322,23 @@ private:
   unsigned short mReceivingHeight;
   bool mVideoLatencyTestEnable;
   uint64_t mVideoLatencyAvg;
+  uint32_t mMinBitrate;
+  uint32_t mStartBitrate;
+  uint32_t mMaxBitrate;
 
   static const unsigned int sAlphaNum = 7;
   static const unsigned int sAlphaDen = 8;
   static const unsigned int sRoundingPadding = 1024;
 
   mozilla::RefPtr<WebrtcAudioConduit> mSyncedTo;
+
+  nsAutoPtr<VideoCodecConfig> mExternalSendCodec;
+  nsAutoPtr<VideoCodecConfig> mExternalRecvCodec;
+
+  // statistics object for video codec;
+  nsAutoPtr<VideoCodecStatistics> mVideoCodecStat;
+
+  nsAutoPtr<LoadManager> mLoadManager;
 };
 
 } // end namespace

@@ -14,7 +14,7 @@ function peerReadyCb(evt) {
 
   // reset callback and NFC Hardware.
   nfc.onpeerready = null;
-  toggleNFC(false, runNextTest);
+  toggleNFC(false).then(runNextTest);
 }
 
 function handleTechnologyDiscoveredRE0(msg) {
@@ -32,7 +32,7 @@ function handleTechnologyDiscoveredRE0(msg) {
 
   request.onerror = function () {
     ok(false, "checkP2PRegistration failed.");
-    toggleNFC(false, runNextTest);
+    toggleNFC(false).then(runNextTest);
   }
 }
 
@@ -48,50 +48,47 @@ function handleTechnologyDiscoveredRE0ForP2PRegFailure(msg) {
     is(request.result, false, "check for P2P registration result");
 
     nfc.onpeerready = null;
-    toggleNFC(false, runNextTest);
+    toggleNFC(false).then(runNextTest);
   }
 
   request.onerror = function () {
     ok(false, "checkP2PRegistration failed.");
 
     nfc.onpeerready = null;
-    toggleNFC(false, runNextTest);
+    toggleNFC(false).then(runNextTest);
   }
-}
-
-function activateRE(re) {
-  let deferred = Promise.defer();
-  let cmd = "nfc nci rf_intf_activated_ntf " + re;
-
-  emulator.run(cmd, function(result) {
-    is(result.pop(), "OK", "check activation of RE" + re);
-    deferred.resolve();
-  });
-
-  return deferred.promise;
 }
 
 function testPeerReady() {
   window.navigator.mozSetMessageHandler(
     "nfc-manager-tech-discovered", handleTechnologyDiscoveredRE0);
 
-  toggleNFC(true, function() {
-    activateRE(0);
-  });
+  toggleNFC(true).then(() => emulator.activateRE(0));
 }
 
 function testCheckP2PRegFailure() {
   window.navigator.mozSetMessageHandler(
     "nfc-manager-tech-discovered", handleTechnologyDiscoveredRE0ForP2PRegFailure);
 
-  toggleNFC(true, function() {
-    activateRE(0);
-  });
+  toggleNFC(true).then(() => emulator.activateRE(0));
+}
+
+function testCheckNfcPeerObjForInvalidToken() {
+  try {
+    // Use a'fakeSessionToken'
+    let peer = nfc.getNFCPeer("fakeSessionToken");
+    ok(false, "Should not get a NFCPeer object.");
+  } catch (ex) {
+    ok(true, "Exception expected");
+  }
+
+  toggleNFC(false).then(runNextTest);
 }
 
 let tests = [
   testPeerReady,
-  testCheckP2PRegFailure
+  testCheckP2PRegFailure,
+  testCheckNfcPeerObjForInvalidToken
 ];
 
 SpecialPowers.pushPermissions(

@@ -6,20 +6,87 @@
 const cssAutoCompleter = require("devtools/sourceeditor/css-autocompleter");
 const { AutocompletePopup } = require("devtools/shared/autocomplete-popup");
 
+const CM_TERN_SCRIPTS = [
+  "chrome://browser/content/devtools/codemirror/tern.js",
+  "chrome://browser/content/devtools/codemirror/show-hint.js"
+];
+
 const privates = new WeakMap();
 
 /**
- * Prepares an editor instance for autocompletion, setting up the popup and the
- * CSS completer instance.
+ * Prepares an editor instance for autocompletion.
  */
-function setupAutoCompletion(ctx, walker) {
+function setupAutoCompletion(ctx, options) {
   let { cm, ed, Editor } = ctx;
 
   let win = ed.container.contentWindow.wrappedJSObject;
+  let { CodeMirror, document } = win;
 
   let completer = null;
-  if (ed.config.mode == Editor.modes.css)
-    completer = new cssAutoCompleter({walker: walker});
+  let autocompleteKey = "Ctrl-" +
+                        Editor.keyFor("autocompletion", { noaccel: true });
+  if (ed.config.mode == Editor.modes.js) {
+    let defs = [
+      "tern/browser",
+      "tern/ecma5",
+    ].map(require);
+
+    CM_TERN_SCRIPTS.forEach(ed.loadScript, ed);
+    win.tern = require("tern/tern");
+    cm.tern = new CodeMirror.TernServer({
+      defs: defs,
+      typeTip: function(data) {
+        let tip = document.createElement("span");
+        tip.className = "CodeMirror-Tern-information";
+        let tipType = document.createElement("strong");
+        tipType.appendChild(document.createTextNode(data.type || cm.l10n("autocompletion.notFound")));
+        tip.appendChild(tipType);
+
+        if (data.doc) {
+          tip.appendChild(document.createTextNode(" — " + data.doc));
+        }
+
+        if (data.url) {
+          tip.appendChild(document.createTextNode(" "));
+          let docLink = document.createElement("a");
+          docLink.textContent = "[" + cm.l10n("autocompletion.docsLink") + "]";
+          docLink.href = data.url;
+          docLink.className = "theme-link";
+          docLink.setAttribute("target", "_blank");
+          tip.appendChild(docLink);
+        }
+
+        return tip;
+      }
+    });
+    cm.on("cursorActivity", (cm) => {
+      cm.tern.updateArgHints(cm);
+    });
+
+    let keyMap = {};
+
+    keyMap[autocompleteKey] = (cm) => {
+      cm.tern.getHint(cm, (data) => {
+        CodeMirror.on(data, "shown", () => ed.emit("before-suggest"));
+        CodeMirror.on(data, "close", () => ed.emit("after-suggest"));
+        CodeMirror.on(data, "select", () => ed.emit("suggestion-entered"));
+        CodeMirror.showHint(cm, (cm, cb) => cb(data), { async: true });
+      });
+    };
+
+    keyMap[Editor.keyFor("showInformation", { noaccel: true })] = (cm) => {
+      cm.tern.showType(cm, null, () => {
+        ed.emit("show-information");
+      });
+    };
+
+    cm.addKeyMap(keyMap);
+
+    // TODO: Integrate tern autocompletion with this autocomplete API.
+    return;
+  } else if (ed.config.mode == Editor.modes.css) {
+    completer = new cssAutoCompleter({walker: options.walker});
+  }
 
   let popup = new AutocompletePopup(win.parent.document, {
     position: "after_start",
@@ -34,14 +101,14 @@ function setupAutoCompletion(ctx, walker) {
       return;
     }
 
-    return win.CodeMirror.Pass;
+    return CodeMirror.Pass;
   };
 
   let keyMap = {
     "Tab": cycle,
     "Down": cycle,
-    "Shift-Tab": cycle.bind(this, true),
-    "Up": cycle.bind(this, true),
+    "Shift-Tab": cycle.bind(null, true),
+    "Up": cycle.bind(null, true),
     "Enter": () => {
       if (popup && popup.isOpen) {
         if (!privates.get(ed).suggestionInsertedOnce) {
@@ -56,10 +123,10 @@ function setupAutoCompletion(ctx, walker) {
         return;
       }
 
-      return win.CodeMirror.Pass;
+      return CodeMirror.Pass;
     }
   };
-  keyMap[Editor.accel("Space")] = cm => autoComplete(ctx);
+  keyMap[autocompleteKey] = cm => autoComplete(ctx);
   cm.addKeyMap(keyMap);
 
   cm.on("keydown", (cm, e) => onEditorKeypress(ctx, e));

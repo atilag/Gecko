@@ -181,7 +181,7 @@ class Debugger::FrameRange
      * Similarly, if stack frames are added to or removed from frontDebugger(),
      * then the range's front is invalid until popFront is called.
      */
-    FrameRange(AbstractFramePtr frame, GlobalObject *global = nullptr)
+    explicit FrameRange(AbstractFramePtr frame, GlobalObject *global = nullptr)
       : frame(frame)
     {
         nextDebugger = 0;
@@ -809,6 +809,63 @@ Debugger::unwrapDebuggeeValue(JSContext *cx, MutableHandleValue vp)
     return true;
 }
 
+/*
+ * Convert Debugger.Objects in desc to debuggee values.
+ * Reject non-callable getters and setters.
+ */
+static bool
+CheckArgCompartment(JSContext *cx, JSObject *obj, HandleValue v,
+                    const char *methodname, const char *propname)
+{
+    if (v.isObject() && v.toObject().compartment() != obj->compartment()) {
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_DEBUG_COMPARTMENT_MISMATCH,
+                             methodname, propname);
+        return false;
+    }
+    return true;
+}
+
+bool
+Debugger::unwrapPropDescInto(JSContext *cx, HandleObject obj, Handle<PropDesc> wrapped,
+                             MutableHandle<PropDesc> unwrapped)
+{
+    MOZ_ASSERT(!wrapped.isUndefined());
+
+    unwrapped.set(wrapped);
+
+    if (unwrapped.hasValue()) {
+        RootedValue value(cx, unwrapped.value());
+        if (!unwrapDebuggeeValue(cx, &value) ||
+            !CheckArgCompartment(cx, obj, value, "defineProperty", "value"))
+        {
+            return false;
+        }
+        unwrapped.setValue(value);
+    }
+
+    if (unwrapped.hasGet()) {
+        RootedValue get(cx, unwrapped.getterValue());
+        if (!unwrapDebuggeeValue(cx, &get) ||
+            !CheckArgCompartment(cx, obj, get, "defineProperty", "get"))
+        {
+            return false;
+        }
+        unwrapped.setGetter(get);
+    }
+
+    if (unwrapped.hasSet()) {
+        RootedValue set(cx, unwrapped.setterValue());
+        if (!unwrapDebuggeeValue(cx, &set) ||
+            !CheckArgCompartment(cx, obj, set, "defineProperty", "set"))
+        {
+            return false;
+        }
+        unwrapped.setSetter(set);
+    }
+
+    return true;
+}
+
 JSTrapStatus
 Debugger::handleUncaughtExceptionHelper(Maybe<AutoCompartment> &ac,
                                         MutableHandleValue *vp, bool callHook)
@@ -990,7 +1047,7 @@ CallMethodIfPresent(JSContext *cx, HandleObject obj, const char *name, int argc,
     RootedId id(cx, AtomToId(atom));
     RootedValue fval(cx);
     return JSObject::getGeneric(cx, obj, obj, id, &fval) &&
-           (!js_IsCallable(fval) || Invoke(cx, ObjectValue(*obj), fval, argc, argv, rval));
+           (!IsCallable(fval) || Invoke(cx, ObjectValue(*obj), fval, argc, argv, rval));
 }
 
 JSTrapStatus
@@ -1329,7 +1386,7 @@ Debugger::onSingleStep(JSContext *cx, MutableHandleValue vp)
         RootedValue savedIterValue;
 
       public:
-        PreserveIterValue(JSContext *cx) : cx(cx), savedIterValue(cx, cx->iterValue) {
+        explicit PreserveIterValue(JSContext *cx) : cx(cx), savedIterValue(cx, cx->iterValue) {
             cx->iterValue.setMagic(JS_NO_ITER_VALUE);
         }
         ~PreserveIterValue() {
@@ -2416,8 +2473,8 @@ class Debugger::ScriptQuery {
   public:
     /* Construct a ScriptQuery to use matching scripts for |dbg|. */
     ScriptQuery(JSContext *cx, Debugger *dbg):
-        cx(cx), debugger(dbg), compartments(cx->runtime()), url(cx), displayURL(cx),
-        displayURLChars(nullptr), innermostForCompartment(cx->runtime())
+        cx(cx), debugger(dbg), compartments(cx->runtime()), url(cx), displayURLString(cx),
+        innermostForCompartment(cx->runtime())
     {}
 
     /*
@@ -2515,6 +2572,7 @@ class Debugger::ScriptQuery {
         }
 
         /* Check for a 'displayURL' property. */
+        RootedValue displayURL(cx);
         if (!JSObject::getProperty(cx, query, query, cx->names().displayURL, &displayURL))
             return false;
         if (!displayURL.isUndefined() && !displayURL.isString()) {
@@ -2522,6 +2580,12 @@ class Debugger::ScriptQuery {
                                  "query object's 'displayURL' property",
                                  "neither undefined nor a string");
             return false;
+        }
+
+        if (displayURL.isString()) {
+            displayURLString = displayURL.toString()->ensureLinear(cx);
+            if (!displayURLString)
+                return false;
         }
 
         return true;
@@ -2532,7 +2596,7 @@ class Debugger::ScriptQuery {
         url.setUndefined();
         hasLine = false;
         innermost = false;
-        displayURLChars = nullptr;
+        displayURLString = nullptr;
         return matchAllDebuggeeGlobals();
     }
 
@@ -2598,11 +2662,7 @@ class Debugger::ScriptQuery {
 
     /* If this is a string, matching scripts' sources have displayURLs equal to
      * it. */
-    RootedValue displayURL;
-
-    /* displayURL as a jschar* */
-    const jschar *displayURLChars;
-    size_t displayURLLength;
+    RootedLinearString displayURLString;
 
     /* True if the query contained a 'line' property. */
     bool hasLine;
@@ -2677,13 +2737,6 @@ class Debugger::ScriptQuery {
             if (!urlCString.encodeLatin1(cx, url.toString()))
                 return false;
         }
-        if (displayURL.isString()) {
-            JSString *s = displayURL.toString();
-            displayURLChars = s->getChars(cx);
-            displayURLLength = s->length();
-            if (!displayURLChars)
-                return false;
-        }
 
         return true;
     }
@@ -2725,13 +2778,13 @@ class Debugger::ScriptQuery {
             if (line < script->lineno() || script->lineno() + js_GetScriptLineExtent(script) < line)
                 return;
         }
-        if (displayURLChars) {
+        if (displayURLString) {
             if (!script->scriptSource() || !script->scriptSource()->hasDisplayURL())
                 return;
+
             const jschar *s = script->scriptSource()->displayURL();
-            if (CompareChars(s, js_strlen(s), displayURLChars, displayURLLength) != 0) {
+            if (CompareChars(s, js_strlen(s), displayURLString) != 0)
                 return;
-            }
         }
 
         if (innermost) {
@@ -3028,9 +3081,9 @@ DebuggerScript_getUrl(JSContext *cx, unsigned argc, Value *vp)
     if (script->filename()) {
         JSString *str;
         if (script->scriptSource()->introducerFilename())
-            str = js_NewStringCopyZ<CanGC>(cx, script->scriptSource()->introducerFilename());
+            str = NewStringCopyZ<CanGC>(cx, script->scriptSource()->introducerFilename());
         else
-            str = js_NewStringCopyZ<CanGC>(cx, script->filename());
+            str = NewStringCopyZ<CanGC>(cx, script->filename());
         if (!str)
             return false;
         args.rval().setString(str);
@@ -3361,7 +3414,7 @@ class FlowGraphSummary {
         size_t column_;
     };
 
-    FlowGraphSummary(JSContext *cx) : entries_(cx) {}
+    explicit FlowGraphSummary(JSContext *cx) : entries_(cx) {}
 
     Entry &operator[](size_t index) {
         return entries_[index];
@@ -3676,6 +3729,23 @@ Debugger::handleIonBailout(JSContext *cx, jit::RematerializedFrame *from, jit::B
     return replaceFrameGuts(cx, from, to, iter);
 }
 
+/* static */ void
+Debugger::propagateForcedReturn(JSContext *cx, AbstractFramePtr frame, HandleValue rval)
+{
+    // Invoking the interrupt handler is considered a step and invokes the
+    // youngest frame's onStep handler, if any. However, we cannot handle
+    // { return: ... } resumption values straightforwardly from the interrupt
+    // handler. Instead, we set the intended return value in the frame's rval
+    // slot and set the propagating-forced-return flag on the JSContext.
+    //
+    // The interrupt handler then returns false with no exception set,
+    // signaling an uncatchable exception. In the exception handlers, we then
+    // check for the special propagating-forced-return flag.
+    MOZ_ASSERT(!cx->isExceptionPending());
+    cx->setPropagatingForcedReturn();
+    frame.setReturnValue(rval);
+}
+
 static bool
 DebuggerScript_setBreakpoint(JSContext *cx, unsigned argc, Value *vp)
 {
@@ -3972,7 +4042,7 @@ DebuggerSource_getText(JSContext *cx, unsigned argc, Value *vp)
         return false;
 
     JSString *str = hasSourceData ? ss->substring(cx, 0, ss->length())
-                                  : js_NewStringCopyZ<CanGC>(cx, "[no source]");
+                                  : NewStringCopyZ<CanGC>(cx, "[no source]");
     if (!str)
         return false;
 
@@ -3987,7 +4057,7 @@ DebuggerSource_getUrl(JSContext *cx, unsigned argc, Value *vp)
 
     ScriptSource *ss = sourceObject->source();
     if (ss->filename()) {
-        JSString *str = js_NewStringCopyZ<CanGC>(cx, ss->filename());
+        JSString *str = NewStringCopyZ<CanGC>(cx, ss->filename());
         if (!str)
             return false;
         args.rval().setString(str);
@@ -4080,7 +4150,7 @@ DebuggerSource_getIntroductionType(JSContext *cx, unsigned argc, Value *vp)
 
     ScriptSource *ss = sourceObject->source();
     if (ss->hasIntroductionType()) {
-        JSString *str = js_NewStringCopyZ<CanGC>(cx, ss->introductionType());
+        JSString *str = NewStringCopyZ<CanGC>(cx, ss->introductionType());
         if (!str)
             return false;
         args.rval().setString(str);
@@ -4645,13 +4715,13 @@ DebuggerFrame_setOnPop(JSContext *cx, unsigned argc, Value *vp)
  */
 bool
 js::EvaluateInEnv(JSContext *cx, Handle<Env*> env, HandleValue thisv, AbstractFramePtr frame,
-                  ConstTwoByteChars chars, unsigned length, const char *filename, unsigned lineno,
+                  mozilla::Range<const jschar> chars, const char *filename, unsigned lineno,
                   MutableHandleValue rval)
 {
     assertSameCompartment(cx, env, frame);
     JS_ASSERT_IF(frame, thisv.get() == frame.thisValue());
 
-    JS_ASSERT(!IsPoisonedPtr(chars.get()));
+    JS_ASSERT(!IsPoisonedPtr(chars.start().get()));
 
     /*
      * NB: This function breaks the assumption that the compiler can see all
@@ -4666,7 +4736,7 @@ js::EvaluateInEnv(JSContext *cx, Handle<Env*> env, HandleValue thisv, AbstractFr
            .setCanLazilyParse(false)
            .setIntroductionType("debugger eval");
     RootedScript callerScript(cx, frame ? frame.script() : nullptr);
-    SourceBufferHolder srcBuf(chars.get(), length, SourceBufferHolder::NoOwnership);
+    SourceBufferHolder srcBuf(chars.start().get(), chars.length(), SourceBufferHolder::NoOwnership);
     RootedScript script(cx, frontend::CompileScript(cx, &cx->tempLifoAlloc(), env, callerScript,
                                                     options, srcBuf,
                                                     /* source = */ nullptr,
@@ -4807,9 +4877,13 @@ DebuggerGenericEval(JSContext *cx, const char *fullMethodName, const Value &code
     RootedValue rval(cx);
     JS::Anchor<JSString *> anchor(flat);
     AbstractFramePtr frame = iter ? iter->abstractFramePtr() : NullFramePtr();
-    bool ok = EvaluateInEnv(cx, env, thisv, frame,
-                            ConstTwoByteChars(flat->chars(), flat->length()),
-                            flat->length(), url ? url : "debugger eval code", lineNumber, &rval);
+    AutoStableStringChars stableChars(cx);
+    if (!stableChars.initTwoByte(cx, flat))
+        return false;
+
+    mozilla::Range<const jschar> chars = stableChars.twoByteRange();
+    bool ok = EvaluateInEnv(cx, env, thisv, frame, chars, url ? url : "debugger eval code",
+                            lineNumber, &rval);
     return dbg->receiveCompletionValue(ac, ok, rval, vp);
 }
 
@@ -5174,8 +5248,6 @@ DebuggerObject_getOwnPropertyDescriptor(JSContext *cx, unsigned argc, Value *vp)
     {
         Maybe<AutoCompartment> ac;
         ac.construct(cx, obj);
-        if (!cx->compartment()->wrapId(cx, id.address()))
-            return false;
 
         ErrorCopier ec(ac, dbg->toJSObject());
         if (!GetOwnPropertyDescriptor(cx, obj, id, &desc))
@@ -5231,12 +5303,8 @@ DebuggerObject_getOwnPropertyNames(JSContext *cx, unsigned argc, Value *vp)
              vals[i].setString(str);
          } else if (JSID_IS_ATOM(id)) {
              vals[i].setString(JSID_TO_STRING(id));
-             if (!cx->compartment()->wrap(cx, vals[i]))
-                 return false;
          } else {
-             vals[i].setObject(*JSID_TO_OBJECT(id));
-             if (!dbg->wrapDebuggeeValue(cx, vals[i]))
-                 return false;
+             MOZ_ASSERT_UNREACHABLE("GetPropertyNames must return only string and int jsids");
          }
     }
 
@@ -5257,34 +5325,24 @@ DebuggerObject_defineProperty(JSContext *cx, unsigned argc, Value *vp)
     if (!ValueToId<CanGC>(cx, args[0], &id))
         return false;
 
-    AutoPropDescArrayRooter descs(cx);
-    if (!descs.reserve(3)) // desc, unwrappedDesc, rewrappedDesc
+    Rooted<PropDesc> desc(cx);
+    if (!desc.initialize(cx, args[1], false))
         return false;
-    PropDesc *desc = descs.append();
-    if (!desc || !desc->initialize(cx, args[1], false))
-        return false;
-    desc->clearPd();
 
-    PropDesc *unwrappedDesc = descs.append();
-    if (!unwrappedDesc || !desc->unwrapDebuggerObjectsInto(cx, dbg, obj, unwrappedDesc))
+    if (!dbg->unwrapPropDescInto(cx, obj, desc, &desc))
         return false;
-    if (!unwrappedDesc->checkGetter(cx) || !unwrappedDesc->checkSetter(cx))
+    if (!desc.checkGetter(cx) || !desc.checkSetter(cx))
         return false;
 
     {
-        PropDesc *rewrappedDesc = descs.append();
-        if (!rewrappedDesc)
-            return false;
-        RootedId wrappedId(cx);
-
         Maybe<AutoCompartment> ac;
         ac.construct(cx, obj);
-        if (!unwrappedDesc->wrapInto(cx, obj, id, wrappedId.address(), rewrappedDesc))
+        if (!cx->compartment()->wrap(cx, &desc))
             return false;
 
         ErrorCopier ec(ac, dbg->toJSObject());
         bool dummy;
-        if (!DefineProperty(cx, obj, wrappedId, *rewrappedDesc, true, &dummy))
+        if (!DefineProperty(cx, obj, id, desc, true, &dummy))
             return false;
     }
 
@@ -5304,44 +5362,31 @@ DebuggerObject_defineProperties(JSContext *cx, unsigned argc, Value *vp)
         return false;
 
     AutoIdVector ids(cx);
-    AutoPropDescArrayRooter descs(cx);
+    AutoPropDescVector descs(cx);
     if (!ReadPropertyDescriptors(cx, props, false, &ids, &descs))
         return false;
     size_t n = ids.length();
 
-    AutoPropDescArrayRooter unwrappedDescs(cx);
     for (size_t i = 0; i < n; i++) {
-        if (!unwrappedDescs.append())
+        if (!dbg->unwrapPropDescInto(cx, obj, descs[i], descs[i]))
             return false;
-        if (!descs[i].unwrapDebuggerObjectsInto(cx, dbg, obj, &unwrappedDescs[i]))
-            return false;
-        if (!unwrappedDescs[i].checkGetter(cx) || !unwrappedDescs[i].checkSetter(cx))
+        if (!descs[i].checkGetter(cx) || !descs[i].checkSetter(cx))
             return false;
     }
 
     {
-        AutoIdVector rewrappedIds(cx);
-        AutoPropDescArrayRooter rewrappedDescs(cx);
-
         Maybe<AutoCompartment> ac;
         ac.construct(cx, obj);
-        RootedId id(cx);
         for (size_t i = 0; i < n; i++) {
-            if (!rewrappedIds.append(JSID_VOID) || !rewrappedDescs.append())
-                return false;
-            id = ids[i];
-            if (!unwrappedDescs[i].wrapInto(cx, obj, id, rewrappedIds[i].address(), &rewrappedDescs[i]))
+            if (!cx->compartment()->wrap(cx, descs[i]))
                 return false;
         }
 
         ErrorCopier ec(ac, dbg->toJSObject());
         for (size_t i = 0; i < n; i++) {
             bool dummy;
-            if (!DefineProperty(cx, obj, rewrappedIds[i],
-                                rewrappedDescs[i], true, &dummy))
-            {
+            if (!DefineProperty(cx, obj, ids[i], descs[i], true, &dummy))
                 return false;
-            }
         }
     }
 
@@ -5357,16 +5402,16 @@ static bool
 DebuggerObject_deleteProperty(JSContext *cx, unsigned argc, Value *vp)
 {
     THIS_DEBUGOBJECT_OWNER_REFERENT(cx, argc, vp, "deleteProperty", args, dbg, obj);
-    RootedValue nameArg(cx, args.get(0));
+    RootedId id(cx);
+    if (!ValueToId<CanGC>(cx, args.get(0), &id))
+        return false;
 
     Maybe<AutoCompartment> ac;
     ac.construct(cx, obj);
-    if (!cx->compartment()->wrap(cx, &nameArg))
-        return false;
+    ErrorCopier ec(ac, dbg->toJSObject());
 
     bool succeeded;
-    ErrorCopier ec(ac, dbg->toJSObject());
-    if (!JSObject::deleteByValue(cx, obj, nameArg, &succeeded))
+    if (!JSObject::deleteGeneric(cx, obj, id, &succeeded))
         return false;
     args.rval().setBoolean(succeeded);
     return true;
@@ -5934,8 +5979,6 @@ DebuggerEnv_names(JSContext *cx, unsigned argc, Value *vp)
     for (size_t i = 0, len = keys.length(); i < len; i++) {
         id = keys[i];
         if (JSID_IS_ATOM(id) && IsIdentifier(JSID_TO_ATOM(id))) {
-            if (!cx->compartment()->wrapId(cx, id.address()))
-                return false;
             if (!NewbornArrayPush(cx, arr, StringValue(JSID_TO_STRING(id))))
                 return false;
         }
@@ -5957,8 +6000,6 @@ DebuggerEnv_find(JSContext *cx, unsigned argc, Value *vp)
     {
         Maybe<AutoCompartment> ac;
         ac.construct(cx, env);
-        if (!cx->compartment()->wrapId(cx, id.address()))
-            return false;
 
         /* This can trigger resolve hooks. */
         ErrorCopier ec(ac, dbg->toJSObject());
@@ -5989,8 +6030,6 @@ DebuggerEnv_getVariable(JSContext *cx, unsigned argc, Value *vp)
     {
         Maybe<AutoCompartment> ac;
         ac.construct(cx, env);
-        if (!cx->compartment()->wrapId(cx, id.address()))
-            return false;
 
         /* This can trigger getters. */
         ErrorCopier ec(ac, dbg->toJSObject());
@@ -6031,7 +6070,7 @@ DebuggerEnv_setVariable(JSContext *cx, unsigned argc, Value *vp)
     {
         Maybe<AutoCompartment> ac;
         ac.construct(cx, env);
-        if (!cx->compartment()->wrapId(cx, id.address()) || !cx->compartment()->wrap(cx, &v))
+        if (!cx->compartment()->wrap(cx, &v))
             return false;
 
         /* This can trigger setters. */

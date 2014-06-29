@@ -359,6 +359,12 @@ VARIABLES = {
         This variable can only be used on Windows.
         """, None),
 
+    'LD_VERSION_SCRIPT': (unicode, unicode,
+        """The linker version script for shared libraries.
+
+        This variable can only be used on Linux.
+        """, None),
+
     'RESOURCE_FILES': (HierarchicalStringListWithFlagsFactory({'preprocess': bool}), list,
         """List of resources to be exported, and in which subdirectories.
 
@@ -593,6 +599,12 @@ VARIABLES = {
         """List of manifest files defining browser chrome tests.
         """, None),
 
+    'CRASHTEST_MANIFESTS': (StrictOrderingOnAppendList, list,
+        """List of manifest files defining crashtests.
+
+        These are commonly named crashtests.list.
+        """, None),
+
     'METRO_CHROME_MANIFESTS': (StrictOrderingOnAppendList, list,
         """List of manifest files defining metro browser chrome tests.
         """, None),
@@ -607,6 +619,12 @@ VARIABLES = {
 
     'MOCHITEST_WEBAPPRT_CHROME_MANIFESTS': (StrictOrderingOnAppendList, list,
         """List of manifest files defining webapprt mochitest chrome tests.
+        """, None),
+
+    'REFTEST_MANIFESTS': (StrictOrderingOnAppendList, list,
+        """List of manifest files defining reftests.
+
+        These are commonly named reftest.list.
         """, None),
 
     'WEBRTC_SIGNALLING_TEST_MANIFESTS': (StrictOrderingOnAppendList, list,

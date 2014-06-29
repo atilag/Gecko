@@ -48,8 +48,8 @@ HashChildren(Shape *kid1, Shape *kid2)
         return nullptr;
     }
 
-    JS_ALWAYS_TRUE(hash->putNew(kid1, kid1));
-    JS_ALWAYS_TRUE(hash->putNew(kid2, kid2));
+    JS_ALWAYS_TRUE(hash->putNew(StackShape(kid1), kid1));
+    JS_ALWAYS_TRUE(hash->putNew(StackShape(kid2), kid2));
     return hash;
 }
 
@@ -85,7 +85,7 @@ PropertyTree::insertChild(ExclusiveContext *cx, Shape *parent, Shape *child)
         return true;
     }
 
-    if (!kidp->toHash()->putNew(child, child)) {
+    if (!kidp->toHash()->putNew(StackShape(child), child)) {
         js_ReportOutOfMemory(cx);
         return false;
     }
@@ -112,7 +112,7 @@ Shape::removeChild(Shape *child)
     KidsHash *hash = kidp->toHash();
     JS_ASSERT(hash->count() >= 2);      /* otherwise kidp->isShape() should be true */
 
-    hash->remove(child);
+    hash->remove(StackShape(child));
     child->parent = nullptr;
 
     if (hash->count() == 1) {
@@ -276,7 +276,7 @@ KidsPointer::checkConsistency(Shape *aKid) const
     } else {
         JS_ASSERT(isHash());
         KidsHash *hash = toHash();
-        KidsHash::Ptr ptr = hash->lookup(aKid);
+        KidsHash::Ptr ptr = hash->lookup(StackShape(aKid));
         JS_ASSERT(*ptr == aKid);
     }
 }
@@ -297,17 +297,14 @@ Shape::dump(JSContext *cx, FILE *fp) const
         JSLinearString *str;
         if (JSID_IS_ATOM(propid)) {
             str = JSID_TO_ATOM(propid);
+            if (!str)
+                fputs("<error>", fp);
+            else
+                FileEscapedString(fp, str, '"');
         } else {
-            JS_ASSERT(JSID_IS_OBJECT(propid));
-            Value v = IdToValue(propid);
-            JSString *s = ToStringSlow<NoGC>(cx, v);
-            fputs("object ", fp);
-            str = s ? s->ensureLinear(cx) : nullptr;
+            JS_ASSERT(JSID_IS_SYMBOL(propid));
+            JSID_TO_SYMBOL(propid)->dump(fp);
         }
-        if (!str)
-            fputs("<error>", fp);
-        else
-            FileEscapedString(fp, str, '"');
     }
 
     fprintf(fp, " g/s %p/%p slot %d attrs %x ",

@@ -35,11 +35,11 @@ namespace {
 
 // If JS_STRUCTURED_CLONE_VERSION changes then we need to update our major
 // schema version.
-static_assert(JS_STRUCTURED_CLONE_VERSION == 2,
+static_assert(JS_STRUCTURED_CLONE_VERSION == 3,
               "Need to update the major schema version.");
 
 // Major schema version. Bump for almost everything.
-const uint32_t kMajorSchemaVersion = 14;
+const uint32_t kMajorSchemaVersion = 15;
 
 // Minor schema version. Should almost always be 0 (maybe bump on release
 // branches if we have to).
@@ -125,7 +125,8 @@ CreateFileTables(mozIStorageConnection* aDBConn)
   AssertIsOnIOThread();
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
-  PROFILER_LABEL("IndexedDB", "CreateFileTables");
+  PROFILER_LABEL("OpenDatabaseHelper", "CreateFileTables",
+    js::ProfileEntry::Category::STORAGE);
 
   // Table `file`
   nsresult rv = aDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
@@ -188,7 +189,8 @@ CreateTables(mozIStorageConnection* aDBConn)
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
   NS_ASSERTION(aDBConn, "Passing a null database connection!");
 
-  PROFILER_LABEL("IndexedDB", "CreateTables");
+  PROFILER_LABEL("OpenDatabaseHelper", "CreateTables",
+    js::ProfileEntry::Category::STORAGE);
 
   // Table `database`
   nsresult rv = aDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
@@ -304,7 +306,8 @@ UpgradeSchemaFrom4To5(mozIStorageConnection* aConnection)
   AssertIsOnIOThread();
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
-  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom4To5");
+  PROFILER_LABEL("OpenDatabaseHelper", "UpgradeSchemaFrom4To5",
+    js::ProfileEntry::Category::STORAGE);
 
   nsresult rv;
 
@@ -393,7 +396,8 @@ UpgradeSchemaFrom5To6(mozIStorageConnection* aConnection)
   AssertIsOnIOThread();
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
-  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom5To6");
+  PROFILER_LABEL("OpenDatabaseHelper", "UpgradeSchemaFrom5To6",
+    js::ProfileEntry::Category::STORAGE);
 
   // First, drop all the indexes we're no longer going to use.
   nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
@@ -751,7 +755,8 @@ UpgradeSchemaFrom6To7(mozIStorageConnection* aConnection)
   AssertIsOnIOThread();
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
-  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom6To7");
+  PROFILER_LABEL("OpenDatabaseHelper", "UpgradeSchemaFrom6To7",
+    js::ProfileEntry::Category::STORAGE);
 
   nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
     "CREATE TEMPORARY TABLE temp_upgrade ("
@@ -810,7 +815,8 @@ UpgradeSchemaFrom7To8(mozIStorageConnection* aConnection)
   AssertIsOnIOThread();
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
-  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom7To8");
+  PROFILER_LABEL("OpenDatabaseHelper", "UpgradeSchemaFrom7To8",
+    js::ProfileEntry::Category::STORAGE);
 
   nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
     "CREATE TEMPORARY TABLE temp_upgrade ("
@@ -875,6 +881,8 @@ UpgradeSchemaFrom7To8(mozIStorageConnection* aConnection)
 
 class CompressDataBlobsFunction MOZ_FINAL : public mozIStorageFunction
 {
+  ~CompressDataBlobsFunction() {}
+
 public:
   NS_DECL_ISUPPORTS
 
@@ -882,7 +890,8 @@ public:
   OnFunctionCall(mozIStorageValueArray* aArguments,
                  nsIVariant** aResult)
   {
-    PROFILER_LABEL("IndexedDB", "CompressDataBlobsFunction::OnFunctionCall");
+    PROFILER_LABEL("CompressDataBlobsFunction", "OnFunctionCall",
+      js::ProfileEntry::Category::STORAGE);
 
     uint32_t argc;
     nsresult rv = aArguments->GetNumEntries(&argc);
@@ -932,7 +941,8 @@ UpgradeSchemaFrom8To9_0(mozIStorageConnection* aConnection)
   AssertIsOnIOThread();
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
-  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom8To9_0");
+  PROFILER_LABEL("OpenDatabaseHelper", "UpgradeSchemaFrom8To9_0",
+    js::ProfileEntry::Category::STORAGE);
 
   // We no longer use the dataVersion column.
   nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
@@ -973,7 +983,8 @@ UpgradeSchemaFrom9_0To10_0(mozIStorageConnection* aConnection)
   AssertIsOnIOThread();
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
-  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom9_0To10_0");
+  PROFILER_LABEL("OpenDatabaseHelper", "UpgradeSchemaFrom9_0To10_0",
+    js::ProfileEntry::Category::STORAGE);
 
   nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
     "ALTER TABLE object_data ADD COLUMN file_ids TEXT;"
@@ -1000,7 +1011,8 @@ UpgradeSchemaFrom10_0To11_0(mozIStorageConnection* aConnection)
   AssertIsOnIOThread();
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
-  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom10_0To11_0");
+  PROFILER_LABEL("OpenDatabaseHelper", "UpgradeSchemaFrom10_0To11_0",
+    js::ProfileEntry::Category::STORAGE);
 
   nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
     "CREATE TEMPORARY TABLE temp_upgrade ("
@@ -1132,6 +1144,8 @@ UpgradeSchemaFrom10_0To11_0(mozIStorageConnection* aConnection)
 
 class EncodeKeysFunction MOZ_FINAL : public mozIStorageFunction
 {
+  ~EncodeKeysFunction() {}
+
 public:
   NS_DECL_ISUPPORTS
 
@@ -1139,7 +1153,8 @@ public:
   OnFunctionCall(mozIStorageValueArray* aArguments,
                  nsIVariant** aResult)
   {
-    PROFILER_LABEL("IndexedDB", "EncodeKeysFunction::OnFunctionCall");
+    PROFILER_LABEL("EncodeKeysFunction", "OnFunctionCall",
+      js::ProfileEntry::Category::STORAGE);
 
     uint32_t argc;
     nsresult rv = aArguments->GetNumEntries(&argc);
@@ -1190,7 +1205,8 @@ UpgradeSchemaFrom11_0To12_0(mozIStorageConnection* aConnection)
   AssertIsOnIOThread();
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
-  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom11_0To12_0");
+  PROFILER_LABEL("OpenDatabaseHelper", "UpgradeSchemaFrom11_0To12_0",
+    js::ProfileEntry::Category::STORAGE);
 
   NS_NAMED_LITERAL_CSTRING(encoderName, "encode");
 
@@ -1407,7 +1423,8 @@ UpgradeSchemaFrom12_0To13_0(mozIStorageConnection* aConnection,
   AssertIsOnIOThread();
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
-  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom12_0To13_0");
+  PROFILER_LABEL("OpenDatabaseHelper", "UpgradeSchemaFrom12_0To13_0",
+    js::ProfileEntry::Category::STORAGE);
 
   nsresult rv;
 
@@ -1438,6 +1455,17 @@ UpgradeSchemaFrom13_0To14_0(mozIStorageConnection* aConnection)
   // The only change between 13 and 14 was a different structured
   // clone format, but it's backwards-compatible.
   nsresult rv = aConnection->SetSchemaVersion(MakeSchemaVersion(14, 0));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  return NS_OK;
+}
+
+nsresult
+UpgradeSchemaFrom14_0To15_0(mozIStorageConnection* aConnection)
+{
+  // The only change between 14 and 15 was a different structured
+  // clone format, but it's backwards-compatible.
+  nsresult rv = aConnection->SetSchemaVersion(MakeSchemaVersion(15, 0));
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
@@ -1627,7 +1655,8 @@ public:
   {
     NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-    PROFILER_MAIN_THREAD_LABEL("IndexedDB", "VersionChangeEventsRunnable::Run");
+    PROFILER_MAIN_THREAD_LABEL("OpenDatabaseHelper", "VersionChangeEventsRunnable::Run",
+      js::ProfileEntry::Category::STORAGE);
 
     // Fire version change events at all of the databases that are not already
     // closed. Also kick bfcached documents out of bfcache.
@@ -1778,7 +1807,8 @@ OpenDatabaseHelper::DoDatabaseWork()
   AssertIsOnIOThread();
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
-  PROFILER_LABEL("IndexedDB", "OpenDatabaseHelper::DoDatabaseWork");
+  PROFILER_LABEL("OpenDatabaseHelper", "DoDatabaseWork",
+    js::ProfileEntry::Category::STORAGE);
 
   mState = eFiringEvents; // In case we fail somewhere along the line.
 
@@ -1931,7 +1961,8 @@ OpenDatabaseHelper::CreateDatabaseConnection(
   AssertIsOnIOThread();
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
-  PROFILER_LABEL("IndexedDB", "OpenDatabaseHelper::CreateDatabaseConnection");
+  PROFILER_LABEL("OpenDatabaseHelper", "CreateDatabaseConnection",
+    js::ProfileEntry::Category::STORAGE);
 
   nsresult rv;
   bool exists;
@@ -2053,7 +2084,7 @@ OpenDatabaseHelper::CreateDatabaseConnection(
     }
     else  {
       // This logic needs to change next time we change the schema!
-      static_assert(kSQLiteSchemaVersion == int32_t((14 << 4) + 0),
+      static_assert(kSQLiteSchemaVersion == int32_t((15 << 4) + 0),
                     "Need upgrade code from schema version increase.");
 
       while (schemaVersion != kSQLiteSchemaVersion) {
@@ -2087,6 +2118,9 @@ OpenDatabaseHelper::CreateDatabaseConnection(
         }
         else if (schemaVersion == MakeSchemaVersion(13, 0)) {
           rv = UpgradeSchemaFrom13_0To14_0(connection);
+        }
+        else if (schemaVersion == MakeSchemaVersion(14, 0)) {
+          rv = UpgradeSchemaFrom14_0To15_0(connection);
         }
         else {
           NS_WARNING("Unable to open IndexedDB database, no upgrade path is "
@@ -2195,7 +2229,8 @@ OpenDatabaseHelper::Run()
   NS_ASSERTION(mState != eCreated, "Dispatch was not called?!?");
 
   if (NS_IsMainThread()) {
-    PROFILER_MAIN_THREAD_LABEL("IndexedDB", "OpenDatabaseHelper::Run");
+    PROFILER_MAIN_THREAD_LABEL("OpenDatabaseHelper", "Run",
+      js::ProfileEntry::Category::STORAGE);
 
     if (mState == eOpenPending) {
       if (NS_FAILED(mResultCode)) {
@@ -2292,7 +2327,8 @@ OpenDatabaseHelper::Run()
     return NS_OK;
   }
 
-  PROFILER_LABEL("IndexedDB", "OpenDatabaseHelper::Run");
+  PROFILER_LABEL("OpenDatabaseHelper", "Run",
+    js::ProfileEntry::Category::STORAGE);
 
   // We're on the DB thread.
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
@@ -2308,7 +2344,7 @@ OpenDatabaseHelper::Run()
                     "IDBRequest[%llu] DT Done", mRequest->GetSerialNumber(),
                     mResultCode);
 
-  return NS_DispatchToMainThread(this, NS_DISPATCH_NORMAL);
+  return NS_DispatchToMainThread(this);
 }
 
 nsresult
@@ -2316,8 +2352,8 @@ OpenDatabaseHelper::EnsureSuccessResult()
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
-                             "OpenDatabaseHelper::EnsureSuccessResult");
+  PROFILER_MAIN_THREAD_LABEL("OpenDatabaseHelper", "EnsureSuccessResult",
+    js::ProfileEntry::Category::STORAGE);
 
   nsRefPtr<DatabaseInfo> dbInfo;
   if (DatabaseInfo::Get(mDatabaseId, getter_AddRefs(dbInfo))) {
@@ -2461,8 +2497,8 @@ OpenDatabaseHelper::DispatchSuccessEvent()
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
-                              "OpenDatabaseHelper::DispatchSuccessEvent");
+  PROFILER_MAIN_THREAD_LABEL("OpenDatabaseHelper", "DispatchSuccessEvent",
+    js::ProfileEntry::Category::STORAGE);
 
   nsRefPtr<nsIDOMEvent> event =
     CreateGenericEvent(mOpenDBRequest, NS_LITERAL_STRING(SUCCESS_EVT_STR),
@@ -2481,8 +2517,8 @@ OpenDatabaseHelper::DispatchErrorEvent()
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
-                              "OpenDatabaseHelper::DispatchErrorEvent");
+  PROFILER_MAIN_THREAD_LABEL("OpenDatabaseHelper", "DispatchErrorEvent",
+    js::ProfileEntry::Category::STORAGE);
 
   nsRefPtr<nsIDOMEvent> event =
     CreateGenericEvent(mOpenDBRequest, NS_LITERAL_STRING(ERROR_EVT_STR),
@@ -2533,7 +2569,8 @@ SetVersionHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
   NS_ASSERTION(aConnection, "Passing a null connection!");
 
-  PROFILER_LABEL("IndexedDB", "SetVersionHelper::DoDatabaseWork");
+  PROFILER_LABEL("SetVersionHelper", "DoDatabaseWork",
+    js::ProfileEntry::Category::STORAGE);
 
   nsCOMPtr<mozIStorageStatement> stmt;
   nsresult rv = aConnection->CreateStatement(NS_LITERAL_CSTRING(
@@ -2654,7 +2691,8 @@ DeleteDatabaseHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
   NS_ASSERTION(!aConnection, "How did we get a connection here?");
 
-  PROFILER_LABEL("IndexedDB", "DeleteDatabaseHelper::DoDatabaseWork");
+  PROFILER_LABEL("DeleteDatabaseHelper", "DoDatabaseWork",
+    js::ProfileEntry::Category::STORAGE);
 
   const StoragePrivilege& privilege = mOpenHelper->Privilege();
 

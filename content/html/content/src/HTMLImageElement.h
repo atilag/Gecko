@@ -13,16 +13,21 @@
 #include "imgRequestProxy.h"
 #include "Units.h"
 
+// Only needed for IsPictureEnabled()
+#include "mozilla/dom/HTMLPictureElement.h"
+
 namespace mozilla {
 class EventChainPreVisitor;
 namespace dom {
 
+class ResponsiveImageSelector;
 class HTMLImageElement MOZ_FINAL : public nsGenericHTMLElement,
                                    public nsImageLoadingContent,
                                    public nsIDOMHTMLImageElement
 {
+  friend class HTMLSourceElement;
 public:
-  explicit HTMLImageElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
+  explicit HTMLImageElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo);
   virtual ~HTMLImageElement();
 
   static already_AddRefed<HTMLImageElement>
@@ -73,11 +78,13 @@ public:
   virtual void UnbindFromTree(bool aDeep, bool aNullParent) MOZ_OVERRIDE;
 
   virtual EventStates IntrinsicState() const MOZ_OVERRIDE;
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
+  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
   nsresult CopyInnerTo(Element* aDest);
 
   void MaybeLoadImage();
+
+  static bool IsSrcsetEnabled();
 
   bool IsMap()
   {
@@ -132,6 +139,10 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::src, aSrc, aError);
   }
+  void SetSrcset(const nsAString& aSrcset, ErrorResult& aError)
+  {
+    SetHTMLAttr(nsGkAtoms::srcset, aSrcset, aError);
+  }
   void SetCrossOrigin(const nsAString& aCrossOrigin, ErrorResult& aError)
   {
     SetHTMLAttr(nsGkAtoms::crossorigin, aCrossOrigin, aError);
@@ -152,6 +163,10 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::longdesc, aLongDesc, aError);
   }
+  void SetSizes(const nsAString& aSizes, ErrorResult& aError)
+  {
+    SetHTMLAttr(nsGkAtoms::sizes, aSizes, aError);
+  }
   void SetBorder(const nsAString& aBorder, ErrorResult& aError)
   {
     SetHTMLAttr(nsGkAtoms::border, aBorder, aError);
@@ -171,7 +186,36 @@ public:
   void SetForm(nsIDOMHTMLFormElement* aForm);
   void ClearForm(bool aRemoveFromForm);
 
+  virtual void DestroyContent() MOZ_OVERRIDE;
+
 protected:
+  // Resolve and load the current mResponsiveSelector (responsive mode) or src
+  // attr image.
+  nsresult LoadSelectedImage(bool aForce, bool aNotify);
+
+  // Update/create/destroy mResponsiveSelector
+  void PictureSourceSrcsetChanged(nsIContent *aSourceNode,
+                                  const nsAString& aNewValue, bool aNotify);
+  void PictureSourceSizesChanged(nsIContent *aSourceNode,
+                                 const nsAString& aNewValue, bool aNotify);
+
+  void PictureSourceAdded(nsIContent *aSourceNode);
+  // This should be called prior to the unbind, such that nextsibling works
+  void PictureSourceRemoved(nsIContent *aSourceNode);
+
+  bool MaybeUpdateResponsiveSelector(nsIContent *aCurrentSource = nullptr,
+                                     bool aSourceRemoved = false);
+
+  // Given a <source> node that is a previous sibling *or* ourselves, try to
+  // create a ResponsiveSelector.
+
+  // If the node's srcset/sizes make for an invalid selector, returns
+  // false. This does not guarantee the resulting selector matches an image,
+  // only that it is valid.
+  bool TryCreateResponsiveSelector(nsIContent *aSourceNode,
+                                   const nsAString *aSrcset = nullptr,
+                                   const nsAString *aSizes = nullptr);
+
   CSSIntPoint GetXY();
   virtual void GetItemValueText(nsAString& text) MOZ_OVERRIDE;
   virtual void SetItemValueText(const nsAString& text) MOZ_OVERRIDE;
@@ -188,6 +232,9 @@ protected:
   // This is a weak reference that this element and the HTMLFormElement
   // cooperate in maintaining.
   HTMLFormElement* mForm;
+
+  // Created when we're tracking responsive image state
+  nsRefPtr<ResponsiveImageSelector> mResponsiveSelector;
 
 private:
   static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,

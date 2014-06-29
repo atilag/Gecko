@@ -9,6 +9,7 @@
 #include "nsCSSProperty.h"
 #include "nsString.h"
 #include "nsTArrayForwardDeclare.h"
+#include "gfxFontFamilyList.h"
 
 class nsCSSValue;
 class nsStringComparator;
@@ -18,7 +19,7 @@ class nsIPrincipal;
 class nsIURI;
 struct gfxFontFeature;
 struct gfxAlternateValue;
-class nsCSSValueList;
+struct nsCSSValueList;
 
 // Style utility functions
 class nsStyleUtil {
@@ -41,6 +42,10 @@ public:
   // Returns true for all other cases
   static bool AppendEscapedCSSIdent(const nsAString& aIdent,
                                     nsAString& aResult);
+
+  static void
+  AppendEscapedCSSFontFamilyList(const mozilla::FontFamilyList& aFamilyList,
+                                 nsAString& aResult);
 
   // Append a bitmask-valued property's value(s) (space-separated) to aResult.
   static void AppendBitmaskCSSValue(nsCSSProperty aProperty,

@@ -11,7 +11,6 @@
 #include "ChildIterator.h"
 #include "nsDOMClassInfoID.h"
 #include "nsError.h"
-#include "nsINodeInfo.h"
 #include "nsIXULSortService.h"
 #include "nsContentUtils.h"
 #include "nsTreeBodyFrame.h"
@@ -555,7 +554,7 @@ nsTreeContentView::CycleHeader(nsITreeColumn* aCol)
 
         nsAutoString hints;
         column->GetAttr(kNameSpaceID_None, nsGkAtoms::sorthints, hints);
-        sortdirection.AppendLiteral(" ");
+        sortdirection.Append(' ');
         sortdirection += hints;
 
         nsCOMPtr<nsIDOMNode> rootnode = do_QueryInterface(mRoot);

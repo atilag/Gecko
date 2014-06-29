@@ -1,4 +1,4 @@
-/* -*- js2-basic-offset: 2; indent-tabs-mode: nil; -*- */
+/* -*- js-indent-level: 2; indent-tabs-mode: nil -*- */
 /* vim: set ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -1850,7 +1850,7 @@ WebConsoleFrame.prototype = {
     let actor = aHttpActivity.actor;
 
     if (actor) {
-      this.webConsoleClient.getRequestHeaders(actor, function(aResponse) {
+      this.webConsoleClient.getRequestHeaders(actor, (aResponse) => {
         if (aResponse.error) {
           Cu.reportError("WCF_openNetworkPanel getRequestHeaders:" +
                          aResponse.error);
@@ -1860,10 +1860,10 @@ WebConsoleFrame.prototype = {
         aHttpActivity.request.headers = aResponse.headers;
 
         this.webConsoleClient.getRequestCookies(actor, onRequestCookies);
-      }.bind(this));
+      });
     }
 
-    let onRequestCookies = function(aResponse) {
+    let onRequestCookies = (aResponse) => {
       if (aResponse.error) {
         Cu.reportError("WCF_openNetworkPanel getRequestCookies:" +
                        aResponse.error);
@@ -1873,9 +1873,9 @@ WebConsoleFrame.prototype = {
       aHttpActivity.request.cookies = aResponse.cookies;
 
       this.webConsoleClient.getResponseHeaders(actor, onResponseHeaders);
-    }.bind(this);
+    };
 
-    let onResponseHeaders = function(aResponse) {
+    let onResponseHeaders = (aResponse) => {
       if (aResponse.error) {
         Cu.reportError("WCF_openNetworkPanel getResponseHeaders:" +
                        aResponse.error);
@@ -1885,9 +1885,9 @@ WebConsoleFrame.prototype = {
       aHttpActivity.response.headers = aResponse.headers;
 
       this.webConsoleClient.getResponseCookies(actor, onResponseCookies);
-    }.bind(this);
+    };
 
-    let onResponseCookies = function(aResponse) {
+    let onResponseCookies = (aResponse) => {
       if (aResponse.error) {
         Cu.reportError("WCF_openNetworkPanel getResponseCookies:" +
                        aResponse.error);
@@ -1897,9 +1897,9 @@ WebConsoleFrame.prototype = {
       aHttpActivity.response.cookies = aResponse.cookies;
 
       this.webConsoleClient.getRequestPostData(actor, onRequestPostData);
-    }.bind(this);
+    };
 
-    let onRequestPostData = function(aResponse) {
+    let onRequestPostData = (aResponse) => {
       if (aResponse.error) {
         Cu.reportError("WCF_openNetworkPanel getRequestPostData:" +
                        aResponse.error);
@@ -1910,9 +1910,9 @@ WebConsoleFrame.prototype = {
       aHttpActivity.discardRequestBody = aResponse.postDataDiscarded;
 
       this.webConsoleClient.getResponseContent(actor, onResponseContent);
-    }.bind(this);
+    };
 
-    let onResponseContent = function(aResponse) {
+    let onResponseContent = (aResponse) => {
       if (aResponse.error) {
         Cu.reportError("WCF_openNetworkPanel getResponseContent:" +
                        aResponse.error);
@@ -1923,9 +1923,9 @@ WebConsoleFrame.prototype = {
       aHttpActivity.discardResponseBody = aResponse.contentDiscarded;
 
       this.webConsoleClient.getEventTimings(actor, onEventTimings);
-    }.bind(this);
+    };
 
-    let onEventTimings = function(aResponse) {
+    let onEventTimings = (aResponse) => {
       if (aResponse.error) {
         Cu.reportError("WCF_openNetworkPanel getEventTimings:" +
                        aResponse.error);
@@ -1935,9 +1935,9 @@ WebConsoleFrame.prototype = {
       aHttpActivity.timings = aResponse.timings;
 
       openPanel();
-    }.bind(this);
+    };
 
-    let openPanel = function() {
+    let openPanel = () => {
       aNode._netPanel = netPanel;
 
       let panel = netPanel.panel;
@@ -1953,7 +1953,7 @@ WebConsoleFrame.prototype = {
       });
 
       aNode._panelOpen = true;
-    }.bind(this);
+    };
 
     let netPanel = new NetworkPanel(this.popupset, aHttpActivity, this);
     netPanel.linkNode = aNode;
@@ -2911,9 +2911,9 @@ WebConsoleFrame.prototype = {
 
     this._commandController = null;
 
-    let onDestroy = function() {
+    let onDestroy = () => {
       this._destroyer.resolve(null);
-    }.bind(this);
+    };
 
     if (this.proxy) {
       this.proxy.disconnect().then(onDestroy);
@@ -3133,7 +3133,10 @@ JSTerm.prototype = {
       inputContainer.style.display = "none";
     }
     else {
+      this._onPaste = WebConsoleUtils.pasteHandlerGen(this.inputNode, doc.getElementById("webconsole-notificationbox"));
       this.inputNode.addEventListener("keypress", this._keyPress, false);
+      this.inputNode.addEventListener("paste", this._onPaste);
+      this.inputNode.addEventListener("drop", this._onPaste);
       this.inputNode.addEventListener("input", this._inputEventHandler, false);
       this.inputNode.addEventListener("keyup", this._inputEventHandler, false);
       this.inputNode.addEventListener("focus", this._focusEventHandler, false);
@@ -3272,6 +3275,7 @@ JSTerm.prototype = {
     // value that was not evaluated yet.
     this.history[this.historyIndex++] = aExecuteString;
     this.historyPlaceHolder = this.history.length;
+    WebConsoleUtils.usageCount++;
     this.setInputValue("");
     this.clearCompletion();
   },
@@ -4288,8 +4292,8 @@ JSTerm.prototype = {
 
     if (this._autocompleteQuery && input.startsWith(this._autocompleteQuery)) {
       let filterBy = input;
-      // Find the last non-alphanumeric if exists.
-      let lastNonAlpha = input.match(/[^a-zA-Z0-9][a-zA-Z0-9]*$/);
+      // Find the last non-alphanumeric other than _ or $ if it exists.
+      let lastNonAlpha = input.match(/[^a-zA-Z0-9_$][a-zA-Z0-9_$]*$/);
       // If input contains non-alphanumerics, use the part after the last one
       // to filter the cache
       if (lastNonAlpha) {
@@ -4522,6 +4526,12 @@ JSTerm.prototype = {
                 .getElementById("webConsole_autocompletePopup");
     if (popup) {
       popup.parentNode.removeChild(popup);
+    }
+
+    if (this._onPaste) {
+      this.inputNode.removeEventListener("paste", this._onPaste, false);
+      this.inputNode.removeEventListener("drop", this._onPaste, false);
+      this._onPaste = null;
     }
 
     this.inputNode.removeEventListener("keypress", this._keyPress, false);
@@ -4840,12 +4850,12 @@ WebConsoleConnectionProxy.prototype = {
                                         timeout, Ci.nsITimer.TYPE_ONE_SHOT);
 
     let connPromise = this._connectDefer.promise;
-    connPromise.then(function _onSucess() {
+    connPromise.then(() => {
       this._connectTimer.cancel();
       this._connectTimer = null;
-    }.bind(this), function _onFailure() {
+    }, () => {
       this._connectTimer = null;
-    }.bind(this));
+    });
 
     let client = this.client = this.target.client;
 

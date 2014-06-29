@@ -30,26 +30,16 @@ class nsStyledElementNotElementCSSInlineStyle : public nsStyledElementBase
 
 protected:
 
-  inline nsStyledElementNotElementCSSInlineStyle(already_AddRefed<nsINodeInfo>& aNodeInfo)
+  inline nsStyledElementNotElementCSSInlineStyle(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
     : nsStyledElementBase(aNodeInfo)
   {}
 
 public:
   // nsIContent interface methods
-  virtual nsIAtom* GetClassAttributeName() const MOZ_OVERRIDE;
-  virtual nsIAtom* GetIDAttributeName() const MOZ_OVERRIDE;
-  virtual nsIAtom* DoGetID() const MOZ_OVERRIDE;
-  virtual const nsAttrValue* DoGetClasses() const MOZ_OVERRIDE;
-
   virtual mozilla::css::StyleRule* GetInlineStyleRule();
   virtual nsresult SetInlineStyleRule(mozilla::css::StyleRule* aStyleRule,
                                       const nsAString* aSerialized,
                                       bool aNotify) MOZ_OVERRIDE;
-
-  virtual nsresult UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
-                             bool aNotify) MOZ_OVERRIDE;
-  virtual nsresult AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
-                                const nsAttrValue* aValue, bool aNotify) MOZ_OVERRIDE;
 
   nsICSSDeclaration* Style();
 
@@ -82,7 +72,7 @@ protected:
 
 class nsStyledElement : public nsStyledElementNotElementCSSInlineStyle {
 protected:
-  inline nsStyledElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+  inline nsStyledElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
     : nsStyledElementNotElementCSSInlineStyle(aNodeInfo)
   {}
 };

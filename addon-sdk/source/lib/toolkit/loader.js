@@ -40,7 +40,7 @@ const { notifyObservers } = Cc['@mozilla.org/observer-service;1'].
                         getService(Ci.nsIObserverService);
 const { NetUtil } = Cu.import("resource://gre/modules/NetUtil.jsm", {});
 const { Reflect } = Cu.import("resource://gre/modules/reflect.jsm", {});
-const { console } = Cu.import("resource://gre/modules/devtools/Console.jsm");
+const { ConsoleAPI } = Cu.import("resource://gre/modules/devtools/Console.jsm");
 const { join: pathJoin, normalize, dirname } = Cu.import("resource://gre/modules/osfile/ospath_unix.jsm");
 
 // Define some shortcuts.
@@ -56,7 +56,7 @@ const NODE_MODULES = ["assert", "buffer_ieee754", "buffer", "child_process", "cl
 
 const COMPONENT_ERROR = '`Components` is not available in this context.\n' +
   'Functionality provided by Components may be available in an SDK\n' +
-  'module: https://jetpack.mozillalabs.com/sdk/latest/docs/ \n\n' +
+  'module: https://developer.mozilla.org/en-US/Add-ons/SDK \n\n' +
   'However, if you still need to import Components, you may use the\n' +
   '`chrome` module\'s properties for shortcuts to Component properties:\n\n' +
   'Shortcuts: \n' +
@@ -384,13 +384,12 @@ exports.resolve = resolve;
 // algorithm.
 // `id` should already be resolved relatively at this point.
 // http://nodejs.org/api/modules.html#modules_all_together
-const nodeResolve = iced(function nodeResolve(id, requirer, { manifest, rootURI }) {
+const nodeResolve = iced(function nodeResolve(id, requirer, { rootURI }) {
   // Resolve again
   id = exports.resolve(id, requirer);
 
   // we assume that extensions are correct, i.e., a directory doesnt't have '.js'
   // and a js file isn't named 'file.json.js'
-
   let fullId = join(rootURI, id);
 
   let resolvedPath;
@@ -400,7 +399,7 @@ const nodeResolve = iced(function nodeResolve(id, requirer, { manifest, rootURI 
     return stripBase(rootURI, resolvedPath);
   // If manifest has dependencies, attempt to look up node modules
   // in the `dependencies` list
-  else if (manifest.dependencies) {
+  else {
     let dirs = getNodeModulePaths(dirname(join(rootURI, requirer))).map(dir => join(dir, id));
     for (let i = 0; i < dirs.length; i++) {
       if (resolvedPath = loadAsFile(dirs[i]))
@@ -533,7 +532,6 @@ const Require = iced(function Require(loader, requirer) {
 
     // TODO should get native Firefox modules before doing node-style lookups
     // to save on loading time
-
     if (isNative) {
       // If a requireMap is available from `generateMap`, use that to
       // immediately resolve the node-style mapping.
@@ -688,8 +686,13 @@ exports.unload = unload;
 //   If `resolve` does not returns `uri` string exception will be thrown by
 //   an associated `require` call.
 const Loader = iced(function Loader(options) {
+  let console = new ConsoleAPI({
+    consoleID: options.id ? "addon/" + options.id : ""
+  });
+
   let {
-    modules, globals, resolve, paths, rootURI, manifest, requireMap, isNative
+    modules, globals, resolve, paths, rootURI,
+    manifest, requireMap, isNative, metadata
   } = override({
     paths: {},
     modules: {},
@@ -744,6 +747,7 @@ const Loader = iced(function Loader(options) {
     mapping: { enumerable: false, value: mapping },
     // Map of module objects indexed by module URIs.
     modules: { enumerable: false, value: modules },
+    metadata: { enumerable: false, value: metadata },
     // Map of module sandboxes indexed by module URIs.
     sandboxes: { enumerable: false, value: {} },
     resolve: { enumerable: false, value: resolve },

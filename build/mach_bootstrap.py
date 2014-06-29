@@ -38,6 +38,7 @@ SEARCH_PATHS = [
     'config',
     'dom/bindings',
     'dom/bindings/parser',
+    'layout/tools/reftest',
     'other-licenses/ply',
     'xpcom/idl-parser',
     'testing',
@@ -58,7 +59,7 @@ SEARCH_PATHS = [
     'testing/mozbase/mozinfo',
     'testing/mozbase/moztest',
     'testing/mozbase/mozversion',
-    'testing/mozbase/manifestdestiny',
+    'testing/mozbase/manifestparser',
     'xpcom/idl-parser',
 ]
 

@@ -43,11 +43,11 @@
 #include "nsCocoaFeatures.h"
 #endif
 
-using namespace mozilla::gfx;
-using namespace mozilla::layers;
-
 namespace mozilla {
 namespace gl {
+
+using namespace mozilla::gfx;
+using namespace mozilla::layers;
 
 #ifdef DEBUG
 unsigned GLContext::sCurrentGLContextTLS = -1;
@@ -70,6 +70,7 @@ static const char *sExtensionNames[] = {
     "GL_OES_depth32",
     "GL_OES_stencil8",
     "GL_OES_texture_npot",
+    "GL_IMG_texture_npot",
     "GL_ARB_depth_texture",
     "GL_OES_depth_texture",
     "GL_OES_packed_depth_stencil",
@@ -285,7 +286,7 @@ GLContext::GLContext(const SurfaceCaps& caps,
     mNeedsTextureSizeChecks(false),
     mWorkAroundDriverBugs(true)
 {
-    mOwningThread = NS_GetCurrentThread();
+    mOwningThreadId = PlatformThread::CurrentId();
 }
 
 GLContext::~GLContext() {
@@ -578,13 +579,15 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
         const char *rendererMatchStrings[size_t(GLRenderer::Other)] = {
                 "Adreno 200",
                 "Adreno 205",
+                "Adreno (TM) 200",
                 "Adreno (TM) 205",
                 "Adreno (TM) 320",
                 "PowerVR SGX 530",
                 "PowerVR SGX 540",
                 "NVIDIA Tegra",
                 "Android Emulator",
-                "Gallium 0.4 on llvmpipe"
+                "Gallium 0.4 on llvmpipe",
+                "Intel HD Graphics 3000 OpenGL Engine",
         };
 
         mRenderer = GLRenderer::Other;
@@ -1183,11 +1186,9 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
                                  0, nullptr,
                                  true);
         }
-    }
 
-    if (mInitialized)
         reporter.SetSuccessful();
-    else {
+    } else {
         // if initialization fails, ensure all symbols are zero, to avoid hard-to-understand bugs
         mSymbols.Zero();
         NS_WARNING("InitWithPrefix failed!");
@@ -1331,6 +1332,20 @@ GLContext::InitExtensions()
         MarkExtensionUnsupported(ANGLE_texture_compression_dxt3);
         MarkExtensionUnsupported(ANGLE_texture_compression_dxt5);
     }
+
+#ifdef XP_MACOSX
+    // Bug 1009642: On OSX Mavericks (10.9), the driver for Intel HD
+    // 3000 appears to be buggy WRT updating sub-images of S3TC
+    // textures with glCompressedTexSubImage2D. Works on Intel HD 4000
+    // and Intel HD 5000/Iris that I tested.
+    if (WorkAroundDriverBugs() &&
+        nsCocoaFeatures::OSXVersionMajor() == 10 &&
+        nsCocoaFeatures::OSXVersionMinor() == 9 &&
+        Renderer() == GLRenderer::IntelHD3000)
+    {
+        MarkExtensionUnsupported(EXT_texture_compression_s3tc);
+    }
+#endif
 
 #ifdef DEBUG
     firstRun = false;
@@ -2108,20 +2123,7 @@ GLContext::IsOffscreenSizeAllowed(const IntSize& aSize) const {
 bool
 GLContext::IsOwningThreadCurrent()
 {
-  return NS_GetCurrentThread() == mOwningThread;
-}
-
-void
-GLContext::DispatchToOwningThread(nsIRunnable *event)
-{
-    // Before dispatching, we need to ensure we're not in the middle of
-    // shutting down. Dispatching runnables in the middle of shutdown
-    // (that is, when the main thread is no longer get-able) can cause them
-    // to leak. See Bug 741319, and Bug 744115.
-    nsCOMPtr<nsIThread> mainThread;
-    if (NS_SUCCEEDED(NS_GetMainThread(getter_AddRefs(mainThread)))) {
-        mOwningThread->Dispatch(event, NS_DISPATCH_NORMAL);
-    }
+  return PlatformThread::CurrentId() == mOwningThreadId;
 }
 
 GLBlitHelper*

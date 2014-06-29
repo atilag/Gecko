@@ -11,6 +11,9 @@
 
 #include "AudioConduit.h"
 #include "VideoConduit.h"
+#include <foundation/ABase.h>
+#include <utils/RefBase.h>
+#include "OMXCodecWrapper.h"
 
 namespace android {
   class OMXVideoEncoder;
@@ -20,6 +23,9 @@ namespace mozilla {
 
 class WebrtcOMXDecoder;
 class OMXOutputDrain;
+
+// XXX see if we can reduce this
+#define WEBRTC_OMX_H264_MIN_DECODE_BUFFERS 10
 
 class WebrtcOMXH264VideoEncoder : public WebrtcVideoEncoder
 {
@@ -48,12 +54,18 @@ public:
 
 private:
   RefPtr<android::OMXVideoEncoder> mOMX;
+  android::sp<android::OMXCodecReservation> mReservation;
+
   webrtc::EncodedImageCallback* mCallback;
   RefPtr<OMXOutputDrain> mOutputDrain;
   uint32_t mWidth;
   uint32_t mHeight;
   uint32_t mFrameRate;
+  uint32_t mBitRateKbps;
+  uint32_t mBitRateAtLastIDR;
+  TimeStamp mLastIDRTime;
   bool mOMXConfigured;
+  bool mOMXReconfigure;
   webrtc::EncodedImage mEncodedImage;
 };
 
@@ -81,6 +93,7 @@ public:
 private:
   webrtc::DecodedImageCallback* mCallback;
   RefPtr<WebrtcOMXDecoder> mOMX;
+  android::sp<android::OMXCodecReservation> mReservation;
 };
 
 }

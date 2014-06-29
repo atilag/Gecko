@@ -540,7 +540,7 @@ struct IonScript
         return (CacheLocation *) &runtimeData()[locIndex];
     }
     void toggleBarriers(bool enabled);
-    void purgeCaches(JS::Zone *zone);
+    void purgeCaches();
     void destroyCaches();
     void unlinkFromRuntime(FreeOp *fop);
     void copySnapshots(const SnapshotWriter *writer);
@@ -601,6 +601,11 @@ struct IonScript
 
     static const uint32_t MAX_PARALLEL_AGE = 5;
 
+    enum ShouldIncreaseAge {
+        IncreaseAge = true,
+        KeepAge = false
+    };
+
     void resetParallelAge() {
         MOZ_ASSERT(isParallelEntryScript());
         parallelAge_ = 0;
@@ -608,9 +613,9 @@ struct IonScript
     uint32_t parallelAge() const {
         return parallelAge_;
     }
-    uint32_t increaseParallelAge() {
+    uint32_t shouldPreserveParallelCode(ShouldIncreaseAge increaseAge = KeepAge) {
         MOZ_ASSERT(isParallelEntryScript());
-        return ++parallelAge_;
+        return (increaseAge ? ++parallelAge_ : parallelAge_) < MAX_PARALLEL_AGE;
     }
 
     static void writeBarrierPre(Zone *zone, IonScript *ionScript);
@@ -636,11 +641,6 @@ struct IonBlockCounts
 
     // Text information about the code generated for this block.
     char *code_;
-
-    // Number of bytes of code generated in this block. Spill code is counted
-    // separately from other, instruction implementing code.
-    uint32_t instructionBytes_;
-    uint32_t spillBytes_;
 
   public:
 
@@ -702,22 +702,6 @@ struct IonBlockCounts
     const char *code() const {
         return code_;
     }
-
-    void setInstructionBytes(uint32_t bytes) {
-        instructionBytes_ = bytes;
-    }
-
-    uint32_t instructionBytes() const {
-        return instructionBytes_;
-    }
-
-    void setSpillBytes(uint32_t bytes) {
-        spillBytes_ = bytes;
-    }
-
-    uint32_t spillBytes() const {
-        return spillBytes_;
-    }
 };
 
 // Execution information for a compiled script which may persist after the
@@ -774,40 +758,25 @@ struct VMFunction;
 class JitCompartment;
 class JitRuntime;
 
-struct AutoFlushCache
+struct AutoFlushICache
 {
   private:
+#if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS)
     uintptr_t start_;
     uintptr_t stop_;
     const char *name_;
-    JitRuntime *runtime_;
-    bool used_;
+    bool inhibit_;
+    AutoFlushICache *prev_;
+#endif
 
   public:
-    void update(uintptr_t p, size_t len);
-    static void updateTop(uintptr_t p, size_t len);
-    ~AutoFlushCache();
-    AutoFlushCache(const char *nonce, JitRuntime *rt);
-    void flushAnyway();
+    static void setRange(uintptr_t p, size_t len);
+    static void flush(uintptr_t p, size_t len);
+    static void setInhibit();
+    ~AutoFlushICache();
+    explicit AutoFlushICache(const char *nonce, bool inhibit=false);
 };
 
-// If you are currently in the middle of modifing Ion-compiled code, which
-// is going to be flushed at *some* point, but determine that you *must*
-// call a function *right* *now*, two things can go wrong:
-//   1)  The flusher that you were using is still active, but you are about to
-//       enter jitted code, so it needs to be flushed
-//   2) the called function can re-enter a compilation/modification path which
-//       will use your AFC, and thus not flush when his compilation is done
-
-struct AutoFlushInhibitor
-{
-  private:
-    JitRuntime *runtime_;
-    AutoFlushCache *afc;
-  public:
-    AutoFlushInhibitor(JitRuntime *rt);
-    ~AutoFlushInhibitor();
-};
 } // namespace jit
 
 namespace gc {

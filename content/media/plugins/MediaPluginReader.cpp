@@ -35,11 +35,6 @@ MediaPluginReader::MediaPluginReader(AbstractMediaDecoder *aDecoder,
 {
 }
 
-MediaPluginReader::~MediaPluginReader()
-{
-  ResetDecode();
-}
-
 nsresult MediaPluginReader::Init(MediaDecoderReader* aCloneDonor)
 {
   return NS_OK;
@@ -104,18 +99,22 @@ nsresult MediaPluginReader::ReadMetadata(MediaInfo* aInfo,
   return NS_OK;
 }
 
+void MediaPluginReader::Shutdown()
+{
+  ResetDecode();
+  if (mPlugin) {
+    GetMediaPluginHost()->DestroyDecoder(mPlugin);
+    mPlugin = nullptr;
+  }
+}
+
 // Resets all state related to decoding, emptying all buffers etc.
 nsresult MediaPluginReader::ResetDecode()
 {
   if (mLastVideoFrame) {
     mLastVideoFrame = nullptr;
   }
-  if (mPlugin) {
-    GetMediaPluginHost()->DestroyDecoder(mPlugin);
-    mPlugin = nullptr;
-  }
-
-  return NS_OK;
+  return MediaDecoderReader::ResetDecode();
 }
 
 bool MediaPluginReader::DecodeVideoFrame(bool &aKeyframeSkip,
@@ -144,9 +143,7 @@ bool MediaPluginReader::DecodeVideoFrame(bool &aKeyframeSkip,
       if (mLastVideoFrame) {
         int64_t durationUs;
         mPlugin->GetDuration(mPlugin, &durationUs);
-        if (durationUs < mLastVideoFrame->mTime) {
-          durationUs = 0;
-        }
+        durationUs = std::max<int64_t>(durationUs - mLastVideoFrame->mTime, 0);
         mVideoQueue.Push(VideoData::ShallowCopyUpdateDuration(mLastVideoFrame,
                                                               durationUs));
         mLastVideoFrame = nullptr;
@@ -323,10 +320,21 @@ nsresult MediaPluginReader::Seek(int64_t aTarget, int64_t aStartTime, int64_t aE
 {
   NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
 
-  mVideoQueue.Reset();
-  mAudioQueue.Reset();
-
-  mAudioSeekTimeUs = mVideoSeekTimeUs = aTarget;
+  if (mHasAudio && mHasVideo) {
+    // The decoder seeks/demuxes audio and video streams separately. So if
+    // we seek both audio and video to aTarget, the audio stream can typically
+    // seek closer to the seek target, since typically every audio block is
+    // a sync point, whereas for video there are only keyframes once every few
+    // seconds. So if we have both audio and video, we must seek the video
+    // stream to the preceeding keyframe first, get the stream time, and then
+    // seek the audio stream to match the video stream's time. Otherwise, the
+    // audio and video streams won't be in sync after the seek.
+    mVideoSeekTimeUs = aTarget;
+    const VideoData* v = DecodeToFirstVideoData();
+    mAudioSeekTimeUs = v ? v->mTime : aTarget;
+  } else {
+    mAudioSeekTimeUs = mVideoSeekTimeUs = aTarget;
+  }
 
   return NS_OK;
 }

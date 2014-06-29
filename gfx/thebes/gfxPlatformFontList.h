@@ -114,9 +114,6 @@ public:
                       const nsACString& aGenericFamily,
                       nsTArray<nsString>& aListOfFonts);
 
-    virtual bool ResolveFontName(const nsAString& aFontName,
-                                   nsAString& aResolvedFontName);
-
     void UpdateFontList();
 
     void ClearPrefFonts() { mPrefFonts.Clear(); }
@@ -194,6 +191,7 @@ public:
 protected:
     class MemoryReporter MOZ_FINAL : public nsIMemoryReporter
     {
+        ~MemoryReporter() {}
     public:
         NS_DECL_ISUPPORTS
         NS_DECL_NSIMEMORYREPORTER
@@ -263,9 +261,6 @@ protected:
 
     // load the bad underline blacklist from pref.
     void LoadBadUnderlineList();
-
-    // explicitly set fixed-pitch flag for all faces
-    void SetFixedPitch(const nsAString& aFamilyName);
 
     void GenerateFontListKey(const nsAString& aKeyName, nsAString& aResult);
 

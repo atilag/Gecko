@@ -10,8 +10,10 @@
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
+#include "mozilla/dom/AutocompleteErrorEvent.h"
 #include "mozilla/dom/HTMLFormControlsCollection.h"
 #include "mozilla/dom/HTMLFormElementBinding.h"
+#include "mozilla/Move.h"
 #include "nsIHTMLDocument.h"
 #include "nsGkAtoms.h"
 #include "nsStyleConsts.h"
@@ -27,6 +29,7 @@
 #include "nsAutoPtr.h"
 #include "nsTArray.h"
 #include "nsIMutableArray.h"
+#include "nsIFormAutofillContentService.h"
 
 // form submission
 #include "nsIFormSubmitObserver.h"
@@ -61,7 +64,7 @@
 
 // construction, destruction
 nsGenericHTMLElement*
-NS_NewHTMLFormElement(already_AddRefed<nsINodeInfo>&& aNodeInfo,
+NS_NewHTMLFormElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
                       mozilla::dom::FromParser aFromParser)
 {
   mozilla::dom::HTMLFormElement* it = new mozilla::dom::HTMLFormElement(aNodeInfo);
@@ -93,7 +96,7 @@ static const nsAttrValue::EnumTable* kFormDefaultAutocomplete = &kFormAutocomple
 bool HTMLFormElement::gFirstFormSubmitted = false;
 bool HTMLFormElement::gPasswordManagerInitialized = false;
 
-HTMLFormElement::HTMLFormElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+HTMLFormElement::HTMLFormElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo),
     mSelectedRadioButtons(4),
     mRequiredRadioButtonCounts(4),
@@ -297,6 +300,31 @@ HTMLFormElement::CheckValidity(bool* retVal)
 {
   *retVal = CheckValidity();
   return NS_OK;
+}
+
+void
+HTMLFormElement::RequestAutocomplete()
+{
+  bool dummy;
+  nsCOMPtr<nsIDOMWindow> window =
+    do_QueryInterface(OwnerDoc()->GetScriptHandlingObject(dummy));
+  nsCOMPtr<nsIFormAutofillContentService> formAutofillContentService =
+    do_GetService("@mozilla.org/formautofill/content-service;1");
+
+  if (!formAutofillContentService || !window) {
+    AutocompleteErrorEventInit init;
+    init.mBubbles = true;
+    init.mCancelable = false;
+    init.mReason = AutoCompleteErrorReason::Disabled;
+
+    nsRefPtr<AutocompleteErrorEvent> event =
+      AutocompleteErrorEvent::Constructor(this, NS_LITERAL_STRING("autocompleteerror"), init);
+
+    (new AsyncEventDispatcher(this, event))->PostDOMEvent();
+    return;
+  }
+
+  formAutofillContentService->RequestAutocomplete(this, window);
 }
 
 bool
@@ -1511,7 +1539,7 @@ HTMLFormElement::FlushPendingSubmission()
   if (mPendingSubmission) {
     // Transfer owning reference so that the submissioin doesn't get deleted
     // if we reenter
-    nsAutoPtr<nsFormSubmission> submission = mPendingSubmission;
+    nsAutoPtr<nsFormSubmission> submission = Move(mPendingSubmission);
 
     SubmitSubmission(submission);
   }

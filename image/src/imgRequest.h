@@ -46,10 +46,11 @@ class imgRequest : public nsIStreamListener,
                    public nsIInterfaceRequestor,
                    public nsIAsyncVerifyRedirectCallback
 {
+  virtual ~imgRequest();
+
 public:
   typedef mozilla::image::ImageURL ImageURL;
   imgRequest(imgLoader* aLoader);
-  virtual ~imgRequest();
 
   NS_DECL_THREADSAFE_ISUPPORTS
 
@@ -74,6 +75,9 @@ public:
 
   // Called or dispatched by cancel for main thread only execution.
   void ContinueCancel(nsresult aStatus);
+
+  // Called or dispatched by EvictFromCache for main thread only execution.
+  void ContinueEvict();
 
   // Methods that get forwarded to the Image, or deferred until it's
   // instantiated.
@@ -145,6 +149,7 @@ private:
     mLoadId = aLoadId;
   }
   void Cancel(nsresult aStatus);
+  void EvictFromCache();
   void RemoveFromCache();
 
   nsresult GetSecurityInfo(nsISupports **aSecurityInfo);

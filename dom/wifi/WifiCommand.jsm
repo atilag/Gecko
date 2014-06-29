@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -273,6 +273,33 @@ this.WifiCommand = function(aControlMessage, aInterface, aSdkVersion) {
         reply = reply.split(" ")[2]; // Format: Macaddr = XX.XX.XX.XX.XX.XX
       }
       callback(reply);
+    });
+  };
+
+  command.connectToHostapd = function(callback) {
+    voidControlMessage("connect_to_hostapd", callback);
+  };
+
+  command.closeHostapdConnection = function(callback) {
+    voidControlMessage("close_hostapd_connection", callback);
+  };
+
+  command.hostapdCommand = function (callback, request) {
+    var msg = { cmd:     "hostapd_command",
+                request: request,
+                iface:   aInterface };
+
+    aControlMessage(msg, function(data) {
+      callback(data.status ? null : data.reply);
+    });
+  };
+
+  command.hostapdGetStations = function (callback) {
+    var msg = { cmd:     "hostapd_get_stations",
+                iface:   aInterface };
+
+    aControlMessage(msg, function(data) {
+      callback(data.status);
     });
   };
 

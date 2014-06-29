@@ -98,6 +98,38 @@ function resetUnlimitedQuota(url)
   removePermission("indexedDB-unlimited", url);
 }
 
+function getMutableFile(fileStorageKey, name)
+{
+  var requestService = SpecialPowers.getDOMRequestService();
+  var request = requestService.createRequest(window);
+
+  switch (fileStorageKey) {
+    case IndexedDatabaseKey:
+      var dbname = window.location.pathname;
+      indexedDB.open(dbname, 1).onsuccess = function(event) {
+        var db = event.target.result;
+        db.createMutableFile(name).onsuccess = function(event) {
+          var fileHandle = event.target.result;
+          requestService.fireSuccess(request, fileHandle);
+        }
+      }
+      break;
+
+    case DeviceStorageKey:
+      var dbname = window.location.pathname;
+      indexedDB.open(dbname, 1).onsuccess = function(event) {
+        var db = event.target.result;
+        db.createMutableFile(name).onsuccess = function(event) {
+          var fileHandle = event.target.result;
+          requestService.fireSuccess(request, fileHandle);
+        }
+      }
+      break;
+  }
+
+  return request;
+}
+
 function getFileHandle(fileStorageKey, name)
 {
   var requestService = SpecialPowers.getDOMRequestService();
@@ -162,14 +194,9 @@ function compareBuffers(buffer1, buffer2)
   return true;
 }
 
-function getBlob(type, buffer)
-{
-  return SpecialPowers.unwrap(utils.getBlob([buffer], {type: type}));
-}
-
 function getRandomBlob(size)
 {
-  return getBlob("binary/random", getRandomBuffer(size));
+  return new Blob([getRandomBuffer(size)], { type: "binary/random" });
 }
 
 function getFileId(blob)

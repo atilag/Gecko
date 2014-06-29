@@ -10,12 +10,13 @@
 
 #include "nsClassHashtable.h"
 #include "nsHashKeys.h"
-#include "nsCSSValue.h"
+#include "nsTArray.h"
 #include "imgIRequest.h"
 #include "imgIOnloadBlocker.h"
 #include "imgINotificationObserver.h"
 #include "mozilla/Attributes.h"
 
+class imgIContainer;
 class nsIFrame;
 class nsIDocument;
 class nsPresContext;
@@ -24,6 +25,8 @@ class nsIPrincipal;
 
 namespace mozilla {
 namespace css {
+
+struct ImageValue;
 
 class ImageLoader MOZ_FINAL : public imgINotificationObserver,
                               public imgIOnloadBlocker {
@@ -64,6 +67,8 @@ public:
   void DestroyRequest(imgIRequest* aRequest);
 
 private:
+  ~ImageLoader() {}
+
   // We need to be able to look up the frames associated with a request (for
   // delivering notifications) and the requests associated with a frame (when
   // the frame goes away). Thus we maintain hashtables going both ways.  These

@@ -1,9 +1,9 @@
-﻿/* This Source Code Form is subject to the terms of the Mozilla Public
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 const TIMEUPDATE_TIMEOUT_LENGTH = 10000;
-const ENDED_TIMEOUT_LENGTH = 10000;
+const ENDED_TIMEOUT_LENGTH = 30000;
 
 /* Time we wait for the canplaythrough event to fire
  * Note: this needs to be at least 30s because the

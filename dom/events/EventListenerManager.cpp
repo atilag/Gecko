@@ -6,7 +6,9 @@
 // Microsoft's API Name hackery sucks
 #undef CreateEvent
 
+#include "mozilla/AddonPathService.h"
 #include "mozilla/BasicEvents.h"
+#include "mozilla/CycleCollectedJSRuntime.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
 #ifdef MOZ_B2G
@@ -640,25 +642,10 @@ EventListenerManager::SetEventHandlerInternal(
 nsresult
 EventListenerManager::SetEventHandler(nsIAtom* aName,
                                       const nsAString& aBody,
-                                      uint32_t aLanguage,
                                       bool aDeferCompilation,
                                       bool aPermitUntrustedEvents,
                                       Element* aElement)
 {
-  NS_PRECONDITION(aLanguage != nsIProgrammingLanguage::UNKNOWN,
-                  "Must know the language for the script event listener");
-
-  // |aPermitUntrustedEvents| is set to False for chrome - events
-  // *generated* from an unknown source are not allowed.
-  // However, for script languages with no 'sandbox', we want to reject
-  // such scripts based on the source of their code, not just the source
-  // of the event.
-  if (aPermitUntrustedEvents && 
-      aLanguage != nsIProgrammingLanguage::JAVASCRIPT) {
-    NS_WARNING("Discarding non-JS event listener from untrusted source");
-    return NS_ERROR_FAILURE;
-  }
-
   nsCOMPtr<nsIDocument> doc;
   nsCOMPtr<nsIScriptGlobalObject> global =
     GetScriptGlobalAndDocument(getter_AddRefs(doc));
@@ -788,12 +775,12 @@ EventListenerManager::CompileEventHandlerInternal(Listener* aListener,
     GetScriptGlobalAndDocument(getter_AddRefs(doc));
   NS_ENSURE_STATE(global);
 
-  nsIScriptContext* context = global->GetScriptContext();
-  NS_ENSURE_STATE(context);
-
   // Activate JSAPI, and make sure that exceptions are reported on the right
   // Window.
-  AutoJSAPIWithErrorsReportedToWindow jsapi(context);
+  AutoJSAPI jsapi;
+  if (NS_WARN_IF(!jsapi.InitWithLegacyErrorReporting(global))) {
+    return NS_ERROR_UNEXPECTED;
+  }
   JSContext* cx = jsapi.cx();
 
   nsCOMPtr<nsIAtom> typeAtom = aListener->mTypeAtom;
@@ -856,13 +843,15 @@ EventListenerManager::CompileEventHandlerInternal(Listener* aListener,
                                    typeAtom, win,
                                    &argCount, &argNames);
 
+  JSAddonId *addonId = MapURIToAddonID(uri);
+
   // Wrap the event target, so that we can use it as the scope for the event
   // handler. Note that mTarget is different from aElement in the <body> case,
   // where mTarget is a Window.
   //
   // The wrapScope doesn't really matter here, because the target will create
   // its reflector in the proper scope, and then we'll enter that compartment.
-  JS::Rooted<JSObject*> wrapScope(cx, context->GetWindowProxy());
+  JS::Rooted<JSObject*> wrapScope(cx, global->GetGlobalJSObject());
   JS::Rooted<JS::Value> v(cx);
   {
     JSAutoCompartment ac(cx, wrapScope);
@@ -870,6 +859,17 @@ EventListenerManager::CompileEventHandlerInternal(Listener* aListener,
                                              /* aAllowWrapping = */ false);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
+    }
+  }
+  if (addonId) {
+    JS::Rooted<JSObject*> vObj(cx, &v.toObject());
+    JS::Rooted<JSObject*> addonScope(cx, xpc::GetAddonScope(cx, vObj, addonId));
+    if (!addonScope) {
+      return NS_ERROR_FAILURE;
+    }
+    JSAutoCompartment ac(cx, addonScope);
+    if (!JS_WrapValue(cx, &v)) {
+      return NS_ERROR_FAILURE;
     }
   }
   JS::Rooted<JSObject*> target(cx, &v.toObject());
@@ -891,7 +891,7 @@ EventListenerManager::CompileEventHandlerInternal(Listener* aListener,
   JS::CompileOptions options(cx);
   options.setIntroductionType("eventHandler")
          .setFileAndLine(url.get(), lineNo)
-         .setVersion(SCRIPTVERSION_DEFAULT)
+         .setVersion(JSVERSION_DEFAULT)
          .setElement(&v.toObject())
          .setElementAttributeName(jsStr)
          .setDefineOnScope(false);
@@ -1326,6 +1326,27 @@ EventListenerManager::MarkForCC()
   }
   if (mRefCnt.IsPurple()) {
     mRefCnt.RemovePurple();
+  }
+}
+
+void
+EventListenerManager::TraceListeners(JSTracer* aTrc)
+{
+  uint32_t count = mListeners.Length();
+  for (uint32_t i = 0; i < count; ++i) {
+    const Listener& listener = mListeners.ElementAt(i);
+    JSEventHandler* jsEventHandler = listener.GetJSEventHandler();
+    if (jsEventHandler) {
+      const TypedEventHandler& typedHandler =
+        jsEventHandler->GetTypedEventHandler();
+      if (typedHandler.HasEventHandler()) {
+        mozilla::TraceScriptHolder(typedHandler.Ptr(), aTrc);
+      }
+    } else if (listener.mListenerType == Listener::eWebIDLListener) {
+      mozilla::TraceScriptHolder(listener.mListener.GetWebIDLCallback(), aTrc);
+    }
+    // We might have eWrappedJSListener, but that is the legacy type for
+    // JS implemented event listeners, and trickier to handle here.
   }
 }
 

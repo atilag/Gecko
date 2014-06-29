@@ -132,6 +132,13 @@ void RTSPSource::seek(uint64_t timeUs)
     seekTo(timeUs);
 }
 
+void RTSPSource::playbackEnded()
+{
+    LOGI("RTSPSource::playbackEnded()");
+    sp<AMessage> msg = new AMessage(kWhatPerformPlaybackEnded, mReflector->id());
+    msg->post();
+}
+
 status_t RTSPSource::feedMoreTSData() {
     return mFinalResult;
 }
@@ -246,8 +253,17 @@ void RTSPSource::performSuspend() {
 // TODO, Bug 895753.
 }
 
+void RTSPSource::performPlaybackEnded() {
+    // Transition from PLAYING to CONNECTED state so that we are ready to
+    // perform an another play operation.
+    if (mState != PLAYING) {
+        return;
+    }
+    mState = CONNECTED;
+}
+
 void RTSPSource::performSeek(int64_t seekTimeUs) {
-    if (mState != PLAYING && mState != PAUSING) {
+    if (mState != CONNECTED && mState != PLAYING && mState != PAUSING) {
         return;
     }
 
@@ -309,6 +325,9 @@ void RTSPSource::onMessageReceived(const sp<AMessage> &msg) {
         return;
     } else if (msg->what() == kWhatPerformSuspend) {
         performSuspend();
+        return;
+    } else if (msg->what() == kWhatPerformPlaybackEnded) {
+        performPlaybackEnded();
         return;
     }
 
@@ -434,6 +453,7 @@ void RTSPSource::onMessageReceived(const sp<AMessage> &msg) {
                 source->signalEOS(finalResult);
             }
 
+            onTrackEndOfStream(trackIndex);
             break;
         }
 
@@ -468,6 +488,22 @@ void RTSPSource::onMessageReceived(const sp<AMessage> &msg) {
             info->mRTPTime = rtpTime;
             info->mNormalPlaytimeUs = nptUs;
             info->mNPTMappingValid = true;
+            break;
+        }
+
+        case RtspConnectionHandler::kWhatTryTCPInterleaving:
+        {
+            // By default, we will request to deliver RTP over UDP. If the play
+            // request timed out and we didn't receive any RTP packet, we will
+            // fail back to use RTP interleaved in the existing RTSP/TCP
+            // connection. And in this case, we have to explicitly perform
+            // another play event to request the server to start streaming
+            // again.
+            int64_t playTimeUs;
+            if (!msg->findInt64("timeUs", &playTimeUs)) {
+                playTimeUs = 0;
+            }
+            performPlay(playTimeUs);
             break;
         }
 
@@ -603,6 +639,7 @@ void RTSPSource::onDisconnected(const sp<AMessage> &msg) {
 
 void RTSPSource::finishDisconnectIfPossible() {
     if (mState != DISCONNECTED) {
+        CHECK(mHandler != NULL);
         mHandler->disconnect();
     }
 
@@ -653,5 +690,21 @@ void RTSPSource::onTrackDataAvailable(size_t trackIndex)
     if (mListener) {
         mListener->OnMediaDataAvailable(trackIndex, data, data.Length(), 0, meta.get());
     }
+}
+
+void RTSPSource::onTrackEndOfStream(size_t trackIndex)
+{
+    if (!mListener) {
+        return;
+    }
+
+    nsRefPtr<nsIStreamingProtocolMetaData> meta;
+    meta = new mozilla::net::RtspMetaData();
+    meta->SetFrameType(MEDIASTREAM_FRAMETYPE_END_OF_STREAM);
+
+    nsCString data;
+    data.AssignLiteral("END_OF_STREAM");
+
+    mListener->OnMediaDataAvailable(trackIndex, data, data.Length(), 0, meta.get());
 }
 }  // namespace android

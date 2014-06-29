@@ -10,6 +10,7 @@
 #include "jsobj.h"
 #include "jsscript.h"
 
+#include "gc/ForkJoinNursery.h"
 #include "gc/Marking.h"
 #include "jit/BaselineDebugModeOSR.h"
 #include "jit/BaselineFrame.h"
@@ -26,10 +27,13 @@
 #include "jit/Snapshots.h"
 #include "jit/VMFunctions.h"
 #include "vm/ArgumentsObject.h"
+#include "vm/Debugger.h"
 #include "vm/ForkJoin.h"
 #include "vm/Interpreter.h"
+#include "vm/TraceLogging.h"
 
 #include "jsscriptinlines.h"
+#include "gc/Nursery-inl.h"
 #include "jit/JitFrameIterator-inl.h"
 #include "vm/Probes-inl.h"
 
@@ -80,20 +84,23 @@ JitFrameIterator::JitFrameIterator(ThreadSafeContext *cx)
     type_(JitFrame_Exit),
     returnAddressToFp_(nullptr),
     frameSize_(0),
+    mode_(cx->isForkJoinContext() ? ParallelExecution : SequentialExecution),
+    kind_(Kind_FrameIterator),
     cachedSafepointIndex_(nullptr),
-    activation_(nullptr),
-    mode_(cx->isForkJoinContext() ? ParallelExecution : SequentialExecution)
+    activation_(nullptr)
 {
 }
 
 JitFrameIterator::JitFrameIterator(const ActivationIterator &activations)
-    : current_(activations.jitTop()),
-      type_(JitFrame_Exit),
-      returnAddressToFp_(nullptr),
-      frameSize_(0),
-      cachedSafepointIndex_(nullptr),
-      activation_(activations->asJit()),
-      mode_(activation_->cx()->isForkJoinContext() ? ParallelExecution : SequentialExecution)
+  : current_(activations.jitTop()),
+    type_(JitFrame_Exit),
+    returnAddressToFp_(nullptr),
+    frameSize_(0),
+    mode_(activations->asJit()->cx()->isForkJoinContext() ? ParallelExecution
+                                                          : SequentialExecution),
+    kind_(Kind_FrameIterator),
+    cachedSafepointIndex_(nullptr),
+    activation_(activations->asJit())
 {
 }
 
@@ -102,8 +109,23 @@ JitFrameIterator::JitFrameIterator(IonJSFrameLayout *fp, ExecutionMode mode)
     type_(JitFrame_IonJS),
     returnAddressToFp_(fp->returnAddress()),
     frameSize_(fp->prevFrameLocalSize()),
-    mode_(mode)
+    mode_(mode),
+    kind_(Kind_FrameIterator)
 {
+}
+
+IonBailoutIterator *
+JitFrameIterator::asBailoutIterator()
+{
+    MOZ_ASSERT(isBailoutIterator());
+    return static_cast<IonBailoutIterator *>(this);
+}
+
+const IonBailoutIterator *
+JitFrameIterator::asBailoutIterator() const
+{
+    MOZ_ASSERT(isBailoutIterator());
+    return static_cast<const IonBailoutIterator *>(this);
 }
 
 bool
@@ -162,43 +184,11 @@ JitFrameIterator::maybeCallee() const
 }
 
 bool
-JitFrameIterator::isNative() const
-{
-    if (type_ != JitFrame_Exit || isFakeExitFrame())
-        return false;
-    return exitFrame()->footer()->jitCode() == nullptr;
-}
-
-bool
-JitFrameIterator::isOOLNative() const
+JitFrameIterator::isBareExit() const
 {
     if (type_ != JitFrame_Exit)
         return false;
-    return exitFrame()->footer()->jitCode() == ION_FRAME_OOL_NATIVE;
-}
-
-bool
-JitFrameIterator::isOOLPropertyOp() const
-{
-    if (type_ != JitFrame_Exit)
-        return false;
-    return exitFrame()->footer()->jitCode() == ION_FRAME_OOL_PROPERTY_OP;
-}
-
-bool
-JitFrameIterator::isOOLProxy() const
-{
-    if (type_ != JitFrame_Exit)
-        return false;
-    return exitFrame()->footer()->jitCode() == ION_FRAME_OOL_PROXY;
-}
-
-bool
-JitFrameIterator::isDOMExit() const
-{
-    if (type_ != JitFrame_Exit)
-        return false;
-    return exitFrame()->isDomExit();
+    return exitFrame()->isBareExit();
 }
 
 bool
@@ -218,6 +208,16 @@ JitFrameIterator::script() const
     return script;
 }
 
+uint8_t *
+JitFrameIterator::resumeAddressToFp() const
+{
+    // If we are settled on a patched BaselineFrame due to debug mode OSR, get
+    // the real return address via the stashed DebugModeOSRInfo.
+    if (isBaselineJS() && baselineFrame()->getDebugModeOSRInfo())
+        return baselineFrame()->debugModeOSRInfo()->resumeAddr;
+    return returnAddressToFp();
+}
+
 void
 JitFrameIterator::baselineScriptAndPc(JSScript **scriptRes, jsbytecode **pcRes) const
 {
@@ -225,7 +225,7 @@ JitFrameIterator::baselineScriptAndPc(JSScript **scriptRes, jsbytecode **pcRes) 
     JSScript *script = this->script();
     if (scriptRes)
         *scriptRes = script;
-    uint8_t *retAddr = returnAddressToFp();
+    uint8_t *retAddr = resumeAddressToFp();
 
     // If we have unwound the scope due to exception handling to a different
     // pc, the frame should behave as if it were settled on that pc.
@@ -233,11 +233,6 @@ JitFrameIterator::baselineScriptAndPc(JSScript **scriptRes, jsbytecode **pcRes) 
         *pcRes = overridePc;
         return;
     }
-
-    // If we are in the middle of a recompile handler, get the real return
-    // address as stashed in the RecompileInfo.
-    if (BaselineDebugModeOSRInfo *info = baselineFrame()->getDebugModeOSRInfo())
-        retAddr = info->resumeAddr;
 
     if (pcRes) {
         // If the return address is into the prologue entry address or just
@@ -463,6 +458,24 @@ HandleExceptionIon(JSContext *cx, const InlineFrameIterator &frame, ResumeFromEx
 }
 
 static void
+ForcedReturn(JSContext *cx, const JitFrameIterator &frame, jsbytecode *pc,
+             ResumeFromException *rfe, bool *calledDebugEpilogue)
+{
+    BaselineFrame *baselineFrame = frame.baselineFrame();
+    MOZ_ASSERT(baselineFrame->hasReturnValue());
+
+    if (jit::DebugEpilogue(cx, baselineFrame, pc, true)) {
+        rfe->kind = ResumeFromException::RESUME_FORCED_RETURN;
+        rfe->framePointer = frame.fp() - BaselineFrame::FramePointerOffset;
+        rfe->stackPointer = reinterpret_cast<uint8_t *>(baselineFrame);
+        return;
+    }
+
+    // DebugEpilogue threw an exception. Propagate to the caller frame.
+    *calledDebugEpilogue = true;
+}
+
+static void
 HandleExceptionBaseline(JSContext *cx, const JitFrameIterator &frame, ResumeFromException *rfe,
                         jsbytecode **unwoundScopeToPc, bool *calledDebugEpilogue)
 {
@@ -472,6 +485,14 @@ HandleExceptionBaseline(JSContext *cx, const JitFrameIterator &frame, ResumeFrom
     RootedScript script(cx);
     jsbytecode *pc;
     frame.baselineScriptAndPc(script.address(), &pc);
+
+    // We may be propagating a forced return from the interrupt
+    // callback, which cannot easily force a return.
+    if (cx->isPropagatingForcedReturn()) {
+        cx->clearPropagatingForcedReturn();
+        ForcedReturn(cx, frame, pc, rfe, calledDebugEpilogue);
+        return;
+    }
 
     if (cx->isExceptionPending() && cx->compartment()->debugMode()) {
         BaselineFrame *baselineFrame = frame.baselineFrame();
@@ -488,16 +509,7 @@ HandleExceptionBaseline(JSContext *cx, const JitFrameIterator &frame, ResumeFrom
             break;
 
           case JSTRAP_RETURN:
-            JS_ASSERT(baselineFrame->hasReturnValue());
-            if (jit::DebugEpilogue(cx, baselineFrame, pc, true)) {
-                rfe->kind = ResumeFromException::RESUME_FORCED_RETURN;
-                rfe->framePointer = frame.fp() - BaselineFrame::FramePointerOffset;
-                rfe->stackPointer = reinterpret_cast<uint8_t *>(baselineFrame);
-                return;
-            }
-
-            // DebugEpilogue threw an exception. Propagate to the caller frame.
-            *calledDebugEpilogue = true;
+            ForcedReturn(cx, frame, pc, rfe, calledDebugEpilogue);
             return;
 
           default:
@@ -589,7 +601,7 @@ HandleExceptionBaseline(JSContext *cx, const JitFrameIterator &frame, ResumeFrom
 struct AutoDeleteDebugModeOSRInfo
 {
     BaselineFrame *frame;
-    AutoDeleteDebugModeOSRInfo(BaselineFrame *frame) : frame(frame) { MOZ_ASSERT(frame); }
+    explicit AutoDeleteDebugModeOSRInfo(BaselineFrame *frame) : frame(frame) { MOZ_ASSERT(frame); }
     ~AutoDeleteDebugModeOSRInfo() { frame->deleteDebugModeOSRInfo(); }
 };
 
@@ -597,6 +609,7 @@ void
 HandleException(ResumeFromException *rfe)
 {
     JSContext *cx = GetJSContextFromJitCode();
+    TraceLogger *logger = TraceLoggerForMainThread(cx->runtime());
 
     rfe->kind = ResumeFromException::RESUME_ENTRY_FRAME;
 
@@ -647,10 +660,14 @@ HandleException(ResumeFromException *rfe)
                 // When profiling, each frame popped needs a notification that
                 // the function has exited, so invoke the probe that a function
                 // is exiting.
+
                 JSScript *script = frames.script();
                 probes::ExitScript(cx, script, script->functionNonDelazifying(), popSPSFrame);
-                if (!frames.more())
+                if (!frames.more()) {
+                    TraceLogStopEvent(logger, TraceLogger::IonMonkey);
+                    TraceLogStopEvent(logger);
                     break;
+                }
                 ++frames;
             }
 
@@ -677,6 +694,9 @@ HandleException(ResumeFromException *rfe)
 
             if (rfe->kind != ResumeFromException::RESUME_ENTRY_FRAME)
                 return;
+
+            TraceLogStopEvent(logger, TraceLogger::Baseline);
+            TraceLogStopEvent(logger);
 
             // Unwind profiler pseudo-stack
             JSScript *script = iter.script();
@@ -736,28 +756,23 @@ HandleException(ResumeFromException *rfe)
 void
 HandleParallelFailure(ResumeFromException *rfe)
 {
-    ForkJoinContext *cx = ForkJoinContext::current();
-    JitFrameIterator iter(cx->perThreadData->jitTop, ParallelExecution);
-
     parallel::Spew(parallel::SpewBailouts, "Bailing from VM reentry");
 
-    while (!iter.isEntry()) {
-        if (iter.isScripted()) {
-            cx->bailoutRecord->updateCause(ParallelBailoutUnsupportedVM,
-                                           iter.script(), iter.script(), nullptr);
-            break;
-        }
-        ++iter;
-    }
+    ForkJoinContext *cx = ForkJoinContext::current();
+    JitFrameIterator frameIter(cx);
 
-    while (!iter.isEntry()) {
-        if (iter.isScripted())
-            PropagateAbortPar(iter.script(), iter.script());
-        ++iter;
-    }
+    // Advance to the first Ion frame so we can pull out the BailoutKind.
+    while (!frameIter.isIonJS())
+        ++frameIter;
+    SnapshotIterator snapIter(frameIter);
+
+    cx->bailoutRecord->setIonBailoutKind(snapIter.bailoutKind());
+    cx->bailoutRecord->rematerializeFrames(cx, frameIter);
 
     rfe->kind = ResumeFromException::RESUME_ENTRY_FRAME;
-    rfe->stackPointer = iter.fp();
+
+    MOZ_ASSERT(frameIter.done());
+    rfe->stackPointer = frameIter.fp();
 }
 
 void
@@ -881,10 +896,8 @@ MarkIonJSFrame(JSTracer *trc, const JitFrameIterator &frame)
         // longer reachable through the callee token (JSFunction/JSScript->ion
         // is now nullptr or recompiled). Manually trace it here.
         IonScript::Trace(trc, ionScript);
-    } else if (CalleeTokenIsFunction(layout->calleeToken())) {
-        ionScript = CalleeTokenToFunction(layout->calleeToken())->nonLazyScript()->ionScript();
     } else {
-        ionScript = CalleeTokenToScript(layout->calleeToken())->ionScript();
+        ionScript = frame.ionScriptFromCalleeToken();
     }
 
     if (CalleeTokenIsFunction(layout->calleeToken()))
@@ -938,7 +951,8 @@ MarkIonJSFrame(JSTracer *trc, const JitFrameIterator &frame)
 }
 
 #ifdef JSGC_GENERATIONAL
-static void
+template <typename T>
+void
 UpdateIonJSFrameForMinorGC(JSTracer *trc, const JitFrameIterator &frame)
 {
     // Minor GCs may move slots/elements allocated in the nursery. Update
@@ -951,10 +965,8 @@ UpdateIonJSFrameForMinorGC(JSTracer *trc, const JitFrameIterator &frame)
         // This frame has been invalidated, meaning that its IonScript is no
         // longer reachable through the callee token (JSFunction/JSScript->ion
         // is now nullptr or recompiled).
-    } else if (CalleeTokenIsFunction(layout->calleeToken())) {
-        ionScript = CalleeTokenToFunction(layout->calleeToken())->nonLazyScript()->ionScript();
     } else {
-        ionScript = CalleeTokenToScript(layout->calleeToken())->ionScript();
+        ionScript = frame.ionScriptFromCalleeToken();
     }
 
     const SafepointIndex *si = ionScript->getSafepointIndex(frame.returnAddressToFp());
@@ -965,7 +977,7 @@ UpdateIonJSFrameForMinorGC(JSTracer *trc, const JitFrameIterator &frame)
     for (GeneralRegisterBackwardIterator iter(safepoint.allGprSpills()); iter.more(); iter++) {
         --spill;
         if (slotsRegs.has(*iter))
-            trc->runtime()->gc.nursery.forwardBufferPointer(reinterpret_cast<HeapSlot **>(spill));
+            T::forwardBufferPointer(trc, reinterpret_cast<HeapSlot **>(spill));
     }
 
     // Skip to the right place in the safepoint
@@ -979,6 +991,12 @@ UpdateIonJSFrameForMinorGC(JSTracer *trc, const JitFrameIterator &frame)
 
     while (safepoint.getSlotsOrElementsSlot(&slot)) {
         HeapSlot **slots = reinterpret_cast<HeapSlot **>(layout->slotRef(slot));
+#ifdef JSGC_FJGENERATIONAL
+        if (trc->callback == gc::ForkJoinNursery::MinorGCCallback) {
+            gc::ForkJoinNursery::forwardBufferPointer(trc, slots);
+            continue;
+        }
+#endif
         trc->runtime()->gc.nursery.forwardBufferPointer(slots);
     }
 }
@@ -1056,16 +1074,17 @@ MarkJitExitFrame(JSTracer *trc, const JitFrameIterator &frame)
     // This correspond to the case where we have build a fake exit frame in
     // CodeGenerator.cpp which handle the case of a native function call. We
     // need to mark the argument vector of the function call.
-    if (frame.isNative()) {
-        IonNativeExitFrameLayout *native = frame.exitFrame()->nativeExit();
+    if (frame.isExitFrameLayout<IonNativeExitFrameLayout>()) {
+        IonNativeExitFrameLayout *native = frame.exitFrame()->as<IonNativeExitFrameLayout>();
         size_t len = native->argc() + 2;
         Value *vp = native->vp();
         gc::MarkValueRootRange(trc, len, vp, "ion-native-args");
         return;
     }
 
-    if (frame.isOOLNative()) {
-        IonOOLNativeExitFrameLayout *oolnative = frame.exitFrame()->oolNativeExit();
+    if (frame.isExitFrameLayout<IonOOLNativeExitFrameLayout>()) {
+        IonOOLNativeExitFrameLayout *oolnative =
+            frame.exitFrame()->as<IonOOLNativeExitFrameLayout>();
         gc::MarkJitCodeRoot(trc, oolnative->stubCode(), "ion-ool-native-code");
         gc::MarkValueRoot(trc, oolnative->vp(), "iol-ool-native-vp");
         size_t len = oolnative->argc() + 1;
@@ -1073,8 +1092,9 @@ MarkJitExitFrame(JSTracer *trc, const JitFrameIterator &frame)
         return;
     }
 
-    if (frame.isOOLPropertyOp()) {
-        IonOOLPropertyOpExitFrameLayout *oolgetter = frame.exitFrame()->oolPropertyOpExit();
+    if (frame.isExitFrameLayout<IonOOLPropertyOpExitFrameLayout>()) {
+        IonOOLPropertyOpExitFrameLayout *oolgetter =
+            frame.exitFrame()->as<IonOOLPropertyOpExitFrameLayout>();
         gc::MarkJitCodeRoot(trc, oolgetter->stubCode(), "ion-ool-property-op-code");
         gc::MarkValueRoot(trc, oolgetter->vp(), "ion-ool-property-op-vp");
         gc::MarkIdRoot(trc, oolgetter->id(), "ion-ool-property-op-id");
@@ -1082,8 +1102,8 @@ MarkJitExitFrame(JSTracer *trc, const JitFrameIterator &frame)
         return;
     }
 
-    if (frame.isOOLProxy()) {
-        IonOOLProxyExitFrameLayout *oolproxy = frame.exitFrame()->oolProxyExit();
+    if (frame.isExitFrameLayout<IonOOLProxyExitFrameLayout>()) {
+        IonOOLProxyExitFrameLayout *oolproxy = frame.exitFrame()->as<IonOOLProxyExitFrameLayout>();
         gc::MarkJitCodeRoot(trc, oolproxy->stubCode(), "ion-ool-proxy-code");
         gc::MarkValueRoot(trc, oolproxy->vp(), "ion-ool-proxy-vp");
         gc::MarkIdRoot(trc, oolproxy->id(), "ion-ool-proxy-id");
@@ -1092,8 +1112,8 @@ MarkJitExitFrame(JSTracer *trc, const JitFrameIterator &frame)
         return;
     }
 
-    if (frame.isDOMExit()) {
-        IonDOMExitFrameLayout *dom = frame.exitFrame()->DOMExit();
+    if (frame.isExitFrameLayout<IonDOMExitFrameLayout>()) {
+        IonDOMExitFrameLayout *dom = frame.exitFrame()->as<IonDOMExitFrameLayout>();
         gc::MarkObjectRoot(trc, dom->thisObjAddress(), "ion-dom-args");
         if (dom->isMethodFrame()) {
             IonDOMMethodExitFrameLayout *method =
@@ -1104,6 +1124,12 @@ MarkJitExitFrame(JSTracer *trc, const JitFrameIterator &frame)
         } else {
             gc::MarkValueRoot(trc, dom->vp(), "ion-dom-args");
         }
+        return;
+    }
+
+    if (frame.isBareExit()) {
+        // Nothing to mark. Fake exit frame pushed for VM functions with
+        // nothing to mark on the stack.
         return;
     }
 
@@ -1232,9 +1258,9 @@ MarkJitActivation(JSTracer *trc, const JitActivationIterator &activations)
 }
 
 void
-MarkJitActivations(JSRuntime *rt, JSTracer *trc)
+MarkJitActivations(PerThreadData *ptd, JSTracer *trc)
 {
-    for (JitActivationIterator activations(rt); !activations.done(); ++activations)
+    for (JitActivationIterator activations(ptd); !activations.done(); ++activations)
         MarkJitActivation(trc, activations);
 }
 
@@ -1251,17 +1277,30 @@ TopmostIonActivationCompartment(JSRuntime *rt)
 }
 
 #ifdef JSGC_GENERATIONAL
-void
-UpdateJitActivationsForMinorGC(JSRuntime *rt, JSTracer *trc)
+template <typename T>
+void UpdateJitActivationsForMinorGC(PerThreadData *ptd, JSTracer *trc)
 {
+#ifdef JSGC_FJGENERATIONAL
+    JS_ASSERT(trc->runtime()->isHeapMinorCollecting() || trc->runtime()->isFJMinorCollecting());
+#else
     JS_ASSERT(trc->runtime()->isHeapMinorCollecting());
-    for (JitActivationIterator activations(rt); !activations.done(); ++activations) {
+#endif
+    for (JitActivationIterator activations(ptd); !activations.done(); ++activations) {
         for (JitFrameIterator frames(activations); !frames.done(); ++frames) {
             if (frames.type() == JitFrame_IonJS)
-                UpdateIonJSFrameForMinorGC(trc, frames);
+                UpdateIonJSFrameForMinorGC<T>(trc, frames);
         }
     }
 }
+
+template
+void UpdateJitActivationsForMinorGC<Nursery>(PerThreadData *ptd, JSTracer *trc);
+
+#ifdef JSGC_FJGENERATIONAL
+template
+void UpdateJitActivationsForMinorGC<gc::ForkJoinNursery>(PerThreadData *ptd, JSTracer *trc);
+#endif
+
 #endif
 
 void
@@ -1306,7 +1345,7 @@ GetPcScript(JSContext *cx, JSScript **scriptRes, jsbytecode **pcRes)
     if (MOZ_UNLIKELY(rt->ionPcScriptCache == nullptr)) {
         rt->ionPcScriptCache = (PcScriptCache *)js_malloc(sizeof(struct PcScriptCache));
         if (rt->ionPcScriptCache)
-            rt->ionPcScriptCache->clear(rt->gc.number);
+            rt->ionPcScriptCache->clear(rt->gc.gcNumber());
     }
 
     // Attempt to lookup address in cache.
@@ -1409,6 +1448,12 @@ FromStringPayload(uintptr_t payload)
 }
 
 static Value
+FromSymbolPayload(uintptr_t payload)
+{
+    return SymbolValue(reinterpret_cast<JS::Symbol *>(payload));
+}
+
+static Value
 FromTypedPayload(JSValueType type, uintptr_t payload)
 {
     switch (type) {
@@ -1418,6 +1463,8 @@ FromTypedPayload(JSValueType type, uintptr_t payload)
         return BooleanValue(!!payload);
       case JSVAL_TYPE_STRING:
         return FromStringPayload(payload);
+      case JSVAL_TYPE_SYMBOL:
+        return FromSymbolPayload(payload);
       case JSVAL_TYPE_OBJECT:
         return FromObjectPayload(payload);
       default:
@@ -1504,6 +1551,8 @@ SnapshotIterator::allocationValue(const RValueAllocation &alloc)
             return BooleanValue(ReadFrameBooleanSlot(fp_, alloc.stackOffset2()));
           case JSVAL_TYPE_STRING:
             return FromStringPayload(fromStack(alloc.stackOffset2()));
+          case JSVAL_TYPE_SYMBOL:
+            return FromSymbolPayload(fromStack(alloc.stackOffset2()));
           case JSVAL_TYPE_OBJECT:
             return FromObjectPayload(fromStack(alloc.stackOffset2()));
           default:
@@ -1656,10 +1705,26 @@ JitFrameIterator::ionScript() const
     IonScript *ionScript = nullptr;
     if (checkInvalidation(&ionScript))
         return ionScript;
+    return ionScriptFromCalleeToken();
+}
+
+IonScript *
+JitFrameIterator::ionScriptFromCalleeToken() const
+{
+    JS_ASSERT(type() == JitFrame_IonJS);
+    JS_ASSERT(!checkInvalidation());
+
     switch (GetCalleeTokenTag(calleeToken())) {
       case CalleeToken_Function:
       case CalleeToken_Script:
-        return mode_ == ParallelExecution ? script()->parallelIonScript() : script()->ionScript();
+        switch (mode_) {
+          case SequentialExecution:
+            return script()->ionScript();
+          case ParallelExecution:
+            return script()->parallelIonScript();
+          default:
+            MOZ_ASSUME_UNREACHABLE("No such execution mode");
+        }
       default:
         MOZ_ASSUME_UNREACHABLE("unknown callee token type");
     }
@@ -1680,9 +1745,55 @@ JitFrameIterator::osiIndex() const
     return ionScript()->getOsiIndex(reader.osiReturnPointOffset());
 }
 
-template <AllowGC allowGC>
+InlineFrameIterator::InlineFrameIterator(ThreadSafeContext *cx, const JitFrameIterator *iter)
+  : callee_(cx),
+    script_(cx)
+{
+    resetOn(iter);
+}
+
+InlineFrameIterator::InlineFrameIterator(JSRuntime *rt, const JitFrameIterator *iter)
+  : callee_(rt),
+    script_(rt)
+{
+    resetOn(iter);
+}
+
+InlineFrameIterator::InlineFrameIterator(ThreadSafeContext *cx, const IonBailoutIterator *iter)
+  : frame_(iter),
+    framesRead_(0),
+    frameCount_(UINT32_MAX),
+    callee_(cx),
+    script_(cx)
+{
+    if (iter) {
+        start_ = SnapshotIterator(*iter);
+        findNextFrame();
+    }
+}
+
+InlineFrameIterator::InlineFrameIterator(ThreadSafeContext *cx, const InlineFrameIterator *iter)
+  : frame_(iter ? iter->frame_ : nullptr),
+    framesRead_(0),
+    frameCount_(iter ? iter->frameCount_ : UINT32_MAX),
+    callee_(cx),
+    script_(cx)
+{
+    if (frame_) {
+        if (frame_->isBailoutIterator())
+            start_ = SnapshotIterator(*frame_->asBailoutIterator());
+        else
+            start_ = SnapshotIterator(*frame_);
+
+        // findNextFrame will iterate to the next frame and init. everything.
+        // Therefore to settle on the same frame, we report one frame less readed.
+        framesRead_ = iter->framesRead_ - 1;
+        findNextFrame();
+    }
+}
+
 void
-InlineFrameIteratorMaybeGC<allowGC>::resetOn(const JitFrameIterator *iter)
+InlineFrameIterator::resetOn(const JitFrameIterator *iter)
 {
     frame_ = iter;
     framesRead_ = 0;
@@ -1693,12 +1804,9 @@ InlineFrameIteratorMaybeGC<allowGC>::resetOn(const JitFrameIterator *iter)
         findNextFrame();
     }
 }
-template void InlineFrameIteratorMaybeGC<NoGC>::resetOn(const JitFrameIterator *iter);
-template void InlineFrameIteratorMaybeGC<CanGC>::resetOn(const JitFrameIterator *iter);
 
-template <AllowGC allowGC>
 void
-InlineFrameIteratorMaybeGC<allowGC>::findNextFrame()
+InlineFrameIterator::findNextFrame()
 {
     JS_ASSERT(more());
 
@@ -1780,17 +1888,30 @@ InlineFrameIteratorMaybeGC<allowGC>::findNextFrame()
 
     framesRead_++;
 }
-template void InlineFrameIteratorMaybeGC<NoGC>::findNextFrame();
-template void InlineFrameIteratorMaybeGC<CanGC>::findNextFrame();
 
-template <AllowGC allowGC>
+JSObject *
+InlineFrameIterator::computeScopeChain(Value scopeChainValue) const
+{
+    if (scopeChainValue.isObject())
+        return &scopeChainValue.toObject();
+
+    // Note we can hit this case even for heavyweight functions, in case we
+    // are walking the frame during the function prologue, before the scope
+    // chain has been initialized.
+    if (isFunctionFrame())
+        return callee()->environment();
+
+    // Ion does not handle scripts that are not compile-and-go.
+    MOZ_ASSERT(!script()->isForEval());
+    MOZ_ASSERT(script()->compileAndGo());
+    return &script()->global();
+}
+
 bool
-InlineFrameIteratorMaybeGC<allowGC>::isFunctionFrame() const
+InlineFrameIterator::isFunctionFrame() const
 {
     return !!callee_;
 }
-template bool InlineFrameIteratorMaybeGC<NoGC>::isFunctionFrame() const;
-template bool InlineFrameIteratorMaybeGC<CanGC>::isFunctionFrame() const;
 
 MachineState
 MachineState::FromBailout(mozilla::Array<uintptr_t, Registers::Total> &regs,
@@ -1806,13 +1927,12 @@ MachineState::FromBailout(mozilla::Array<uintptr_t, Registers::Total> &regs,
     return machine;
 }
 
-template <AllowGC allowGC>
 bool
-InlineFrameIteratorMaybeGC<allowGC>::isConstructing() const
+InlineFrameIterator::isConstructing() const
 {
     // Skip the current frame and look at the caller's.
     if (more()) {
-        InlineFrameIteratorMaybeGC<allowGC> parent(GetJSContextFromJitCode(), this);
+        InlineFrameIterator parent(GetJSContextFromJitCode(), this);
         ++parent;
 
         // Inlined Getters and Setters are never constructing.
@@ -1827,8 +1947,6 @@ InlineFrameIteratorMaybeGC<allowGC>::isConstructing() const
 
     return frame_->isConstructing();
 }
-template bool InlineFrameIteratorMaybeGC<NoGC>::isConstructing() const;
-template bool InlineFrameIteratorMaybeGC<CanGC>::isConstructing() const;
 
 bool
 JitFrameIterator::isConstructing() const
@@ -1877,8 +1995,8 @@ JitFrameIterator::numActualArgs() const
     if (isScripted())
         return jsFrame()->numActualArgs();
 
-    JS_ASSERT(isNative());
-    return exitFrame()->nativeExit()->argc();
+    JS_ASSERT(isExitFrameLayout<IonNativeExitFrameLayout>());
+    return exitFrame()->as<IonNativeExitFrameLayout>()->argc();
 }
 
 void
@@ -1888,7 +2006,7 @@ SnapshotIterator::warnUnreadableAllocation()
 }
 
 struct DumpOp {
-    DumpOp(unsigned int i) : i_(i) {}
+    explicit DumpOp(unsigned int i) : i_(i) {}
 
     unsigned int i_;
     void operator()(const Value& v) {
@@ -1945,9 +2063,8 @@ JitFrameIterator::dumpBaseline() const
     }
 }
 
-template <AllowGC allowGC>
 void
-InlineFrameIteratorMaybeGC<allowGC>::dump() const
+InlineFrameIterator::dump() const
 {
     if (more())
         fprintf(stderr, " JS frame (inlined)\n");
@@ -2006,8 +2123,6 @@ InlineFrameIteratorMaybeGC<allowGC>::dump() const
 
     fputc('\n', stderr);
 }
-template void InlineFrameIteratorMaybeGC<NoGC>::dump() const;
-template void InlineFrameIteratorMaybeGC<CanGC>::dump() const;
 
 void
 JitFrameIterator::dump() const

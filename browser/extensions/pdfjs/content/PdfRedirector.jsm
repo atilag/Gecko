@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
 /* Copyright 2012 Mozilla Foundation
  *
@@ -60,6 +60,10 @@ function getObjectUrl(window) {
   }
 
   // Checking if overlay is a proper PlayPreview overlay.
+  if (element.displayedType !== element.TYPE_NULL ||
+      element.pluginFallbackType !== element.PLUGIN_PLAY_PREVIEW) {
+    return null; // invalid plugin element overlay state
+  }
   for (var i = 0; i < element.children.length; i++) {
     if (element.children[i] === containerElement) {
       return null; // invalid plugin element overlay
@@ -131,3 +135,4 @@ PdfRedirector.prototype = {
     // Do nothing
   }
 };
+

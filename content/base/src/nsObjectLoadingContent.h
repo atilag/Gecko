@@ -214,9 +214,10 @@ class nsObjectLoadingContent : public nsImageLoadingContent
     {
       aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
     }
-    JS::Value LegacyCall(JSContext* aCx, JS::Handle<JS::Value> aThisVal,
-                         const mozilla::dom::Sequence<JS::Value>& aArguments,
-                         mozilla::ErrorResult& aRv);
+    void LegacyCall(JSContext* aCx, JS::Handle<JS::Value> aThisVal,
+                    const mozilla::dom::Sequence<JS::Value>& aArguments,
+                    JS::MutableHandle<JS::Value> aRetval,
+                    mozilla::ErrorResult& aRv);
 
   protected:
     /**
@@ -472,6 +473,7 @@ class nsObjectLoadingContent : public nsImageLoadingContent
     // Helper class for SetupProtoChain
     class SetupProtoChainRunner MOZ_FINAL : public nsIRunnable
     {
+      ~SetupProtoChainRunner();
     public:
       NS_DECL_ISUPPORTS
 

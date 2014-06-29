@@ -1,4 +1,4 @@
-# -*- Mode: javascript; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+# -*- indent-tabs-mode: nil; js-indent-level: 4 -*-
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
@@ -488,29 +488,36 @@ function openPreferences(paneID, extraArgs)
     }
   }
 
+  // This function is duplicated from preferences.js.
+  function internalPrefCategoryNameToFriendlyName(aName) {
+    return (aName || "").replace(/^pane./, function(toReplace) { return toReplace[4].toLowerCase(); });
+  }
+
   if (getBoolPref("browser.preferences.inContent")) {
     let win = Services.wm.getMostRecentWindow("navigator:browser");
     if (!win) {
       return;
     }
 
-    let newLoad = !win.switchToTabHavingURI("about:preferences", true);
+    let friendlyCategoryName = internalPrefCategoryNameToFriendlyName(paneID);
+    let preferencesURL = "about:preferences" +
+                         (friendlyCategoryName ? "#" + friendlyCategoryName : "");
+    let newLoad = !win.switchToTabHavingURI(preferencesURL, true, {ignoreFragment: true});
     let browser = win.gBrowser.selectedBrowser;
 
-    function switchToPane() {
+    if (newLoad) {
+      Services.obs.addObserver(function advancedPaneLoadedObs(prefWin, topic, data) {
+        if (prefWin != browser.contentWindow) {
+          return;
+        }
+        Services.obs.removeObserver(advancedPaneLoadedObs, "advanced-pane-loaded");
+        switchToAdvancedSubPane(browser.contentDocument);
+      }, "advanced-pane-loaded", false);
+    } else {
       if (paneID) {
-        browser.contentWindow.selectCategory(paneID);
+        browser.contentWindow.gotoPref(paneID);
       }
       switchToAdvancedSubPane(browser.contentDocument);
-    }
-
-    if (newLoad) {
-      browser.addEventListener("load", function onload() {
-        browser.removeEventListener("load", onload, true);
-        switchToPane();
-      }, true);
-    } else {
-      switchToPane();
     }
   } else {
     var instantApply = getBoolPref("browser.preferences.instantApply", false);

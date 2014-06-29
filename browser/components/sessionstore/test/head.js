@@ -39,9 +39,11 @@ registerCleanupFunction(() => {
 
 let tmp = {};
 Cu.import("resource://gre/modules/Promise.jsm", tmp);
+Cu.import("resource://gre/modules/Task.jsm", tmp);
 Cu.import("resource:///modules/sessionstore/SessionStore.jsm", tmp);
 Cu.import("resource:///modules/sessionstore/SessionSaver.jsm", tmp);
-let {Promise, SessionStore, SessionSaver} = tmp;
+Cu.import("resource:///modules/sessionstore/SessionFile.jsm", tmp);
+let {Promise, Task, SessionStore, SessionSaver, SessionFile} = tmp;
 
 let ss = Cc["@mozilla.org/browser/sessionstore;1"].getService(Ci.nsISessionStore);
 
@@ -71,7 +73,7 @@ function provideWindow(aCallback, aURL, aFeatures) {
     });
   }
 
-  let win = openDialog(getBrowserURL(), "", aFeatures || "chrome,all,dialog=no", aURL);
+  let win = openDialog(getBrowserURL(), "", aFeatures || "chrome,all,dialog=no", aURL || "about:blank");
   whenWindowLoaded(win, function onWindowLoaded(aWin) {
     if (!aURL) {
       info("Loaded a blank window.");
@@ -88,6 +90,12 @@ function provideWindow(aCallback, aURL, aFeatures) {
 
 // This assumes that tests will at least have some state/entries
 function waitForBrowserState(aState, aSetStateCallback) {
+  if (typeof aState == "string") {
+    aState = JSON.parse(aState);
+  }
+  if (typeof aState != "object") {
+    throw new TypeError("Argument must be an object or a JSON representation of an object");
+  }
   let windows = [window];
   let tabsRestored = 0;
   let expectedTabsRestored = 0;
@@ -170,6 +178,10 @@ function waitForBrowserState(aState, aSetStateCallback) {
 
   // Finally, call setBrowserState
   ss.setBrowserState(JSON.stringify(aState));
+}
+
+function promiseBrowserState(aState) {
+  return new Promise(resolve => waitForBrowserState(aState, resolve));
 }
 
 // Doesn't assume that the tab needs to be closed in a cleanup function.
@@ -272,12 +284,25 @@ function forceSaveState() {
   return SessionSaver.run();
 }
 
-function promiseSaveFileContents() {
+function promiseRecoveryFileContents() {
   let promise = forceSaveState();
   return promise.then(function() {
-    return OS.File.read(OS.Path.join(OS.Constants.Path.profileDir, "sessionstore.js"), { encoding: "utf-8" });
+    return OS.File.read(SessionFile.Paths.recovery, { encoding: "utf-8" });
   });
 }
+
+let promiseForEachSessionRestoreFile = Task.async(function*(cb) {
+  for (let key of SessionFile.Paths.loadOrder) {
+    let data = "";
+    try {
+      data = yield OS.File.read(SessionFile.Paths[key], { encoding: "utf-8" });
+    } catch (ex if ex instanceof OS.File.Error
+	     && ex.becauseNoSuchFile) {
+      // Ignore missing files
+    }
+    cb(data, key);
+  }
+});
 
 function whenBrowserLoaded(aBrowser, aCallback = next, ignoreSubFrames = true) {
   aBrowser.addEventListener("load", function onLoad(event) {
@@ -440,7 +465,15 @@ function closeAllButPrimaryWindow() {
  * expected (e.g. reading a big session state from disk).
  */
 function whenNewWindowLoaded(aOptions, aCallback) {
-  let win = OpenBrowserWindow(aOptions);
+  let features = "";
+  let url = "about:blank";
+
+  if (aOptions && aOptions.private || false) {
+    features = ",private";
+    url = "about:privatebrowsing";
+  }
+
+  let win = openDialog(getBrowserURL(), "", "chrome,all,dialog=no" + features, url);
   whenDelayedStartupFinished(win, () => aCallback(win));
   return win;
 }
@@ -480,6 +513,9 @@ function whenDelayedStartupFinished(aWindow, aCallback) {
       executeSoon(aCallback);
     }
   }, "browser-delayed-startup-finished", false);
+}
+function promiseDelayedStartupFinished(aWindow) {
+  return new Promise((resolve) => whenDelayedStartupFinished(aWindow, resolve));
 }
 
 /**

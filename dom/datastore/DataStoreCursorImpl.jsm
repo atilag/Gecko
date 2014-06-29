@@ -1,4 +1,4 @@
-/* -*- Mode: js2; js2-basic-offset: 2; indent-tabs-mode: nil; -*- */
+/* -*- js-indent-level: 2; indent-tabs-mode: nil -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -27,6 +27,7 @@ const REVISION_REMOVED = 'removed';
 const REVISION_VOID = 'void';
 const REVISION_SKIP = 'skip'
 
+Cu.import('resource://gre/modules/Services.jsm');
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 
 /**
@@ -87,6 +88,8 @@ this.DataStoreCursor.prototype = {
   contractID: '@mozilla.org/dom/datastore-cursor-impl;1',
   QueryInterface: XPCOMUtils.generateQI([Components.interfaces.nsISupports]),
 
+  _shuttingdown: false,
+
   _window: null,
   _dataStore: null,
   _revisionId: null,
@@ -102,12 +105,31 @@ this.DataStoreCursor.prototype = {
     this._window = aWindow;
     this._dataStore = aDataStore;
     this._revisionId = aRevisionId;
+
+    Services.obs.addObserver(this, "inner-window-destroyed", false);
+
+    let util = aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                      .getInterface(Ci.nsIDOMWindowUtils);
+    this._innerWindowID = util.currentInnerWindowID;
+  },
+
+  observe: function(aSubject, aTopic, aData) {
+    let wId = aSubject.QueryInterface(Ci.nsISupportsPRUint64).data;
+    if (wId == this._innerWindowID) {
+      Services.obs.removeObserver(this, "inner-window-destroyed");
+      this._shuttingdown = true;
+    }
   },
 
   // This is the implementation of the state machine.
   // Read the comments at the top of this file in order to follow what it does.
   stateMachine: function(aStore, aRevisionStore, aResolve, aReject) {
     debug('StateMachine: ' + this._state);
+
+    // If the window has been destroyed we cannot create the Promise object.
+    if (this._shuttingdown) {
+      return;
+    }
 
     switch (this._state) {
       case STATE_INIT:
@@ -386,6 +408,11 @@ this.DataStoreCursor.prototype = {
 
   next: function() {
     debug('Next');
+
+    // If the window has been destroyed we cannot create the Promise object.
+    if (this._shuttingdown) {
+      throw Cr.NS_ERROR_FAILURE;
+    }
 
     let self = this;
     return new this._window.Promise(function(aResolve, aReject) {

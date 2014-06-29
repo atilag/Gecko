@@ -12,7 +12,7 @@
 #include "jsfun.h"
 #include "jsscript.h"
 
-#include "jit/AsmJSLink.h"
+#include "jit/AsmJSFrameIterator.h"
 #include "jit/JitFrameIterator.h"
 #ifdef CHECK_OSIPOINT_REGISTERS
 #include "jit/Registers.h" // for RegisterDump
@@ -33,7 +33,7 @@ class SPSProfiler;
 class InterpreterFrame;
 class StaticBlockObject;
 
-struct ScopeCoordinate;
+class ScopeCoordinate;
 
 // VM stack layout
 //
@@ -117,19 +117,19 @@ class AbstractFramePtr
       : ptr_(0)
     {}
 
-    AbstractFramePtr(InterpreterFrame *fp)
+    MOZ_IMPLICIT AbstractFramePtr(InterpreterFrame *fp)
       : ptr_(fp ? uintptr_t(fp) | Tag_InterpreterFrame : 0)
     {
         MOZ_ASSERT_IF(fp, asInterpreterFrame() == fp);
     }
 
-    AbstractFramePtr(jit::BaselineFrame *fp)
+    MOZ_IMPLICIT AbstractFramePtr(jit::BaselineFrame *fp)
       : ptr_(fp ? uintptr_t(fp) | Tag_BaselineFrame : 0)
     {
         MOZ_ASSERT_IF(fp, asBaselineFrame() == fp);
     }
 
-    AbstractFramePtr(jit::RematerializedFrame *fp)
+    MOZ_IMPLICIT AbstractFramePtr(jit::RematerializedFrame *fp)
       : ptr_(fp ? uintptr_t(fp) | Tag_RematerializedFrame : 0)
     {
         MOZ_ASSERT_IF(fp, asRematerializedFrame() == fp);
@@ -1093,7 +1093,7 @@ class InterpreterStack
     }
 };
 
-void MarkInterpreterActivations(JSRuntime *rt, JSTracer *trc);
+void MarkInterpreterActivations(PerThreadData *ptd, JSTracer *trc);
 
 /*****************************************************************************/
 
@@ -1102,7 +1102,7 @@ class InvokeArgs : public JS::CallArgs
     AutoValueVector v_;
 
   public:
-    InvokeArgs(JSContext *cx) : v_(cx) {}
+    explicit InvokeArgs(JSContext *cx) : v_(cx) {}
 
     bool init(unsigned argc) {
         if (!v_.resize(2 + argc))
@@ -1338,11 +1338,10 @@ class JitActivation : public Activation
     // inline frames associated with that frame.
     //
     // This table is lazily initialized by calling getRematerializedFrame.
-    typedef Vector<RematerializedFrame *, 1> RematerializedFrameVector;
+    typedef Vector<RematerializedFrame *> RematerializedFrameVector;
     typedef HashMap<uint8_t *, RematerializedFrameVector> RematerializedFrameTable;
     RematerializedFrameTable *rematerializedFrames_;
 
-    void freeRematerializedFramesInVector(RematerializedFrameVector &frames);
     void clearRematerializedFrames();
 #endif
 
@@ -1356,7 +1355,7 @@ class JitActivation : public Activation
 
   public:
     JitActivation(JSContext *cx, bool firstFrameIsConstructing, bool active = true);
-    JitActivation(ForkJoinContext *cx);
+    explicit JitActivation(ForkJoinContext *cx);
     ~JitActivation();
 
     bool isActive() const {
@@ -1399,8 +1398,11 @@ class JitActivation : public Activation
     // if an IonFrameIterator pointing to the nearest uninlined frame can be
     // provided, as values need to be read out of snapshots.
     //
+    // T is either JitFrameIterator or IonBailoutIterator.
+    //
     // The inlineDepth must be within bounds of the frame pointed to by iter.
-    RematerializedFrame *getRematerializedFrame(ThreadSafeContext *cx, JitFrameIterator &iter,
+    template <class T>
+    RematerializedFrame *getRematerializedFrame(ThreadSafeContext *cx, const T &iter,
                                                 size_t inlineDepth = 0);
 
     // Look up a rematerialized frame by the fp. If inlineDepth is out of
@@ -1509,9 +1511,7 @@ class AsmJSActivation : public Activation
     void *errorRejoinSP_;
     SPSProfiler *profiler_;
     void *resumePC_;
-    uint8_t *exitSP_;
-
-    static const intptr_t InterruptedSP = -1;
+    uint8_t *exitFP_;
 
   public:
     AsmJSActivation(JSContext *cx, AsmJSModule &module);
@@ -1527,16 +1527,18 @@ class AsmJSActivation : public Activation
 
     // Initialized by JIT code:
     static unsigned offsetOfErrorRejoinSP() { return offsetof(AsmJSActivation, errorRejoinSP_); }
-    static unsigned offsetOfExitSP() { return offsetof(AsmJSActivation, exitSP_); }
+    static unsigned offsetOfExitFP() { return offsetof(AsmJSActivation, exitFP_); }
 
     // Set from SIGSEGV handler:
-    void setInterrupted(void *pc) { resumePC_ = pc; exitSP_ = (uint8_t*)InterruptedSP; }
-    bool isInterruptedSP() const { return exitSP_ == (uint8_t*)InterruptedSP; }
+    void setResumePC(void *pc) { resumePC_ = pc; }
 
-    // Note: exitSP is the sp right before the call instruction. On x86, this
-    // means before the return address is pushed on the stack, on ARM, this
-    // means after.
-    uint8_t *exitSP() const { JS_ASSERT(!isInterruptedSP()); return exitSP_; }
+    // If pc is in C++/Ion code, exitFP points to the innermost asm.js frame
+    // (the one that called into C++). While in asm.js code, exitFP is either
+    // null or points to the innermost asm.js frame. Thus, it is always valid to
+    // unwind a non-null exitFP. The only way C++ can observe a null exitFP is
+    // asychronous interruption of asm.js execution (viz., via the profiler,
+    // a signal handler, or the interrupt exit).
+    uint8_t *exitFP() const { return exitFP_; }
 };
 
 // A FrameIter walks over the runtime's stack of JS script activations,
@@ -1595,12 +1597,12 @@ class FrameIter
         Data(const Data &other);
     };
 
-    FrameIter(ThreadSafeContext *cx, SavedOption = STOP_AT_SAVED);
+    MOZ_IMPLICIT FrameIter(ThreadSafeContext *cx, SavedOption = STOP_AT_SAVED);
     FrameIter(ThreadSafeContext *cx, ContextOption, SavedOption);
     FrameIter(JSContext *cx, ContextOption, SavedOption, JSPrincipals *);
     FrameIter(const FrameIter &iter);
-    FrameIter(const Data &data);
-    FrameIter(AbstractFramePtr frame);
+    MOZ_IMPLICIT FrameIter(const Data &data);
+    MOZ_IMPLICIT FrameIter(AbstractFramePtr frame);
 
     bool done() const { return data_.state_ == DONE; }
 
@@ -1730,7 +1732,7 @@ class ScriptFrameIter : public FrameIter
     }
 
   public:
-    ScriptFrameIter(ThreadSafeContext *cx, SavedOption savedOption = STOP_AT_SAVED)
+    explicit ScriptFrameIter(ThreadSafeContext *cx, SavedOption savedOption = STOP_AT_SAVED)
       : FrameIter(cx, savedOption)
     {
         settle();
@@ -1754,8 +1756,8 @@ class ScriptFrameIter : public FrameIter
     }
 
     ScriptFrameIter(const ScriptFrameIter &iter) : FrameIter(iter) { settle(); }
-    ScriptFrameIter(const FrameIter::Data &data) : FrameIter(data) { settle(); }
-    ScriptFrameIter(AbstractFramePtr frame) : FrameIter(frame) { settle(); }
+    explicit ScriptFrameIter(const FrameIter::Data &data) : FrameIter(data) { settle(); }
+    explicit ScriptFrameIter(AbstractFramePtr frame) : FrameIter(frame) { settle(); }
 
     ScriptFrameIter &operator++() {
         FrameIter::operator++();
@@ -1780,8 +1782,8 @@ class NonBuiltinFrameIter : public FrameIter
     void settle();
 
   public:
-    NonBuiltinFrameIter(ThreadSafeContext *cx,
-                        FrameIter::SavedOption opt = FrameIter::STOP_AT_SAVED)
+    explicit NonBuiltinFrameIter(ThreadSafeContext *cx,
+                                 FrameIter::SavedOption opt = FrameIter::STOP_AT_SAVED)
       : FrameIter(cx, opt)
     {
         settle();
@@ -1804,7 +1806,7 @@ class NonBuiltinFrameIter : public FrameIter
         settle();
     }
 
-    NonBuiltinFrameIter(const FrameIter::Data &data)
+    explicit NonBuiltinFrameIter(const FrameIter::Data &data)
       : FrameIter(data)
     {}
 
@@ -1821,7 +1823,7 @@ class NonBuiltinScriptFrameIter : public ScriptFrameIter
     void settle();
 
   public:
-    NonBuiltinScriptFrameIter(ThreadSafeContext *cx,
+    explicit NonBuiltinScriptFrameIter(ThreadSafeContext *cx,
                               ScriptFrameIter::SavedOption opt = ScriptFrameIter::STOP_AT_SAVED)
       : ScriptFrameIter(cx, opt)
     {
@@ -1845,7 +1847,7 @@ class NonBuiltinScriptFrameIter : public ScriptFrameIter
         settle();
     }
 
-    NonBuiltinScriptFrameIter(const ScriptFrameIter::Data &data)
+    explicit NonBuiltinScriptFrameIter(const ScriptFrameIter::Data &data)
       : ScriptFrameIter(data)
     {}
 
@@ -1863,7 +1865,7 @@ class NonBuiltinScriptFrameIter : public ScriptFrameIter
 class AllFramesIter : public ScriptFrameIter
 {
   public:
-    AllFramesIter(ThreadSafeContext *cx)
+    explicit AllFramesIter(ThreadSafeContext *cx)
       : ScriptFrameIter(cx, ScriptFrameIter::ALL_CONTEXTS, ScriptFrameIter::GO_THROUGH_SAVED)
     {}
 };

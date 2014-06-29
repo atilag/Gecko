@@ -94,6 +94,7 @@ function Tester(aTests, aDumper, aCallback) {
   this.SimpleTest = simpleTestScope.SimpleTest;
   this.MemoryStats = simpleTestScope.MemoryStats;
   this.Task = Task;
+  this.Task.Debugging.maintainStack = true;
   this.Promise = Components.utils.import("resource://gre/modules/Promise.jsm", null).Promise;
   this.Assert = Components.utils.import("resource://testing-common/Assert.jsm", null).Assert;
 
@@ -712,11 +713,17 @@ function testResult(aCondition, aName, aDiag, aIsTodo, aStack) {
     }
     if (aStack) {
       this.msg += "\nStack trace:\n";
-      var frame = aStack;
-      while (frame) {
-        this.msg += "    " + frame + "\n";
-        frame = frame.caller;
+      let normalized;
+      if (aStack instanceof Components.interfaces.nsIStackFrame) {
+        let frames = [];
+        for (let frame = aStack; frame; frame = frame.caller) {
+          frames.push(frame.filename + ":" + frame.name + ":" + frame.lineNumber);
+        }
+        normalized = frames.join("\n");
+      } else {
+        normalized = "" + aStack;
       }
+      this.msg += Task.Debugging.generateReadableStack(normalized, "    ");
     }
     if (aIsTodo)
       this.result = "TEST-UNEXPECTED-PASS";

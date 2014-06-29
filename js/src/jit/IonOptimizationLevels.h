@@ -66,9 +66,6 @@ class OptimizationInfo
     // Toggles whether global value numbering is used.
     bool gvn_;
 
-    // Toggles whether global value numbering is optimistic or pessimistic.
-    IonGvnKind gvnKind_;
-
     // Toggles whether loop invariant code motion is performed.
     bool licm_;
 
@@ -77,6 +74,9 @@ class OptimizationInfo
 
     // Toggles whether Range Analysis is used.
     bool rangeAnalysis_;
+
+    // Toggles whether Truncation based on Range Analysis is used.
+    bool autoTruncate_;
 
     // Describes which register allocator to use.
     IonRegisterAllocator registerAllocator_;
@@ -143,6 +143,10 @@ class OptimizationInfo
         return rangeAnalysis_ && !js_JitOptions.disableRangeAnalysis;
     }
 
+    bool autoTruncateEnabled() const {
+        return autoTruncate_ && rangeAnalysisEnabled();
+    }
+
     bool eaaEnabled() const {
         return eaa_ && !js_JitOptions.disableEaa;
     }
@@ -153,12 +157,6 @@ class OptimizationInfo
 
     bool eliminateRedundantChecksEnabled() const {
         return eliminateRedundantChecks_;
-    }
-
-    IonGvnKind gvnKind() const {
-        if (!js_JitOptions.forceGvnKind)
-            return gvnKind_;
-        return js_JitOptions.forcedGvnKind;
     }
 
     IonRegisterAllocator registerAllocator() const {

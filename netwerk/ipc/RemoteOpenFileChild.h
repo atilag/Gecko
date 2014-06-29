@@ -14,6 +14,8 @@
 #include "nsILocalFile.h"
 #include "nsIRemoteOpenFileListener.h"
 
+class nsILoadContext;
+
 namespace mozilla {
 
 namespace ipc {
@@ -50,14 +52,14 @@ class RemoteOpenFileChild MOZ_FINAL
   typedef mozilla::dom::TabChild TabChild;
   typedef mozilla::ipc::FileDescriptor FileDescriptor;
 
+  virtual ~RemoteOpenFileChild();
+
 public:
   RemoteOpenFileChild()
     : mNSPRFileDesc(nullptr)
     , mAsyncOpenCalled(false)
     , mNSPROpenCalled(false)
   {}
-
-  virtual ~RemoteOpenFileChild();
 
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIFILE
@@ -72,7 +74,8 @@ public:
   // Note: currently only PR_RDONLY is supported for 'flags'
   nsresult AsyncRemoteFileOpen(int32_t aFlags,
                                nsIRemoteOpenFileListener* aListener,
-                               nsITabChild* aTabChild);
+                               nsITabChild* aTabChild,
+                               nsILoadContext *aLoadContext);
 
   void ReleaseIPDLReference()
   {

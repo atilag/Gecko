@@ -11,6 +11,7 @@
 
 #include "nsGkAtoms.h"
 #include "nsLayoutUtils.h"
+#include "nsLayoutStylesheetCache.h"
 #include "DOMSVGNumber.h"
 #include "DOMSVGLength.h"
 #include "nsSVGAngle.h"
@@ -68,6 +69,10 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMSVGTranslatePoint)
   NS_INTERFACE_MAP_ENTRY(mozilla::nsISVGPoint)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
+
+SVGSVGElement::~SVGSVGElement()
+{
+}
 
 nsISVGPoint*
 DOMSVGTranslatePoint::Clone()
@@ -156,7 +161,7 @@ NS_INTERFACE_TABLE_TAIL_INHERITING(SVGSVGElementBase)
 //----------------------------------------------------------------------
 // Implementation
 
-SVGSVGElement::SVGSVGElement(already_AddRefed<nsINodeInfo>& aNodeInfo,
+SVGSVGElement::SVGSVGElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo,
                              FromParser aFromParser)
   : SVGSVGElementBase(aNodeInfo),
     mViewportWidth(0),
@@ -180,10 +185,10 @@ SVGSVGElement::SVGSVGElement(already_AddRefed<nsINodeInfo>& aNodeInfo,
 
 // From NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGSVGElement)
 nsresult
-SVGSVGElement::Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const
+SVGSVGElement::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const
 {
   *aResult = nullptr;
-  already_AddRefed<nsINodeInfo> ni = nsCOMPtr<nsINodeInfo>(aNodeInfo).forget();
+  already_AddRefed<mozilla::dom::NodeInfo> ni = nsRefPtr<mozilla::dom::NodeInfo>(aNodeInfo).forget();
   SVGSVGElement *it = new SVGSVGElement(ni, NOT_FROM_PARSER);
 
   nsCOMPtr<nsINode> kungFuDeathGrip = it;
@@ -380,10 +385,10 @@ SVGSVGElement::DeselectAll()
   }
 }
 
-already_AddRefed<nsIDOMSVGNumber>
+already_AddRefed<DOMSVGNumber>
 SVGSVGElement::CreateSVGNumber()
 {
-  nsCOMPtr<nsIDOMSVGNumber> number = new DOMSVGNumber();
+  nsRefPtr<DOMSVGNumber> number = new DOMSVGNumber(ToSupports(this));
   return number.forget();
 }
 
@@ -722,8 +727,6 @@ SVGSVGElement::BindToTree(nsIDocument* aDocument,
                           nsIContent* aBindingParent,
                           bool aCompileEventHandlers)
 {
-  static const char kSVGStyleSheetURI[] = "resource://gre/res/svg.css";
-
   nsSMILAnimationController* smilController = nullptr;
 
   if (aDocument) {
@@ -754,7 +757,8 @@ SVGSVGElement::BindToTree(nsIDocument* aDocument,
     // Setup the style sheet during binding, not element construction,
     // because we could move the root SVG element from the document
     // that created it to another document.
-    aDocument->EnsureCatalogStyleSheet(kSVGStyleSheetURI);
+    aDocument->
+      EnsureOnDemandBuiltInUASheet(nsLayoutStylesheetCache::SVGSheet());
   }
 
   if (mTimedDocumentRoot && smilController) {

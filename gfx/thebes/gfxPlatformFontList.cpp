@@ -101,6 +101,7 @@ static const char* kObservedPrefs[] = {
 };
 
 class gfxFontListPrefObserver MOZ_FINAL : public nsIObserver {
+    ~gfxFontListPrefObserver() {}
 public:
     NS_DECL_ISUPPORTS
     NS_DECL_NSIOBSERVER
@@ -128,9 +129,8 @@ MOZ_DEFINE_MALLOC_SIZE_OF(FontListMallocSizeOf)
 NS_IMPL_ISUPPORTS(gfxPlatformFontList::MemoryReporter, nsIMemoryReporter)
 
 NS_IMETHODIMP
-gfxPlatformFontList::MemoryReporter::CollectReports
-    (nsIMemoryReporterCallback* aCb,
-     nsISupports* aClosure)
+gfxPlatformFontList::MemoryReporter::CollectReports(
+    nsIMemoryReporterCallback* aCb, nsISupports* aClosure, bool aAnonymize)
 {
     FontListSizes sizes;
     sizes.mFontListSize = 0;
@@ -140,17 +140,20 @@ gfxPlatformFontList::MemoryReporter::CollectReports
     gfxPlatformFontList::PlatformFontList()->AddSizeOfIncludingThis(&FontListMallocSizeOf,
                                                                     &sizes);
 
-    aCb->Callback(EmptyCString(),
-                  NS_LITERAL_CSTRING("explicit/gfx/font-list"),
-                  KIND_HEAP, UNITS_BYTES, sizes.mFontListSize,
-                  NS_LITERAL_CSTRING("Memory used to manage the list of font families and faces."),
-                  aClosure);
+    nsresult rv;
+    rv = aCb->Callback(EmptyCString(),
+                       NS_LITERAL_CSTRING("explicit/gfx/font-list"),
+                       KIND_HEAP, UNITS_BYTES, sizes.mFontListSize,
+                       NS_LITERAL_CSTRING("Memory used to manage the list of font families and faces."),
+                       aClosure);
+    NS_ENSURE_SUCCESS(rv, rv);
 
-    aCb->Callback(EmptyCString(),
-                  NS_LITERAL_CSTRING("explicit/gfx/font-charmaps"),
-                  KIND_HEAP, UNITS_BYTES, sizes.mCharMapsSize,
-                  NS_LITERAL_CSTRING("Memory used to record the character coverage of individual fonts."),
-                  aClosure);
+    rv = aCb->Callback(EmptyCString(),
+                       NS_LITERAL_CSTRING("explicit/gfx/font-charmaps"),
+                       KIND_HEAP, UNITS_BYTES, sizes.mCharMapsSize,
+                       NS_LITERAL_CSTRING("Memory used to record the character coverage of individual fonts."),
+                       aClosure);
+    NS_ENSURE_SUCCESS(rv, rv);
 
     if (sizes.mFontTableCacheSize) {
         aCb->Callback(EmptyCString(),
@@ -423,22 +426,6 @@ gfxPlatformFontList::PreloadNamesList()
 
 }
 
-void 
-gfxPlatformFontList::SetFixedPitch(const nsAString& aFamilyName)
-{
-    gfxFontFamily *family = FindFamily(aFamilyName);
-    if (!family) return;
-
-    family->FindStyleVariations();
-    nsTArray<nsRefPtr<gfxFontEntry> >& fontlist = family->GetFontList();
-
-    uint32_t i, numFonts = fontlist.Length();
-
-    for (i = 0; i < numFonts; i++) {
-        fontlist[i]->mFixedPitch = 1;
-    }
-}
-
 void
 gfxPlatformFontList::LoadBadUnderlineList()
 {
@@ -450,17 +437,6 @@ gfxPlatformFontList::LoadBadUnderlineList()
         GenerateFontListKey(blacklist[i], key);
         mBadUnderlineFamilyNames.PutEntry(key);
     }
-}
-
-bool 
-gfxPlatformFontList::ResolveFontName(const nsAString& aFontName, nsAString& aResolvedFontName)
-{
-    gfxFontFamily *family = FindFamily(aFontName);
-    if (family) {
-        aResolvedFontName = family->Name();
-        return true;
-    }
-    return false;
 }
 
 static PLDHashOperator
@@ -867,8 +843,12 @@ bool
 gfxPlatformFontList::GetStandardFamilyName(const nsAString& aFontName, nsAString& aFamilyName)
 {
     aFamilyName.Truncate();
-    ResolveFontName(aFontName, aFamilyName);
-    return !aFamilyName.IsEmpty();
+    gfxFontFamily *ff = FindFamily(aFontName);
+    if (!ff) {
+        return false;
+    }
+    aFamilyName.Assign(ff->Name());
+    return true;
 }
 
 gfxCharacterMap*

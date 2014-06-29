@@ -42,10 +42,11 @@ interface nsIVariant;
 interface nsIPrivacyTransitionObserver;
 interface nsIReflowObserver;
 interface nsIScrollObserver;
-
+interface nsITabParent;
+ 
 typedef unsigned long nsLoadFlags;
 
-[scriptable, builtinclass, uuid(e46d924d-c20f-4add-8cf5-1e1c817b2181)]
+[scriptable, builtinclass, uuid(e5fe5c76-e511-4da3-9709-f8294b8dc5ce)]
 interface nsIDocShell : nsIDocShellTreeItem
 {
   /**
@@ -112,7 +113,9 @@ interface nsIDocShell : nsIDocShellTreeItem
   // Whether the load should be treated as srcdoc load, rather than a URI one.
   const long INTERNAL_LOAD_FLAGS_IS_SRCDOC               = 0x40;
 
-  const long INTERNAL_LOAD_FLAGS_FIXUP_SCHEME_TYPOS      = 0x80;
+  const long INTERNAL_LOAD_FLAGS_NO_OPENER               = 0x100;
+
+  // NB: 0x80 is available.
 
   /**
    * Loads the given URI.  This method is identical to loadURI(...) except
@@ -447,6 +450,11 @@ interface nsIDocShell : nsIDocShellTreeItem
                         in wstring aURL,
                         [optional] in nsIChannel aFailedChannel);
 
+  /**
+   * The channel that failed to load and resulted in an error page.
+   * May be null. Relevant only to error pages.
+   */
+  readonly attribute nsIChannel failedChannel;
 
   /**
    * Keeps track of the previous SHTransaction index and the current
@@ -958,4 +966,20 @@ interface nsIDocShell : nsIDocShellTreeItem
    * docshell.device_size_is_page_size pref.
    */
   [infallible] attribute boolean deviceSizeIsPageSize;
+
+  /**
+   * Regarding setOpener / getOpener - We can't use XPIDL's "attribute"
+   * for notxpcom, so we're relegated to using explicit gets / sets. This
+   * should be fine, considering that these methods should only ever be
+   * called from native code.
+   */
+  [noscript,notxpcom,nostdcall] void setOpener(in nsITabParent aOpener);
+  [noscript,notxpcom,nostdcall] nsITabParent getOpener();
+
+  /**
+   * See the documentation for setOpener and getOpener about why we
+   * don't use attribute here instead.
+   */
+  [noscript,notxpcom,nostdcall] void setOpenedRemote(in nsITabParent aOpenedRemote);
+  [noscript,notxpcom,nostdcall] nsITabParent getOpenedRemote();
 };

@@ -38,6 +38,7 @@
 #include "SurfaceTypes.h"
 #include "GLScreenBuffer.h"
 #include "GLContextSymbols.h"
+#include "base/platform_thread.h"       // for PlatformThreadId
 #include "mozilla/GenericRefCounted.h"
 #include "mozilla/Scoped.h"
 #include "gfx2DGlue.h"
@@ -137,6 +138,7 @@ MOZ_END_ENUM_CLASS(GLVendor)
 MOZ_BEGIN_ENUM_CLASS(GLRenderer)
     Adreno200,
     Adreno205,
+    AdrenoTM200,
     AdrenoTM205,
     AdrenoTM320,
     SGX530,
@@ -144,6 +146,7 @@ MOZ_BEGIN_ENUM_CLASS(GLRenderer)
     Tegra,
     AndroidEmulator,
     GalliumLlvmpipe,
+    IntelHD3000,
     Other
 MOZ_END_ENUM_CLASS(GLRenderer)
 
@@ -337,6 +340,7 @@ public:
         OES_depth32,
         OES_stencil8,
         OES_texture_npot,
+        IMG_texture_npot,
         ARB_depth_texture,
         OES_depth_texture,
         OES_packed_depth_stencil,
@@ -2569,7 +2573,6 @@ public:
      * executing thread.
      */
     bool IsOwningThreadCurrent();
-    void DispatchToOwningThread(nsIRunnable *event);
 
     static void PlatformStartup();
 
@@ -2699,19 +2702,6 @@ public:
     GLint GetMaxTextureImageSize() { return mMaxTextureImageSize; }
 
 public:
-    /**
-     * Context reset constants.
-     * These are used to determine who is guilty when a context reset
-     * happens.
-     */
-    enum ContextResetARB {
-        CONTEXT_NO_ERROR = 0,
-        CONTEXT_GUILTY_CONTEXT_RESET_ARB = 0x8253,
-        CONTEXT_INNOCENT_CONTEXT_RESET_ARB = 0x8254,
-        CONTEXT_UNKNOWN_CONTEXT_RESET_ARB = 0x8255
-    };
-
-public:
     std::map<GLuint, SharedSurface_GL*> mFBOMapping;
 
     enum {
@@ -2733,8 +2723,8 @@ public:
 protected:
     nsRefPtr<GLContext> mSharedContext;
 
-    // The thread on which this context was created.
-    nsCOMPtr<nsIThread> mOwningThread;
+    // The thread id which this context was created.
+    PlatformThreadId mOwningThreadId;
 
     GLContextSymbols mSymbols;
 

@@ -13,6 +13,7 @@ XPIDL_SOURCES += [
     'nsIEntropyCollector.idl',
     'nsIScriptChannel.idl',
     'nsISiteSpecificUserAgent.idl',
+    'nsISlowScriptDebug.idl',
 ]
 
 XPIDL_MODULE = 'dom'
@@ -32,7 +33,6 @@ EXPORTS += [
     'nsIGlobalObject.h',
     'nsIJSNativeInitializer.h',
     'nsIScriptContext.h',
-    'nsIScriptExternalNameSet.h',
     'nsIScriptGlobalObject.h',
     'nsIScriptNameSpaceManager.h',
     'nsIScriptObjectPrincipal.h',
@@ -58,12 +58,16 @@ EXPORTS.mozilla.dom += [
     'MessageChannel.h',
     'MessagePort.h',
     'MessagePortList.h',
+    'NameSpaceConstants.h',
     'Navigator.h',
+    'NodeInfo.h',
+    'NodeInfoInlines.h',
     'PerformanceEntry.h',
     'PerformanceResourceTiming.h',
     'ScreenOrientation.h',
     'ScriptSettings.h',
     'StructuredCloneTags.h',
+    'SubtleCrypto.h',
     'URL.h',
     'URLSearchParams.h',
 ]
@@ -80,6 +84,7 @@ UNIFIED_SOURCES += [
     'MessageChannel.cpp',
     'MessagePortList.cpp',
     'Navigator.cpp',
+    'NodeInfo.cpp',
     'nsContentPermissionHelper.cpp',
     'nsDOMClassInfo.cpp',
     'nsDOMNavigationTiming.cpp',
@@ -104,6 +109,7 @@ UNIFIED_SOURCES += [
     'PerformanceEntry.cpp',
     'PerformanceResourceTiming.cpp',
     'ScriptSettings.cpp',
+    'SubtleCrypto.cpp',
     'URL.cpp',
     'URLSearchParams.cpp',
     'WindowNamedPropertiesHandler.cpp',
@@ -128,12 +134,13 @@ EXTRA_COMPONENTS += [
     'ConsoleAPIStorage.js',
     'SiteSpecificUserAgent.js',
     'SiteSpecificUserAgent.manifest',
+    'SlowScriptDebug.js',
+    'SlowScriptDebug.manifest',
 ]
 
 EXTRA_JS_MODULES += [
     'DOMRequestHelper.jsm',
     'IndexedDBHelper.jsm',
-    'ObjectWrapper.jsm',
 ]
 
 FAIL_ON_WARNINGS = True
@@ -175,7 +182,7 @@ LOCAL_INCLUDES += [
     '/js/xpconnect/wrappers',
 ]
 
-for var in ('MOZ_JSDEBUGGER', 'MOZ_B2G_RIL', 'MOZ_B2G_FM'):
+for var in ('MOZ_B2G_RIL', 'MOZ_B2G_FM'):
     if CONFIG[var]:
         DEFINES[var] = True
 

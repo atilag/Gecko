@@ -72,9 +72,12 @@ struct nsExternalDOMClassInfoData : public nsDOMClassInfoData
 class nsDOMClassInfo : public nsXPCClassInfo
 {
   friend class nsHTMLDocumentSH;
+
+protected:
+  virtual ~nsDOMClassInfo();
+
 public:
   nsDOMClassInfo(nsDOMClassInfoData* aData);
-  virtual ~nsDOMClassInfo();
 
   NS_DECL_NSIXPCSCRIPTABLE
 
@@ -149,12 +152,6 @@ protected:
   nsresult ResolveConstructor(JSContext *cx, JSObject *obj,
                               JSObject **objp);
 
-  // Checks if id is a number and returns the number, if aIsNumber is
-  // non-null it's set to true if the id is a number and false if it's
-  // not a number. If id is not a number this method returns -1
-  static int32_t GetArrayIndexFromId(JSContext *cx, JS::Handle<jsid> id,
-                                     bool *aIsNumber = nullptr);
-
   static nsIXPConnect *sXPConnect;
   static nsIScriptSecurityManager *sSecMan;
 
@@ -166,10 +163,6 @@ protected:
 public:
   static jsid sLocation_id;
   static jsid sConstructor_id;
-  static jsid sLength_id;
-  static jsid sItem_id;
-  static jsid sNamedItem_id;
-  static jsid sEnumerate_id;
   static jsid sTop_id;
   static jsid sDocument_id;
   static jsid sWrappedJSObject_id;
@@ -352,12 +345,12 @@ public:
 
 class nsEventListenerThisTranslator : public nsIXPCFunctionThisTranslator
 {
-public:
-  nsEventListenerThisTranslator()
+  virtual ~nsEventListenerThisTranslator()
   {
   }
 
-  virtual ~nsEventListenerThisTranslator()
+public:
+  nsEventListenerThisTranslator()
   {
   }
 

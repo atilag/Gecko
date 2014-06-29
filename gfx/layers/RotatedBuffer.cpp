@@ -100,7 +100,7 @@ RotatedBuffer::DrawBufferQuadrant(gfx::DrawTarget* aTarget,
   // (to avoid flickering) but direct2d is ok since it defers rendering.
   // We should try abstract this logic in a helper when we have other use
   // cases.
-  if (aTarget->GetType() == BackendType::DIRECT2D && aOperator == CompositionOp::OP_SOURCE) {
+  if (aTarget->GetBackendType() == BackendType::DIRECT2D && aOperator == CompositionOp::OP_SOURCE) {
     aOperator = CompositionOp::OP_OVER;
     if (mDTBuffer->GetFormat() == SurfaceFormat::B8G8R8A8) {
       aTarget->ClearRect(ToRect(fillRect));
@@ -169,7 +169,9 @@ RotatedBuffer::DrawBufferWithRotation(gfx::DrawTarget *aTarget, ContextSource aS
                                       gfx::SourceSurface* aMask,
                                       const gfx::Matrix* aMaskTransform) const
 {
-  PROFILER_LABEL("RotatedBuffer", "DrawBufferWithRotation");
+  PROFILER_LABEL("RotatedBuffer", "DrawBufferWithRotation",
+    js::ProfileEntry::Category::GRAPHICS);
+
   // See above, in Azure Repeat should always be a safe, even faster choice
   // though! Particularly on D2D Repeat should be a lot faster, need to look
   // into that. TODO[Bas]
@@ -330,7 +332,7 @@ RotatedContentBuffer::EnsureBuffer()
   NS_ASSERTION(!mLoanedDrawTarget, "Loaned draw target must be returned");
   if (!mDTBuffer) {
     if (mBufferProvider) {
-      mDTBuffer = mBufferProvider->GetAsDrawTarget();
+      mDTBuffer = mBufferProvider->BorrowDrawTarget();
     }
   }
 
@@ -345,7 +347,7 @@ RotatedContentBuffer::EnsureBufferOnWhite()
   if (!mDTBufferOnWhite) {
     if (mBufferProviderOnWhite) {
       mDTBufferOnWhite =
-        mBufferProviderOnWhite->GetAsDrawTarget();
+        mBufferProviderOnWhite->BorrowDrawTarget();
     }
   }
 
@@ -691,7 +693,7 @@ RotatedContentBuffer::BeginPaint(ThebesLayer* aLayer,
 }
 
 DrawTarget*
-RotatedContentBuffer::BorrowDrawTargetForPainting(const PaintState& aPaintState,
+RotatedContentBuffer::BorrowDrawTargetForPainting(PaintState& aPaintState,
                                                   DrawIterator* aIter /* = nullptr */)
 {
   if (aPaintState.mMode == SurfaceMode::SURFACE_NONE) {
@@ -703,12 +705,16 @@ RotatedContentBuffer::BorrowDrawTargetForPainting(const PaintState& aPaintState,
   if (!result) {
     return nullptr;
   }
-  const nsIntRegion* drawPtr = &aPaintState.mRegionToDraw;
+  nsIntRegion* drawPtr = &aPaintState.mRegionToDraw;
   if (aIter) {
     // The iterators draw region currently only contains the bounds of the region,
     // this makes it the precise region.
     aIter->mDrawRegion.And(aIter->mDrawRegion, aPaintState.mRegionToDraw);
     drawPtr = &aIter->mDrawRegion;
+  }
+  if (result->GetBackendType() == BackendType::DIRECT2D ||
+      result->GetBackendType() == BackendType::DIRECT2D1_1) {
+    drawPtr->SimplifyOutwardByArea(100 * 100);
   }
 
   if (aPaintState.mMode == SurfaceMode::SURFACE_COMPONENT_ALPHA) {

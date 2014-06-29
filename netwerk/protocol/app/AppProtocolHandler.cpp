@@ -31,6 +31,8 @@ public:
   NS_IMETHODIMP Run();
 
 private:
+  ~DummyChannel() {}
+
   bool                        mPending;
   uint32_t                    mSuspendCount;
   nsCOMPtr<nsISupports>       mListenerContext;
@@ -114,6 +116,11 @@ NS_IMETHODIMP DummyChannel::GetIsUnsafe(bool *aResult)
 }
 
 NS_IMETHODIMP DummyChannel::SetAppURI(nsIURI *aURI)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP DummyChannel::GetJarFile(nsIFile* *aFile)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }

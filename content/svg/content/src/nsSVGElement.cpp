@@ -63,7 +63,7 @@ static_assert(sizeof(void*) == sizeof(nullptr),
               "nullptr should be the correct size");
 
 nsresult
-NS_NewSVGElement(Element **aResult, already_AddRefed<nsINodeInfo>&& aNodeInfo)
+NS_NewSVGElement(Element **aResult, already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
 {
   nsRefPtr<nsSVGElement> it = new nsSVGElement(aNodeInfo);
   nsresult rv = it->Init();
@@ -84,7 +84,7 @@ nsSVGEnumMapping nsSVGElement::sSVGUnitTypesMap[] = {
   {nullptr, 0}
 };
 
-nsSVGElement::nsSVGElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+nsSVGElement::nsSVGElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
   : nsSVGElementBase(aNodeInfo)
 {
 }
@@ -99,7 +99,7 @@ nsSVGElement::WrapNode(JSContext *aCx)
 
 /* readonly attribute SVGAnimatedString className; */
 NS_IMETHODIMP
-nsSVGElement::GetClassName(nsISupports** aClassName)
+nsSVGElement::GetSVGClassName(nsISupports** aClassName)
 {
   *aClassName = ClassName().take();
   return NS_OK;
@@ -239,15 +239,6 @@ NS_IMPL_ISUPPORTS_INHERITED(nsSVGElement, nsSVGElementBase,
 
 //----------------------------------------------------------------------
 // nsIContent methods
-
-const nsAttrValue*
-nsSVGElement::DoGetClasses() const
-{
-  if (mClassAttribute.IsAnimated()) {
-    return mClassAnimAttr;
-  }
-  return nsSVGElementBase::DoGetClasses();
-}
 
 nsresult
 nsSVGElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
@@ -1094,19 +1085,6 @@ nsSVGElement::sMaskMap[] = {
 
 //----------------------------------------------------------------------
 // nsIDOMSVGElement methods
-
-/* attribute DOMString id; */
-NS_IMETHODIMP nsSVGElement::GetId(nsAString & aId)
-{
-  GetAttr(kNameSpaceID_None, nsGkAtoms::id, aId);
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP nsSVGElement::SetId(const nsAString & aId)
-{
-  return SetAttr(kNameSpaceID_None, nsGkAtoms::id, aId, true);
-}
 
 /* readonly attribute nsIDOMSVGSVGElement ownerSVGElement; */
 NS_IMETHODIMP

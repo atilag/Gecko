@@ -10,7 +10,7 @@
 #include "nsCOMPtr.h"               // for member, local
 #include "nsGkAtoms.h"              // for nsGkAtoms::baseURIProperty
 #include "nsIDOMNode.h"
-#include "nsINodeInfo.h"            // member (in nsCOMPtr)
+#include "mozilla/dom/NodeInfo.h"            // member (in nsCOMPtr)
 #include "nsIVariant.h"             // for use in GetUserData()
 #include "nsNodeInfoManager.h"      // for use in NodePrincipal()
 #include "nsPropertyTable.h"        // for typedefs
@@ -31,7 +31,7 @@
 
 class nsAttrAndChildArray;
 class nsChildContentList;
-class nsCSSSelectorList;
+struct nsCSSSelectorList;
 class nsDOMAttributeMap;
 class nsIContent;
 class nsIDocument;
@@ -183,7 +183,8 @@ enum {
 
 // Make sure we have space for our bits
 #define ASSERT_NODE_FLAGS_SPACE(n) \
-  static_assert(WRAPPER_CACHE_FLAGS_BITS_USED + (n) <= 32, \
+  static_assert(WRAPPER_CACHE_FLAGS_BITS_USED + (n) <=                          \
+                  sizeof(nsWrapperCache::FlagsType) * 8,                        \
                 "Not enough space for our bits")
 ASSERT_NODE_FLAGS_SPACE(NODE_TYPE_SPECIFIC_BITS_OFFSET);
 
@@ -337,7 +338,7 @@ public:
   friend class nsAttrAndChildArray;
 
 #ifdef MOZILLA_INTERNAL_API
-  nsINode(already_AddRefed<nsINodeInfo>& aNodeInfo)
+  nsINode(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
   : mNodeInfo(aNodeInfo),
     mParent(nullptr),
     mBoolFlags(0),
@@ -523,6 +524,19 @@ public:
   nsIDocument *GetCurrentDoc() const
   {
     return IsInDoc() ? OwnerDoc() : nullptr;
+  }
+
+  /**
+   * This method gets the current doc of the node hosting this content
+   * or the current doc of this content if it is not being hosted. This
+   * method walks through ShadowRoot boundaries until it reach the host
+   * that is located in the root of the "tree of trees" (see Shadow DOM
+   * spec) and returns the current doc for that host.
+   */
+  nsIDocument* GetCrossShadowCurrentDoc() const
+  {
+    return HasFlag(NODE_IS_IN_SHADOW_TREE) ?
+      GetCrossShadowCurrentDocInternal() : GetCurrentDoc();
   }
 
   /**
@@ -804,33 +818,17 @@ public:
   }
 
   /**
+   * Get the parent Element of this node, traversing over a ShadowRoot
+   * to its host if necessary.
+   */
+  mozilla::dom::Element* GetParentElementCrossingShadowRoot() const;
+
+  /**
    * Get the root of the subtree this node belongs to.  This never returns
    * null.  It may return 'this' (e.g. for document nodes, and nodes that
    * are the roots of disconnected subtrees).
    */
-  nsINode* SubtreeRoot() const
-  {
-    // There are three cases of interest here.  nsINodes that are really:
-    // 1. nsIDocument nodes - Are always in the document.
-    // 2. nsIContent nodes - Are either in the document, or mSubtreeRoot
-    //    is updated in BindToTree/UnbindFromTree.
-    // 3. nsIAttribute nodes - Are never in the document, and mSubtreeRoot
-    //    is always 'this' (as set in nsINode's ctor).
-    nsINode* node = IsInDoc() ? OwnerDocAsNode() : mSubtreeRoot;
-    NS_ASSERTION(node, "Should always have a node here!");
-#ifdef DEBUG
-    {
-      const nsINode* slowNode = this;
-      const nsINode* iter = slowNode;
-      while ((iter = iter->GetParentNode())) {
-        slowNode = iter;
-      }
-
-      NS_ASSERTION(slowNode == node, "These should always be in sync!");
-    }
-#endif
-    return node;
-  }
+  nsINode* SubtreeRoot() const;
 
   /**
    * See nsIDOMEventTarget
@@ -901,7 +899,7 @@ public:
    * @param aNodeInfo the nodeinfo to use for the clone
    * @param aResult the clone
    */
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const = 0;
+  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const = 0;
 
   // This class can be extended by subclasses that wish to store more
   // information in the slots.
@@ -951,7 +949,7 @@ public:
   }
 #endif
 
-  void SetFlags(uint32_t aFlagsToSet)
+  void SetFlags(FlagsType aFlagsToSet)
   {
     NS_ASSERTION(!(aFlagsToSet & (NODE_IS_ANONYMOUS_ROOT |
                                   NODE_IS_NATIVE_ANONYMOUS_ROOT |
@@ -965,7 +963,7 @@ public:
     nsWrapperCache::SetFlags(aFlagsToSet);
   }
 
-  void UnsetFlags(uint32_t aFlagsToUnset)
+  void UnsetFlags(FlagsType aFlagsToUnset)
   {
     NS_ASSERTION(!(aFlagsToUnset &
                    (NODE_IS_ANONYMOUS_ROOT |
@@ -1205,6 +1203,8 @@ public:
 
 private:
 
+  nsIDocument* GetCrossShadowCurrentDocInternal() const;
+
   nsIContent* GetNextNodeImpl(const nsINode* aRoot,
                               const bool aSkipChildren) const
   {
@@ -1351,6 +1351,8 @@ private:
     // Set if the element has a parser insertion mode other than "in body",
     // per the HTML5 "Parse state" section.
     ElementHasWeirdParserInsertionMode,
+    // Parser sets this flag if it has notified about the node.
+    ParserHasNotified,
     // Guard value
     BooleanFlagCount
   };
@@ -1491,6 +1493,8 @@ public:
   bool IsScopedStyleRoot() { return GetBoolFlag(ElementIsScopedStyleRoot); }
   bool HasRelevantHoverRules() const { return GetBoolFlag(NodeHasRelevantHoverRules); }
   void SetHasRelevantHoverRules() { SetBoolFlag(NodeHasRelevantHoverRules); }
+  void SetParserHasNotified() { SetBoolFlag(ParserHasNotified); };
+  bool HasParserNotified() { return GetBoolFlag(ParserHasNotified); }
 protected:
   void SetParentIsContent(bool aValue) { SetBoolFlag(ParentIsContent, aValue); }
   void SetInDocument() { SetBoolFlag(IsInDocument); }
@@ -1520,7 +1524,8 @@ protected:
   void SetSubtreeRootPointer(nsINode* aSubtreeRoot)
   {
     NS_ASSERTION(aSubtreeRoot, "aSubtreeRoot can never be null!");
-    NS_ASSERTION(!(IsNodeOfType(eCONTENT) && IsInDoc()), "Shouldn't be here!");
+    NS_ASSERTION(!(IsNodeOfType(eCONTENT) && IsInDoc()) &&
+                 !HasFlag(NODE_IS_IN_SHADOW_TREE), "Shouldn't be here!");
     mSubtreeRoot = aSubtreeRoot;
   }
 
@@ -1617,12 +1622,14 @@ public:
   // HasAttributes is defined inline in Element.h.
   bool HasAttributes() const;
   nsDOMAttributeMap* GetAttributes();
-  JS::Value SetUserData(JSContext* aCx, const nsAString& aKey,
-                        JS::Handle<JS::Value> aData,
-                        nsIDOMUserDataHandler* aHandler,
-                        mozilla::ErrorResult& aError);
-  JS::Value GetUserData(JSContext* aCx, const nsAString& aKey,
-                        mozilla::ErrorResult& aError);
+  void SetUserData(JSContext* aCx, const nsAString& aKey,
+                   JS::Handle<JS::Value> aData,
+                   nsIDOMUserDataHandler* aHandler,
+                   JS::MutableHandle<JS::Value> aRetval,
+                   mozilla::ErrorResult& aError);
+  void GetUserData(JSContext* aCx, const nsAString& aKey,
+                   JS::MutableHandle<JS::Value> aRetval,
+                   mozilla::ErrorResult& aError);
 
   // Helper method to remove this node from its parent. This is not exposed
   // through WebIDL.
@@ -1801,7 +1808,7 @@ protected:
   static bool Traverse(nsINode *tmp, nsCycleCollectionTraversalCallback &cb);
   static void Unlink(nsINode *tmp);
 
-  nsCOMPtr<nsINodeInfo> mNodeInfo;
+  nsRefPtr<mozilla::dom::NodeInfo> mNodeInfo;
 
   nsINode* mParent;
 

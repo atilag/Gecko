@@ -18,10 +18,10 @@
 #include "nsISupportsImpl.h"            // for Layer::AddRef, etc
 #include "nsRegion.h"                   // for nsIntRegion
 
-using namespace mozilla::gfx;
-
 namespace mozilla {
 namespace layers {
+
+using namespace mozilla::gfx;
 
 class ClientImageLayer : public ImageLayer, 
                          public ClientLayer {
@@ -103,8 +103,7 @@ protected:
       return mImageClientTypeContainer;
     }
 
-    RefPtr<gfx::SourceSurface> surface;
-    AutoLockImage autoLock(mContainer, &surface);
+    AutoLockImage autoLock(mContainer);
 
 #ifdef MOZ_WIDGET_GONK
     // gralloc buffer needs CompositableType::BUFFER_IMAGE_BUFFERED to prevent

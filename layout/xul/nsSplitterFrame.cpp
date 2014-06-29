@@ -52,6 +52,9 @@ public:
 
 class nsSplitterFrameInner : public nsIDOMEventListener
 {
+protected:
+  virtual ~nsSplitterFrameInner();
+
 public:
 
   NS_DECL_ISUPPORTS
@@ -62,7 +65,6 @@ public:
     mOuter = aSplitter;
     mPressed = false;
   }
-  virtual ~nsSplitterFrameInner();
 
   void Disconnect() { mOuter = nullptr; }
 
@@ -262,9 +264,9 @@ nsSplitterFrame::AttributeChanged(int32_t aNameSpaceID,
  * Initialize us. If we are in a box get our alignment so we know what direction we are
  */
 void
-nsSplitterFrame::Init(nsIContent*      aContent,
-                      nsIFrame*        aParent,
-                      nsIFrame*        aPrevInFlow)
+nsSplitterFrame::Init(nsIContent*       aContent,
+                      nsContainerFrame* aParent,
+                      nsIFrame*         aPrevInFlow)
 {
   MOZ_ASSERT(!mInner);
   mInner = new nsSplitterFrameInner(this);
@@ -305,7 +307,7 @@ nsSplitterFrame::DoLayout(nsBoxLayoutState& aState)
 {
   if (GetStateBits() & NS_FRAME_FIRST_REFLOW) 
   {
-    mInner->mParentBox = GetParentBox();
+    mInner->mParentBox = nsBox::GetParentBox(this);
     mInner->UpdateState();
   }
 
@@ -316,7 +318,7 @@ nsSplitterFrame::DoLayout(nsBoxLayoutState& aState)
 void
 nsSplitterFrame::GetInitialOrientation(bool& aIsHorizontal)
 {
-  nsIFrame* box = GetParentBox();
+  nsIFrame* box = nsBox::GetParentBox(this);
   if (box) {
     aIsHorizontal = !box->IsHorizontal();
   }
@@ -614,7 +616,7 @@ nsSplitterFrameInner::MouseDown(nsIDOMEvent* aMouseEvent)
                     nsGkAtoms::_true, eCaseMatters))
     return NS_OK;
 
-  mParentBox = mOuter->GetParentBox();
+  mParentBox = nsBox::GetParentBox(mOuter);
   if (!mParentBox)
     return NS_OK;
 
@@ -656,7 +658,7 @@ nsSplitterFrameInner::MouseDown(nsIDOMEvent* aMouseEvent)
   mChildInfosBeforeCount = 0;
   mChildInfosAfterCount = 0;
 
-  nsIFrame* childBox = mParentBox->GetChildBox();
+  nsIFrame* childBox = nsBox::GetChildBox(mParentBox);
 
   while (nullptr != childBox) 
   { 
@@ -711,7 +713,7 @@ nsSplitterFrameInner::MouseDown(nsIDOMEvent* aMouseEvent)
         } 
     }
     
-    childBox = childBox->GetNextBox();
+    childBox = nsBox::GetNextBox(childBox);
     count++;
   }
 
@@ -899,13 +901,13 @@ nsSplitterFrameInner::AdjustChildren(nsPresContext* aPresContext)
 
 static nsIFrame* GetChildBoxForContent(nsIFrame* aParentBox, nsIContent* aContent)
 {
-  nsIFrame* childBox = aParentBox->GetChildBox();
+  nsIFrame* childBox = nsBox::GetChildBox(aParentBox);
 
   while (nullptr != childBox) {
     if (childBox->GetContent() == aContent) {
       return childBox;
     }
-    childBox = childBox->GetNextBox();
+    childBox = nsBox::GetNextBox(childBox);
   }
   return nullptr;
 }
@@ -920,11 +922,11 @@ nsSplitterFrameInner::AdjustChildren(nsPresContext* aPresContext, nsSplitterInfo
   nscoord onePixel = nsPresContext::CSSPixelsToAppUnits(1);
 
   // first set all the widths.
-  nsIFrame* child =  mOuter->GetChildBox();
+  nsIFrame* child =  nsBox::GetChildBox(mOuter);
   while(child)
   {
     SetPreferredSize(state, child, onePixel, aIsHorizontal, nullptr);
-    child = child->GetNextBox();
+    child = nsBox::GetNextBox(child);
   }
 
   // now set our changed widths.

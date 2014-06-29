@@ -6,16 +6,17 @@
 
 #include "jit/AsmJSSignalHandlers.h"
 
-#include "mozilla/BinarySearch.h"
+#include "mozilla/DebugOnly.h"
 
 #include "assembler/assembler/MacroAssembler.h"
 #include "jit/AsmJSModule.h"
+#include "vm/Runtime.h"
 
 using namespace js;
 using namespace js::jit;
-using namespace mozilla;
 
 using JS::GenericNaN;
+using mozilla::DebugOnly;
 
 #if defined(XP_WIN)
 # define XMM_sig(p,i) ((p)->Xmm##i)
@@ -85,6 +86,11 @@ using JS::GenericNaN;
 #  define R15_sig(p) ((p)->uc_mcontext.arm_pc)
 # else
 #  define R15_sig(p) ((p)->uc_mcontext.gregs[REG_R15])
+# endif
+# if defined(__linux__) && defined(__mips__)
+#  define EPC_sig(p) ((p)->uc_mcontext.pc)
+#  define RSP_sig(p) ((p)->uc_mcontext.gregs[29])
+#  define RFP_sig(p) ((p)->uc_mcontext.gregs[30])
 # endif
 #elif defined(__NetBSD__)
 # define XMM_sig(p,i) (((struct fxsave64 *)(p)->uc_mcontext.__fpregs)->fx_xmm[i])
@@ -175,7 +181,7 @@ class AutoSetHandlingSignal
     JSRuntime *rt;
 
   public:
-    AutoSetHandlingSignal(JSRuntime *rt)
+    explicit AutoSetHandlingSignal(JSRuntime *rt)
       : rt(rt)
     {
         JS_ASSERT(!rt->handlingSignal);
@@ -207,31 +213,6 @@ SetXMMRegToNaN(bool isFloat32, T *xmm_reg)
         dbls[0] = GenericNaN();
         dbls[1] = 0;
     }
-}
-
-struct GetHeapAccessOffset
-{
-    const AsmJSModule &module;
-    explicit GetHeapAccessOffset(const AsmJSModule &module) : module(module) {}
-    uintptr_t operator[](size_t index) const {
-        return module.heapAccess(index).offset();
-    }
-};
-
-// Perform a binary search on the projected offsets of the known heap accesses
-// in the module.
-static const AsmJSHeapAccess *
-LookupHeapAccess(const AsmJSModule &module, uint8_t *pc)
-{
-    JS_ASSERT(module.containsPC(pc));
-
-    uintptr_t pcOff = pc - module.codeBase();
-
-    size_t match;
-    if (!BinarySearch(GetHeapAccessOffset(module), 0, module.numHeapAccesses(), pcOff, &match))
-        return nullptr;
-
-    return &module.heapAccess(match);
 }
 #endif
 
@@ -273,6 +254,37 @@ LookupHeapAccess(const AsmJSModule &module, uint8_t *pc)
 #   endif
 
 typedef struct sigcontext mcontext_t;
+
+typedef struct ucontext {
+    uint32_t uc_flags;
+    struct ucontext* uc_link;
+    stack_t uc_stack;
+    mcontext_t uc_mcontext;
+    // Other fields are not used so don't define them here.
+} ucontext_t;
+
+#  elif defined(__mips__)
+
+typedef struct {
+    uint32_t regmask;
+    uint32_t status;
+    uint64_t pc;
+    uint64_t gregs[32];
+    uint64_t fpregs[32];
+    uint32_t acx;
+    uint32_t fpc_csr;
+    uint32_t fpc_eir;
+    uint32_t used_math;
+    uint32_t dsp;
+    uint64_t mdhi;
+    uint64_t mdlo;
+    uint32_t hi1;
+    uint32_t lo1;
+    uint32_t hi2;
+    uint32_t lo2;
+    uint32_t hi3;
+    uint32_t lo3;
+} mcontext_t;
 
 typedef struct ucontext {
     uint32_t uc_flags;
@@ -326,6 +338,8 @@ static bool IsSignalHandlingBroken() { return false; }
 # define PC_sig(p) EIP_sig(p)
 #elif defined(JS_CPU_ARM)
 # define PC_sig(p) R15_sig(p)
+#elif defined(JS_CPU_MIPS)
+# define PC_sig(p) EPC_sig(p)
 #endif
 
 static bool
@@ -337,12 +351,12 @@ HandleSimulatorInterrupt(JSRuntime *rt, AsmJSActivation *activation, void *fault
     // simulator could be in the middle of an instruction. On ARM, the signal
     // handlers are currently only used for Odin code, see bug 964258.
 
-#ifdef JS_ARM_SIMULATOR
+#if defined(JS_ARM_SIMULATOR) || defined(JS_MIPS_SIMULATOR)
     const AsmJSModule &module = activation->module();
     if (module.containsPC((void *)rt->mainThread.simulator()->get_pc()) &&
         module.containsPC(faultingAddress))
     {
-        activation->setInterrupted(nullptr);
+        activation->setResumePC(nullptr);
         int32_t nextpc = int32_t(module.interruptExit());
         rt->mainThread.simulator()->set_resume_pc(nextpc);
         return true;
@@ -355,7 +369,6 @@ HandleSimulatorInterrupt(JSRuntime *rt, AsmJSActivation *activation, void *fault
 static uint8_t **
 ContextToPC(CONTEXT *context)
 {
-    JS_STATIC_ASSERT(sizeof(PC_sig(context)) == sizeof(void*));
     return reinterpret_cast<uint8_t**>(&PC_sig(context));
 }
 
@@ -452,7 +465,7 @@ HandleException(PEXCEPTION_POINTERS exception)
     // The trampoline will jump to activation->resumePC if execution isn't
     // interrupted.
     if (module.containsPC(faultingAddress)) {
-        activation->setInterrupted(pc);
+        activation->setResumePC(pc);
         *ppc = module.interruptExit();
 
         JSRuntime::AutoLockForInterrupt lock(rt);
@@ -470,7 +483,7 @@ HandleException(PEXCEPTION_POINTERS exception)
         return false;
     }
 
-    const AsmJSHeapAccess *heapAccess = LookupHeapAccess(module, pc);
+    const AsmJSHeapAccess *heapAccess = module.lookupHeapAccess(pc);
     if (!heapAccess)
         return false;
 
@@ -655,7 +668,7 @@ HandleMachException(JSRuntime *rt, const ExceptionRequest &request)
     // The trampoline will jump to activation->resumePC if execution isn't
     // interrupted.
     if (module.containsPC(faultingAddress)) {
-        activation->setInterrupted(pc);
+        activation->setResumePC(pc);
         *ppc = module.interruptExit();
 
         JSRuntime::AutoLockForInterrupt lock(rt);
@@ -676,7 +689,7 @@ HandleMachException(JSRuntime *rt, const ExceptionRequest &request)
         return false;
     }
 
-    const AsmJSHeapAccess *heapAccess = LookupHeapAccess(module, pc);
+    const AsmJSHeapAccess *heapAccess = module.lookupHeapAccess(pc);
     if (!heapAccess)
         return false;
 
@@ -905,7 +918,7 @@ HandleSignal(int signum, siginfo_t *info, void *ctx)
     // The trampoline will jump to activation->resumePC if execution isn't
     // interrupted.
     if (module.containsPC(faultingAddress)) {
-        activation->setInterrupted(pc);
+        activation->setResumePC(pc);
         *ppc = module.interruptExit();
 
         JSRuntime::AutoLockForInterrupt lock(rt);
@@ -923,7 +936,7 @@ HandleSignal(int signum, siginfo_t *info, void *ctx)
         return false;
     }
 
-    const AsmJSHeapAccess *heapAccess = LookupHeapAccess(module, pc);
+    const AsmJSHeapAccess *heapAccess = module.lookupHeapAccess(pc);
     if (!heapAccess)
         return false;
 
@@ -1021,14 +1034,25 @@ js::EnsureAsmJSSignalHandlersInstalled(JSRuntime *rt)
 // js::HandleExecutionInterrupt. The memory is un-protected from the signal
 // handler after control flow is redirected.
 void
-js::RequestInterruptForAsmJSCode(JSRuntime *rt)
+js::RequestInterruptForAsmJSCode(JSRuntime *rt, int interruptModeRaw)
 {
-    JS_ASSERT(rt->currentThreadOwnsInterruptLock());
+    switch (JSRuntime::InterruptMode(interruptModeRaw)) {
+      case JSRuntime::RequestInterruptMainThread:
+      case JSRuntime::RequestInterruptAnyThread:
+        break;
+      case JSRuntime::RequestInterruptAnyThreadDontStopIon:
+      case JSRuntime::RequestInterruptAnyThreadForkJoin:
+        // It is ok to wait for asm.js execution to complete; we aren't trying
+        // to break an iloop or anything. Avoid the overhead of protecting all
+        // the code and taking a fault.
+        return;
+    }
 
     AsmJSActivation *activation = rt->mainThread.asmJSActivationStackFromAnyThread();
     if (!activation)
         return;
 
+    JS_ASSERT(rt->currentThreadOwnsInterruptLock());
     activation->module().protectCode(rt);
 }
 

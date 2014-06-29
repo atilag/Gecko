@@ -25,6 +25,7 @@
 #include "nsGenericHTMLElement.h"
 #include "jsfriendapi.h"
 #include <algorithm>
+#include "mozilla/dom/NodeInfoInlines.h"
 
 // Form related includes
 #include "nsIDOMHTMLFormElement.h"
@@ -530,6 +531,10 @@ nsContentList::Item(uint32_t aIndex, bool aDoFlush)
 Element*
 nsContentList::NamedItem(const nsAString& aName, bool aDoFlush)
 {
+  if (aName.IsEmpty()) {
+    return nullptr;
+  }
+
   BringSelfUpToDate(aDoFlush);
 
   uint32_t i, count = mElements.Length();
@@ -565,6 +570,15 @@ nsContentList::GetSupportedNames(unsigned aFlags, nsTArray<nsString>& aNames)
   nsAutoTArray<nsIAtom*, 8> atoms;
   for (uint32_t i = 0; i < mElements.Length(); ++i) {
     nsIContent *content = mElements.ElementAt(i);
+    if (content->HasID()) {
+      nsIAtom* id = content->GetID();
+      MOZ_ASSERT(id != nsGkAtoms::_empty,
+                 "Empty ids don't get atomized");
+      if (!atoms.Contains(id)) {
+        atoms.AppendElement(id);
+      }
+    }
+
     nsGenericHTMLElement* el = nsGenericHTMLElement::FromContent(content);
     if (el) {
       // XXXbz should we be checking for particular tags here?  How
@@ -574,15 +588,11 @@ nsContentList::GetSupportedNames(unsigned aFlags, nsTArray<nsString>& aNames)
       const nsAttrValue* val = el->GetParsedAttr(nsGkAtoms::name);
       if (val && val->Type() == nsAttrValue::eAtom) {
         nsIAtom* name = val->GetAtomValue();
+        MOZ_ASSERT(name != nsGkAtoms::_empty,
+                   "Empty names don't get atomized");
         if (!atoms.Contains(name)) {
           atoms.AppendElement(name);
         }
-      }
-    }
-    if (content->HasID()) {
-      nsIAtom* id = content->GetID();
-      if (!atoms.Contains(id)) {
-        atoms.AppendElement(id);
       }
     }
   }
@@ -851,7 +861,7 @@ nsContentList::Match(Element *aElement)
   if (!mXMLMatchAtom)
     return false;
 
-  nsINodeInfo *ni = aElement->NodeInfo();
+  mozilla::dom::NodeInfo *ni = aElement->NodeInfo();
  
   bool unknown = mMatchNameSpaceId == kNameSpaceID_Unknown;
   bool wildcard = mMatchNameSpaceId == kNameSpaceID_Wildcard;

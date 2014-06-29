@@ -1,4 +1,4 @@
-/* -*- Mode: javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -229,6 +229,10 @@ let NetMonitorView = {
     });
   },
 
+  reloadPage: function() {
+    NetMonitorController.triggerActivity(ACTIVITY_TYPE.RELOAD.WITH_CACHE_DEFAULT);
+  },
+
   /**
    * Lazily initializes and returns a promise for a Editor instance.
    *
@@ -362,6 +366,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     this._onContextCopyImageAsDataUriCommand = this.copyImageAsDataUri.bind(this);
     this._onContextResendCommand = this.cloneSelectedRequest.bind(this);
     this._onContextPerfCommand = () => NetMonitorView.toggleFrontendMode();
+    this._onReloadCommand = () => NetMonitorView.reloadPage();
 
     this.sendCustomRequestEvent = this.sendCustomRequest.bind(this);
     this.closeCustomRequestEvent = this.closeCustomRequest.bind(this);
@@ -379,6 +384,8 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
   },
 
   _onConnect: function() {
+    $("#requests-menu-reload-notice-button").addEventListener("command", this._onReloadCommand, false);
+
     if (NetMonitorController.supportsCustomRequest) {
       $("#request-menu-context-resend").addEventListener("command", this._onContextResendCommand, false);
       $("#custom-request-send-button").addEventListener("click", this.sendCustomRequestEvent, false);
@@ -426,6 +433,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     $("#request-menu-context-resend").removeEventListener("command", this._onContextResendCommand, false);
     $("#request-menu-context-perf").removeEventListener("command", this._onContextPerfCommand, false);
 
+    $("#requests-menu-reload-notice-button").removeEventListener("command", this._onReloadCommand, false);
     $("#requests-menu-perf-notice-button").removeEventListener("command", this._onContextPerfCommand, false);
     $("#requests-menu-network-summary-button").removeEventListener("command", this._onContextPerfCommand, false);
     $("#requests-menu-network-summary-label").removeEventListener("click", this._onContextPerfCommand, false);
@@ -1614,6 +1622,9 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
       !selectedItem.attachment.responseContent ||
       !selectedItem.attachment.responseContent.content.mimeType.contains("image/");
 
+    let separator = $("#request-menu-context-separator");
+    separator.hidden = !selectedItem;
+
     let newTabElement = $("#request-menu-context-newtab");
     newTabElement.hidden = !selectedItem;
   },
@@ -1980,6 +1991,8 @@ NetworkDetailsView.prototype = {
    */
   destroy: function() {
     dumpn("Destroying the NetworkDetailsView");
+
+    $("tabpanels", this.widget).removeEventListener("select", this._onTabSelect);
   },
 
   /**
@@ -2068,7 +2081,10 @@ NetworkDetailsView.prototype = {
       }
       populated[tab] = true;
       window.emit(EVENTS.TAB_UPDATED);
-      NetMonitorView.RequestsMenu.ensureSelectedItemIsVisible();
+
+      if (NetMonitorController.isConnected()) {
+        NetMonitorView.RequestsMenu.ensureSelectedItemIsVisible();
+      }
     });
   },
 

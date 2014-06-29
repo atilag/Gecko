@@ -1,4 +1,4 @@
-// -*- Mode: js2; tab-width: 2; indent-tabs-mode: nil; js2-basic-offset: 2; js2-skip-preprocessor-directives: t; -*-
+// -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -48,13 +48,7 @@ let videoDiscoveryTests = [
   { id: "with-sources-mp4", source: "http://mochi.test:8888/simple.mp4", text: "video with mp4 extension source child" },
   { id: "with-sources-fail", pass: false, text: "video with no mp4 extension source child" },
   { id: "with-sources-mimetype", source: "http://mochi.test:8888/simple-video-mp4", text: "video with mp4 mimetype source child" },
-  { id: "video-overlay", source: "http://mochi.test:8888/simple.mp4", text: "div overlay covering a simple video with mp4 src" },
-
-  { id: "opt-in-simple-mp4", source: "http://mochi.test:8888/simple.mp4", poster: "http://mochi.test:8888/simple.png", text: "simple video with mp4 src" },
-  { id: "opt-out-simple-mp4", pass: false, text: "simple video with mp4 src but opt-out" },
-  { id: "opt-in-simple-fail", pass: false, text: "simple video with opt-in but no mp4 src" },
-  { id: "opt-in-with-sources-mp4", source: "http://mochi.test:8888/simple.mp4", text: "opt-in video with mp4 extension source child" },
-  { id: "opt-out-with-sources-mp4", pass: false, text: "video with mp4 extension source child but opt-out" }
+  { id: "video-overlay", source: "http://mochi.test:8888/simple.mp4", text: "div overlay covering a simple video with mp4 src" }
 ];
 
 function execute_video_test(test) {

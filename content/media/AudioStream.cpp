@@ -13,6 +13,7 @@
 #include "mozilla/Mutex.h"
 #include <algorithm>
 #include "mozilla/Preferences.h"
+#include "mozilla/Telemetry.h"
 #include "soundtouch/SoundTouch.h"
 #include "Latency.h"
 
@@ -50,6 +51,88 @@ double AudioStream::sVolumeScale;
 uint32_t AudioStream::sCubebLatency;
 bool AudioStream::sCubebLatencyPrefSet;
 
+
+/**
+ * Keep a list of frames sent to the audio engine in each DataCallback along
+ * with the playback rate at the moment. Since the playback rate and number of
+ * underrun frames can vary in each callback. We need to keep the whole history
+ * in order to calculate the playback position of the audio engine correctly.
+ */
+class FrameHistory {
+  struct Chunk {
+    uint32_t servicedFrames;
+    uint32_t totalFrames;
+    int rate;
+  };
+
+  template <typename T>
+  static T FramesToUs(uint32_t frames, int rate) {
+    return static_cast<T>(frames) * USECS_PER_S / rate;
+  }
+public:
+  FrameHistory()
+    : mBaseOffset(0), mBasePosition(0) {}
+
+  void Append(uint32_t aServiced, uint32_t aUnderrun, int aRate) {
+    /* In most case where playback rate stays the same and we don't underrun
+     * frames, we are able to merge chunks to avoid lose of precision to add up
+     * in compressing chunks into |mBaseOffset| and |mBasePosition|.
+     */
+    if (!mChunks.IsEmpty()) {
+      Chunk& c = mChunks.LastElement();
+      // 2 chunks (c1 and c2) can be merged when rate is the same and
+      // adjacent frames are zero. That is, underrun frames in c1 are zero
+      // or serviced frames in c2 are zero.
+      if (c.rate == aRate &&
+          (c.servicedFrames == c.totalFrames ||
+           aServiced == 0)) {
+        c.servicedFrames += aServiced;
+        c.totalFrames += aServiced + aUnderrun;
+        return;
+      }
+    }
+    Chunk* p = mChunks.AppendElement();
+    p->servicedFrames = aServiced;
+    p->totalFrames = aServiced + aUnderrun;
+    p->rate = aRate;
+  }
+
+  /**
+   * @param frames The playback position in frames of the audio engine.
+   * @return The playback position in microseconds of the audio engine,
+   *         adjusted by playback rate changes and underrun frames.
+   */
+  int64_t GetPosition(int64_t frames) {
+    // playback position should not go backward.
+    MOZ_ASSERT(frames >= mBaseOffset);
+    while (true) {
+      if (mChunks.IsEmpty()) {
+        return mBasePosition;
+      }
+      const Chunk& c = mChunks[0];
+      if (frames <= mBaseOffset + c.totalFrames) {
+        uint32_t delta = frames - mBaseOffset;
+        delta = std::min(delta, c.servicedFrames);
+        return static_cast<int64_t>(mBasePosition) +
+               FramesToUs<int64_t>(delta, c.rate);
+      }
+      // Since the playback position of the audio engine will not go backward,
+      // we are able to compress chunks so that |mChunks| won't grow unlimitedly.
+      // Note that we lose precision in converting integers into floats and
+      // inaccuracy will accumulate over time. However, for a 24hr long,
+      // sample rate = 44.1k file, the error will be less than 1 microsecond
+      // after playing 24 hours. So we are fine with that.
+      mBaseOffset += c.totalFrames;
+      mBasePosition += FramesToUs<double>(c.servicedFrames, c.rate);
+      mChunks.RemoveElementAt(0);
+    }
+  }
+private:
+  nsAutoTArray<Chunk, 7> mChunks;
+  int64_t mBaseOffset;
+  double mBasePosition;
+};
+
 /*static*/ void AudioStream::PrefChanged(const char* aPref, void* aClosure)
 {
   if (strcmp(aPref, PREF_VOLUME_SCALE) == 0) {
@@ -70,6 +153,16 @@ bool AudioStream::sCubebLatencyPrefSet;
     StaticMutexAutoLock lock(sMutex);
     sCubebLatency = std::min<uint32_t>(std::max<uint32_t>(value, 1), 1000);
   }
+}
+
+/*static*/ bool AudioStream::GetFirstStream()
+{
+  static bool sFirstStream = true;
+
+  StaticMutexAutoLock lock(sMutex);
+  bool result = sFirstStream;
+  sFirstStream = false;
+  return result;
 }
 
 /*static*/ double AudioStream::GetVolumeScale()
@@ -133,8 +226,8 @@ static cubeb_stream_type ConvertChannelToCubebType(dom::AudioChannel aChannel)
       return CUBEB_STREAM_TYPE_VOICE_CALL;
     case dom::AudioChannel::Ringer:
       return CUBEB_STREAM_TYPE_RING;
-    // Currently Android openSLES library doesn't support FORCE_AUDIBLE yet.
     case dom::AudioChannel::Publicnotification:
+      return CUBEB_STREAM_TYPE_SYSTEM_ENFORCED;
     default:
       NS_ERROR("The value of AudioChannel is invalid");
       return CUBEB_STREAM_TYPE_MAX;
@@ -152,7 +245,6 @@ AudioStream::AudioStream()
   , mAudioClock(MOZ_THIS_IN_INITIALIZER_LIST())
   , mLatencyRequest(HighLatency)
   , mReadPoint(0)
-  , mLostFrames(0)
   , mDumpFile(nullptr)
   , mVolume(1.0)
   , mBytesPerFrame(0)
@@ -211,12 +303,6 @@ AudioStream::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
   }
 }
 
-nsresult AudioStream::EnsureTimeStretcherInitialized()
-{
-  MonitorAutoLock mon(mMonitor);
-  return EnsureTimeStretcherInitializedUnlocked();
-}
-
 nsresult AudioStream::EnsureTimeStretcherInitializedUnlocked()
 {
   mMonitor.AssertCurrentThreadOwns();
@@ -234,15 +320,19 @@ nsresult AudioStream::SetPlaybackRate(double aPlaybackRate)
   NS_ASSERTION(aPlaybackRate > 0.0,
                "Can't handle negative or null playbackrate in the AudioStream.");
   // Avoid instantiating the resampler if we are not changing the playback rate.
+  // GetPreservesPitch/SetPreservesPitch don't need locking before calling
   if (aPlaybackRate == mAudioClock.GetPlaybackRate()) {
     return NS_OK;
   }
 
-  if (EnsureTimeStretcherInitialized() != NS_OK) {
+  // MUST lock since the rate transposer is used from the cubeb callback,
+  // and rate changes can cause the buffer to be reallocated
+  MonitorAutoLock mon(mMonitor);
+  if (EnsureTimeStretcherInitializedUnlocked() != NS_OK) {
     return NS_ERROR_FAILURE;
   }
 
-  mAudioClock.SetPlaybackRate(aPlaybackRate);
+  mAudioClock.SetPlaybackRateUnlocked(aPlaybackRate);
   mOutRate = mInRate / aPlaybackRate;
 
   if (mAudioClock.GetPreservesPitch()) {
@@ -262,7 +352,10 @@ nsresult AudioStream::SetPreservesPitch(bool aPreservesPitch)
     return NS_OK;
   }
 
-  if (EnsureTimeStretcherInitialized() != NS_OK) {
+  // MUST lock since the rate transposer is used from the cubeb callback,
+  // and rate changes can cause the buffer to be reallocated
+  MonitorAutoLock mon(mMonitor);
+  if (EnsureTimeStretcherInitializedUnlocked() != NS_OK) {
     return NS_ERROR_FAILURE;
   }
 
@@ -380,6 +473,9 @@ AudioStream::Init(int32_t aNumChannels, int32_t aRate,
                   const dom::AudioChannel aAudioChannel,
                   LatencyRequest aLatencyRequest)
 {
+  mStartTime = TimeStamp::Now();
+  mIsFirst = GetFirstStream();
+
   if (!GetCubebContext() || aNumChannels < 0 || aRate < 0) {
     return NS_ERROR_FAILURE;
   }
@@ -488,6 +584,14 @@ AudioStream::OpenCubeb(cubeb_stream_params &aParams,
       LOG(("AudioStream::OpenCubeb() %p failed to init cubeb", this));
       return NS_ERROR_FAILURE;
     }
+  }
+
+  if (!mStartTime.IsNull()) {
+		TimeDuration timeDelta = TimeStamp::Now() - mStartTime;
+    LOG(("AudioStream creation time %sfirst: %u ms", mIsFirst ? "" : "not ",
+         (uint32_t) timeDelta.ToMilliseconds()));
+		Telemetry::Accumulate(mIsFirst ? Telemetry::AUDIOSTREAM_FIRST_OPEN_MS :
+                          Telemetry::AUDIOSTREAM_LATER_OPEN_MS, timeDelta.ToMilliseconds());
   }
 
   return NS_OK;
@@ -638,6 +742,14 @@ AudioStream::SetVolume(double aVolume)
 }
 
 void
+AudioStream::Cancel()
+{
+  MonitorAutoLock mon(mMonitor);
+  mState = ERRORED;
+  mon.NotifyAll();
+}
+
+void
 AudioStream::Drain()
 {
   MonitorAutoLock mon(mMonitor);
@@ -736,7 +848,8 @@ AudioStream::Shutdown()
 int64_t
 AudioStream::GetPosition()
 {
-  return mAudioClock.GetPosition();
+  MonitorAutoLock mon(mMonitor);
+  return mAudioClock.GetPositionUnlocked();
 }
 
 // This function is miscompiled by PGO with MSVC 2010.  See bug 768333.
@@ -746,18 +859,12 @@ AudioStream::GetPosition()
 int64_t
 AudioStream::GetPositionInFrames()
 {
+  MonitorAutoLock mon(mMonitor);
   return mAudioClock.GetPositionInFrames();
 }
 #ifdef _MSC_VER
 #pragma optimize("", on)
 #endif
-
-int64_t
-AudioStream::GetPositionInFramesInternal()
-{
-  MonitorAutoLock mon(mMonitor);
-  return GetPositionInFramesUnlocked();
-}
 
 int64_t
 AudioStream::GetPositionInFramesUnlocked()
@@ -776,13 +883,7 @@ AudioStream::GetPositionInFramesUnlocked()
     }
   }
 
-  // Adjust the reported position by the number of silent frames written
-  // during stream underruns.
-  uint64_t adjustedPosition = 0;
-  if (position >= mLostFrames) {
-    adjustedPosition = position - mLostFrames;
-  }
-  return std::min<uint64_t>(adjustedPosition, INT64_MAX);
+  return std::min<uint64_t>(position, INT64_MAX);
 }
 
 int64_t
@@ -887,7 +988,7 @@ AudioStream::GetTimeStretched(void* aBuffer, long aFrames, int64_t &aTimeMs)
 
   uint8_t* wpos = reinterpret_cast<uint8_t*>(aBuffer);
   double playbackRate = static_cast<double>(mInRate) / mOutRate;
-  uint32_t toPopBytes = FramesToBytes(ceil(aFrames / playbackRate));
+  uint32_t toPopBytes = FramesToBytes(ceil(aFrames * playbackRate));
   uint32_t available = 0;
   bool lowOnBufferedData = false;
   do {
@@ -991,15 +1092,19 @@ AudioStream::DataCallback(void* aBuffer, long aFrames)
 
   underrunFrames = aFrames - servicedFrames;
 
+  // Always send audible frames first, and silent frames later.
+  // Otherwise it will break the assumption of FrameHistory.
   if (mState != DRAINING) {
+    mAudioClock.UpdateFrameHistory(servicedFrames, underrunFrames);
     uint8_t* rpos = static_cast<uint8_t*>(aBuffer) + FramesToBytes(aFrames - underrunFrames);
     memset(rpos, 0, FramesToBytes(underrunFrames));
     if (underrunFrames) {
       PR_LOG(gAudioStreamLog, PR_LOG_WARNING,
              ("AudioStream %p lost %d frames", this, underrunFrames));
     }
-    mLostFrames += underrunFrames;
     servicedFrames += underrunFrames;
+  } else {
+    mAudioClock.UpdateFrameHistory(servicedFrames, 0);
   }
 
   WriteDumpFile(mDumpFile, this, aFrames, aBuffer);
@@ -1019,7 +1124,6 @@ AudioStream::DataCallback(void* aBuffer, long aFrames)
                      (latency * 1000) / mOutRate, now);
   }
 
-  mAudioClock.UpdateWritePosition(servicedFrames);
   return servicedFrames;
 }
 
@@ -1038,92 +1142,42 @@ AudioStream::StateCallback(cubeb_state aState)
 
 AudioClock::AudioClock(AudioStream* aStream)
  :mAudioStream(aStream),
-  mOldOutRate(0),
-  mBasePosition(0),
-  mBaseOffset(0),
-  mOldBaseOffset(0),
-  mOldBasePosition(0),
-  mPlaybackRateChangeOffset(0),
-  mPreviousPosition(0),
-  mWritten(0),
   mOutRate(0),
   mInRate(0),
   mPreservesPitch(true),
-  mCompensatingLatency(false)
+  mFrameHistory(new FrameHistory())
 {}
 
 void AudioClock::Init()
 {
   mOutRate = mAudioStream->GetRate();
   mInRate = mAudioStream->GetRate();
-  mOldOutRate = mOutRate;
 }
 
-void AudioClock::UpdateWritePosition(uint32_t aCount)
+void AudioClock::UpdateFrameHistory(uint32_t aServiced, uint32_t aUnderrun)
 {
-  mWritten += aCount;
+  mFrameHistory->Append(aServiced, aUnderrun, mOutRate);
 }
 
-uint64_t AudioClock::GetPosition()
+int64_t AudioClock::GetPositionUnlocked() const
 {
-  int64_t position = mAudioStream->GetPositionInFramesInternal();
-  int64_t diffOffset;
-  NS_ASSERTION(position < 0 || (mInRate != 0 && mOutRate != 0), "AudioClock not initialized.");
-  if (position >= 0) {
-    if (position < mPlaybackRateChangeOffset) {
-      // See if we are still playing frames pushed with the old playback rate in
-      // the backend. If we are, use the old output rate to compute the
-      // position.
-      mCompensatingLatency = true;
-      diffOffset = position - mOldBaseOffset;
-      position = static_cast<uint64_t>(mOldBasePosition +
-        static_cast<float>(USECS_PER_S * diffOffset) / mOldOutRate);
-      mPreviousPosition = position;
-      return position;
-    }
-
-    if (mCompensatingLatency) {
-      diffOffset = position - mPlaybackRateChangeOffset;
-      mCompensatingLatency = false;
-      mBasePosition = mPreviousPosition;
-    } else {
-      diffOffset = position - mPlaybackRateChangeOffset;
-    }
-    position =  static_cast<uint64_t>(mBasePosition +
-      (static_cast<float>(USECS_PER_S * diffOffset) / mOutRate));
-    return position;
-  }
-  return UINT64_MAX;
+  // GetPositionInFramesUnlocked() asserts it owns the monitor
+  int64_t frames = mAudioStream->GetPositionInFramesUnlocked();
+  NS_ASSERTION(frames < 0 || (mInRate != 0 && mOutRate != 0), "AudioClock not initialized.");
+  return frames >= 0 ? mFrameHistory->GetPosition(frames) : -1;
 }
 
-uint64_t AudioClock::GetPositionInFrames()
+int64_t AudioClock::GetPositionInFrames() const
 {
-  return (GetPosition() * mOutRate) / USECS_PER_S;
+  return (GetPositionUnlocked() * mInRate) / USECS_PER_S;
 }
 
-void AudioClock::SetPlaybackRate(double aPlaybackRate)
+void AudioClock::SetPlaybackRateUnlocked(double aPlaybackRate)
 {
-  int64_t position = mAudioStream->GetPositionInFramesInternal();
-  if (position > mPlaybackRateChangeOffset) {
-    mOldBasePosition = mBasePosition;
-    mBasePosition = GetPosition();
-    mOldBaseOffset = mPlaybackRateChangeOffset;
-    mBaseOffset = position;
-    mPlaybackRateChangeOffset = mWritten;
-    mOldOutRate = mOutRate;
-    mOutRate = static_cast<int>(mInRate / aPlaybackRate);
-  } else {
-    // The playbackRate has been changed before the end of the latency
-    // compensation phase. We don't update the mOld* variable. That way, the
-    // last playbackRate set is taken into account.
-    mBasePosition = GetPosition();
-    mBaseOffset = position;
-    mPlaybackRateChangeOffset = mWritten;
-    mOutRate = static_cast<int>(mInRate / aPlaybackRate);
-  }
+  mOutRate = static_cast<int>(mInRate / aPlaybackRate);
 }
 
-double AudioClock::GetPlaybackRate()
+double AudioClock::GetPlaybackRate() const
 {
   return static_cast<double>(mInRate) / mOutRate;
 }
@@ -1133,7 +1187,7 @@ void AudioClock::SetPreservesPitch(bool aPreservesPitch)
   mPreservesPitch = aPreservesPitch;
 }
 
-bool AudioClock::GetPreservesPitch()
+bool AudioClock::GetPreservesPitch() const
 {
   return mPreservesPitch;
 }

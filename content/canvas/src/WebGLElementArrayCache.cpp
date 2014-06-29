@@ -5,9 +5,9 @@
 
 #include "WebGLElementArrayCache.h"
 
-#include "nsTArray.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/MathAlgorithms.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -88,9 +88,9 @@ UpdateUpperBound(uint32_t* out_upperBound, uint32_t newBound)
  * We take advantage of the specifics of the situation to avoid generalist tree storage and instead
  * store the tree entries in a vector, mTreeData.
  *
- * The number of leaves is given by mNumLeaves, and mTreeData is always a vector of length
+ * TreeData is always a vector of length
  *
- *    2 * mNumLeaves.
+ *    2 * (number of leaves).
  *
  * Its data layout is as follows: mTreeData[0] is unused, mTreeData[1] is the root node,
  * then at offsets 2..3 is the tree level immediately below the root node, then at offsets 4..7
@@ -124,21 +124,13 @@ UpdateUpperBound(uint32_t* out_upperBound, uint32_t newBound)
  * case where each element array buffer is only ever used with one type, this is also addressed
  * by having WebGLElementArrayCache lazily create trees for each type only upon first use.
  *
- * Another consequence of this constraint is that when invalidating the trees, we have to invalidate
+ * Another consequence of this constraint is that when updating the trees, we have to update
  * all existing trees. So if trees for types uint8_t, uint16_t and uint32_t have ever been constructed for this buffer,
- * every subsequent invalidation will have to invalidate all trees even if one of the types is never
- * used again. This implies that it is important to minimize the cost of invalidation i.e.
- * do lazy updates upon use as opposed to immediately updating invalidated trees. This poses a problem:
- * it is nontrivial to keep track of the part of the tree that's invalidated. The current solution
- * can only keep track of an invalidated interval, from |mFirstInvalidatedLeaf| to |mLastInvalidatedLeaf|.
- * The problem is that if one does two small, far-apart partial buffer updates, the resulting invalidated
- * area is very large even though only a small part of the array really needed to be invalidated.
- * The real solution to this problem would be to use a smarter data structure to keep track of the
- * invalidated area, probably an interval tree. Meanwhile, we can probably live with the current situation
- * as the unfavorable case seems to be a small corner case: in order to run into performance issues,
- * the number of bufferSubData in between two consecutive draws must be small but greater than 1, and
- * the partial buffer updates must be small and far apart. Anything else than this corner case
- * should run fast in the current setting.
+ * every subsequent update will have to update all trees even if one of the types is never
+ * used again. That's inefficient, but content should not put indices of different types in the
+ * same element array buffer anyways. Different index types can only be consumed in separate
+ * drawElements calls, so nothing particular is to be achieved by lumping them in the same
+ * buffer object.
  */
 template<typename T>
 struct WebGLElementArrayCacheTree
@@ -151,26 +143,24 @@ struct WebGLElementArrayCacheTree
   static const size_t sElementsPerLeafMask = sElementsPerLeaf - 1; // sElementsPerLeaf is POT
 
 private:
+
+  // The WebGLElementArrayCache that owns this tree
   WebGLElementArrayCache& mParent;
+
+  // The tree's internal data storage. Its length is 2 * (number of leaves)
+  // because of its data layout explained in the above class comment.
   FallibleTArray<T> mTreeData;
-  size_t mNumLeaves;
-  bool mInvalidated;
-  size_t mFirstInvalidatedLeaf;
-  size_t mLastInvalidatedLeaf;
 
 public:
+  // Constructor. Takes a reference to the WebGLElementArrayCache that is to be
+  // the parent. Does not initialize the tree. Should be followed by a call
+  // to Update() to attempt initializing the tree.
   WebGLElementArrayCacheTree(WebGLElementArrayCache& p)
     : mParent(p)
-    , mNumLeaves(0)
-    , mInvalidated(false)
-    , mFirstInvalidatedLeaf(0)
-    , mLastInvalidatedLeaf(0)
   {
-    ResizeToParentSize();
   }
 
   T GlobalMaximum() const {
-    MOZ_ASSERT(!mInvalidated);
     return mTreeData[1];
   }
 
@@ -216,21 +206,26 @@ public:
     return treeIndex + distance;
   }
 
-  size_t LeafForElement(size_t element) {
+  size_t NumLeaves() const {
+    // see class comment for why we the tree storage size is 2 * numLeaves
+    return mTreeData.Length() >> 1;
+  }
+
+  size_t LeafForElement(size_t element) const {
     size_t leaf = element / sElementsPerLeaf;
-    MOZ_ASSERT(leaf < mNumLeaves);
+    MOZ_ASSERT(leaf < NumLeaves());
     return leaf;
   }
 
-  size_t LeafForByte(size_t byte) {
+  size_t LeafForByte(size_t byte) const {
     return LeafForElement(byte / sizeof(T));
   }
 
   // Returns the index, into the tree storage, where a given leaf is stored
-  size_t TreeIndexForLeaf(size_t leaf) {
-    // See above class comment. The tree storage is an array of length 2*mNumLeaves.
+  size_t TreeIndexForLeaf(size_t leaf) const {
+    // See above class comment. The tree storage is an array of length 2 * numLeaves.
     // The leaves are stored in its second half.
-    return leaf + mNumLeaves;
+    return leaf + NumLeaves();
   }
 
   static size_t LastElementUnderSameLeaf(size_t element) {
@@ -242,14 +237,13 @@ public:
   }
 
   static size_t NextMultipleOfElementsPerLeaf(size_t numElements) {
+    MOZ_ASSERT(numElements >= 1);
     return ((numElements - 1) | sElementsPerLeafMask) + 1;
   }
 
   bool Validate(T maxAllowed, size_t firstLeaf, size_t lastLeaf,
                 uint32_t* out_upperBound)
   {
-    MOZ_ASSERT(!mInvalidated);
-
     size_t firstTreeIndex = TreeIndexForLeaf(firstLeaf);
     size_t lastTreeIndex  = TreeIndexForLeaf(lastLeaf);
 
@@ -300,38 +294,9 @@ public:
     }
   }
 
-  template<typename U>
-  static U NextPowerOfTwo(U x) {
-    U result = 1;
-    while (result < x)
-      result <<= 1;
-    MOZ_ASSERT(result >= x);
-    MOZ_ASSERT((result & (result - 1)) == 0);
-    return result;
-  }
-
-  bool ResizeToParentSize()
-  {
-    size_t numberOfElements = mParent.ByteSize() / sizeof(T);
-    size_t requiredNumLeaves = (numberOfElements + sElementsPerLeaf - 1) / sElementsPerLeaf;
-
-    size_t oldNumLeaves = mNumLeaves;
-    mNumLeaves = NextPowerOfTwo(requiredNumLeaves);
-    Invalidate(0, mParent.ByteSize() - 1);
-
-    // see class comment for why we the tree storage size is 2 * mNumLeaves
-    if (!mTreeData.SetLength(2 * mNumLeaves)) {
-      return false;
-    }
-    if (mNumLeaves != oldNumLeaves) {
-      memset(mTreeData.Elements(), 0, mTreeData.Length() * sizeof(mTreeData[0]));
-    }
-    return true;
-  }
-
-  void Invalidate(size_t firstByte, size_t lastByte);
-
-  void Update();
+  // Updates the tree from the parent's buffer contents. Fallible, as it
+  // may have to resize the tree storage.
+  bool Update(size_t firstByte, size_t lastByte);
 
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
   {
@@ -347,59 +312,87 @@ struct TreeForType {};
 template<>
 struct TreeForType<uint8_t>
 {
-  static WebGLElementArrayCacheTree<uint8_t>*& Run(WebGLElementArrayCache *b) { return b->mUint8Tree; }
+  static ScopedDeletePtr<WebGLElementArrayCacheTree<uint8_t>>&
+  Value(WebGLElementArrayCache *b) {
+    return b->mUint8Tree;
+  }
 };
 
 template<>
 struct TreeForType<uint16_t>
 {
-  static WebGLElementArrayCacheTree<uint16_t>*& Run(WebGLElementArrayCache *b) { return b->mUint16Tree; }
+  static ScopedDeletePtr<WebGLElementArrayCacheTree<uint16_t>>&
+  Value(WebGLElementArrayCache *b) {
+    return b->mUint16Tree;
+  }
 };
 
 template<>
 struct TreeForType<uint32_t>
 {
-  static WebGLElementArrayCacheTree<uint32_t>*& Run(WebGLElementArrayCache *b) { return b->mUint32Tree; }
+  static ScopedDeletePtr<WebGLElementArrayCacheTree<uint32_t>>&
+  Value(WebGLElementArrayCache *b) {
+    return b->mUint32Tree;
+  }
 };
 
-// When the buffer gets updated from firstByte to lastByte,
-// calling this method will notify the tree accordingly
+// Calling this method will 1) update the leaves in this interval
+// from the raw buffer data, and 2) propagate this update up the tree
 template<typename T>
-void WebGLElementArrayCacheTree<T>::Invalidate(size_t firstByte, size_t lastByte)
+bool WebGLElementArrayCacheTree<T>::Update(size_t firstByte, size_t lastByte)
 {
-  lastByte = std::min(lastByte, mNumLeaves * sElementsPerLeaf * sizeof(T) - 1);
+  MOZ_ASSERT(firstByte <= lastByte);
+  MOZ_ASSERT(lastByte < mParent.mBytes.Length());
+
+  size_t numberOfElements = mParent.mBytes.Length() / sizeof(T);
+  size_t requiredNumLeaves = 0;
+  if (numberOfElements > 0) {
+    // If we didn't require the number of leaves to be a power of two, then
+    // it would just be equal to
+    //
+    //    ceil(numberOfElements / sElementsPerLeaf)
+    //
+    // The way we implement this (division+ceil) operation in integer arithmetic
+    // is as follows:
+    size_t numLeavesNonPOT = (numberOfElements + sElementsPerLeaf - 1) / sElementsPerLeaf;
+    // It only remains to round that up to the next power of two:
+    requiredNumLeaves = RoundUpPow2(numLeavesNonPOT);
+  }
+
+  // Step #0: if needed, resize our tree data storage.
+  if (requiredNumLeaves != NumLeaves()) {
+    // see class comment for why we the tree storage size is 2 * numLeaves
+    if (!mTreeData.SetLength(2 * requiredNumLeaves)) {
+      mTreeData.SetLength(0);
+      return false;
+    }
+    MOZ_ASSERT(NumLeaves() == requiredNumLeaves);
+
+    if (NumLeaves()) {
+      // when resizing, update the whole tree, not just the subset corresponding
+      // to the part of the buffer being updated.
+      memset(mTreeData.Elements(), 0, mTreeData.Length() * sizeof(T));
+      firstByte = 0;
+      lastByte = mParent.mBytes.Length() - 1;
+    }
+  }
+
+  if (NumLeaves() == 0) {
+    return true;
+  }
+
+  lastByte = std::min(lastByte, NumLeaves() * sElementsPerLeaf * sizeof(T) - 1);
   if (firstByte > lastByte) {
-    return;
+    return true;
   }
 
   size_t firstLeaf = LeafForByte(firstByte);
   size_t lastLeaf = LeafForByte(lastByte);
 
-  if (mInvalidated) {
-    mFirstInvalidatedLeaf = std::min(firstLeaf, mFirstInvalidatedLeaf);
-    mLastInvalidatedLeaf = std::max(lastLeaf, mLastInvalidatedLeaf);
-  } else {
-    mInvalidated = true;
-    mFirstInvalidatedLeaf = firstLeaf;
-    mLastInvalidatedLeaf = lastLeaf;
-  }
-}
+  MOZ_ASSERT(firstLeaf <= lastLeaf && lastLeaf < NumLeaves());
 
-
-// When tree has been partially invalidated, from mFirstInvalidatedLeaf to
-// mLastInvalidatedLeaf, calling this method will 1) update the leaves in this interval
-// from the raw buffer data, and 2) propagate this update up the tree
-template<typename T>
-void WebGLElementArrayCacheTree<T>::Update()
-{
-  if (!mInvalidated) {
-    return;
-  }
-
-  MOZ_ASSERT(mLastInvalidatedLeaf < mNumLeaves);
-
-  size_t firstTreeIndex = TreeIndexForLeaf(mFirstInvalidatedLeaf);
-  size_t lastTreeIndex = TreeIndexForLeaf(mLastInvalidatedLeaf);
+  size_t firstTreeIndex = TreeIndexForLeaf(firstLeaf);
+  size_t lastTreeIndex = TreeIndexForLeaf(lastLeaf);
 
   // Step #1: initialize the tree leaves from plain buffer data.
   // That is, each tree leaf must be set to the max of the |sElementsPerLeaf| corresponding
@@ -409,8 +402,7 @@ void WebGLElementArrayCacheTree<T>::Update()
     // treeIndex is the index of the tree leaf we're writing, i.e. the destination index
     size_t treeIndex = firstTreeIndex;
     // srcIndex is the index in the source buffer
-    size_t srcIndex = mFirstInvalidatedLeaf * sElementsPerLeaf;
-    size_t numberOfElements = mParent.ByteSize() / sizeof(T);
+    size_t srcIndex = firstLeaf * sElementsPerLeaf;
     while (treeIndex <= lastTreeIndex) {
       T m = 0;
       size_t a = srcIndex;
@@ -426,37 +418,18 @@ void WebGLElementArrayCacheTree<T>::Update()
   // Step #2: propagate the values up the tree. This is simply a matter of walking up
   // the tree and setting each node to the max of its two children.
   while (firstTreeIndex > 1) {
-
     // move up 1 level
     firstTreeIndex = ParentNode(firstTreeIndex);
     lastTreeIndex = ParentNode(lastTreeIndex);
 
-    // fast-exit case where only one node is invalidated at the current level
+    // fast-exit case where only one node is updated at the current level
     if (firstTreeIndex == lastTreeIndex) {
       mTreeData[firstTreeIndex] = std::max(mTreeData[LeftChildNode(firstTreeIndex)], mTreeData[RightChildNode(firstTreeIndex)]);
       continue;
     }
 
-    // initialize local iteration variables: child and parent.
     size_t child = LeftChildNode(firstTreeIndex);
     size_t parent = firstTreeIndex;
-
-    // the unrolling makes this look more complicated than it is; the plain non-unrolled
-    // version is in the second while loop below
-    const int unrollSize = 8;
-    while (RightNeighborNode(parent, unrollSize - 1) <= lastTreeIndex)
-    {
-      for (int unroll = 0; unroll < unrollSize; unroll++)
-      {
-        T a = mTreeData[child];
-        child = RightNeighborNode(child);
-        T b = mTreeData[child];
-        child = RightNeighborNode(child);
-        mTreeData[parent] = std::max(a, b);
-        parent = RightNeighborNode(parent);
-      }
-    }
-    // plain non-unrolled version, used to terminate the job after the last unrolled iteration
     while (parent <= lastTreeIndex)
     {
       T a = mTreeData[child];
@@ -468,51 +441,47 @@ void WebGLElementArrayCacheTree<T>::Update()
     }
   }
 
-  mInvalidated = false;
-}
-
-WebGLElementArrayCache::~WebGLElementArrayCache() {
-  delete mUint8Tree;
-  delete mUint16Tree;
-  delete mUint32Tree;
-  free(mUntypedData);
-}
-
-bool WebGLElementArrayCache::BufferData(const void* ptr, size_t byteSize) {
-  mByteSize = byteSize;
-  if (mUint8Tree)
-    if (!mUint8Tree->ResizeToParentSize())
-      return false;
-  if (mUint16Tree)
-    if (!mUint16Tree->ResizeToParentSize())
-      return false;
-  if (mUint32Tree)
-    if (!mUint32Tree->ResizeToParentSize())
-      return false;
-  mUntypedData = realloc(mUntypedData, byteSize);
-  if (!mUntypedData)
-    return false;
-  BufferSubData(0, ptr, byteSize);
   return true;
 }
 
-void WebGLElementArrayCache::BufferSubData(size_t pos, const void* ptr, size_t updateByteSize) {
-  if (!updateByteSize) return;
-  if (ptr)
-      memcpy(static_cast<uint8_t*>(mUntypedData) + pos, ptr, updateByteSize);
-  else
-      memset(static_cast<uint8_t*>(mUntypedData) + pos, 0, updateByteSize);
-  InvalidateTrees(pos, pos + updateByteSize - 1);
+WebGLElementArrayCache::WebGLElementArrayCache() {
 }
 
-void WebGLElementArrayCache::InvalidateTrees(size_t firstByte, size_t lastByte)
+WebGLElementArrayCache::~WebGLElementArrayCache() {
+}
+
+bool WebGLElementArrayCache::BufferData(const void* ptr, size_t byteLength) {
+  if (mBytes.Length() != byteLength) {
+    if (!mBytes.SetLength(byteLength)) {
+      mBytes.SetLength(0);
+      return false;
+    }
+  }
+  MOZ_ASSERT(mBytes.Length() == byteLength);
+  return BufferSubData(0, ptr, byteLength);
+}
+
+bool WebGLElementArrayCache::BufferSubData(size_t pos, const void* ptr, size_t updateByteLength) {
+  MOZ_ASSERT(pos + updateByteLength <= mBytes.Length());
+  if (!updateByteLength)
+    return true;
+  if (ptr)
+    memcpy(mBytes.Elements() + pos, ptr, updateByteLength);
+  else
+    memset(mBytes.Elements() + pos, 0, updateByteLength);
+  return UpdateTrees(pos, pos + updateByteLength - 1);
+}
+
+bool WebGLElementArrayCache::UpdateTrees(size_t firstByte, size_t lastByte)
 {
+  bool result = true;
   if (mUint8Tree)
-    mUint8Tree->Invalidate(firstByte, lastByte);
+    result &= mUint8Tree->Update(firstByte, lastByte);
   if (mUint16Tree)
-    mUint16Tree->Invalidate(firstByte, lastByte);
+    result &= mUint16Tree->Update(firstByte, lastByte);
   if (mUint32Tree)
-    mUint32Tree->Invalidate(firstByte, lastByte);
+    result &= mUint32Tree->Update(firstByte, lastByte);
+  return result;
 }
 
 template<typename T>
@@ -535,17 +504,24 @@ WebGLElementArrayCache::Validate(uint32_t maxAllowed, size_t firstElement,
   // is exactly the max allowed value.
   MOZ_ASSERT(uint32_t(maxAllowedT) == maxAllowed);
 
-  if (!mByteSize || !countElements)
+  if (!mBytes.Length() || !countElements)
     return true;
 
-  WebGLElementArrayCacheTree<T>*& tree = TreeForType<T>::Run(this);
+  ScopedDeletePtr<WebGLElementArrayCacheTree<T>>& tree = TreeForType<T>::Value(this);
   if (!tree) {
     tree = new WebGLElementArrayCacheTree<T>(*this);
+    if (mBytes.Length()) {
+      bool valid = tree->Update(0, mBytes.Length() - 1);
+      if (!valid) {
+        // Do not assert here. This case would happen if an allocation failed.
+        // We've already settled on fallible allocations around here.
+        tree = nullptr;
+        return false;
+      }
+    }
   }
 
   size_t lastElement = firstElement + countElements - 1;
-
-  tree->Update();
 
   // fast exit path when the global maximum for the whole element array buffer
   // falls in the allowed range
@@ -561,7 +537,7 @@ WebGLElementArrayCache::Validate(uint32_t maxAllowed, size_t firstElement,
   // before calling tree->Validate, we have to validate ourselves the boundaries of the elements span,
   // to round them to the nearest multiple of sElementsPerLeaf.
   size_t firstElementAdjustmentEnd = std::min(lastElement,
-                                            tree->LastElementUnderSameLeaf(firstElement));
+                                              tree->LastElementUnderSameLeaf(firstElement));
   while (firstElement <= firstElementAdjustmentEnd) {
     const T& curData = elements[firstElement];
     UpdateUpperBound(out_upperBound, curData);
@@ -570,7 +546,7 @@ WebGLElementArrayCache::Validate(uint32_t maxAllowed, size_t firstElement,
     firstElement++;
   }
   size_t lastElementAdjustmentEnd = std::max(firstElement,
-                                           tree->FirstElementUnderSameLeaf(lastElement));
+                                             tree->FirstElementUnderSameLeaf(lastElement));
   while (lastElement >= lastElementAdjustmentEnd) {
     const T& curData = elements[lastElement];
     UpdateUpperBound(out_upperBound, curData);
@@ -613,10 +589,22 @@ WebGLElementArrayCache::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
   size_t uint16TreeSize = mUint16Tree ? mUint16Tree->SizeOfIncludingThis(aMallocSizeOf) : 0;
   size_t uint32TreeSize = mUint32Tree ? mUint32Tree->SizeOfIncludingThis(aMallocSizeOf) : 0;
   return aMallocSizeOf(this) +
-          mByteSize +
+          mBytes.SizeOfExcludingThis(aMallocSizeOf) +
           uint8TreeSize +
           uint16TreeSize +
           uint32TreeSize;
+}
+
+bool
+WebGLElementArrayCache::BeenUsedWithMultipleTypes() const
+{
+  // C++ Standard ($4.7)
+  // "If the source type is bool, the value false is converted to zero and
+  //  the value true is converted to one."
+  const int num_types_used = (mUint8Tree  != nullptr) +
+                             (mUint16Tree != nullptr) +
+                             (mUint32Tree != nullptr);
+  return num_types_used > 1;
 }
 
 } // end namespace mozilla

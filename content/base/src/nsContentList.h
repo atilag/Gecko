@@ -42,7 +42,6 @@ public:
   {
     SetIsDOMBinding();
   }
-  virtual ~nsBaseContentList();
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
 
@@ -100,6 +99,8 @@ public:
     mElements.SetCapacity(aCapacity);
   }
 protected:
+  virtual ~nsBaseContentList();
+
   /**
    * To be called from non-destructor locations (e.g. unlink) that want to
    * remove from caches.  Cacheable subclasses should override.
@@ -284,9 +285,9 @@ public:
                                  nsTArray<nsString>& aNames) MOZ_OVERRIDE;
 
   // nsContentList public methods
-  NS_HIDDEN_(uint32_t) Length(bool aDoFlush);
-  NS_HIDDEN_(nsIContent*) Item(uint32_t aIndex, bool aDoFlush);
-  NS_HIDDEN_(mozilla::dom::Element*)
+  uint32_t Length(bool aDoFlush);
+  nsIContent* Item(uint32_t aIndex, bool aDoFlush);
+  mozilla::dom::Element*
   NamedItem(const nsAString& aName, bool aDoFlush);
 
   // nsIMutationObserver

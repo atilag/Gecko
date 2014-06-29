@@ -1,4 +1,4 @@
-// -*- Mode: javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+// -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
@@ -39,50 +39,14 @@ function load_ca(ca_name) {
 const SERVER_PORT = 8888;
 
 function failingOCSPResponder() {
-  let httpServer = new HttpServer();
-  httpServer.registerPrefixHandler("/", function(request, response) {
-    do_check_true(false);
-  });
-  httpServer.identity.setPrimary("http", "www.example.com", SERVER_PORT);
-  httpServer.identity.add("http", "crl.example.com", SERVER_PORT);
-  httpServer.start(SERVER_PORT);
-  return httpServer;
+  return getFailingHttpServer(SERVER_PORT,
+                              ["www.example.com", "crl.example.com"]);
 }
 
 function start_ocsp_responder(expectedCertNames) {
-  let httpServer = new HttpServer();
-  httpServer.registerPrefixHandler("/",
-      function handleServerCallback(aRequest, aResponse) {
-        do_check_neq(aRequest.host, "crl.example.com"); // No CRL checks
-        let cert_nick = aRequest.path.slice(1, aRequest.path.length - 1);
-
-        do_check_true(expectedCertNames.length >= 1);
-        let expected_nick = expectedCertNames.shift();
-        do_check_eq(cert_nick, expected_nick);
-
-        do_print("Generating ocsp response for '" + cert_nick + "'");
-        aResponse.setStatusLine(aRequest.httpVersion, 200, "OK");
-        aResponse.setHeader("Content-Type", "application/ocsp-response");
-        // now we generate the response
-        let ocsp_request_desc = new Array();
-        ocsp_request_desc.push("good");
-        ocsp_request_desc.push(cert_nick);
-        ocsp_request_desc.push("unused_arg");
-        let arg_array = new Array();
-        arg_array.push(ocsp_request_desc);
-        let retArray = generateOCSPResponses(arg_array, "test_ev_certs");
-        let responseBody = retArray[0];
-        aResponse.bodyOutputStream.write(responseBody, responseBody.length);
-      });
-  httpServer.identity.setPrimary("http", "www.example.com", SERVER_PORT);
-  httpServer.identity.add("http", "crl.example.com", SERVER_PORT);
-  httpServer.start(SERVER_PORT);
-  return {
-    stop: function(callback) {
-      do_check_eq(expectedCertNames.length, 0);
-      httpServer.stop(callback);
-    }
-  };
+  let expectedPaths = expectedCertNames.slice();
+  return startOCSPResponder(SERVER_PORT, "www.example.com", ["crl.example.com"],
+                            "test_ev_certs", expectedCertNames, expectedPaths);
 }
 
 function check_cert_err(cert_name, expected_error) {
@@ -116,18 +80,6 @@ function run_test() {
   // setup and start ocsp responder
   Services.prefs.setCharPref("network.dns.localDomains",
                              'www.example.com, crl.example.com');
-  add_tests_in_mode(true);
-  add_tests_in_mode(false);
-  run_next_test();
-}
-
-function add_tests_in_mode(useMozillaPKIX)
-{
-  add_test(function () {
-    Services.prefs.setBoolPref("security.use_mozillapkix_verification",
-                               useMozillaPKIX);
-    run_next_test();
-  });
 
   add_test(function () {
     clearOCSPCache();
@@ -174,9 +126,7 @@ function add_tests_in_mode(useMozillaPKIX)
 
     clearOCSPCache();
     let ocspResponder = failingOCSPResponder();
-    check_cert_err("ev-valid",
-                   useMozillaPKIX ? SEC_ERROR_UNKNOWN_ISSUER
-                                  : SEC_ERROR_UNTRUSTED_ISSUER);
+    check_cert_err("ev-valid",SEC_ERROR_UNKNOWN_ISSUER);
     ocspResponder.stop(run_next_test);
   });
 
@@ -198,24 +148,15 @@ function add_tests_in_mode(useMozillaPKIX)
   });
 
   add_test(function () {
-    check_no_ocsp_requests("ev-valid",
-      useMozillaPKIX ? SEC_ERROR_POLICY_VALIDATION_FAILED
-                     : (isDebugBuild ? SEC_ERROR_REVOKED_CERTIFICATE
-                                     : SEC_ERROR_EXTENSION_NOT_FOUND));
+    check_no_ocsp_requests("ev-valid", SEC_ERROR_POLICY_VALIDATION_FAILED);
   });
 
   add_test(function () {
-    check_no_ocsp_requests("non-ev-root",
-      useMozillaPKIX ? SEC_ERROR_POLICY_VALIDATION_FAILED
-                     : (isDebugBuild ? SEC_ERROR_UNTRUSTED_ISSUER
-                                     : SEC_ERROR_EXTENSION_NOT_FOUND));
+    check_no_ocsp_requests("non-ev-root", SEC_ERROR_POLICY_VALIDATION_FAILED);
   });
 
   add_test(function () {
-    check_no_ocsp_requests("no-ocsp-url-cert",
-      useMozillaPKIX ? SEC_ERROR_POLICY_VALIDATION_FAILED
-                     : (isDebugBuild ? SEC_ERROR_REVOKED_CERTIFICATE
-                                     : SEC_ERROR_EXTENSION_NOT_FOUND));
+    check_no_ocsp_requests("no-ocsp-url-cert", SEC_ERROR_POLICY_VALIDATION_FAILED);
   });
 
 
@@ -239,13 +180,64 @@ function add_tests_in_mode(useMozillaPKIX)
                                        flags, verifiedChain, hasEVPolicy);
       do_check_eq(hasEVPolicy.value, isDebugBuild);
       do_check_eq(error,
-                  isDebugBuild ? 0
-                               : (useMozillaPKIX ? SEC_ERROR_POLICY_VALIDATION_FAILED
-                                                 : SEC_ERROR_EXTENSION_NOT_FOUND));
+                  isDebugBuild ? 0 : SEC_ERROR_POLICY_VALIDATION_FAILED);
       failingOcspResponder.stop(run_next_test);
     });
   });
 
+  // Bug 991815 old but valid intermediates are OK
+  add_test(function () {
+    clearOCSPCache();
+    let ocspResponder = startOCSPResponder(SERVER_PORT, "www.example.com", [],
+                          "test_ev_certs",
+                          isDebugBuild ? ["int-ev-valid", "ev-valid"]
+                                       : ["ev-valid"],
+                          [], [],
+                          isDebugBuild ? ["longvalidityalmostold", "good"]
+                                       : ["good"]);
+    check_ee_for_ev("ev-valid", isDebugBuild);
+    ocspResponder.stop(run_next_test);
+  });
+
+  // Bug 991815 old but valid end-entities are NOT OK for EV
+  // Unfortunatelly because of soft-fail we consider these OK for DV
+  // libpkix does not enforce the age restriction and thus EV is valid
+  add_test(function () {
+    clearOCSPCache();
+    // Since Mozilla::pkix does not consider the old amost invalid OCSP
+    // response valid, it does not cache the old response and thus
+    // makes a separate request for DV
+    let debugCertNickArray = ["int-ev-valid", "ev-valid", "ev-valid"];
+    let debugResponseArray = ["good", "longvalidityalmostold",
+                              "longvalidityalmostold"];
+    let ocspResponder = startOCSPResponder(SERVER_PORT, "www.example.com", [],
+                          "test_ev_certs",
+                          isDebugBuild ? debugCertNickArray : ["ev-valid"],
+                          [], [],
+                          isDebugBuild ? debugResponseArray
+                                       : ["longvalidityalmostold"]);
+    check_ee_for_ev("ev-valid", false);
+    ocspResponder.stop(run_next_test);
+  });
+
+  // Bug 991815 Valid but Ancient (almost two year old) responses are Not OK for
+  // EV (still OK for soft fail DV)
+  add_test(function () {
+    clearOCSPCache();
+    let debugCertNickArray = ["int-ev-valid", "ev-valid", "ev-valid"];
+    let debugResponseArray = ["good", "ancientstillvalid",
+                              "ancientstillvalid"];
+    let ocspResponder = startOCSPResponder(SERVER_PORT, "www.example.com", [],
+                          "test_ev_certs",
+                          isDebugBuild ? debugCertNickArray : ["ev-valid"],
+                          [], [],
+                          isDebugBuild ? debugResponseArray
+                                       : ["ancientstillvalid"]);
+    check_ee_for_ev("ev-valid", false);
+    ocspResponder.stop(run_next_test);
+  });
+
+  run_next_test();
 }
 
 // bug 950240: add FLAG_MUST_BE_EV to CertVerifier::VerifyCert

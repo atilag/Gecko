@@ -44,6 +44,7 @@ JSCompartment::JSCompartment(Zone *zone, const JS::CompartmentOptions &options =
     isSystem(false),
     isSelfHosting(false),
     marked(true),
+    addonId(options.addonIdOrNull()),
 #ifdef DEBUG
     firedOnNewGlobalObject(false),
 #endif
@@ -225,12 +226,11 @@ JSCompartment::checkWrapperMapAfterMovingGC()
      * wrapperMap that points into the nursery, and that the hash table entries
      * are discoverable.
      */
-    JS::shadow::Runtime *rt = JS::shadow::Runtime::asShadowRuntime(runtimeFromMainThread());
     for (WrapperMap::Enum e(crossCompartmentWrappers); !e.empty(); e.popFront()) {
         CrossCompartmentKey key = e.front().key();
-        JS_ASSERT(!IsInsideNursery(rt, key.debugger));
-        JS_ASSERT(!IsInsideNursery(rt, key.wrapped));
-        JS_ASSERT(!IsInsideNursery(rt, e.front().value().get().toGCThing()));
+        JS_ASSERT(!IsInsideNursery(key.debugger));
+        JS_ASSERT(!IsInsideNursery(key.wrapped));
+        JS_ASSERT(!IsInsideNursery(static_cast<Cell *>(e.front().value().get().toGCThing())));
 
         WrapperMap::Ptr ptr = crossCompartmentWrappers.lookup(key);
         JS_ASSERT(ptr.found() && &*ptr == &e.front());
@@ -249,20 +249,66 @@ JSCompartment::putWrapper(JSContext *cx, const CrossCompartmentKey &wrapped, con
     JS_ASSERT(!IsPoisonedPtr(wrapper.toGCThing()));
     JS_ASSERT_IF(wrapped.kind == CrossCompartmentKey::StringWrapper, wrapper.isString());
     JS_ASSERT_IF(wrapped.kind != CrossCompartmentKey::StringWrapper, wrapper.isObject());
-    bool success = crossCompartmentWrappers.put(wrapped, wrapper);
+    bool success = crossCompartmentWrappers.put(wrapped, ReadBarriered<Value>(wrapper));
 
 #ifdef JSGC_GENERATIONAL
     /* There's no point allocating wrappers in the nursery since we will tenure them anyway. */
-    Nursery &nursery = cx->nursery();
-    JS_ASSERT(!nursery.isInside(wrapper.toGCThing()));
+    JS_ASSERT(!IsInsideNursery(static_cast<gc::Cell *>(wrapper.toGCThing())));
 
-    if (success && (nursery.isInside(wrapped.wrapped) || nursery.isInside(wrapped.debugger))) {
+    if (success && (IsInsideNursery(wrapped.wrapped) || IsInsideNursery(wrapped.debugger))) {
         WrapperMapRef ref(&crossCompartmentWrappers, wrapped);
         cx->runtime()->gc.storeBuffer.putGeneric(ref);
     }
 #endif
 
     return success;
+}
+
+static JSString *
+CopyStringPure(JSContext *cx, JSString *str)
+{
+    /*
+     * Directly allocate the copy in the destination compartment, rather than
+     * first flattening it (and possibly allocating in source compartment),
+     * because we don't know whether the flattening will pay off later.
+     */
+
+    size_t len = str->length();
+    JSString *copy;
+    if (str->isLinear()) {
+        /* Only use AutoStableStringChars if the NoGC allocation fails. */
+        if (str->hasLatin1Chars()) {
+            JS::AutoCheckCannotGC nogc;
+            copy = NewStringCopyN<NoGC>(cx, str->asLinear().latin1Chars(nogc), len);
+        } else {
+            JS::AutoCheckCannotGC nogc;
+            copy = NewStringCopyNDontDeflate<NoGC>(cx, str->asLinear().twoByteChars(nogc), len);
+        }
+        if (copy)
+            return copy;
+
+        AutoStableStringChars chars(cx);
+        if (!chars.init(cx, str))
+            return nullptr;
+
+        return chars.isLatin1()
+               ? NewStringCopyN<CanGC>(cx, chars.latin1Range().start().get(), len)
+               : NewStringCopyNDontDeflate<CanGC>(cx, chars.twoByteRange().start().get(), len);
+    }
+
+    if (str->hasLatin1Chars()) {
+        ScopedJSFreePtr<Latin1Char> copiedChars;
+        if (!str->asRope().copyLatin1CharsZ(cx, copiedChars))
+            return nullptr;
+
+        return NewString<CanGC>(cx, copiedChars.forget(), len);
+    }
+
+    ScopedJSFreePtr<jschar> copiedChars;
+    if (!str->asRope().copyTwoByteCharsZ(cx, copiedChars))
+        return nullptr;
+
+    return NewString<CanGC>(cx, copiedChars.forget(), len);
 }
 
 bool
@@ -273,41 +319,28 @@ JSCompartment::wrap(JSContext *cx, JSString **strp)
 
     /* If the string is already in this compartment, we are done. */
     JSString *str = *strp;
-    if (str->zone() == zone())
+    if (str->zoneFromAnyThread() == zone())
         return true;
 
     /* If the string is an atom, we don't have to copy. */
     if (str->isAtom()) {
-        JS_ASSERT(cx->runtime()->isAtomsZone(str->zone()));
+        JS_ASSERT(str->isPermanentAtom() ||
+                  cx->runtime()->isAtomsZone(str->zone()));
         return true;
     }
 
     /* Check the cache. */
     RootedValue key(cx, StringValue(str));
-    if (WrapperMap::Ptr p = crossCompartmentWrappers.lookup(key)) {
+    if (WrapperMap::Ptr p = crossCompartmentWrappers.lookup(CrossCompartmentKey(key))) {
         *strp = p->value().get().toString();
         return true;
     }
 
-    /*
-     * No dice. Make a copy, and cache it. Directly allocate the copy in the
-     * destination compartment, rather than first flattening it (and possibly
-     * allocating in source compartment), because we don't know whether the
-     * flattening will pay off later.
-     */
-    JSString *copy;
-    if (str->hasPureChars()) {
-        copy = js_NewStringCopyN<CanGC>(cx, str->pureChars(), str->length());
-    } else {
-        ScopedJSFreePtr<jschar> copiedChars;
-        if (!str->copyNonPureCharsZ(cx, copiedChars))
-            return false;
-        copy = js_NewString<CanGC>(cx, copiedChars.forget(), str->length());
-    }
-
+    /* No dice. Make a copy, and cache it. */
+    JSString *copy = CopyStringPure(cx, str);
     if (!copy)
         return false;
-    if (!putWrapper(cx, key, StringValue(copy)))
+    if (!putWrapper(cx, CrossCompartmentKey(key), StringValue(copy)))
         return false;
 
     *strp = copy;
@@ -396,14 +429,13 @@ JSCompartment::wrap(JSContext *cx, MutableHandleObject obj, HandleObject existin
 
     // If we already have a wrapper for this value, use it.
     RootedValue key(cx, ObjectValue(*obj));
-    if (WrapperMap::Ptr p = crossCompartmentWrappers.lookup(key)) {
+    if (WrapperMap::Ptr p = crossCompartmentWrappers.lookup(CrossCompartmentKey(key))) {
         obj.set(&p->value().get().toObject());
         JS_ASSERT(obj->is<CrossCompartmentWrapperObject>());
         JS_ASSERT(obj->getParent() == global);
         return true;
     }
 
-    RootedObject proto(cx, TaggedProto::LazyProto);
     RootedObject existing(cx, existingArg);
     if (existing) {
         // Is it possible to reuse |existing|?
@@ -417,7 +449,7 @@ JSCompartment::wrap(JSContext *cx, MutableHandleObject obj, HandleObject existin
         }
     }
 
-    obj.set(cb->wrap(cx, existing, obj, proto, global, flags));
+    obj.set(cb->wrap(cx, existing, obj, global, flags));
     if (!obj)
         return false;
 
@@ -425,24 +457,7 @@ JSCompartment::wrap(JSContext *cx, MutableHandleObject obj, HandleObject existin
     // map is always directly wrapped by the value.
     JS_ASSERT(Wrapper::wrappedObject(obj) == &key.get().toObject());
 
-    return putWrapper(cx, key, ObjectValue(*obj));
-}
-
-bool
-JSCompartment::wrapId(JSContext *cx, jsid *idp)
-{
-    MOZ_ASSERT(*idp != JSID_VOID, "JSID_VOID is an out-of-band sentinel value");
-    if (JSID_IS_INT(*idp))
-        return true;
-    RootedValue value(cx, IdToValue(*idp));
-    if (!wrap(cx, &value))
-        return false;
-    RootedId id(cx);
-    if (!ValueToId<CanGC>(cx, value, &id))
-        return false;
-
-    *idp = id;
-    return true;
+    return putWrapper(cx, CrossCompartmentKey(key), ObjectValue(*obj));
 }
 
 bool
@@ -484,13 +499,30 @@ JSCompartment::wrap(JSContext *cx, MutableHandle<PropertyDescriptor> desc)
 }
 
 bool
-JSCompartment::wrap(JSContext *cx, AutoIdVector &props)
+JSCompartment::wrap(JSContext *cx, MutableHandle<PropDesc> desc)
 {
-    jsid *vector = props.begin();
-    int length = props.length();
-    for (size_t n = 0; n < size_t(length); ++n) {
-        if (!wrapId(cx, &vector[n]))
+    if (desc.isUndefined())
+        return true;
+
+    JSCompartment *comp = cx->compartment();
+
+    if (desc.hasValue()) {
+        RootedValue value(cx, desc.value());
+        if (!comp->wrap(cx, &value))
             return false;
+        desc.setValue(value);
+    }
+    if (desc.hasGet()) {
+        RootedValue get(cx, desc.getterValue());
+        if (!comp->wrap(cx, &get))
+            return false;
+        desc.setGetter(get);
+    }
+    if (desc.hasSet()) {
+        RootedValue set(cx, desc.setterValue());
+        if (!comp->wrap(cx, &set))
+            return false;
+        desc.setSetter(set);
     }
     return true;
 }
@@ -569,17 +601,17 @@ JSCompartment::sweep(FreeOp *fop, bool releaseTypes)
         savedStacks_.sweep(rt);
 
         if (global_ && IsObjectAboutToBeFinalized(global_.unsafeGet()))
-            global_ = nullptr;
+            global_.set(nullptr);
 
         if (selfHostingScriptSource &&
             IsObjectAboutToBeFinalized((JSObject **) selfHostingScriptSource.unsafeGet()))
         {
-            selfHostingScriptSource = nullptr;
+            selfHostingScriptSource.set(nullptr);
         }
 
 #ifdef JS_ION
         if (jitCompartment_)
-            jitCompartment_->sweep(fop);
+            jitCompartment_->sweep(fop, this);
 #endif
 
         /*
@@ -645,9 +677,7 @@ JSCompartment::purge()
 void
 JSCompartment::clearTables()
 {
-    global_ = nullptr;
-
-    regExps.clearTables();
+    global_.set(nullptr);
 
     // No scripts should have run in this compartment. This is used when
     // merging a compartment that has been used off thread into another
@@ -660,6 +690,7 @@ JSCompartment::clearTables()
     JS_ASSERT(!debugScopes);
     JS_ASSERT(!gcWeakMapList);
     JS_ASSERT(enumerators->next() == enumerators);
+    JS_ASSERT(regExps.empty());
 
     types.clearTables();
     if (baseShapes.initialized())

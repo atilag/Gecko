@@ -21,6 +21,7 @@
 #include "nsIFilePicker.h"
 #include "nsIContentPrefService2.h"
 #include "mozilla/Decimal.h"
+#include "nsContentUtils.h"
 
 class nsDOMFileList;
 class nsIRadioGroupContainer;
@@ -39,6 +40,9 @@ class Date;
 class DirPickerFileListBuilderTask;
 
 class UploadLastDir MOZ_FINAL : public nsIObserver, public nsSupportsWeakReference {
+
+  ~UploadLastDir() {}
+
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIOBSERVER
@@ -65,13 +69,13 @@ public:
 
   class ContentPrefCallback MOZ_FINAL : public nsIContentPrefCallback2
   {
-    public:
+    virtual ~ContentPrefCallback()
+    { }
+
+  public:
     ContentPrefCallback(nsIFilePicker* aFilePicker, nsIFilePickerShownCallback* aFpCallback)
     : mFilePicker(aFilePicker)
     , mFpCallback(aFpCallback)
-    { }
-
-    virtual ~ContentPrefCallback()
     { }
 
     NS_DECL_ISUPPORTS
@@ -101,7 +105,7 @@ public:
   using nsIConstraintValidation::Validity;
   using nsGenericHTMLFormElementWithState::GetForm;
 
-  HTMLInputElement(already_AddRefed<nsINodeInfo>& aNodeInfo,
+  HTMLInputElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo,
                    mozilla::dom::FromParser aFromParser);
   virtual ~HTMLInputElement();
 
@@ -234,7 +238,7 @@ public:
    */
   already_AddRefed<nsIDOMHTMLInputElement> GetSelectedRadioButton();
 
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
+  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(HTMLInputElement,
                                            nsGenericHTMLFormElementWithState)
@@ -302,21 +306,6 @@ public:
    * filter is added, which is the concatenation of all valid filters.
    */
   void SetFilePickerFiltersFromAccept(nsIFilePicker* filePicker);
-
-  /**
-   * Returns the filter which should be used for the file picker according to
-   * the accept attribute value.
-   *
-   * See:
-   * http://dev.w3.org/html5/spec/forms.html#attr-input-accept
-   *
-   * @return Filter to use on the file picker with AppendFilters, 0 if none.
-   *
-   * @note You should not call this function if the element has no @accept.
-   * @note This will only filter for one type of file. If more than one filter
-   * is specified by the accept attribute they will *all* be ignored.
-   */
-  int32_t GetFilterFromAccept();
 
   /**
    * The form might need to request an update of the UI bits
@@ -592,7 +581,7 @@ public:
   void SetType(const nsAString& aValue, ErrorResult& aRv)
   {
     SetHTMLAttr(nsGkAtoms::type, aValue, aRv);
-    if (aValue.Equals(NS_LITERAL_STRING("number"))) {
+    if (aValue.EqualsLiteral("number")) {
       // For NS_FORM_INPUT_NUMBER we rely on having frames to process key
       // events. Make sure we have them in case someone changes the type of
       // this element to "number" and then expects to be able to send key
@@ -1283,6 +1272,7 @@ protected:
    * @see nsIFormControl.h (specifically NS_FORM_INPUT_*)
    */
   uint8_t                  mType;
+  nsContentUtils::AutocompleteAttrState mAutocompleteAttrState;
   bool                     mDisabledChanged     : 1;
   bool                     mValueChanged        : 1;
   bool                     mCheckedChanged      : 1;
@@ -1377,12 +1367,12 @@ private:
   class nsFilePickerShownCallback
     : public nsIFilePickerShownCallback
   {
-  public:
-    nsFilePickerShownCallback(HTMLInputElement* aInput,
-                              nsIFilePicker* aFilePicker);
     virtual ~nsFilePickerShownCallback()
     { }
 
+  public:
+    nsFilePickerShownCallback(HTMLInputElement* aInput,
+                              nsIFilePicker* aFilePicker);
     NS_DECL_ISUPPORTS
 
     NS_IMETHOD Done(int16_t aResult) MOZ_OVERRIDE;

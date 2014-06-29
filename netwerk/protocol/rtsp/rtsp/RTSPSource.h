@@ -54,6 +54,7 @@ public:
     void seek(uint64_t timeUs);
     void resume();
     void suspend();
+    void playbackEnded();
 
     status_t feedMoreTSData();
 
@@ -71,13 +72,14 @@ protected:
 
 private:
     enum {
-        kWhatNotify          = 'noti',
-        kWhatDisconnect      = 'disc',
-        kWhatPerformSeek     = 'seek',
-        kWhatPerformPlay     = 'play',
-        kWhatPerformPause    = 'paus',
-        kWhatPerformResume   = 'resu',
-        kWhatPerformSuspend  = 'susp',
+        kWhatNotify               = 'noti',
+        kWhatDisconnect           = 'disc',
+        kWhatPerformSeek          = 'seek',
+        kWhatPerformPlay          = 'play',
+        kWhatPerformPause         = 'paus',
+        kWhatPerformResume        = 'resu',
+        kWhatPerformSuspend       = 'susp',
+        kWhatPerformPlaybackEnded = 'ende',
     };
 
     enum State {
@@ -140,7 +142,11 @@ private:
 
     void performSuspend();
 
+    void performPlaybackEnded();
+
     void onTrackDataAvailable(size_t trackIndex);
+
+    void onTrackEndOfStream(size_t trackIndex);
 
     nsMainThreadPtrHandle<nsIStreamingProtocolListener> mListener;
     int mPrintCount;

@@ -35,23 +35,8 @@ endif
 USE_AUTOTARGETS_MK = 1
 include $(topsrcdir)/config/makefiles/makeutils.mk
 
-# Only build with Pymake (not GNU make) on Windows.
-ifeq ($(HOST_OS_ARCH),WINNT)
-ifndef L10NBASEDIR
-ifndef .PYMAKE
-$(error Pymake is required to build on Windows. Run |./mach build| to \
-automatically use pymake or invoke pymake directly via \
-|python build/pymake/make.py|.)
-endif
-endif
-endif
-
 ifdef REBUILD_CHECK
-ifdef .PYMAKE
-REPORT_BUILD = @%rebuild_check rebuild_check $@ $^
-else
 REPORT_BUILD = $(info $(shell $(PYTHON) $(MOZILLA_DIR)/config/rebuild_check.py $@ $^))
-endif
 else
 REPORT_BUILD = $(info $(notdir $@))
 endif
@@ -66,15 +51,11 @@ endif
 # ELOG prints out failed command when building silently (gmake -s). Pymake
 # prints out failed commands anyway, so ELOG just makes things worse by
 # forcing shell invocations.
-ifndef .PYMAKE
 ifneq (,$(findstring s, $(filter-out --%, $(MAKEFLAGS))))
   ELOG := $(EXEC) sh $(BUILD_TOOLS)/print-failed-commands.sh
 else
   ELOG :=
 endif # -s
-else
-  ELOG :=
-endif # ifndef .PYMAKE
 
 _VPATH_SRCS = $(abspath $<)
 
@@ -238,7 +219,7 @@ endif
 COMPILE_CFLAGS += $(COMPILE_PDB_FLAG)
 COMPILE_CXXFLAGS += $(COMPILE_PDB_FLAG)
 
-LINK_PDBFILE = $(basename $(@F)).pdb
+LINK_PDBFILE ?= $(basename $(@F)).pdb
 ifdef MOZ_DEBUG
 CODFILE=$(basename $(@F)).cod
 endif
@@ -509,6 +490,10 @@ endif # AIX
 ifeq ($(OS_ARCH),Linux)
 ifdef IS_COMPONENT
 EXTRA_DSO_LDOPTS += -Wl,-Bsymbolic
+endif
+ifdef LD_VERSION_SCRIPT
+EXTRA_DSO_LDOPTS += -Wl,--version-script,$(LD_VERSION_SCRIPT)
+EXTRA_DEPS += $(LD_VERSION_SCRIPT)
 endif
 endif
 
@@ -1020,25 +1005,113 @@ $(filter %.s,$(CPPSRCS:%.cc=%.s)): %.s: %.cc $(call mkdir_deps,$(MDDEPDIR))
 	$(REPORT_BUILD)
 	$(CCC) -S $(COMPILE_CXXFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
 
+$(filter %.s,$(CPPSRCS:%.cxx=%.s)): %.s: %.cpp $(call mkdir_deps,$(MDDEPDIR))
+	$(REPORT_BUILD)
+	$(CCC) -S $(COMPILE_CXXFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
+
 $(filter %.s,$(CSRCS:%.c=%.s)): %.s: %.c $(call mkdir_deps,$(MDDEPDIR))
 	$(REPORT_BUILD)
 	$(CC) -S $(COMPILE_CFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
 
-$(filter %.i,$(CPPSRCS:%.cpp=%.i)): %.i: %.cpp $(call mkdir_deps,$(MDDEPDIR))
+ifneq (,$(filter %.i,$(MAKECMDGOALS)))
+# Call as $(call _group_srcs,extension,$(SRCS)) - this will create a list
+# of the full sources, as well as the $(notdir) version. So:
+#   foo.cpp sub/bar.cpp
+# becomes:
+#   foo.cpp sub/bar.cpp bar.cpp
+#
+# This way we can match both 'make sub/bar.i' and 'make bar.i'
+_group_srcs = $(sort $(patsubst %.$1,%.i,$(filter %.$1,$2 $(notdir $2))))
+_PREPROCESSED_CPP_FILES := $(call _group_srcs,cpp,$(CPPSRCS))
+_PREPROCESSED_CC_FILES := $(call _group_srcs,cc,$(CPPSRCS))
+_PREPROCESSED_CXX_FILES := $(call _group_srcs,cxx,$(CPPSRCS))
+_PREPROCESSED_C_FILES := $(call _group_srcs,c,$(CSRCS))
+_PREPROCESSED_CMM_FILES := $(call _group_srcs,mm,$(CMMSRCS))
+
+# Hack up VPATH so we can reach the sources. Eg: 'make Parser.i' may need to
+# reach $(srcdir)/frontend/Parser.i
+VPATH += $(addprefix $(srcdir)/,$(sort $(dir $(CPPSRCS) $(CSRCS) $(CMMSRCS))))
+
+# Make preprocessed files PHONY so they are always executed, since they are
+# manual targets and we don't necessarily write to $@.
+.PHONY: $(_PREPROCESSED_CPP_FILES) $(_PREPROCESSED_CC_FILES) $(_PREPROCESSED_CXX_FILES) $(_PREPROCESSED_C_FILES) $(_PREPROCESSED_CMM_FILES)
+
+$(_PREPROCESSED_CPP_FILES): %.i: %.cpp $(call mkdir_deps,$(MDDEPDIR))
 	$(REPORT_BUILD)
+	$(addprefix $(MKDIR) -p ,$(filter-out .,$(@D)))
 	$(CCC) -C $(PREPROCESS_OPTION)$@ $(COMPILE_CXXFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
 
-$(filter %.i,$(CPPSRCS:%.cc=%.i)): %.i: %.cc $(call mkdir_deps,$(MDDEPDIR))
+$(_PREPROCESSED_CC_FILES): %.i: %.cc $(call mkdir_deps,$(MDDEPDIR))
 	$(REPORT_BUILD)
+	$(addprefix $(MKDIR) -p ,$(filter-out .,$(@D)))
 	$(CCC) -C $(PREPROCESS_OPTION)$@ $(COMPILE_CXXFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
 
-$(filter %.i,$(CSRCS:%.c=%.i)): %.i: %.c $(call mkdir_deps,$(MDDEPDIR))
+$(_PREPROCESSED_CXX_FILES): %.i: %.cxx $(call mkdir_deps,$(MDDEPDIR))
 	$(REPORT_BUILD)
+	$(addprefix $(MKDIR) -p ,$(filter-out .,$(@D)))
+	$(CCC) -C $(PREPROCESS_OPTION)$@ $(COMPILE_CXXFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
+
+$(_PREPROCESSED_C_FILES): %.i: %.c $(call mkdir_deps,$(MDDEPDIR))
+	$(REPORT_BUILD)
+	$(addprefix $(MKDIR) -p ,$(filter-out .,$(@D)))
 	$(CC) -C $(PREPROCESS_OPTION)$@ $(COMPILE_CFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
 
-$(filter %.i,$(CMMSRCS:%.mm=%.i)): %.i: %.mm $(call mkdir_deps,$(MDDEPDIR))
+$(_PREPROCESSED_CMM_FILES): %.i: %.mm $(call mkdir_deps,$(MDDEPDIR))
 	$(REPORT_BUILD)
+	$(addprefix $(MKDIR) -p ,$(filter-out .,$(@D)))
 	$(CCC) -C $(PREPROCESS_OPTION)$@ $(COMPILE_CXXFLAGS) $(COMPILE_CMMFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
+
+# Default to pre-processing the actual unified file. This can be overridden
+# at the command-line to pre-process only the individual source file.
+PP_UNIFIED ?= 1
+
+# PP_REINVOKE gets set on the sub-make to prevent us from going in an
+# infinite loop if the filename doesn't exist in the unified source files.
+ifndef PP_REINVOKE
+
+MATCH_cpp = \(cpp\|cc|cxx\)
+UPPER_c = C
+UPPER_cpp = CPP
+UPPER_mm = CMM
+
+# When building with PP_UNIFIED=0, we also have to look in the Unified files to
+# find a matching pathname.
+_get_all_sources = $1 $(if $(filter Unified%,$1),$(shell sed -n 's/\#include "\(.*\)"$$/\1/p' $(filter Unified%,$1)))
+all_cpp_sources := $(call _get_all_sources,$(CPPSRCS))
+all_mm_sources := $(call _get_all_sources,$(CMMSRCS))
+all_c_sources := $(call _get_all_sources,$(CSRCS))
+all_sources := $(all_cpp_sources) $(all_cmm_sources) $(all_c_sources)
+
+# The catch-all %.i rule runs when we pass in a .i filename that doesn't match
+# one of the *SRCS variables. The two code paths depend on whether or not
+# we are requesting a unified file (PP_UNIFIED=1, the default) or not:
+#
+# PP_UNIFIED=1:
+#  - Look for it in any of the Unified files, and re-exec make with
+#    Unified_foo0.i as the target. This gets us the full unified preprocessed
+#    file.
+#
+# PP_UNIFIED=0:
+#  - If the .i filename is in *SRCS, or in a Unified filename, then we re-exec
+#    make with that filename as the target. The *SRCS variables are modified
+#    to have the Unified sources appended to them so that the static pattern
+#    rules will match.
+%.i: FORCE
+ifeq ($(PP_UNIFIED),1)
+	@$(MAKE) PP_REINVOKE=1 \
+	    $(or $(addsuffix .i, \
+              $(foreach type,c cpp mm, \
+	        $(if $(filter Unified%,$($(UPPER_$(type))SRCS)), \
+	          $(shell grep -l '#include "\(.*/\)\?$(basename $@).$(or $(MATCH_$(type)),$(type))"' Unified*.$(type) | sed 's/\.$(type)$$//') \
+            ))),$(error "File not found for preprocessing: $@"))
+else
+	@$(MAKE) PP_REINVOKE=1 $@ \
+	    $(foreach type,c cpp mm,$(UPPER_$(type))SRCS="$(all_$(type)_sources)")
+endif
+
+endif
+
+endif
 
 $(RESFILE): %.res: %.rc
 	$(REPORT_BUILD)
@@ -1050,9 +1123,7 @@ else
 endif
 
 # Cancel GNU make built-in implicit rules
-ifndef .PYMAKE
 MAKEFLAGS += -r
-endif
 
 ifneq (,$(filter WINNT,$(OS_ARCH)))
 SEP := ;

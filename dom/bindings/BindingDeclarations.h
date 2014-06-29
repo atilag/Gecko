@@ -70,7 +70,7 @@ public:
   // The context that this returns is not guaranteed to be in the compartment of
   // the object returned from Get(), in fact it's generally in the caller's
   // compartment.
-  JSContext* GetContext() const
+  JSContext* Context() const
   {
     return mCx;
   }
@@ -362,19 +362,14 @@ public:
 #endif
   {}
 
-  operator T&() {
+  // This is no worse than get() in terms of const handling.
+  operator T&() const {
     MOZ_ASSERT(inited);
     MOZ_ASSERT(ptr, "NonNull<T> was set to null");
     return *ptr;
   }
 
-  operator const T&() const {
-    MOZ_ASSERT(inited);
-    MOZ_ASSERT(ptr, "NonNull<T> was set to null");
-    return *ptr;
-  }
-
-  operator T*() {
+  operator T*() const {
     MOZ_ASSERT(inited);
     MOZ_ASSERT(ptr, "NonNull<T> was set to null");
     return ptr;

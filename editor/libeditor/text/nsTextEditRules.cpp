@@ -58,17 +58,28 @@ using namespace mozilla::dom;
  ********************************************************/
 
 nsTextEditRules::nsTextEditRules()
-: mEditor(nullptr)
-, mPasswordText()
-, mPasswordIMEText()
-, mPasswordIMEIndex(0)
-, mActionNesting(0)
-, mLockRulesSniffing(false)
-, mDidExplicitlySetInterline(false)
-, mTheAction(EditAction::none)
-, mLastStart(0)
-, mLastLength(0)
 {
+  InitFields();
+}
+
+void
+nsTextEditRules::InitFields()
+{
+  mEditor = nullptr;
+  mPasswordText.Truncate();
+  mPasswordIMEText.Truncate();
+  mPasswordIMEIndex = 0;
+  mBogusNode = nullptr;
+  mCachedSelectionNode = nullptr;
+  mCachedSelectionOffset = 0;
+  mActionNesting = 0;
+  mLockRulesSniffing = false;
+  mDidExplicitlySetInterline = false;
+  mDeleteBidiImmediately = false;
+  mTheAction = EditAction::none;
+  mTimer = nullptr;
+  mLastStart = 0;
+  mLastLength = 0;
 }
 
 nsTextEditRules::~nsTextEditRules()
@@ -102,6 +113,8 @@ NS_IMETHODIMP
 nsTextEditRules::Init(nsPlaintextEditor *aEditor)
 {
   if (!aEditor) { return NS_ERROR_NULL_POINTER; }
+
+  InitFields();
 
   mEditor = aEditor;  // we hold a non-refcounted reference back to our editor
   nsCOMPtr<nsISelection> selection;
@@ -1234,10 +1247,20 @@ nsTextEditRules::TruncateInsertionIfNeeded(Selection* aSelection,
     }
     else
     {
-      int32_t inCount = aOutString->Length();
-      if (inCount + resultingDocLength > aMaxLength)
-      {
-        aOutString->Truncate(aMaxLength - resultingDocLength);
+      int32_t oldLength = aOutString->Length();
+      if (oldLength + resultingDocLength > aMaxLength) {
+        int32_t newLength = aMaxLength - resultingDocLength;
+        MOZ_ASSERT(newLength > 0);
+        char16_t newLastChar = aOutString->CharAt(newLength - 1);
+        char16_t removingFirstChar = aOutString->CharAt(newLength);
+        // Don't separate the string between a surrogate pair.
+        if (NS_IS_HIGH_SURROGATE(newLastChar) &&
+            NS_IS_LOW_SURROGATE(removingFirstChar)) {
+          newLength--;
+        }
+        // XXX What should we do if we're removing IVS and its preceding
+        //     character won't be removed?
+        aOutString->Truncate(newLength);
         if (aTruncated) {
           *aTruncated = true;
         }

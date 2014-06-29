@@ -16,6 +16,7 @@
 
 #include "gfxColor.h"
 #include "gfxMatrix.h"
+#include "gfxUtils.h"
 #include "gfxASurface.h"
 #include "gfxPattern.h"
 #include "gfxPlatform.h"
@@ -155,7 +156,7 @@ gfxContext::OriginalSurface()
         return mSurface;
     }
 
-    if (mOriginalDT && mOriginalDT->GetType() == BackendType::CAIRO) {
+    if (mOriginalDT && mOriginalDT->GetBackendType() == BackendType::CAIRO) {
         cairo_surface_t *s =
             (cairo_surface_t*)mOriginalDT->GetNativeSurface(NativeSurfaceType::CAIRO_SURFACE);
         if (s) {
@@ -182,7 +183,7 @@ gfxContext::CurrentSurface(gfxFloat *dx, gfxFloat *dy)
         cairo_surface_get_device_offset(s, dx, dy);
     return gfxASurface::Wrap(s);
   } else {
-    if (mDT->GetType() == BackendType::CAIRO) {
+    if (mDT->GetBackendType() == BackendType::CAIRO) {
         cairo_surface_t *s =
             (cairo_surface_t*)mDT->GetNativeSurface(NativeSurfaceType::CAIRO_SURFACE);
         if (s) {
@@ -209,7 +210,7 @@ gfxContext::GetCairo()
     return mCairo;
   }
 
-  if (mDT->GetType() == BackendType::CAIRO) {
+  if (mDT->GetBackendType() == BackendType::CAIRO) {
     cairo_t *ctx =
       (cairo_t*)mDT->GetNativeSurface(NativeSurfaceType::CAIRO_CONTEXT);
     if (ctx) {
@@ -308,7 +309,7 @@ void gfxContext::SetPath(gfxPath* path)
         cairo_append_path(mCairo, path->mPath);
   } else {
     MOZ_ASSERT(path->mMoz2DPath, "Can't mix cairo and azure paths!");
-    MOZ_ASSERT(path->mMoz2DPath->GetBackendType() == mDT->GetType());
+    MOZ_ASSERT(path->mMoz2DPath->GetBackendType() == mDT->GetBackendType());
     mPath = path->mMoz2DPath;
     mPathBuilder = nullptr;
     mPathIsRect = false;
@@ -354,7 +355,9 @@ gfxContext::Stroke()
 void
 gfxContext::Fill()
 {
-  PROFILER_LABEL("gfxContext", "Fill");
+  PROFILER_LABEL("gfxContext", "Fill",
+    js::ProfileEntry::Category::GRAPHICS);
+
   if (mCairo) {
     cairo_fill_preserve(mCairo);
   } else {
@@ -1504,7 +1507,9 @@ gfxContext::Mask(gfxPattern *pattern)
 void
 gfxContext::Mask(gfxASurface *surface, const gfxPoint& offset)
 {
-  PROFILER_LABEL("gfxContext", "Mask");
+  PROFILER_LABEL("gfxContext", "Mask",
+    js::ProfileEntry::Category::GRAPHICS);
+
   if (mCairo) {
     cairo_mask_surface(mCairo, surface->CairoSurface(), offset.x, offset.y);
   } else {
@@ -1538,7 +1543,9 @@ gfxContext::Mask(SourceSurface *surface, const Point& offset)
 void
 gfxContext::Paint(gfxFloat alpha)
 {
-  PROFILER_LABEL("gfxContext", "Paint");
+  PROFILER_LABEL("gfxContext", "Paint",
+    js::ProfileEntry::Category::GRAPHICS);
+
   if (mCairo) {
     cairo_paint_with_alpha(mCairo, alpha);
   } else {
@@ -1951,34 +1958,31 @@ gfxContext::RoundedRectangle(const gfxRect& rect,
 #ifdef MOZ_DUMP_PAINTING
 void
 gfxContext::WriteAsPNG(const char* aFile)
-{ 
-  nsRefPtr<gfxASurface> surf = CurrentSurface();
-  if (surf) {
-    surf->WriteAsPNG(aFile);
+{
+  if (mDT) {
+    gfxUtils::WriteAsPNG(mDT, aFile);
   } else {
-    NS_WARNING("No surface found!");
+    NS_WARNING("No DrawTarget found!");
   }
 }
 
 void 
-gfxContext::DumpAsDataURL()
-{ 
-  nsRefPtr<gfxASurface> surf = CurrentSurface();
-  if (surf) {
-    surf->DumpAsDataURL();
+gfxContext::DumpAsDataURI()
+{
+  if (mDT) {
+    gfxUtils::DumpAsDataURI(mDT);
   } else {
-    NS_WARNING("No surface found!");
+    NS_WARNING("No DrawTarget found!");
   }
 }
 
 void 
-gfxContext::CopyAsDataURL()
-{ 
-  nsRefPtr<gfxASurface> surf = CurrentSurface();
-  if (surf) {
-    surf->CopyAsDataURL();
+gfxContext::CopyAsDataURI()
+{
+  if (mDT) {
+    gfxUtils::CopyAsDataURI(mDT);
   } else {
-    NS_WARNING("No surface found!");
+    NS_WARNING("No DrawTarget found!");
   }
 }
 #endif
@@ -2242,6 +2246,12 @@ gfxContext::GetAzureDeviceSpaceClipBounds()
   return rect;
 }
 
+Point
+gfxContext::GetDeviceOffset() const
+{
+  return CurrentState().deviceOffset;
+}
+
 Matrix
 gfxContext::GetDeviceTransform() const
 {
@@ -2297,7 +2307,7 @@ gfxContext::GetRoundOffsetsToPixels(bool *aRoundX, bool *aRoundY)
     // AxisAlignedTransforms, but we leave things simple.
     // Not much point rounding if a matrix will mess things up anyway.
     // Also return false for non-cairo contexts.
-    if (CurrentMatrix().HasNonTranslation() || mDT) {
+    if (CurrentMatrix().HasNonTranslation()) {
         *aRoundY = false;
         return;
     }

@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+   /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -14,7 +14,10 @@
 #include "mozilla/dom/CanvasRenderingContext2D.h"
 #include "mozilla/dom/HTMLCanvasElementBinding.h"
 #include "mozilla/dom/UnionTypes.h"
+#include "mozilla/dom/MouseEvent.h"
+#include "mozilla/EventDispatcher.h"
 #include "mozilla/gfx/Rect.h"
+#include "mozilla/MouseEvents.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
 #include "nsAttrValueInlines.h"
@@ -22,12 +25,12 @@
 #include "nsDisplayList.h"
 #include "nsDOMFile.h"
 #include "nsDOMJSUtils.h"
-#include "nsFrameManager.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsITimer.h"
 #include "nsIWritablePropertyBag2.h"
 #include "nsIXPConnect.h"
 #include "nsJSUtils.h"
+#include "nsLayoutUtils.h"
 #include "nsMathUtils.h"
 #include "nsNetUtil.h"
 #include "nsStreamUtils.h"
@@ -112,7 +115,7 @@ HTMLCanvasPrintState::NotifyDone()
 
 // ---------------------------------------------------------------------------
 
-HTMLCanvasElement::HTMLCanvasElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+HTMLCanvasElement::HTMLCanvasElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo),
     mWriteOnly(false)
 {
@@ -286,6 +289,27 @@ HTMLCanvasElement::CopyInnerTo(Element* aDest)
     }
   }
   return rv;
+}
+
+nsresult HTMLCanvasElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
+{
+  if (aVisitor.mEvent->eventStructType == NS_MOUSE_EVENT) {
+    WidgetMouseEventBase* evt = (WidgetMouseEventBase*)aVisitor.mEvent;
+    if (mCurrentContext) {
+      nsIFrame *frame = GetPrimaryFrame();
+      if (!frame)
+        return NS_OK;
+      nsPoint ptInRoot = nsLayoutUtils::GetEventCoordinatesRelativeTo(evt, frame);
+      nsRect paddingRect = frame->GetContentRectRelativeToSelf();
+      Point hitpoint;
+      hitpoint.x = (ptInRoot.x - paddingRect.x) / AppUnitsPerCSSPixel();
+      hitpoint.y = (ptInRoot.y - paddingRect.y) / AppUnitsPerCSSPixel();
+
+      evt->region = mCurrentContext->GetHitRegion(hitpoint);
+      aVisitor.mCanHandle = true;
+    }
+  }
+  return nsGenericHTMLElement::PreHandleEvent(aVisitor);
 }
 
 nsChangeHint
@@ -590,8 +614,9 @@ HTMLCanvasElement::MozGetAsFileImpl(const nsAString& aName,
   }
 
   // The DOMFile takes ownership of the buffer
-  nsRefPtr<nsDOMMemoryFile> file =
-    new nsDOMMemoryFile(imgData, (uint32_t)imgSize, aName, type, PR_Now());
+  nsRefPtr<DOMFile> file =
+    DOMFile::CreateMemoryFile(imgData, (uint32_t)imgSize, aName, type,
+                              PR_Now());
 
   file.forget(aResult);
   return NS_OK;
@@ -745,7 +770,7 @@ HTMLCanvasElement::MozGetIPCContext(const nsAString& aContextId,
   }
 
   // We only support 2d shmem contexts for now.
-  if (!aContextId.Equals(NS_LITERAL_STRING("2d")))
+  if (!aContextId.EqualsLiteral("2d"))
     return NS_ERROR_INVALID_ARG;
 
   if (mCurrentContextId.IsEmpty()) {

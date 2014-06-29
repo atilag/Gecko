@@ -5,8 +5,8 @@
 
 #include "URL.h"
 
+#include "nsDOMFile.h"
 #include "nsIDocument.h"
-#include "nsIDOMFile.h"
 #include "nsIIOService.h"
 #include "nsPIDOMWindow.h"
 
@@ -67,18 +67,18 @@ private:
 class CreateURLRunnable : public WorkerMainThreadRunnable
 {
 private:
-  nsIDOMBlob* mBlob;
+  DOMFileImpl* mBlobImpl;
   nsString& mURL;
 
 public:
-  CreateURLRunnable(WorkerPrivate* aWorkerPrivate, nsIDOMBlob* aBlob,
+  CreateURLRunnable(WorkerPrivate* aWorkerPrivate, DOMFileImpl* aBlobImpl,
                     const mozilla::dom::objectURLOptions& aOptions,
                     nsString& aURL)
   : WorkerMainThreadRunnable(aWorkerPrivate),
-    mBlob(aBlob),
+    mBlobImpl(aBlobImpl),
     mURL(aURL)
   {
-    MOZ_ASSERT(aBlob);
+    MOZ_ASSERT(aBlobImpl);
   }
 
   bool
@@ -106,7 +106,7 @@ public:
     nsCString url;
     nsresult rv = nsHostObjectProtocolHandler::AddDataEntry(
         NS_LITERAL_CSTRING(BLOBURI_SCHEME),
-        mBlob, principal, url);
+        mBlobImpl, principal, url);
 
     if (NS_FAILED(rv)) {
       NS_WARNING("Failed to add data entry for the blob!");
@@ -475,7 +475,7 @@ URL*
 URL::Constructor(const GlobalObject& aGlobal, const nsAString& aUrl,
                  URL& aBase, ErrorResult& aRv)
 {
-  JSContext* cx = aGlobal.GetContext();
+  JSContext* cx = aGlobal.Context();
   WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(cx);
 
   nsRefPtr<ConstructorRunnable> runnable =
@@ -499,7 +499,7 @@ URL*
 URL::Constructor(const GlobalObject& aGlobal, const nsAString& aUrl,
                  const nsAString& aBase, ErrorResult& aRv)
 {
-  JSContext* cx = aGlobal.GetContext();
+  JSContext* cx = aGlobal.Context();
   WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(cx);
 
   nsRefPtr<ConstructorRunnable> runnable =
@@ -844,7 +844,7 @@ URL::CreateObjectURL(const GlobalObject& aGlobal, JSObject* aBlob,
                      const mozilla::dom::objectURLOptions& aOptions,
                      nsString& aResult, mozilla::ErrorResult& aRv)
 {
-  JSContext* cx = aGlobal.GetContext();
+  JSContext* cx = aGlobal.Context();
   WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(cx);
 
   nsCOMPtr<nsIDOMBlob> blob = file::GetDOMBlobFromJSObject(aBlob);
@@ -857,8 +857,10 @@ URL::CreateObjectURL(const GlobalObject& aGlobal, JSObject* aBlob,
     return;
   }
 
+  DOMFile* domBlob = static_cast<DOMFile*>(blob.get());
+
   nsRefPtr<CreateURLRunnable> runnable =
-    new CreateURLRunnable(workerPrivate, blob, aOptions, aResult);
+    new CreateURLRunnable(workerPrivate, domBlob->Impl(), aOptions, aResult);
 
   if (!runnable->Dispatch(cx)) {
     JS_ReportPendingException(cx);
@@ -878,7 +880,7 @@ URL::CreateObjectURL(const GlobalObject& aGlobal, JSObject& aBlob,
 void
 URL::RevokeObjectURL(const GlobalObject& aGlobal, const nsAString& aUrl)
 {
-  JSContext* cx = aGlobal.GetContext();
+  JSContext* cx = aGlobal.Context();
   WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(cx);
 
   nsRefPtr<RevokeURLRunnable> runnable =

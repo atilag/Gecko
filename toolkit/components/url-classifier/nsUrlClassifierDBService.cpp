@@ -773,9 +773,9 @@ public:
     , mCallback(c)
     {}
 
+private:
   ~nsUrlClassifierLookupCallback();
 
-private:
   nsresult HandleResults();
 
   nsRefPtr<nsUrlClassifierDBService> mDBService;
@@ -987,6 +987,8 @@ public:
     {}
 
 private:
+  ~nsUrlClassifierClassifyCallback() {}
+
   nsCOMPtr<nsIURIClassifierCallback> mCallback;
   bool mCheckMalware;
   bool mCheckPhishing;
@@ -1207,7 +1209,7 @@ nsUrlClassifierDBService::Classify(nsIPrincipal* aPrincipal,
   nsAutoCString phishing;
   Preferences::GetCString(PHISH_TABLE_PREF, &phishing);
   if (!phishing.IsEmpty()) {
-    tables.Append(",");
+    tables.Append(',');
     tables.Append(phishing);
   }
   nsresult rv = LookupURI(aPrincipal, tables, callback, false, result);

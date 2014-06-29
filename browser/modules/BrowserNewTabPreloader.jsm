@@ -35,7 +35,7 @@ const TOPIC_TIMER_CALLBACK = "timer-callback";
 const TOPIC_DELAYED_STARTUP = "browser-delayed-startup-finished";
 const TOPIC_XUL_WINDOW_CLOSED = "xul-window-destroyed";
 
-const FRAME_SCRIPT_URL = "chrome://browser/content/newtab/preloaderContent.js";
+const BROWSER_CONTENT_SCRIPT = "chrome://browser/content/content.js";
 
 function createTimer(obj, delay) {
   let timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
@@ -63,7 +63,6 @@ this.BrowserNewTabPreloader = {
   },
 
   newTab: function Preloader_newTab(aTab) {
-    let swapped = false;
     let win = aTab.ownerDocument.defaultView;
     if (win.gBrowser) {
       let utils = win.QueryInterface(Ci.nsIInterfaceRequestor)
@@ -72,17 +71,11 @@ this.BrowserNewTabPreloader = {
       let {width, height} = utils.getBoundsWithoutFlushing(win.gBrowser);
       let hiddenBrowser = HiddenBrowsers.get(width, height)
       if (hiddenBrowser) {
-        swapped = hiddenBrowser.swapWithNewTab(aTab);
+        return hiddenBrowser.swapWithNewTab(aTab);
       }
-
-      // aTab's browser is now visible and is therefore allowed to make
-      // background captures.
-      let msgMan = aTab.linkedBrowser.messageManager;
-      msgMan.loadFrameScript(FRAME_SCRIPT_URL, false);
-      msgMan.sendAsyncMessage("BrowserNewTabPreloader:allowBackgroundCaptures");
     }
 
-    return swapped;
+    return false;
   }
 };
 
@@ -329,10 +322,15 @@ HiddenBrowser.prototype = {
     // Swap docShells.
     tabbrowser.swapNewTabWithBrowser(aTab, this._browser);
 
-    // Load all default frame scripts attached to the target window.
+    // Load all delayed frame scripts attached to the "browers" message manager.
+    // The browser content script was already loaded, so don't load it again.
     let mm = aTab.linkedBrowser.messageManager;
-    let scripts = win.messageManager.getDelayedFrameScripts();
-    Array.forEach(scripts, ([script, runGlobal]) => mm.loadFrameScript(script, true, runGlobal));
+    let scripts = win.getGroupMessageManager("browsers").getDelayedFrameScripts();
+    Array.forEach(scripts, ([script, runGlobal]) => {
+      if (script != BROWSER_CONTENT_SCRIPT) {
+        mm.loadFrameScript(script, true, runGlobal);
+      }
+    });
 
     // Remove the browser, it will be recreated by a timer.
     this._removeBrowser();
@@ -377,6 +375,12 @@ HiddenBrowser.prototype = {
       this._browser.setAttribute("src", NEWTAB_URL);
       this._applySize();
       doc.getElementById("win").appendChild(this._browser);
+
+      // Let the docShell be inactive so that document.hidden=true.
+      this._browser.docShell.isActive = false;
+
+      this._browser.messageManager.loadFrameScript(BROWSER_CONTENT_SCRIPT,
+                                                   true);
     });
   },
 

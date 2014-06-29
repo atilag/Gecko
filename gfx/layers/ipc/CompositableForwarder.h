@@ -23,7 +23,8 @@ namespace mozilla {
 namespace layers {
 
 class CompositableClient;
-class TextureFactoryIdentifier;
+class AsyncTransactionTracker;
+struct TextureFactoryIdentifier;
 class SurfaceDescriptor;
 class SurfaceDescriptorTiles;
 class ThebesBufferData;
@@ -106,12 +107,28 @@ public:
                                  const nsIntRect& aRect) = 0;
 
   /**
-   * Tell the CompositableHost on the compositor side to remove the texture.
+   * Tell the CompositableHost on the compositor side to remove the texture
+   * from the CompositableHost.
    * This function does not delete the TextureHost corresponding to the
    * TextureClient passed in parameter.
+   * When the TextureClient has TEXTURE_DEALLOCATE_CLIENT flag,
+   * the transaction becomes synchronous.
    */
   virtual void RemoveTextureFromCompositable(CompositableClient* aCompositable,
                                              TextureClient* aTexture) = 0;
+
+  /**
+   * Tell the CompositableHost on the compositor side to remove the texture
+   * from the CompositableHost. The compositor side sends back transaction
+   * complete message.
+   * This function does not delete the TextureHost corresponding to the
+   * TextureClient passed in parameter.
+   * It is used when the TextureClient recycled.
+   * Only ImageBridge implements it.
+   */
+  virtual void RemoveTextureFromCompositableAsync(AsyncTransactionTracker* aAsyncTransactionTracker,
+                                                  CompositableClient* aCompositable,
+                                                  TextureClient* aTexture) {}
 
   /**
    * Tell the compositor side to delete the TextureHost corresponding to the
@@ -167,6 +184,11 @@ public:
                               TextureClient* aTexture,
                               nsIntRegion* aRegion) = 0;
 
+
+  virtual void SendFenceHandle(AsyncTransactionTracker* aTracker,
+                               PTextureChild* aTexture,
+                               const FenceHandle& aFence) = 0;
+
   void IdentifyTextureHost(const TextureFactoryIdentifier& aIdentifier);
 
   virtual int32_t GetMaxTextureSize() const MOZ_OVERRIDE
@@ -175,6 +197,8 @@ public:
   }
 
   bool IsOnCompositorSide() const MOZ_OVERRIDE { return false; }
+
+  virtual bool IsImageBridgeChild() const { return false; }
 
   /**
    * Returns the type of backend that is used off the main thread.

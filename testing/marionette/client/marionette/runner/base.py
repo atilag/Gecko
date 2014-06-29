@@ -12,6 +12,7 @@ import sys
 import time
 import traceback
 import random
+import re
 import mozinfo
 import moznetwork
 import xml.dom.minidom as dom
@@ -214,6 +215,7 @@ class MarionetteTestResult(unittest._TextTestResult, TestResultCollection):
                 self.stream.writeln('END LOG:')
 
     def printErrorList(self, flavour, errors):
+        TIMEOUT_MESSAGE = "ScriptTimeoutException: ScriptTimeoutException: timed out"
         for error in errors:
             err = error.output
             self.stream.writeln(self.separator1)
@@ -221,6 +223,7 @@ class MarionetteTestResult(unittest._TextTestResult, TestResultCollection):
             self.stream.writeln(self.separator2)
             lastline = None
             fail_present = None
+            test_name = self.getInfo(error)
             for line in err:
                 if not line.startswith('\t') and line != '':
                     lastline = line
@@ -228,10 +231,15 @@ class MarionetteTestResult(unittest._TextTestResult, TestResultCollection):
                     fail_present = True
             for line in err:
                 if line != lastline or fail_present:
-                    self.stream.writeln("%s" % line)
+                    if re.match('.*\.js', test_name):
+                        if error.reason != TIMEOUT_MESSAGE:
+                            self.stream.writeln("%s" % line)
+                    else:
+                        self.stream.writeln("%s" % line)
+
                 else:
                     self.stream.writeln("TEST-UNEXPECTED-FAIL | %s | %s" %
-                                        (self.getInfo(error), error.reason))
+                                        (test_name, error.reason))
 
     def stopTest(self, *args, **kwargs):
         unittest._TextTestResult.stopTest(self, *args, **kwargs)
@@ -359,11 +367,11 @@ class BaseMarionetteOptions(OptionParser):
                              'specify which architecture to emulate for both cases')
         self.add_option('--emulator-binary',
                         action='store',
-                        dest='emulatorBinary',
+                        dest='emulator_binary',
                         help='launch a specific emulator binary rather than launching from the B2G built emulator')
         self.add_option('--emulator-img',
                         action='store',
-                        dest='emulatorImg',
+                        dest='emulator_img',
                         help='use a specific image file instead of a fresh one')
         self.add_option('--emulator-res',
                         action='store',
@@ -377,11 +385,11 @@ class BaseMarionetteOptions(OptionParser):
                         help='size of sdcard to create for the emulator')
         self.add_option('--no-window',
                         action='store_true',
-                        dest='noWindow',
+                        dest='no_window',
                         default=False,
                         help='when Marionette launches an emulator, start it with the -no-window argument')
         self.add_option('--logcat-dir',
-                        dest='logcat_dir',
+                        dest='logdir',
                         action='store',
                         help='directory to store logcat dump files')
         self.add_option('--address',
@@ -433,10 +441,6 @@ class BaseMarionetteOptions(OptionParser):
                         action='store',
                         dest='xml_output',
                         help='xml output')
-        self.add_option('--gecko-path',
-                        dest='gecko_path',
-                        action='store',
-                        help='path to b2g gecko binaries that should be installed on the device or emulator')
         self.add_option('--testvars',
                         dest='testvars',
                         action='store',
@@ -463,6 +467,11 @@ class BaseMarionetteOptions(OptionParser):
                         dest='shuffle',
                         default=False,
                         help='run tests in a random order')
+        self.add_option('--shuffle-seed',
+                        dest='shuffle_seed',
+                        type=int,
+                        default=random.randint(0, sys.maxint),
+                        help='Use given seed to shuffle tests')
         self.add_option('--total-chunks',
                         dest='total_chunks',
                         type=int,
@@ -479,6 +488,13 @@ class BaseMarionetteOptions(OptionParser):
                         dest='server_root',
                         action='store',
                         help='sets the web server\'s root directory to the given path')
+        self.add_option('--gecko-log',
+                        dest='gecko_log',
+                        action='store',
+                        help="Define the path to store log file. If the path is"
+                             " a directory, the real log file will be created"
+                             " given the format gecko-(timestamp).log. If it is"
+                             " a file, if will be used directly. Default: 'gecko.log'")
 
     def parse_args(self, args=None, values=None):
         options, tests = OptionParser.parse_args(self, args, values)
@@ -505,8 +521,8 @@ class BaseMarionetteOptions(OptionParser):
                                   'elasticsearch-zlb.webapp.scl3.mozilla.com:9200']
 
         # default to storing logcat output for emulator runs
-        if options.emulator and not options.logcat_dir:
-            options.logcat_dir = 'logcat'
+        if options.emulator and not options.logdir:
+            options.logdir = 'logcat'
 
         # check for valid resolution string, strip whitespaces
         try:
@@ -542,19 +558,21 @@ class BaseMarionetteTestRunner(object):
 
     textrunnerclass = MarionetteTextTestRunner
 
-    def __init__(self, address=None, emulator=None, emulatorBinary=None,
-                 emulatorImg=None, emulator_res='480x800', homedir=None,
+    def __init__(self, address=None, emulator=None, emulator_binary=None,
+                 emulator_img=None, emulator_res='480x800', homedir=None,
                  app=None, app_args=None, bin=None, profile=None, autolog=False,
-                 revision=None, logger=None, testgroup="marionette", noWindow=False,
-                 logcat_dir=None, xml_output=None, repeat=0, gecko_path=None,
+                 revision=None, logger=None, testgroup="marionette", no_window=False,
+                 logdir=None, xml_output=None, repeat=0,
                  testvars=None, tree=None, type=None, device_serial=None,
                  symbols_path=None, timeout=None, es_servers=None, shuffle=False,
-                 sdcard=None, this_chunk=1, total_chunks=1, sources=None, server_root=None,
+                 shuffle_seed=random.randint(0, sys.maxint), sdcard=None,
+                 this_chunk=1, total_chunks=1, sources=None, server_root=None,
+                 gecko_log=None,
                  **kwargs):
         self.address = address
         self.emulator = emulator
-        self.emulatorBinary = emulatorBinary
-        self.emulatorImg = emulatorImg
+        self.emulator_binary = emulator_binary
+        self.emulator_img = emulator_img
         self.emulator_res = emulator_res
         self.homedir = homedir
         self.app = app
@@ -565,13 +583,12 @@ class BaseMarionetteTestRunner(object):
         self.testgroup = testgroup
         self.revision = revision
         self.logger = logger
-        self.noWindow = noWindow
+        self.no_window = no_window
         self.httpd = None
         self.marionette = None
-        self.logcat_dir = logcat_dir
+        self.logdir = logdir
         self.xml_output = xml_output
         self.repeat = repeat
-        self.gecko_path = gecko_path
         self.testvars = {}
         self.test_kwargs = kwargs
         self.tree = tree
@@ -584,11 +601,13 @@ class BaseMarionetteTestRunner(object):
         self._appName = None
         self.es_servers = es_servers
         self.shuffle = shuffle
+        self.shuffle_seed = shuffle_seed
         self.sdcard = sdcard
         self.sources = sources
         self.server_root = server_root
         self.this_chunk = this_chunk
         self.total_chunks = total_chunks
+        self.gecko_log = gecko_log
         self.mixin_run_tests = []
         self.manifest_skipped_tests = []
         self.tests = []
@@ -616,9 +635,9 @@ class BaseMarionetteTestRunner(object):
             self.logger.setLevel(logging.INFO)
             self.logger.addHandler(logging.StreamHandler())
 
-        if self.logcat_dir:
-            if not os.access(self.logcat_dir, os.F_OK):
-                os.mkdir(self.logcat_dir)
+        if self.logdir:
+            if not os.access(self.logdir, os.F_OK):
+                os.mkdir(self.logdir)
 
         # for XML output
         self.testvars['xml_output'] = self.xml_output
@@ -653,7 +672,9 @@ class BaseMarionetteTestRunner(object):
     def reset_test_stats(self):
         self.passed = 0
         self.failed = 0
+        self.unexpected_successes = 0
         self.todo = 0
+        self.skipped = 0
         self.failures = []
 
     def start_httpd(self, need_external_ip):
@@ -685,13 +706,13 @@ class BaseMarionetteTestRunner(object):
                 'app_args': self.app_args,
                 'bin': self.bin,
                 'profile': self.profile,
+                'gecko_log': self.gecko_log,
             })
 
         if self.emulator:
             kwargs.update({
                 'homedir': self.homedir,
-                'logcat_dir': self.logcat_dir,
-                'gecko_path': self.gecko_path,
+                'logdir': self.logdir,
             })
 
         if self.address:
@@ -714,10 +735,10 @@ class BaseMarionetteTestRunner(object):
         elif self.emulator:
             kwargs.update({
                 'emulator': self.emulator,
-                'emulatorBinary': self.emulatorBinary,
-                'emulatorImg': self.emulatorImg,
+                'emulator_binary': self.emulator_binary,
+                'emulator_img': self.emulator_img,
                 'emulator_res': self.emulator_res,
-                'noWindow': self.noWindow,
+                'no_window': self.no_window,
                 'sdcard': self.sdcard,
             })
         return kwargs
@@ -730,7 +751,7 @@ class BaseMarionetteTestRunner(object):
 
         logfile = None
         if self.emulator:
-            filename = os.path.join(os.path.abspath(self.logcat_dir),
+            filename = os.path.join(os.path.abspath(self.logdir),
                                     "emulator-%d.log" % self.marionette.emulator.port)
             if os.access(filename, os.F_OK):
                 logfile = filename
@@ -802,8 +823,14 @@ class BaseMarionetteTestRunner(object):
             counter -= 1
         self.logger.info('\nSUMMARY\n-------')
         self.logger.info('passed: %d' % self.passed)
-        self.logger.info('failed: %d' % self.failed)
-        self.logger.info('todo: %d' % self.todo)
+        if self.unexpected_successes == 0:
+            self.logger.info('failed: %d' % self.failed)
+        else:
+            self.logger.info('failed: %d (unexpected sucesses: %d)', self.failed, self.unexpected_successes)
+        if self.skipped == 0:
+            self.logger.info('todo: %d', self.todo)
+        else:
+            self.logger.info('todo: %d (skipped: %d)', self.todo, self.skipped)
 
         if self.failed > 0:
             self.logger.info('\nFAILED TESTS\n-------')
@@ -834,6 +861,8 @@ class BaseMarionetteTestRunner(object):
 
         for run_tests in self.mixin_run_tests:
             run_tests(tests)
+        if self.shuffle:
+            self.logger.info("Using seed where seed is:%d" % self.shuffle_seed)
 
     def add_test(self, test, expected='pass', oop=None):
         filepath = os.path.abspath(test)
@@ -970,19 +999,22 @@ class BaseMarionetteTestRunner(object):
 
             self.failed += len(results.failures) + len(results.errors)
             if hasattr(results, 'skipped'):
+                self.skipped += len(results.skipped)
                 self.todo += len(results.skipped)
             self.passed += results.passed
             for failure in results.failures + results.errors:
                 self.failures.append((results.getInfo(failure), failure.output, 'TEST-UNEXPECTED-FAIL'))
             if hasattr(results, 'unexpectedSuccesses'):
                 self.failed += len(results.unexpectedSuccesses)
+                self.unexpected_successes += len(results.unexpectedSuccesses)
                 for failure in results.unexpectedSuccesses:
                     self.failures.append((results.getInfo(failure), 'TEST-UNEXPECTED-PASS'))
             if hasattr(results, 'expectedFailures'):
-                self.passed += len(results.expectedFailures)
+                self.todo += len(results.expectedFailures)
 
     def run_test_set(self, tests):
         if self.shuffle:
+            random.seed(self.shuffle_seed)
             random.shuffle(tests)
 
         for test in tests:

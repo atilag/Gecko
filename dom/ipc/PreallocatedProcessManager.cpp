@@ -54,6 +54,7 @@ public:
   void DelayedNuwaFork();
   void PublishSpareProcess(ContentParent* aContent);
   void MaybeForgetSpare(ContentParent* aContent);
+  bool IsNuwaReady();
   void OnNuwaReady();
   bool PreallocatedProcessReady();
   already_AddRefed<ContentParent> GetSpareProcess();
@@ -79,6 +80,7 @@ private:
   static mozilla::StaticRefPtr<PreallocatedProcessManagerImpl> sSingleton;
 
   PreallocatedProcessManagerImpl();
+  ~PreallocatedProcessManagerImpl() {}
   DISALLOW_EVIL_CONSTRUCTORS(PreallocatedProcessManagerImpl);
 
   void Init();
@@ -336,8 +338,19 @@ PreallocatedProcessManagerImpl::MaybeForgetSpare(ContentParent* aContent)
   if (aContent == mPreallocatedAppProcess) {
     mPreallocatedAppProcess = nullptr;
     mIsNuwaReady = false;
+    while (mSpareProcesses.Length() > 0) {
+      nsRefPtr<ContentParent> process = mSpareProcesses[mSpareProcesses.Length() - 1];
+      process->Close();
+      mSpareProcesses.RemoveElementAt(mSpareProcesses.Length() - 1);
+    }
     ScheduleDelayedNuwaFork();
   }
+}
+
+bool
+PreallocatedProcessManagerImpl::IsNuwaReady()
+{
+  return mIsNuwaReady;
 }
 
 void
@@ -480,6 +493,12 @@ PreallocatedProcessManager::MaybeForgetSpare(ContentParent* aContent)
 PreallocatedProcessManager::OnNuwaReady()
 {
   GetPPMImpl()->OnNuwaReady();
+}
+
+/* static */ bool
+PreallocatedProcessManager::IsNuwaReady()
+{
+  return GetPPMImpl()->IsNuwaReady();
 }
 
 /*static */ bool

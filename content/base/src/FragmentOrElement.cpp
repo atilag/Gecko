@@ -24,7 +24,7 @@
 #include "mozilla/dom/Attr.h"
 #include "nsDOMAttributeMap.h"
 #include "nsIAtom.h"
-#include "nsINodeInfo.h"
+#include "mozilla/dom/NodeInfo.h"
 #include "nsIDocumentInlines.h"
 #include "nsIDocumentEncoder.h"
 #include "nsIDOMNodeList.h"
@@ -62,7 +62,6 @@
 #ifdef MOZ_XUL
 #include "nsXULElement.h"
 #endif /* MOZ_XUL */
-#include "nsFrameManager.h"
 #include "nsFrameSelection.h"
 #ifdef DEBUG
 #include "nsRange.h"
@@ -153,14 +152,33 @@ nsIContent::FindFirstNonChromeOnlyAccessContent() const
 nsIContent*
 nsIContent::GetFlattenedTreeParent() const
 {
-  if (HasFlag(NODE_MAY_BE_IN_BINDING_MNGR)) {
-    nsIContent* parent = GetXBLInsertionParent();
-    if (parent) {
-      return parent;
+  nsIContent* parent = nullptr;
+
+  nsTArray<nsIContent*>* destInsertionPoints = GetExistingDestInsertionPoints();
+  if (destInsertionPoints && !destInsertionPoints->IsEmpty()) {
+    // This node was distributed into an insertion point. The last node in
+    // the list of destination insertion insertion points is where this node
+    // appears in the composed tree (see Shadow DOM spec).
+    nsIContent* lastInsertionPoint = destInsertionPoints->LastElement();
+    parent = lastInsertionPoint->GetParent();
+  } else if (HasFlag(NODE_MAY_BE_IN_BINDING_MNGR)) {
+    parent = GetXBLInsertionParent();
+  }
+
+  if (!parent) {
+    parent = GetParent();
+  }
+
+  // Shadow roots never shows up in the flattened tree. Return the host
+  // instead.
+  if (parent && parent->HasFlag(NODE_IS_IN_SHADOW_TREE)) {
+    ShadowRoot* parentShadowRoot = ShadowRoot::FromNode(parent);
+    if (parentShadowRoot) {
+      return parentShadowRoot->GetHost();
     }
   }
 
-  return GetParent();
+  return parent;
 }
 
 nsIContent::IMEState
@@ -482,6 +500,12 @@ nsNodeWeakReference::QueryReferent(const nsIID& aIID, void** aInstancePtr)
                  NS_ERROR_NULL_POINTER;
 }
 
+size_t
+nsNodeWeakReference::SizeOfOnlyThis(mozilla::MallocSizeOf aMallocSizeOf) const
+{
+  return aMallocSizeOf(this);
+}
+
 
 NS_IMPL_CYCLE_COLLECTION(nsNodeSupportsWeakRefTearoff, mNode)
 
@@ -612,12 +636,12 @@ FragmentOrElement::nsDOMSlots::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) c
   return n;
 }
 
-FragmentOrElement::FragmentOrElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+FragmentOrElement::FragmentOrElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
   : nsIContent(aNodeInfo)
 {
 }
 
-FragmentOrElement::FragmentOrElement(already_AddRefed<nsINodeInfo>&& aNodeInfo)
+FragmentOrElement::FragmentOrElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
   : nsIContent(aNodeInfo)
 {
 }
@@ -886,13 +910,6 @@ nsIContent::IsFocusableInternal(int32_t* aTabIndex, bool aWithMouse)
   return false;
 }
 
-const nsAttrValue*
-FragmentOrElement::DoGetClasses() const
-{
-  NS_NOTREACHED("Shouldn't ever be called");
-  return nullptr;
-}
-
 NS_IMETHODIMP
 FragmentOrElement::WalkContentStyleRules(nsRuleWalker* aRuleWalker)
 {
@@ -1009,6 +1026,23 @@ FragmentOrElement::SetShadowRoot(ShadowRoot* aShadowRoot)
 {
   nsDOMSlots *slots = DOMSlots();
   slots->mShadowRoot = aShadowRoot;
+}
+
+nsTArray<nsIContent*>&
+FragmentOrElement::DestInsertionPoints()
+{
+  nsDOMSlots *slots = DOMSlots();
+  return slots->mDestInsertionPoints;
+}
+
+nsTArray<nsIContent*>*
+FragmentOrElement::GetExistingDestInsertionPoints() const
+{
+  nsDOMSlots *slots = GetExistingDOMSlots();
+  if (slots) {
+    return &slots->mDestInsertionPoints;
+  }
+  return nullptr;
 }
 
 void
@@ -1254,8 +1288,8 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(FragmentOrElement)
   // which is dispatched in UnbindFromTree.
 
   if (tmp->HasProperties()) {
-    if (tmp->IsHTML()) {
-      nsIAtom*** props = nsGenericHTMLElement::PropertiesToTraverseAndUnlink();
+    if (tmp->IsHTML() || tmp->IsSVG()) {
+      nsIAtom*** props = Element::HTMLSVGPropertiesToTraverseAndUnlink();
       for (uint32_t i = 0; props[i]; ++i) {
         tmp->DeleteProperty(*props[i]);
       }
@@ -1763,7 +1797,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(FragmentOrElement)
     if (idAtom) {
       id.AppendLiteral(" id='");
       id.Append(nsDependentAtomString(idAtom));
-      id.AppendLiteral("'");
+      id.Append('\'');
     }
 
     nsAutoString classes;
@@ -1774,7 +1808,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(FragmentOrElement)
       classAttrValue->ToString(classString);
       classString.ReplaceChar(char16_t('\n'), char16_t(' '));
       classes.Append(classString);
-      classes.AppendLiteral("'");
+      classes.Append('\'');
     }
 
     nsAutoCString orphan;
@@ -1810,8 +1844,8 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(FragmentOrElement)
   tmp->OwnerDoc()->BindingManager()->Traverse(tmp, cb);
 
   if (tmp->HasProperties()) {
-    if (tmp->IsHTML()) {
-      nsIAtom*** props = nsGenericHTMLElement::PropertiesToTraverseAndUnlink();
+    if (tmp->IsHTML() || tmp->IsSVG()) {
+      nsIAtom*** props = Element::HTMLSVGPropertiesToTraverseAndUnlink();
       for (uint32_t i = 0; props[i]; ++i) {
         nsISupports* property =
           static_cast<nsISupports*>(tmp->GetProperty(*props[i]));
@@ -1829,7 +1863,8 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(FragmentOrElement)
       if (!name->IsAtom()) {
         NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb,
                                            "mAttrsAndChildren[i]->NodeInfo()");
-        cb.NoteXPCOMChild(name->NodeInfo());
+        cb.NoteNativeChild(name->NodeInfo(),
+                           NS_CYCLE_COLLECTION_PARTICIPANT(NodeInfo));
       }
     }
 
@@ -2587,9 +2622,10 @@ Serialize(FragmentOrElement* aRoot, bool aDescendentsOnly, nsAString& aOut)
 
       current = current->GetParentNode();
 
-      // Template case, if we are in a template's content, then the parent
-      // should be the host template element.
-      if (current->NodeType() == nsIDOMNode::DOCUMENT_FRAGMENT_NODE) {
+      // Handle template element. If the parent is a template's content,
+      // then adjust the parent to be the template element.
+      if (current != aRoot &&
+          current->NodeType() == nsIDOMNode::DOCUMENT_FRAGMENT_NODE) {
         DocumentFragment* frag = static_cast<DocumentFragment*>(current);
         nsIContent* fragHost = frag->GetHost();
         if (fragHost && nsNodeUtils::IsTemplateElement(fragHost)) {
@@ -2815,4 +2851,42 @@ FragmentOrElement::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
   }
 
   return n;
+}
+
+void
+FragmentOrElement::SetIsElementInStyleScopeFlagOnSubtree(bool aInStyleScope)
+{
+  if (aInStyleScope && IsElementInStyleScope()) {
+    return;
+  }
+
+  if (IsElement()) {
+    SetIsElementInStyleScope(aInStyleScope);
+    SetIsElementInStyleScopeFlagOnShadowTree(aInStyleScope);
+  }
+
+  nsIContent* n = GetNextNode(this);
+  while (n) {
+    if (n->IsElementInStyleScope()) {
+      n = n->GetNextNonChildNode(this);
+    } else {
+      if (n->IsElement()) {
+        n->SetIsElementInStyleScope(aInStyleScope);
+        n->AsElement()->SetIsElementInStyleScopeFlagOnShadowTree(aInStyleScope);
+      }
+      n = n->GetNextNode(this);
+    }
+  }
+}
+
+void
+FragmentOrElement::SetIsElementInStyleScopeFlagOnShadowTree(bool aInStyleScope)
+{
+  NS_ASSERTION(IsElement(), "calling SetIsElementInStyleScopeFlagOnShadowTree "
+                            "on a non-Element is useless");
+  ShadowRoot* shadowRoot = GetShadowRoot();
+  while (shadowRoot) {
+    shadowRoot->SetIsElementInStyleScopeFlagOnSubtree(aInStyleScope);
+    shadowRoot = shadowRoot->GetOlderShadow();
+  }
 }

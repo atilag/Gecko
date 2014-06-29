@@ -75,7 +75,7 @@ nsGIFDecoder2::nsGIFDecoder2(RasterImage &aImage)
   , mCurrentRow(-1)
   , mLastFlushedRow(-1)
   , mOldColor(0)
-  , mCurrentFrame(-1)
+  , mCurrentFrameIndex(-1)
   , mCurrentPass(0)
   , mLastFlushedPass(0)
   , mGIFOpen(false)
@@ -105,7 +105,7 @@ nsGIFDecoder2::FinishInternal()
 
   // If the GIF got cut off, handle it anyway
   if (!IsSizeDecode() && mGIFOpen) {
-    if (mCurrentFrame == mGIFStruct.images_decoded)
+    if (mCurrentFrameIndex == mGIFStruct.images_decoded)
       EndImageFrame();
     PostDecodeDone(mGIFStruct.loop_count - 1);
     mGIFOpen = false;
@@ -159,11 +159,11 @@ void nsGIFDecoder2::BeginGIF()
 //******************************************************************************
 void nsGIFDecoder2::BeginImageFrame(uint16_t aDepth)
 {
-  gfxImageFormat format;
+  gfx::SurfaceFormat format;
   if (mGIFStruct.is_transparent)
-    format = gfxImageFormat::ARGB32;
+    format = gfx::SurfaceFormat::B8G8R8A8;
   else
-    format = gfxImageFormat::RGB24;
+    format = gfx::SurfaceFormat::B8G8R8X8;
 
   MOZ_ASSERT(HasSize());
 
@@ -188,12 +188,12 @@ void nsGIFDecoder2::BeginImageFrame(uint16_t aDepth)
                  format);
   } else {
     // Our preallocated frame matches up, with the possible exception of alpha.
-    if (format == gfxImageFormat::RGB24) {
+    if (format == gfx::SurfaceFormat::B8G8R8X8) {
       GetCurrentFrame()->SetHasNoAlpha();
     }
   }
 
-  mCurrentFrame = mGIFStruct.images_decoded;
+  mCurrentFrameIndex = mGIFStruct.images_decoded;
 }
 
 
@@ -251,7 +251,7 @@ void nsGIFDecoder2::EndImageFrame()
     mOldColor = 0;
   }
 
-  mCurrentFrame = -1;
+  mCurrentFrameIndex = -1;
 }
 
 

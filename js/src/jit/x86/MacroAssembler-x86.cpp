@@ -43,7 +43,7 @@ MacroAssemblerX86::getDouble(double d)
 }
 
 void
-MacroAssemblerX86::loadConstantDouble(double d, const FloatRegister &dest)
+MacroAssemblerX86::loadConstantDouble(double d, FloatRegister dest)
 {
     if (maybeInlineDouble(d, dest))
         return;
@@ -55,7 +55,7 @@ MacroAssemblerX86::loadConstantDouble(double d, const FloatRegister &dest)
 }
 
 void
-MacroAssemblerX86::addConstantDouble(double d, const FloatRegister &dest)
+MacroAssemblerX86::addConstantDouble(double d, FloatRegister dest)
 {
     Double *dbl = getDouble(d);
     if (!dbl)
@@ -89,7 +89,7 @@ MacroAssemblerX86::getFloat(float f)
 }
 
 void
-MacroAssemblerX86::loadConstantFloat32(float f, const FloatRegister &dest)
+MacroAssemblerX86::loadConstantFloat32(float f, FloatRegister dest)
 {
     if (maybeInlineFloat(f, dest))
         return;
@@ -101,7 +101,7 @@ MacroAssemblerX86::loadConstantFloat32(float f, const FloatRegister &dest)
 }
 
 void
-MacroAssemblerX86::addConstantFloat32(float f, const FloatRegister &dest)
+MacroAssemblerX86::addConstantFloat32(float f, FloatRegister dest)
 {
     Float *flt = getFloat(f);
     if (!flt)
@@ -153,7 +153,7 @@ MacroAssemblerX86::setupAlignedABICall(uint32_t args)
 }
 
 void
-MacroAssemblerX86::setupUnalignedABICall(uint32_t args, const Register &scratch)
+MacroAssemblerX86::setupUnalignedABICall(uint32_t args, Register scratch)
 {
     setupABICall(args);
     dynamicAlignment_ = true;
@@ -179,13 +179,13 @@ MacroAssemblerX86::passABIArg(const MoveOperand &from, MoveOp::Type type)
 }
 
 void
-MacroAssemblerX86::passABIArg(const Register &reg)
+MacroAssemblerX86::passABIArg(Register reg)
 {
     passABIArg(MoveOperand(reg), MoveOp::GENERAL);
 }
 
 void
-MacroAssemblerX86::passABIArg(const FloatRegister &reg, MoveOp::Type type)
+MacroAssemblerX86::passABIArg(FloatRegister reg, MoveOp::Type type)
 {
     passABIArg(MoveOperand(reg), type);
 }
@@ -238,12 +238,12 @@ MacroAssemblerX86::callWithABIPost(uint32_t stackAdjust, MoveOp::Type result)
     if (result == MoveOp::DOUBLE) {
         reserveStack(sizeof(double));
         fstp(Operand(esp, 0));
-        loadDouble(Operand(esp, 0), ReturnFloatReg);
+        loadDouble(Operand(esp, 0), ReturnDoubleReg);
         freeStack(sizeof(double));
     } else if (result == MoveOp::FLOAT32) {
         reserveStack(sizeof(float));
         fstp32(Operand(esp, 0));
-        loadFloat32(Operand(esp, 0), ReturnFloatReg);
+        loadFloat32(Operand(esp, 0), ReturnFloat32Reg);
         freeStack(sizeof(float));
     }
     if (dynamicAlignment_)
@@ -386,6 +386,35 @@ MacroAssemblerX86::branchTestValue(Condition cond, const ValueOperand &value, co
         j(NotEqual, label);
     }
 }
+
+template <typename T>
+void
+MacroAssemblerX86::storeUnboxedValue(ConstantOrRegister value, MIRType valueType, const T &dest,
+                                     MIRType slotType)
+{
+    if (valueType == MIRType_Double) {
+        storeDouble(value.reg().typedReg().fpu(), dest);
+        return;
+    }
+
+    // Store the type tag if needed.
+    if (valueType != slotType)
+        storeTypeTag(ImmType(ValueTypeFromMIRType(valueType)), Operand(dest));
+
+    // Store the payload.
+    if (value.constant())
+        storePayload(value.value(), Operand(dest));
+    else
+        storePayload(value.reg().typedReg().gpr(), Operand(dest));
+}
+
+template void
+MacroAssemblerX86::storeUnboxedValue(ConstantOrRegister value, MIRType valueType, const Address &dest,
+                                     MIRType slotType);
+
+template void
+MacroAssemblerX86::storeUnboxedValue(ConstantOrRegister value, MIRType valueType, const BaseIndex &dest,
+                                     MIRType slotType);
 
 #ifdef JSGC_GENERATIONAL
 

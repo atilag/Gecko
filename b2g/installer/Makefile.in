@@ -22,7 +22,9 @@ DEFINES += -DMOZ_CHILD_PROCESS_NAME=$(MOZ_CHILD_PROCESS_NAME)
 
 # Set MSVC dlls version to package, if any.
 ifdef WIN32_REDIST_DIR
+ifdef MOZ_NO_DEBUG_RTL
 DEFINES += -DMOZ_MSVC_REDIST=$(_MSC_VER)
+endif
 endif
 
 ifdef ENABLE_MARIONETTE
@@ -65,6 +67,20 @@ ifdef GKMEDIAS_SHARED_LIBRARY
 DEFINES += -DGKMEDIAS_SHARED_LIBRARY
 endif
 
+ifdef MOZ_REPLACE_MALLOC
+DEFINES += -DMOZ_REPLACE_MALLOC
+endif
+ifdef MOZ_JEMALLOC3
+DEFINES += -DMOZ_JEMALLOC3
+endif
+
+ifdef MOZ_WIDGET_GTK
+DEFINES += -DMOZ_GTK=1
+ifdef MOZ_ENABLE_GTK3
+DEFINES += -DMOZ_GTK3=1
+endif
+endif
+
 ifdef MOZ_PKG_MANIFEST_P
 $(MOZ_PKG_MANIFEST): $(MOZ_PKG_MANIFEST_P) FORCE
 	$(call py_action,preprocessor,$(DEFINES) $(ACDEFINES) $< -o $@)
@@ -81,6 +97,8 @@ GARBAGE += $(MOZ_PKG_MANIFEST)
 endif
 
 ifdef FXOS_SIMULATOR
+export MAKE
+
 .PHONY: simulator
 simulator: make-package
 	@echo 'Building simulator addon...'

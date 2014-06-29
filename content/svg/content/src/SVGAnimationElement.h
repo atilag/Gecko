@@ -27,7 +27,7 @@ class SVGAnimationElement : public SVGAnimationElementBase,
                             public SVGTests
 {
 protected:
-  SVGAnimationElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
+  SVGAnimationElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo);
   nsresult Init();
 
 public:
@@ -37,7 +37,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(SVGAnimationElement,
                                            SVGAnimationElementBase)
 
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE = 0;
+  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE = 0;
 
   // nsIContent specializations
   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
@@ -58,7 +58,6 @@ public:
   virtual nsresult AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
                                 const nsAttrValue* aValue, bool aNotify) MOZ_OVERRIDE;
 
-  bool PassesConditionalProcessingTests();
   const nsAttrValue* GetAnimAttr(nsIAtom* aName) const;
   bool GetAnimAttr(nsIAtom* aAttName, nsAString& aResult) const;
   bool HasAnimAttr(nsIAtom* aAttName) const;

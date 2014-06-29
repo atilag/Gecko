@@ -43,7 +43,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 //----------------------------------------------------------------------
 // Implementation
 
-SVGAnimationElement::SVGAnimationElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+SVGAnimationElement::SVGAnimationElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
   : SVGAnimationElementBase(aNodeInfo),
     mHrefTarget(MOZ_THIS_IN_INITIALIZER_LIST())
 {
@@ -63,12 +63,6 @@ SVGAnimationElement::Init()
 }
 
 //----------------------------------------------------------------------
-
-bool
-SVGAnimationElement::PassesConditionalProcessingTests()
-{
-  return SVGTests::PassesConditionalProcessingTests();
-}
 
 const nsAttrValue*
 SVGAnimationElement::GetAnimAttr(nsIAtom* aName) const
@@ -312,6 +306,13 @@ SVGAnimationElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
   nsresult rv =
     SVGAnimationElementBase::AfterSetAttr(aNamespaceID, aName, aValue,
                                           aNotify);
+
+  if (SVGTests::IsConditionalProcessingAttribute(aName)) {
+    bool isDisabled = !SVGTests::PassesConditionalProcessingTests();
+    if (mTimedElement.SetIsDisabled(isDisabled)) {
+      AnimationNeedsResample();
+    }
+  }
 
   if (aNamespaceID != kNameSpaceID_XLink || aName != nsGkAtoms::href)
     return rv;

@@ -43,6 +43,8 @@
 #include "webrtc/voice_engine/include/voe_call_report.h"
 
 // Video Engine
+// conflicts with #include of scoped_ptr.h
+#undef FF
 #include "webrtc/video_engine/include/vie_base.h"
 #include "webrtc/video_engine/include/vie_codec.h"
 #include "webrtc/video_engine/include/vie_render.h"
@@ -138,8 +140,6 @@ public:
   }
 #endif
 
-  ~MediaEngineWebRTCVideoSource() { Shutdown(); }
-
   virtual void GetName(nsAString&);
   virtual void GetUUID(nsAString&);
   virtual nsresult Allocate(const VideoTrackConstraintsN &aConstraints,
@@ -170,6 +170,7 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
 
   void OnHardwareStateChange(HardwareState aState);
+  void GetRotation();
   bool OnNewPreviewFrame(layers::Image* aImage, uint32_t aWidth, uint32_t aHeight);
   void OnUserError(UserContext aContext, nsresult aError);
   void OnTakePictureComplete(uint8_t* aData, uint32_t aLength, const nsAString& aMimeType);
@@ -202,6 +203,9 @@ public:
     return NS_OK;
   }
 
+protected:
+  ~MediaEngineWebRTCVideoSource() { Shutdown(); }
+
 private:
   static const unsigned int KMaxDeviceNameLength = 128;
   static const unsigned int KMaxUniqueIdLength = 256;
@@ -212,9 +216,12 @@ private:
 
   // Engine variables.
 #ifdef MOZ_B2G_CAMERA
-  nsRefPtr<ICameraControl> mCameraControl;
   mozilla::ReentrantMonitor mCallbackMonitor; // Monitor for camera callback handling
-  nsRefPtr<nsIDOMFile> mLastCapture;
+  // This is only modified on MainThread (AllocImpl and DeallocImpl)
+  nsRefPtr<ICameraControl> mCameraControl;
+  nsCOMPtr<nsIDOMFile> mLastCapture;
+
+  // These are protected by mMonitor below
   int mRotation;
   int mCameraAngle; // See dom/base/ScreenOrientation.h
   bool mBackCamera;
@@ -261,13 +268,13 @@ class MediaEngineWebRTCAudioSource : public MediaEngineAudioSource,
 public:
   MediaEngineWebRTCAudioSource(webrtc::VoiceEngine* aVoiceEnginePtr, int aIndex,
     const char* name, const char* uuid)
-    : mVoiceEngine(aVoiceEnginePtr)
+    : mSamples(0)
+    , mVoiceEngine(aVoiceEnginePtr)
     , mMonitor("WebRTCMic.Monitor")
     , mCapIndex(aIndex)
     , mChannel(-1)
     , mInitDone(false)
     , mStarted(false)
-    , mSamples(0)
     , mEchoOn(false), mAgcOn(false), mNoiseOn(false)
     , mEchoCancel(webrtc::kEcDefault)
     , mAGC(webrtc::kAgcDefault)
@@ -280,7 +287,6 @@ public:
     mDeviceUUID.Assign(NS_ConvertUTF8toUTF16(uuid));
     Init();
   }
-  ~MediaEngineWebRTCAudioSource() { Shutdown(); }
 
   virtual void GetName(nsAString&);
   virtual void GetUUID(nsAString&);
@@ -313,6 +319,15 @@ public:
 
   NS_DECL_THREADSAFE_ISUPPORTS
 
+protected:
+  ~MediaEngineWebRTCAudioSource() { Shutdown(); }
+
+  // mSamples is an int to avoid conversions when comparing/etc to
+  // samplingFreq & length. Making mSamples protected instead of private is a
+  // silly way to avoid -Wunused-private-field warnings when PR_LOGGING is not
+  // #defined. mSamples is not actually expected to be used by a derived class.
+  int mSamples;
+
 private:
   static const unsigned int KMaxDeviceNameLength = 128;
   static const unsigned int KMaxUniqueIdLength = 256;
@@ -338,7 +353,6 @@ private:
   TrackID mTrackID;
   bool mInitDone;
   bool mStarted;
-  int mSamples; // int to avoid conversions when comparing/etc to samplingFreq & length
 
   nsString mDeviceName;
   nsString mDeviceUUID;

@@ -563,33 +563,34 @@ exports.testDestroyEdgeCaseBug = function(assert, done) {
 
       sidebar.show();
       assert.pass('showing the sidebar');
-
     });
   });
 }
 
 exports.testClickingACheckedMenuitem = function(assert, done) {
   const { Sidebar } = require('sdk/ui/sidebar');
-  let testName = 'testClickingACheckedMenuitem';
-  let window = getMostRecentBrowserWindow();
+  const testName = 'testClickingACheckedMenuitem';
   let sidebar = Sidebar({
     id: testName,
     title: testName,
     url: 'data:text/html;charset=utf-8,'+testName,
   });
+  assert.pass('sidebar was created');
 
-  sidebar.show().then(function() {
-    assert.pass('the show callback works');
+  open().then(focus).then(window => {
+    return sidebar.show().then(_ => {
+      assert.pass('the show callback works');
 
-    sidebar.once('hide', function() {
-      assert.pass('clicking the menuitem after the sidebar has shown hides it.');
-      sidebar.destroy();
-      done();
+      sidebar.once('hide', _ => {
+        assert.pass('clicking the menuitem after the sidebar has shown hides it.');
+        sidebar.destroy();
+        close(window).then(done, assert.fail);
+      });
+
+      let menuitem = window.document.getElementById(makeID(sidebar.id));
+      simulateCommand(menuitem);
     });
-
-    let menuitem = window.document.getElementById(makeID(sidebar.id));
-    simulateCommand(menuitem);
-  });
+  }).catch(assert.fail);
 };
 
 exports.testTitleSetter = function(assert, done) {
@@ -1088,41 +1089,39 @@ exports.testSidebarLeakCheckUnloadAfterAttach = function(assert, done) {
   const loader = Loader(module);
   const { Sidebar } = loader.require('sdk/ui/sidebar');
   let testName = 'testSidebarLeakCheckUnloadAfterAttach';
-  let window = getMostRecentBrowserWindow();
   let sidebar = Sidebar({
     id: testName,
     title: testName,
     url: 'data:text/html;charset=utf-8,'+testName
   });
 
-  sidebar.on('attach', function() {
-    assert.pass('the sidebar was shown');
+  open().then(focus).then(window => {
+    sidebar.on('attach', function() {
+      assert.pass('the sidebar was shown');
 
-    sidebar.on('show', function() {
-      assert.fail('the sidebar show listener should have been removed');
-    });
-    assert.pass('added a sidebar show listener');
+      sidebar.on('show', function() {
+        assert.fail('the sidebar show listener should have been removed');
+      });
+      assert.pass('added a sidebar show listener');
 
-    sidebar.on('hide', function() {
-      assert.fail('the sidebar hide listener should have been removed');
-    });
-    assert.pass('added a sidebar hide listener');
+      sidebar.on('hide', function() {
+        assert.fail('the sidebar hide listener should have been removed');
+      });
+      assert.pass('added a sidebar hide listener');
 
-    let panelBrowser = window.document.getElementById('sidebar').contentDocument.getElementById('web-panels-browser');
-    panelBrowser.contentWindow.addEventListener('unload', function onUnload() {
-      panelBrowser.contentWindow.removeEventListener('unload', onUnload, false);
-      // wait a tick..
-      setTimeout(function() {
+      let panelBrowser = window.document.getElementById('sidebar').contentDocument.getElementById('web-panels-browser');
+      panelBrowser.contentWindow.addEventListener('unload', function onUnload() {
+        panelBrowser.contentWindow.removeEventListener('unload', onUnload, false);
         assert.pass('the sidebar web panel was unloaded properly');
-        done();
-      })
-    }, false);
+        close(window).then(done).catch(assert.fail);
+      }, false);
 
-    loader.unload();
-  });
+      loader.unload();
+    });
 
-  assert.pass('showing the sidebar');
-  sidebar.show();
+    assert.pass('showing the sidebar');
+    sidebar.show();
+  }).catch(assert.fail);
 }
 
 exports.testTwoSidebarsWithSameTitleAndURL = function(assert) {

@@ -39,6 +39,7 @@ enum Phase {
     PHASE_SWEEP_MARK_GRAY_WEAK,
     PHASE_FINALIZE_START,
     PHASE_SWEEP_ATOMS,
+    PHASE_SWEEP_SYMBOL_REGISTRY,
     PHASE_SWEEP_COMPARTMENTS,
     PHASE_SWEEP_DISCARD_CODE,
     PHASE_SWEEP_TABLES,
@@ -75,7 +76,7 @@ enum Stat {
 class StatisticsSerializer;
 
 struct Statistics {
-    Statistics(JSRuntime *rt);
+    explicit Statistics(JSRuntime *rt);
     ~Statistics();
 
     void beginPhase(Phase phase);
@@ -97,6 +98,8 @@ struct Statistics {
 
     jschar *formatMessage();
     jschar *formatJSON(uint64_t timestamp);
+
+    JS::GCSliceCallback setSliceCallback(JS::GCSliceCallback callback);
 
   private:
     JSRuntime *runtime;
@@ -160,6 +163,8 @@ struct Statistics {
     /* Sweep times for SCCs of compartments. */
     Vector<int64_t, 0, SystemAllocPolicy> sccTimes;
 
+    JS::GCSliceCallback sliceCallback;
+
     void beginGC();
     void endGC();
 
@@ -207,7 +212,7 @@ struct AutoPhase
 
 struct MaybeAutoPhase
 {
-    MaybeAutoPhase(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM)
+    explicit MaybeAutoPhase(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM)
       : stats(nullptr)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;

@@ -27,12 +27,13 @@ FontInfoData::Load()
 }
 
 class FontInfoLoadCompleteEvent : public nsRunnable {
+    virtual ~FontInfoLoadCompleteEvent() {}
+
     NS_DECL_THREADSAFE_ISUPPORTS
 
     FontInfoLoadCompleteEvent(FontInfoData *aFontInfo) :
         mFontInfo(aFontInfo)
     {}
-    virtual ~FontInfoLoadCompleteEvent() {}
 
     NS_IMETHOD Run();
 
@@ -40,6 +41,8 @@ class FontInfoLoadCompleteEvent : public nsRunnable {
 };
 
 class AsyncFontInfoLoader : public nsRunnable {
+    virtual ~AsyncFontInfoLoader() {}
+
     NS_DECL_THREADSAFE_ISUPPORTS
 
     AsyncFontInfoLoader(FontInfoData *aFontInfo) :
@@ -47,7 +50,6 @@ class AsyncFontInfoLoader : public nsRunnable {
     {
         mCompleteEvent = new FontInfoLoadCompleteEvent(aFontInfo);
     }
-    virtual ~AsyncFontInfoLoader() {}
 
     NS_IMETHOD Run();
 
@@ -78,7 +80,7 @@ AsyncFontInfoLoader::Run()
     mFontInfo->Load();
 
     // post a completion event that transfer the data to the fontlist
-    NS_DispatchToMainThread(mCompleteEvent, NS_DISPATCH_NORMAL);
+    NS_DispatchToMainThread(mCompleteEvent);
     mFontInfo = nullptr;
 
     return NS_OK;

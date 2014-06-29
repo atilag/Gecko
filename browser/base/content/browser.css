@@ -557,7 +557,8 @@ window[chromehidden~="toolbar"] toolbar:not(.toolbar-primary):not(.chromeclass-m
 #identity-popup-content-box.unknownIdentity > #identity-popup-content-host ,
 #identity-popup-content-box.unknownIdentity > #identity-popup-content-owner ,
 #identity-popup-content-box.verifiedIdentity > #identity-popup-connectedToLabel2 ,
-#identity-popup-content-box.verifiedDomain > #identity-popup-connectedToLabel2 {
+#identity-popup-content-box.verifiedDomain > #identity-popup-connectedToLabel2 ,
+#identity-popup-content-box.verifiedDomain > #identity-popup-runByLabel {
   display: none;
 }
 
@@ -942,11 +943,11 @@ chatbox:-moz-full-screen-ancestor > .chat-titlebar {
 %ifndef MOZ_WIDGET_GTK
 
 #BMB_bookmarksPopup {
-  transform: scale(.7);
+  transform: scale(.4);
   opacity: 0;
   transition-property: transform, opacity;
   transition-duration: 0.15s;
-  transition-timing-function: ease;
+  transition-timing-function: ease-out;
 }
 
 #BMB_bookmarksPopup[animate="open"] {
@@ -972,12 +973,12 @@ chatbox:-moz-full-screen-ancestor > .chat-titlebar {
 
 #BMB_bookmarksPopup[arrowposition="after_start"][animate="cancel"],
 #BMB_bookmarksPopup[arrowposition="before_end"][animate="cancel"] {
-  transform: scale(.7) skew(30deg, 20deg);
+  transform: none;
 }
 
 #BMB_bookmarksPopup[arrowposition="after_end"][animate="cancel"],
 #BMB_bookmarksPopup[arrowposition="before_start"][animate="cancel"] {
-  transform: scale(.7) skew(-30deg, -20deg);
+  transform: none;
 }
 
 %endif
@@ -1132,4 +1133,10 @@ toolbarpaletteitem[place="palette"][hidden] {
 #UITourHighlight[active="color"] {
   animation-name: uitour-color;
   animation-duration: 2s;
+}
+
+/* Combined context-menu items */
+#context-navigation > .menuitem-iconic > .menu-iconic-text,
+#context-navigation > .menuitem-iconic > .menu-accel-container {
+  display: none;
 }

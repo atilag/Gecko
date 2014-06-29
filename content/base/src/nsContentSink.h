@@ -86,19 +86,20 @@ class nsContentSink : public nsICSSLoaderObserver,
   NS_DECL_NSITIMERCALLBACK
 
   // nsICSSLoaderObserver
-  NS_IMETHOD StyleSheetLoaded(nsCSSStyleSheet* aSheet, bool aWasAlternate,
+  NS_IMETHOD StyleSheetLoaded(mozilla::CSSStyleSheet* aSheet,
+                              bool aWasAlternate,
                               nsresult aStatus) MOZ_OVERRIDE;
 
   virtual nsresult ProcessMETATag(nsIContent* aContent);
 
   // nsIContentSink implementation helpers
-  NS_HIDDEN_(nsresult) WillParseImpl(void);
-  NS_HIDDEN_(nsresult) WillInterruptImpl(void);
-  NS_HIDDEN_(nsresult) WillResumeImpl(void);
-  NS_HIDDEN_(nsresult) DidProcessATokenImpl(void);
-  NS_HIDDEN_(void) WillBuildModelImpl(void);
-  NS_HIDDEN_(void) DidBuildModelImpl(bool aTerminated);
-  NS_HIDDEN_(void) DropParserAndPerfHint(void);
+  nsresult WillParseImpl(void);
+  nsresult WillInterruptImpl(void);
+  nsresult WillResumeImpl(void);
+  nsresult DidProcessATokenImpl(void);
+  void WillBuildModelImpl(void);
+  void DidBuildModelImpl(bool aTerminated);
+  void DropParserAndPerfHint(void);
   bool IsScriptExecutingImpl();
 
   void NotifyAppend(nsIContent* aContent, uint32_t aStartIndex);

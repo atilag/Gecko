@@ -17,6 +17,7 @@
 #include "nsISecureBrowserUI.h"
 #include "nsITabParent.h"
 #include "nsIXULBrowserWindow.h"
+#include "nsWeakReference.h"
 #include "Units.h"
 #include "js/TypeDecls.h"
 
@@ -42,7 +43,7 @@ class RenderFrameParent;
 namespace dom {
 
 class ClonedMessageData;
-class ContentParent;
+class nsIContentParent;
 class Element;
 struct StructuredCloneData;
 
@@ -50,17 +51,19 @@ class TabParent : public PBrowserParent
                 , public nsITabParent 
                 , public nsIAuthPromptProvider
                 , public nsISecureBrowserUI
+                , public nsSupportsWeakReference
                 , public TabContext
 {
     typedef mozilla::dom::ClonedMessageData ClonedMessageData;
     typedef mozilla::layout::ScrollingBehavior ScrollingBehavior;
 
+    virtual ~TabParent();
+
 public:
     // nsITabParent
     NS_DECL_NSITABPARENT
 
-    TabParent(ContentParent* aManager, const TabContext& aContext, uint32_t aChromeFlags);
-    virtual ~TabParent();
+    TabParent(nsIContentParent* aManager, const TabContext& aContext, uint32_t aChromeFlags);
     Element* GetOwnerElement() const { return mFrameElement; }
     void SetOwnerElement(Element* aElement);
 
@@ -125,7 +128,16 @@ public:
                                             const nsString& aName,
                                             const nsString& aFeatures,
                                             bool* aOutWindowOpened) MOZ_OVERRIDE;
-    virtual bool AnswerCreateWindow(PBrowserParent** retval) MOZ_OVERRIDE;
+    virtual bool AnswerCreateWindow(const uint32_t& aChromeFlags,
+                                    const bool& aCalledFromJS,
+                                    const bool& aPositionSpecified,
+                                    const bool& aSizeSpecified,
+                                    const nsString& aURI,
+                                    const nsString& aName,
+                                    const nsString& aFeatures,
+                                    const nsString& aBaseURI,
+                                    bool* aWindowIsNew,
+                                    PBrowserParent** aRetVal) MOZ_OVERRIDE;
     virtual bool RecvSyncMessage(const nsString& aMessage,
                                  const ClonedMessageData& aData,
                                  const InfallibleTArray<CpowEntry>& aCpows,
@@ -168,7 +180,7 @@ public:
                                      const int32_t& aCause,
                                      const int32_t& aFocusChange) MOZ_OVERRIDE;
     virtual bool RecvRequestFocus(const bool& aCanRaise) MOZ_OVERRIDE;
-    virtual bool RecvSetCursor(const uint32_t& aValue) MOZ_OVERRIDE;
+    virtual bool RecvSetCursor(const uint32_t& aValue, const bool& aForce) MOZ_OVERRIDE;
     virtual bool RecvSetBackgroundColor(const nscolor& aValue) MOZ_OVERRIDE;
     virtual bool RecvSetStatus(const uint32_t& aType, const nsString& aStatus) MOZ_OVERRIDE;
     virtual bool RecvIsParentWindowMainWidgetVisible(bool* aIsVisible);
@@ -198,6 +210,7 @@ public:
     void Show(const nsIntSize& size);
     void UpdateDimensions(const nsRect& rect, const nsIntSize& size);
     void UpdateFrame(const layers::FrameMetrics& aFrameMetrics);
+    void UIResolutionChanged();
     void AcknowledgeScrollUpdate(const ViewID& aScrollId, const uint32_t& aScrollGeneration);
     void HandleDoubleTap(const CSSPoint& aPoint,
                          int32_t aModifiers,
@@ -288,7 +301,7 @@ public:
     static TabParent* GetFrom(nsFrameLoader* aFrameLoader);
     static TabParent* GetFrom(nsIContent* aContent);
 
-    ContentParent* Manager() { return mManager; }
+    nsIContentParent* Manager() { return mManager; }
 
     /**
      * Let managees query if Destroy() is already called so they don't send out
@@ -303,6 +316,10 @@ protected:
                         CpowHolder* aCpows,
                         nsIPrincipal* aPrincipal,
                         InfallibleTArray<nsString>* aJSONRetVal = nullptr);
+
+    virtual bool RecvAsyncAuthPrompt(const nsCString& aUri,
+                                     const nsString& aRealm,
+                                     const uint64_t& aCallbackId) MOZ_OVERRIDE;
 
     virtual bool Recv__delete__() MOZ_OVERRIDE;
 
@@ -365,7 +382,7 @@ private:
     already_AddRefed<nsFrameLoader> GetFrameLoader() const;
     already_AddRefed<nsIWidget> GetWidget() const;
     layout::RenderFrameParent* GetRenderFrame();
-    nsRefPtr<ContentParent> mManager;
+    nsRefPtr<nsIContentParent> mManager;
     void TryCacheDPIAndScale();
 
     CSSPoint AdjustTapToChildWidget(const CSSPoint& aPoint);
@@ -380,8 +397,8 @@ private:
     // |aOutTargetGuid| will contain the identifier
     // of the APZC instance that handled the event. aOutTargetGuid may be
     // null.
-    void MaybeForwardEventToRenderFrame(WidgetInputEvent& aEvent,
-                                        ScrollableLayerGuid* aOutTargetGuid);
+    nsEventStatus MaybeForwardEventToRenderFrame(WidgetInputEvent& aEvent,
+                                                 ScrollableLayerGuid* aOutTargetGuid);
     // The offset for the child process which is sampled at touch start. This
     // means that the touch events are relative to where the frame was at the
     // start of the touch. We need to look for a better solution to this

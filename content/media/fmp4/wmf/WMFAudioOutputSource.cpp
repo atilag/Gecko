@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "WMFAudioOutputSource.h"
+#include "mp4_demuxer/DecoderData.h"
 #include "VideoUtils.h"
 #include "WMFUtils.h"
 #include "nsTArray.h"
@@ -65,17 +66,18 @@ AACAudioSpecificConfigToUserData(const uint8_t* aAudioSpecConfig,
   aOutUserData.AppendElements(aAudioSpecConfig, aConfigLength);
 }
 
-WMFAudioOutputSource::WMFAudioOutputSource(const mp4_demuxer::AudioDecoderConfig& aConfig)
-  : mAudioChannels(ChannelLayoutToChannelCount(aConfig.channel_layout()))
-  , mAudioBytesPerSample(aConfig.bits_per_channel() / 8)
-  , mAudioRate(aConfig.samples_per_second())
+WMFAudioOutputSource::WMFAudioOutputSource(
+  const mp4_demuxer::AudioDecoderConfig& aConfig)
+  : mAudioChannels(aConfig.channel_count)
+  , mAudioBytesPerSample(aConfig.bits_per_sample / 8)
+  , mAudioRate(aConfig.samples_per_second)
   , mAudioFrameOffset(0)
   , mAudioFrameSum(0)
   , mMustRecaptureAudioPosition(true)
 {
   MOZ_COUNT_CTOR(WMFAudioOutputSource);
-  AACAudioSpecificConfigToUserData(aConfig.extra_data(),
-                                   aConfig.extra_data_size(),
+  AACAudioSpecificConfigToUserData(&aConfig.audio_specific_config[0],
+                                   aConfig.audio_specific_config.length(),
                                    mUserData);
 }
 
@@ -124,6 +126,14 @@ WMFAudioOutputSource::Init()
   mDecoder = decoder;
 
   return decoder.forget();
+}
+
+HRESULT
+WMFAudioOutputSource::Input(mp4_demuxer::MP4Sample* aSample)
+{
+  const uint8_t* data = reinterpret_cast<const uint8_t*>(aSample->data);
+  uint32_t length = aSample->size;
+  return mDecoder->Input(data, length, aSample->composition_timestamp);
 }
 
 HRESULT

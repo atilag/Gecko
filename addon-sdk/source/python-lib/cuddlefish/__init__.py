@@ -5,7 +5,6 @@
 import sys
 import os
 import optparse
-import webbrowser
 import time
 
 from copy import copy
@@ -264,10 +263,11 @@ parser_groups = (
                                  cmds=['test', 'run', 'xpi', 'testex',
                                        'testpkgs', 'testall'])),
         (("", "--e10s",), dict(dest="enable_e10s",
-                               help="enable out-of-process Jetpacks",
+                               help="enable remote windows",
                                action="store_true",
                                default=False,
-                               cmds=['test', 'run', 'testex', 'testpkgs'])),
+                               cmds=['test', 'run', 'testex', 'testpkgs',
+                                     'testaddons', 'testcfx', 'testall'])),
         (("", "--logfile",), dict(dest="logfile",
                                   help="log console output to file",
                                   metavar=None,
@@ -421,13 +421,14 @@ def test_all_testaddons(env_root, defaults):
     addons.sort()
     fail = False
     for dirname in addons:
+        # apply the filter
         if (not defaults['filter'].split(":")[0] in dirname):
             continue
 
         print >>sys.stderr, "Testing %s..." % dirname
         sys.stderr.flush()
         try:
-            run(arguments=["run",
+            run(arguments=["testrun",
                            "--pkgdir",
                            os.path.join(addons_dir, dirname)],
                 defaults=defaults,
@@ -619,7 +620,7 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
             return
         test_cfx(env_root, options.verbose)
         return
-    elif command not in ["xpi", "test", "run"]:
+    elif command not in ["xpi", "test", "run", "testrun"]:
         print >>sys.stderr, "Unknown command: %s" % command
         print >>sys.stderr, "Try using '--help' for assistance."
         sys.exit(1)
@@ -663,6 +664,9 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
         enforce_timeouts = True
     elif command == "run":
         use_main = True
+    elif command == "testrun":
+        use_main = True
+        enforce_timeouts = True
     else:
         assert 0, "shouldn't get here"
 
@@ -681,7 +685,7 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
     # TODO: Consider keeping a cache of dynamic UUIDs, based
     # on absolute filesystem pathname, in the root directory
     # or something.
-    if command in ('xpi', 'run'):
+    if command in ('xpi', 'run', 'testrun'):
         from cuddlefish.preflight import preflight_config
         if target_cfg_json:
             config_was_ok, modified = preflight_config(target_cfg,
@@ -814,9 +818,6 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
         mydir = os.path.dirname(os.path.abspath(__file__))
         app_extension_dir = os.path.join(mydir, "../../app-extension")
 
-    if target_cfg.get('preferences'):
-        harness_options['preferences'] = target_cfg.get('preferences')
-
     # Do not add entries for SDK modules
     harness_options['manifest'] = manifest.get_harness_options_manifest(False)
 
@@ -834,12 +835,6 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
             sys.exit(1)
         # Pass a flag in order to force using sdk modules shipped in the xpi
         harness_options['force-use-bundled-sdk'] = True
-
-    # Pass the list of absolute path for all test modules
-    if command == "test":
-        harness_options['allTestModules'] = manifest.get_all_test_modules()
-        if len(harness_options['allTestModules']) == 0:
-            sys.exit(0)
 
     from cuddlefish.rdf import gen_manifest, RDFUpdate
 
@@ -902,6 +897,8 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
         if options.addons is not None:
             options.addons = options.addons.split(",")
 
+        enable_e10s = options.enable_e10s or target_cfg.get('e10s', False)
+
         try:
             retval = run_app(harness_root_dir=app_extension_dir,
                              manifest_rdf=manifest_rdf,
@@ -924,7 +921,8 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
                              is_running_tests=(command == "test"),
                              overload_modules=options.overload_modules,
                              bundle_sdk=options.bundle_sdk,
-                             pkgdir=options.pkgdir)
+                             pkgdir=options.pkgdir,
+                             enable_e10s=enable_e10s)
         except ValueError, e:
             print ""
             print "A given cfx option has an inappropriate value:"

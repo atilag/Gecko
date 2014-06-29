@@ -19,21 +19,23 @@ class SVGAnimatedTransformList;
 class SVGGraphicsElement;
 class SVGMatrix;
 class SVGIRect;
+struct SVGBoundingBoxOptions;
 
 class SVGTransformableElement : public nsSVGElement
 {
 public:
-  SVGTransformableElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+  SVGTransformableElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
     : nsSVGElement(aNodeInfo) {}
   virtual ~SVGTransformableElement() {}
 
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE = 0;
+  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE = 0;
 
   // WebIDL
   already_AddRefed<SVGAnimatedTransformList> Transform();
   nsSVGElement* GetNearestViewportElement();
   nsSVGElement* GetFarthestViewportElement();
-  already_AddRefed<SVGIRect> GetBBox(ErrorResult& rv);
+  already_AddRefed<SVGIRect> GetBBox(const SVGBoundingBoxOptions& aOptions, 
+                                     ErrorResult& rv);
   already_AddRefed<SVGMatrix> GetCTM();
   already_AddRefed<SVGMatrix> GetScreenCTM();
   already_AddRefed<SVGMatrix> GetTransformToElement(SVGGraphicsElement& aElement,

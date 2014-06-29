@@ -17,7 +17,7 @@
 #include "nsDOMAttributeMap.h"
 #include "nsIAtom.h"
 #include "nsIContentInlines.h"
-#include "nsINodeInfo.h"
+#include "mozilla/dom/NodeInfo.h"
 #include "nsIDocumentInlines.h"
 #include "nsIDOMNodeList.h"
 #include "nsIDOMDocument.h"
@@ -27,7 +27,7 @@
 #include "nsIScriptGlobalObject.h"
 #include "nsIURL.h"
 #include "nsNetUtil.h"
-#include "nsIFrame.h"
+#include "nsContainerFrame.h"
 #include "nsIAnonymousContentCreator.h"
 #include "nsIPresShell.h"
 #include "nsPresContext.h"
@@ -41,6 +41,8 @@
 #include "nsDOMCSSAttrDeclaration.h"
 #include "nsNameSpaceManager.h"
 #include "nsContentList.h"
+#include "nsVariant.h"
+#include "nsDOMSettableTokenList.h"
 #include "nsDOMTokenList.h"
 #include "nsXBLPrototypeBinding.h"
 #include "nsError.h"
@@ -64,7 +66,7 @@
 #ifdef MOZ_XUL
 #include "nsXULElement.h"
 #endif /* MOZ_XUL */
-#include "nsFrameManager.h"
+#include "nsSVGElement.h"
 #include "nsFrameSelection.h"
 #ifdef DEBUG
 #include "nsRange.h"
@@ -123,6 +125,7 @@
 
 #include "mozilla/CORSMode.h"
 #include "mozilla/dom/ShadowRoot.h"
+#include "mozilla/dom/NodeListBinding.h"
 
 #include "nsStyledElement.h"
 #include "nsXBLService.h"
@@ -134,6 +137,32 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
+
+nsIAtom*
+nsIContent::DoGetID() const
+{
+  MOZ_ASSERT(HasID(), "Unexpected call");
+  MOZ_ASSERT(IsElement(), "Only elements can have IDs");
+
+  return AsElement()->GetParsedAttr(nsGkAtoms::id)->GetAtomValue();
+}
+
+const nsAttrValue*
+nsIContent::DoGetClasses() const
+{
+  MOZ_ASSERT(HasFlag(NODE_MAY_HAVE_CLASS), "Unexpected call");
+  MOZ_ASSERT(IsElement(), "Only elements can have classes");
+
+  if (IsSVG()) {
+    const nsAttrValue* animClass =
+      static_cast<const nsSVGElement*>(this)->GetAnimatedClassName();
+    if (animClass) {
+      return animClass;
+    }
+  }
+
+  return AsElement()->GetParsedAttr(nsGkAtoms::_class);
+}
 
 NS_IMETHODIMP
 Element::QueryInterface(REFNSIID aIID, void** aInstancePtr)
@@ -160,7 +189,7 @@ Element::IntrinsicState() const
 void
 Element::NotifyStateChange(EventStates aStates)
 {
-  nsIDocument* doc = GetCurrentDoc();
+  nsIDocument* doc = GetCrossShadowCurrentDoc();
   if (doc) {
     nsAutoScriptBlocker scriptBlocker;
     doc->ContentStateChanged(this, aStates);
@@ -186,7 +215,7 @@ Element::UpdateState(bool aNotify)
   if (aNotify) {
     EventStates changedStates = oldState ^ mState;
     if (!changedStates.IsEmpty()) {
-      nsIDocument* doc = GetCurrentDoc();
+      nsIDocument* doc = GetCrossShadowCurrentDoc();
       if (doc) {
         nsAutoScriptBlocker scriptBlocker;
         doc->ContentStateChanged(this, changedStates);
@@ -215,7 +244,7 @@ nsIContent::UpdateEditableState(bool aNotify)
     if (root) {
       nsIFrame* rootFrame = root->GetPrimaryFrame();
       if (rootFrame) {
-        nsIFrame* parentFrame = rootFrame->GetParent();
+        nsContainerFrame* parentFrame = rootFrame->GetParent();
         nsITextControlFrame* textCtrl = do_QueryFrame(parentFrame);
         isUnknownNativeAnon = !textCtrl;
       }
@@ -466,15 +495,12 @@ Element::WrapObject(JSContext *aCx)
 }
 
 nsDOMTokenList*
-Element::GetClassList()
+Element::ClassList()
 {
-  Element::nsDOMSlots *slots = DOMSlots();
+  Element::nsDOMSlots* slots = DOMSlots();
 
   if (!slots->mClassList) {
-    nsIAtom* classAttr = GetClassAttributeName();
-    if (classAttr) {
-      slots->mClassList = new nsDOMTokenList(this, classAttr);
-    }
+    slots->mClassList = new nsDOMTokenList(this, nsGkAtoms::_class);
   }
 
   return slots->mClassList;
@@ -483,7 +509,7 @@ Element::GetClassList()
 void
 Element::GetClassList(nsISupports** aClassList)
 {
-  NS_IF_ADDREF(*aClassList = GetClassList());
+  NS_ADDREF(*aClassList = ClassList());
 }
 
 already_AddRefed<nsIHTMLCollection>
@@ -736,31 +762,22 @@ Element::AddToIdTable(nsIAtom* aId)
 void
 Element::RemoveFromIdTable()
 {
-  if (HasID()) {
-    RemoveFromIdTable(DoGetID());
+  if (!HasID()) {
+    return;
   }
-}
 
-void
-Element::RemoveFromIdTable(nsIAtom* aId)
-{
-  NS_ASSERTION(HasID(), "Node doesn't have an ID?");
+  nsIAtom* id = DoGetID();
   if (HasFlag(NODE_IS_IN_SHADOW_TREE)) {
     ShadowRoot* containingShadow = GetContainingShadow();
     // Check for containingShadow because it may have
     // been deleted during unlinking.
     if (containingShadow) {
-      containingShadow->RemoveFromIdTable(this, aId);
+      containingShadow->RemoveFromIdTable(this, id);
     }
   } else {
     nsIDocument* doc = GetCurrentDoc();
     if (doc && (!IsInAnonymousSubtree() || doc->IsXUL())) {
-      // id can be null during mutation events evilness. Also, XUL elements
-      // loose their proto attributes during cc-unlink, so this can happen
-      // during cc-unlink too.
-      if (aId) {
-        doc->RemoveFromIdTable(this, aId);
-      }
+      doc->RemoveFromIdTable(this, id);
     }
   }
 }
@@ -770,7 +787,7 @@ Element::CreateShadowRoot(ErrorResult& aError)
 {
   nsAutoScriptBlocker scriptBlocker;
 
-  nsCOMPtr<nsINodeInfo> nodeInfo;
+  nsRefPtr<mozilla::dom::NodeInfo> nodeInfo;
   nodeInfo = mNodeInfo->NodeInfoManager()->GetNodeInfo(
     nsGkAtoms::documentFragmentNodeName, nullptr, kNameSpaceID_None,
     nsIDOMNode::DOCUMENT_FRAGMENT_NODE);
@@ -813,7 +830,7 @@ Element::CreateShadowRoot(ErrorResult& aError)
 
   // Recreate the frame for the bound content because binding a ShadowRoot
   // changes how things are rendered.
-  nsIDocument* doc = GetCurrentDoc();
+  nsIDocument* doc = GetCrossShadowCurrentDoc();
   if (doc) {
     nsIPresShell *shell = doc->GetShell();
     if (shell) {
@@ -822,6 +839,83 @@ Element::CreateShadowRoot(ErrorResult& aError)
   }
 
   return shadowRoot.forget();
+}
+
+NS_IMPL_CYCLE_COLLECTION(DestinationInsertionPointList, mParent, mDestinationPoints)
+
+NS_INTERFACE_TABLE_HEAD(DestinationInsertionPointList)
+  NS_INTERFACE_TABLE(DestinationInsertionPointList, nsINodeList)
+  NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(DestinationInsertionPointList)
+NS_INTERFACE_MAP_END
+
+NS_IMPL_CYCLE_COLLECTING_ADDREF(DestinationInsertionPointList)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(DestinationInsertionPointList)
+
+DestinationInsertionPointList::DestinationInsertionPointList(Element* aElement)
+  : mParent(aElement)
+{
+  SetIsDOMBinding();
+
+  nsTArray<nsIContent*>* destPoints = aElement->GetExistingDestInsertionPoints();
+  if (destPoints) {
+    for (uint32_t i = 0; i < destPoints->Length(); i++) {
+      mDestinationPoints.AppendElement(destPoints->ElementAt(i));
+    }
+  }
+}
+
+DestinationInsertionPointList::~DestinationInsertionPointList()
+{
+}
+
+nsIContent*
+DestinationInsertionPointList::Item(uint32_t aIndex)
+{
+  return mDestinationPoints.SafeElementAt(aIndex);
+}
+
+NS_IMETHODIMP
+DestinationInsertionPointList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
+{
+  nsIContent* item = Item(aIndex);
+  if (!item) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return CallQueryInterface(item, aReturn);
+}
+
+uint32_t
+DestinationInsertionPointList::Length() const
+{
+  return mDestinationPoints.Length();
+}
+
+NS_IMETHODIMP
+DestinationInsertionPointList::GetLength(uint32_t* aLength)
+{
+  *aLength = Length();
+  return NS_OK;
+}
+
+int32_t
+DestinationInsertionPointList::IndexOf(nsIContent* aContent)
+{
+  return mDestinationPoints.IndexOf(aContent);
+}
+
+JSObject*
+DestinationInsertionPointList::WrapObject(JSContext* aCx)
+{
+  return NodeListBinding::Wrap(aCx, this);
+}
+
+already_AddRefed<DestinationInsertionPointList>
+Element::GetDestinationInsertionPoints()
+{
+  nsRefPtr<DestinationInsertionPointList> list =
+    new DestinationInsertionPointList(this);
+  return list.forget();
 }
 
 void
@@ -951,7 +1045,7 @@ Element::SetAttributeNS(const nsAString& aNamespaceURI,
                         const nsAString& aValue,
                         ErrorResult& aError)
 {
-  nsCOMPtr<nsINodeInfo> ni;
+  nsRefPtr<mozilla::dom::NodeInfo> ni;
   aError =
     nsContentUtils::GetNodeInfoFromQName(aNamespaceURI, aQualifiedName,
                                          mNodeInfo->NodeInfoManager(),
@@ -1136,6 +1230,7 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
       SetFlags(NODE_CHROME_ONLY_ACCESS);
     }
     if (aParent->HasFlag(NODE_IS_IN_SHADOW_TREE)) {
+      ClearSubtreeRootPointer();
       SetFlags(NODE_IS_IN_SHADOW_TREE);
     }
     ShadowRoot* parentContainingShadow = aParent->GetContainingShadow();
@@ -1193,12 +1288,26 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                NODE_NEEDS_FRAME | NODE_DESCENDANTS_NEED_FRAMES |
                // And the restyle bits
                ELEMENT_ALL_RESTYLE_FLAGS);
-
-    // Propagate scoped style sheet tracking bit.
-    SetIsElementInStyleScope(mParent->IsElementInStyleScope());
-  } else {
-    // If we're not in the doc, update our subtree pointer.
+  } else if (!HasFlag(NODE_IS_IN_SHADOW_TREE)) {
+    // If we're not in the doc and not in a shadow tree,
+    // update our subtree pointer.
     SetSubtreeRootPointer(aParent->SubtreeRoot());
+  }
+
+  // Propagate scoped style sheet tracking bit.
+  if (mParent->IsContent()) {
+    nsIContent* parent;
+    ShadowRoot* shadowRootParent = ShadowRoot::FromNode(mParent);
+    if (shadowRootParent) {
+      parent = shadowRootParent->GetHost();
+    } else {
+      parent = mParent->AsContent();
+    }
+
+    bool inStyleScope = parent->IsElementInStyleScope();
+
+    SetIsElementInStyleScope(inStyleScope);
+    SetIsElementInStyleScopeFlagOnShadowTree(inStyleScope);
   }
 
   // This has to be here, rather than in nsGenericHTMLElement::BindToTree,
@@ -1340,6 +1449,7 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
     SetParentIsContent(false);
   }
   ClearInDocument();
+  UnsetFlags(NODE_IS_IN_SHADOW_TREE);
 
   // Begin keeping track of our subtree root.
   SetSubtreeRootPointer(aNullParent ? this : mParent->SubtreeRoot());
@@ -1375,7 +1485,7 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
   }
 
   // Unset this since that's what the old code effectively did.
-  UnsetFlags(NODE_FORCE_XBL_BINDINGS | NODE_IS_IN_SHADOW_TREE);
+  UnsetFlags(NODE_FORCE_XBL_BINDINGS);
   
 #ifdef MOZ_XUL
   nsXULElement* xulElem = nsXULElement::FromContent(this);
@@ -1493,12 +1603,6 @@ Element::GetAttributeChangeHint(const nsIAtom* aAttribute,
   return nsChangeHint(0);
 }
 
-nsIAtom *
-Element::GetClassAttributeName() const
-{
-  return nullptr;
-}
-
 bool
 Element::FindAttributeDependence(const nsIAtom* aAttribute,
                                  const MappedAttributeEntry* const aMaps[],
@@ -1516,7 +1620,7 @@ Element::FindAttributeDependence(const nsIAtom* aAttribute,
   return false;
 }
 
-already_AddRefed<nsINodeInfo>
+already_AddRefed<mozilla::dom::NodeInfo>
 Element::GetExistingAttrNameFromQName(const nsAString& aStr) const
 {
   const nsAttrName* name = InternalGetExistingAttrNameFromQName(aStr);
@@ -1524,7 +1628,7 @@ Element::GetExistingAttrNameFromQName(const nsAString& aStr) const
     return nullptr;
   }
 
-  nsCOMPtr<nsINodeInfo> nodeInfo;
+  nsRefPtr<mozilla::dom::NodeInfo> nodeInfo;
   if (name->IsAtom()) {
     nodeInfo = mNodeInfo->NodeInfoManager()->
       GetNodeInfo(name->Atom(), nullptr, kNameSpaceID_None,
@@ -1686,7 +1790,6 @@ Element::SetEventHandler(nsIAtom* aEventName,
 
   defer = defer && aDefer; // only defer if everyone agrees...
   manager->SetEventHandler(aEventName, aValue,
-                           nsIProgrammingLanguage::JAVASCRIPT,
                            defer, !nsContentUtils::IsChromeDoc(ownerDoc),
                            this);
   return NS_OK;
@@ -1897,7 +2000,7 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
     }
   }
   else {
-    nsCOMPtr<nsINodeInfo> ni;
+    nsRefPtr<mozilla::dom::NodeInfo> ni;
     ni = mNodeInfo->NodeInfoManager()->GetNodeInfo(aName, aPrefix,
                                                    aNamespaceID,
                                                    nsIDOMNode::ATTRIBUTE_NODE);
@@ -1976,6 +2079,27 @@ Element::ParseAttribute(int32_t aNamespaceID,
                         const nsAString& aValue,
                         nsAttrValue& aResult)
 {
+  if (aNamespaceID == kNameSpaceID_None) {
+    if (aAttribute == nsGkAtoms::_class) {
+      SetFlags(NODE_MAY_HAVE_CLASS);
+      aResult.ParseAtomArray(aValue);
+      return true;
+    }
+    if (aAttribute == nsGkAtoms::id) {
+      // Store id as an atom.  id="" means that the element has no id,
+      // not that it has an emptystring as the id.
+      RemoveFromIdTable();
+      if (aValue.IsEmpty()) {
+        ClearHasID();
+        return false;
+      }
+      aResult.ParseAtom(aValue);
+      SetHasID();
+      AddToIdTable(aResult.GetAtomValue());
+      return true;
+    }
+  }
+
   return false;
 }
 
@@ -2091,6 +2215,12 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
   // react to unexpected attribute changes.
   nsMutationGuard::DidMutate();
 
+  if (aName == nsGkAtoms::id && aNameSpaceID == kNameSpaceID_None) {
+    // Have to do this before clearing flag. See RemoveFromIdTable
+    RemoveFromIdTable();
+    ClearHasID();
+  }
+
   bool hadValidDir = false;
   bool hadDirAuto = false;
 
@@ -2182,7 +2312,7 @@ Element::DescribeAttribute(uint32_t index, nsAString& aOutDescription) const
       value.Insert(char16_t('\\'), uint32_t(i));
   }
   aOutDescription.Append(value);
-  aOutDescription.AppendLiteral("\"");
+  aOutDescription.Append('"');
 }
 
 #ifdef DEBUG
@@ -2526,6 +2656,81 @@ Element::GetLinkTarget(nsAString& aTarget)
   aTarget.Truncate();
 }
 
+static void
+nsDOMSettableTokenListPropertyDestructor(void *aObject, nsIAtom *aProperty,
+                                         void *aPropertyValue, void *aData)
+{
+  nsDOMSettableTokenList* list =
+    static_cast<nsDOMSettableTokenList*>(aPropertyValue);
+  NS_RELEASE(list);
+}
+
+static nsIAtom** sPropertiesToTraverseAndUnlink[] =
+  {
+    &nsGkAtoms::microdataProperties,
+    &nsGkAtoms::itemtype,
+    &nsGkAtoms::itemref,
+    &nsGkAtoms::itemprop,
+    &nsGkAtoms::sandbox,
+    &nsGkAtoms::sizes,
+    nullptr
+  };
+
+// static
+nsIAtom***
+Element::HTMLSVGPropertiesToTraverseAndUnlink()
+{
+  return sPropertiesToTraverseAndUnlink;
+}
+
+nsDOMSettableTokenList*
+Element::GetTokenList(nsIAtom* aAtom)
+{
+#ifdef DEBUG
+  nsIAtom*** props =
+    HTMLSVGPropertiesToTraverseAndUnlink();
+  bool found = false;
+  for (uint32_t i = 0; props[i]; ++i) {
+    if (*props[i] == aAtom) {
+      found = true;
+      break;
+    }
+  }
+  MOZ_ASSERT(found, "Trying to use an unknown tokenlist!");
+#endif
+
+  nsDOMSettableTokenList* list = nullptr;
+  if (HasProperties()) {
+    list = static_cast<nsDOMSettableTokenList*>(GetProperty(aAtom));
+  }
+  if (!list) {
+    list = new nsDOMSettableTokenList(this, aAtom);
+    NS_ADDREF(list);
+    SetProperty(aAtom, list, nsDOMSettableTokenListPropertyDestructor);
+  }
+  return list;
+}
+
+void
+Element::GetTokenList(nsIAtom* aAtom, nsIVariant** aResult)
+{
+  nsISupports* itemType = GetTokenList(aAtom);
+  nsCOMPtr<nsIWritableVariant> out = new nsVariant();
+  out->SetAsInterface(NS_GET_IID(nsISupports), itemType);
+  out.forget(aResult);
+}
+
+nsresult
+Element::SetTokenList(nsIAtom* aAtom, nsIVariant* aValue)
+{
+  nsDOMSettableTokenList* itemType = GetTokenList(aAtom);
+  nsAutoString string;
+  aValue->GetAsAString(string);
+  ErrorResult rv;
+  itemType->SetValue(string, rv);
+  return rv.ErrorCode();
+}
+
 bool
 Element::MozMatchesSelector(const nsAString& aSelector,
                             ErrorResult& aError)
@@ -2719,7 +2924,7 @@ Element::SetOuterHTML(const nsAString& aOuterHTML, ErrorResult& aError)
   } else {
     NS_ASSERTION(parent->NodeType() == nsIDOMNode::DOCUMENT_FRAGMENT_NODE,
       "How come the parent isn't a document, a fragment or an element?");
-    nsCOMPtr<nsINodeInfo> info =
+    nsRefPtr<mozilla::dom::NodeInfo> info =
       OwnerDoc()->NodeInfoManager()->GetNodeInfo(nsGkAtoms::body,
                                                  nullptr,
                                                  kNameSpaceID_XHTML,

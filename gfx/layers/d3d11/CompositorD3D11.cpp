@@ -15,6 +15,7 @@
 #include "mozilla/layers/Effects.h"
 #include "nsWindowsHelpers.h"
 #include "gfxPrefs.h"
+#include "gfxCrashReporterUtils.h"
 
 #include "mozilla/EnumeratedArray.h"
 
@@ -106,6 +107,15 @@ CompositorD3D11::~CompositorD3D11()
 bool
 CompositorD3D11::Initialize()
 {
+  bool force = gfxPrefs::LayersAccelerationForceEnabled();
+
+  ScopedGfxFeatureReporter reporter("D3D11 Layers", force);
+
+  if (!gfxPlatform::CanUseDirect3D11()) {
+    NS_WARNING("Direct3D 11-accelerated layers are not supported on this system.");
+    return false;
+  }
+
   HRESULT hr;
 
   mDevice = gfxWindowsPlatform::GetPlatform()->GetD3D11Device();
@@ -332,17 +342,8 @@ CompositorD3D11::Initialize()
     swapDesc.BufferCount = 1;
     swapDesc.OutputWindow = mHwnd;
     swapDesc.Windowed = TRUE;
-    // We don't really need this flag, however it seems on some NVidia hardware
-    // smaller area windows do not present properly without this flag. This flag
-    // should have no negative consequences by itself. See bug 613790. This flag
-    // is broken on optimus devices. As a temporary solution we don't set it
-    // there, the only way of reliably detecting we're on optimus is looking for
-    // the DLL. See Bug 623807.
-    if (gfxWindowsPlatform::IsOptimus()) {
-      swapDesc.Flags = 0;
-    } else {
-      swapDesc.Flags = DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE;
-    }
+    swapDesc.Flags = 0;
+
 
     /**
      * Create a swap chain, this swap chain will contain the backbuffer for
@@ -359,6 +360,7 @@ CompositorD3D11::Initialize()
                                        DXGI_MWA_NO_WINDOW_CHANGES);
   }
 
+  reporter.SetSuccessful();
   return true;
 }
 
@@ -868,14 +870,10 @@ CompositorD3D11::VerifyBufferSize()
                               DXGI_FORMAT_B8G8R8A8_UNORM,
                               0);
     mDisableSequenceForNextFrame = true;
-  } else if (gfxWindowsPlatform::IsOptimus()) {
-    mSwapChain->ResizeBuffers(1, mSize.width, mSize.height,
-                              DXGI_FORMAT_B8G8R8A8_UNORM,
-                              0);
   } else {
     mSwapChain->ResizeBuffers(1, mSize.width, mSize.height,
                               DXGI_FORMAT_B8G8R8A8_UNORM,
-                              DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE);
+                              0);
   }
 }
 
@@ -1027,7 +1025,7 @@ CompositorD3D11::PaintToTarget()
                                              SurfaceFormat::B8G8R8A8);
   mTarget->CopySurface(sourceSurface,
                        IntRect(0, 0, bbDesc.Width, bbDesc.Height),
-                       IntPoint());
+                       IntPoint(-mTargetBounds.x, -mTargetBounds.y));
   mTarget->Flush();
   mContext->Unmap(readTexture, 0);
 }

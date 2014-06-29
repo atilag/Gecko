@@ -24,6 +24,7 @@ class nsIFile;
 class nsIJSRuntimeService;
 class nsIPrincipal;
 class nsIXPConnectJSObjectHolder;
+class ComponentLoaderInfo;
 
 /* 6bd13476-1dd2-11b2-bbef-f0ccb5fa64b6 (thanks, mozbot) */
 
@@ -45,7 +46,6 @@ class mozJSComponentLoader : public mozilla::ModuleLoader,
     NS_DECL_NSIOBSERVER
 
     mozJSComponentLoader();
-    virtual ~mozJSComponentLoader();
 
     // ModuleLoader
     const mozilla::Module* LoadModule(mozilla::FileLocation &aFile);
@@ -55,11 +55,11 @@ class mozJSComponentLoader : public mozilla::ModuleLoader,
 
     static mozJSComponentLoader* Get() { return sSelf; }
 
-    void NoteSubScript(JS::HandleScript aScript, JS::HandleObject aThisObject);
-
     size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf);
 
  protected:
+    virtual ~mozJSComponentLoader();
+
     static mozJSComponentLoader* sSelf;
 
     nsresult ReallyInit();
@@ -71,8 +71,8 @@ class mozJSComponentLoader : public mozilla::ModuleLoader,
                                        bool aReuseLoaderGlobal,
                                        bool *aRealFile);
 
-    nsresult ObjectForLocation(nsIFile* aComponentFile,
-                               nsIURI *aComponent,
+    nsresult ObjectForLocation(ComponentLoaderInfo& aInfo,
+                               nsIFile* aComponentFile,
                                JS::MutableHandleObject aObject,
                                JS::MutableHandleScript aTableScript,
                                char **location,
@@ -157,7 +157,6 @@ class mozJSComponentLoader : public mozilla::ModuleLoader,
 
     nsClassHashtable<nsCStringHashKey, ModuleEntry> mImports;
     nsDataHashtable<nsCStringHashKey, ModuleEntry*> mInProgressImports;
-    nsDataHashtable<nsPtrHashKey<JSScript>, JSObject*> mThisObjects;
 
     bool mInitialized;
     bool mReuseLoaderGlobal;

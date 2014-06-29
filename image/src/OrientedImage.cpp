@@ -100,19 +100,21 @@ OrientedImage::GetFrame(uint32_t aWhichFrame,
 
   // Determine an appropriate format for the surface.
   gfx::SurfaceFormat surfaceFormat;
-  gfxImageFormat imageFormat;
   if (InnerImage()->FrameIsOpaque(aWhichFrame)) {
     surfaceFormat = gfx::SurfaceFormat::B8G8R8X8;
-    imageFormat = gfxImageFormat::ARGB32;
   } else {
     surfaceFormat = gfx::SurfaceFormat::B8G8R8A8;
-    imageFormat = gfxImageFormat::ARGB32;
   }
 
   // Create a surface to draw into.
   mozilla::RefPtr<DrawTarget> target =
     gfxPlatform::GetPlatform()->
       CreateOffscreenContentDrawTarget(IntSize(width, height), surfaceFormat);
+  if (!target) {
+    NS_ERROR("Could not create a DrawTarget");
+    return nullptr;
+  }
+
 
   // Create our drawable.
   RefPtr<SourceSurface> innerSurface =
@@ -126,7 +128,7 @@ OrientedImage::GetFrame(uint32_t aWhichFrame,
   gfxRect imageRect(0, 0, width, height);
   gfxUtils::DrawPixelSnapped(ctx, drawable, OrientationMatrix(nsIntSize(width, height)),
                              imageRect, imageRect, imageRect, imageRect,
-                             imageFormat, GraphicsFilter::FILTER_FAST);
+                             surfaceFormat, GraphicsFilter::FILTER_FAST);
   
   return target->Snapshot();
 }
@@ -246,6 +248,33 @@ OrientedImage::Draw(gfxContext* aContext,
   return InnerImage()->Draw(aContext, aFilter, userSpaceToImageSpace,
                             aFill, subimage, viewportSize, aSVGContext,
                             aWhichFrame, aFlags);
+}
+
+NS_IMETHODIMP_(nsIntRect)
+OrientedImage::GetImageSpaceInvalidationRect(const nsIntRect& aRect)
+{
+  nsIntRect rect(InnerImage()->GetImageSpaceInvalidationRect(aRect));
+
+  if (mOrientation.IsIdentity()) {
+    return rect;
+  }
+
+  int32_t width, height;
+  nsresult rv = InnerImage()->GetWidth(&width);
+  rv = NS_FAILED(rv) ? rv : InnerImage()->GetHeight(&height);
+  if (NS_FAILED(rv)) {
+    // Fall back to identity if the width and height aren't available.
+    return rect;
+  }
+
+  // Transform the invalidation rect into the correct orientation.
+  gfxMatrix matrix(OrientationMatrix(nsIntSize(width, height)).Invert());
+  gfxRect invalidRect(matrix.TransformBounds(gfxRect(rect.x, rect.y,
+                                                     rect.width, rect.height)));
+  invalidRect.RoundOut();
+
+  return nsIntRect(invalidRect.x, invalidRect.y,
+                   invalidRect.width, invalidRect.height);
 }
 
 } // namespace image

@@ -12,7 +12,7 @@
 #include <windows.h>
 #include <hidsdi.h>
 #include <stdio.h>
-#include <Xinput.h>
+#include <xinput.h>
 
 #include "nsIComponentManager.h"
 #include "nsIObserver.h"
@@ -479,7 +479,7 @@ WindowsGamepadService::ScanForXInputDevices()
     gamepad.numButtons = kStandardGamepadButtons;
     gamepad.numAxes = kStandardGamepadAxes;
     gamepad.id = gamepadsvc->AddGamepad("xinput",
-                                        StandardMapping,
+                                        GamepadMappingType::Standard,
                                         kStandardGamepadButtons,
                                         kStandardGamepadAxes);
     mGamepads.AppendElement(gamepad);
@@ -745,7 +745,7 @@ WindowsGamepadService::GetRawGamepad(HANDLE handle)
     }
   }
 
-  gamepad.numAxes = std::min(axes.Length(), kMaxAxes);
+  gamepad.numAxes = std::min<size_t>(axes.Length(), kMaxAxes);
   for (unsigned i = 0; i < gamepad.numAxes; i++) {
     if (i >= kMaxAxes) {
       break;
@@ -762,7 +762,7 @@ WindowsGamepadService::GetRawGamepad(HANDLE handle)
   }
 
   gamepad.id = gamepadsvc->AddGamepad(gamepad_id,
-                                      NoMapping,
+                                      GamepadMappingType::_empty,
                                       gamepad.numButtons,
                                       gamepad.numAxes);
   mGamepads.AppendElement(gamepad);

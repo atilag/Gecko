@@ -117,7 +117,6 @@ private:
     TimeStamp mRunTime;
 };
 
-
 class AndroidBridge MOZ_FINAL : public mozilla::layers::GeckoContentController
 {
 public:
@@ -201,7 +200,8 @@ public:
     void ContentDocumentChanged();
     bool IsContentDocumentDisplayed();
 
-    bool ProgressiveUpdateCallback(bool aHasPendingNewThebesContent, const LayerRect& aDisplayPort, float aDisplayResolution, bool aDrawingCritical, mozilla::ParentLayerRect& aCompositionBounds, mozilla::CSSToParentLayerScale& aZoom);
+    bool ProgressiveUpdateCallback(bool aHasPendingNewThebesContent, const LayerRect& aDisplayPort, float aDisplayResolution, bool aDrawingCritical,
+                                   mozilla::ScreenPoint& aScrollOffset, mozilla::CSSToScreenScale& aZoom);
 
     void SetLayerClient(JNIEnv* env, jobject jobj);
     mozilla::widget::android::GeckoLayerClient* GetLayerClient() { return mLayerClient; }
@@ -344,6 +344,13 @@ public:
     static jfieldID GetStaticFieldID(JNIEnv* env, jclass jClass, const char* fieldName, const char* fieldType);
     static jmethodID GetMethodID(JNIEnv* env, jclass jClass, const char* methodName, const char* methodType);
     static jmethodID GetStaticMethodID(JNIEnv* env, jclass jClass, const char* methodName, const char* methodType);
+
+    static jobject ChannelCreate(jobject);
+
+    static void InputStreamClose(jobject obj);
+    static uint32_t InputStreamAvailable(jobject obj);
+    static nsresult InputStreamRead(jobject obj, char *aBuf, uint32_t aCount, uint32_t *aRead);
+
 protected:
     static StaticRefPtr<AndroidBridge> sBridge;
     nsTArray<nsCOMPtr<nsIMobileMessageCallback> > mSmsRequests;
@@ -377,6 +384,16 @@ protected:
     int mAPIVersion;
 
     bool QueueSmsRequest(nsIMobileMessageCallback* aRequest, uint32_t* aRequestIdOut);
+
+    // intput stream
+    jclass jReadableByteChannel;
+    jclass jChannels;
+    jmethodID jChannelCreate;
+    jmethodID jByteBufferRead;
+
+    jclass jInputStream;
+    jmethodID jClose;
+    jmethodID jAvailable;
 
     // other things
     jmethodID jNotifyAppShellReady;

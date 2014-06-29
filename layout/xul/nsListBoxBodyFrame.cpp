@@ -28,7 +28,6 @@
 #include "nsAutoPtr.h"
 #include "nsStyleSet.h"
 #include "nsPIBoxObject.h"
-#include "nsINodeInfo.h"
 #include "nsLayoutUtils.h"
 #include "nsPIListBoxObject.h"
 #include "nsContentUtils.h"
@@ -67,11 +66,13 @@ using namespace mozilla::dom;
 
 class nsListScrollSmoother : public nsITimerCallback
 {
+private:
+  virtual ~nsListScrollSmoother();
+
 public:
   NS_DECL_ISUPPORTS
 
   nsListScrollSmoother(nsListBoxBodyFrame* aOuter);
-  virtual ~nsListScrollSmoother();
 
   // nsITimerCallback
   NS_DECL_NSITIMERCALLBACK
@@ -179,9 +180,9 @@ NS_QUERYFRAME_TAIL_INHERITING(nsBoxFrame)
 ////////// nsIFrame /////////////////
 
 void
-nsListBoxBodyFrame::Init(nsIContent*     aContent,
-                         nsIFrame*       aParent, 
-                         nsIFrame*       aPrevInFlow)
+nsListBoxBodyFrame::Init(nsIContent*       aContent,
+                         nsContainerFrame* aParent, 
+                         nsIFrame*         aPrevInFlow)
 {
   nsBoxFrame::Init(aContent, aParent, aPrevInFlow);
   nsIScrollableFrame* scrollFrame = nsLayoutUtils::GetScrollableFrameFor(this);

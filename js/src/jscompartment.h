@@ -9,6 +9,7 @@
 
 #include "mozilla/MemoryReporting.h"
 
+#include "builtin/RegExp.h"
 #include "builtin/TypedObject.h"
 #include "gc/Zone.h"
 #include "vm/GlobalObject.h"
@@ -74,15 +75,15 @@ struct CrossCompartmentKey
 
     CrossCompartmentKey()
       : kind(ObjectWrapper), debugger(nullptr), wrapped(nullptr) {}
-    CrossCompartmentKey(JSObject *wrapped)
+    explicit CrossCompartmentKey(JSObject *wrapped)
       : kind(ObjectWrapper), debugger(nullptr), wrapped(wrapped) {}
-    CrossCompartmentKey(JSString *wrapped)
+    explicit CrossCompartmentKey(JSString *wrapped)
       : kind(StringWrapper), debugger(nullptr), wrapped(wrapped) {}
-    CrossCompartmentKey(Value wrapped)
+    explicit CrossCompartmentKey(Value wrapped)
       : kind(wrapped.isString() ? StringWrapper : ObjectWrapper),
         debugger(nullptr),
         wrapped((js::gc::Cell *)wrapped.toGCThing()) {}
-    CrossCompartmentKey(const RootedValue &wrapped)
+    explicit CrossCompartmentKey(const RootedValue &wrapped)
       : kind(wrapped.get().isString() ? StringWrapper : ObjectWrapper),
         debugger(nullptr),
         wrapped((js::gc::Cell *)wrapped.get().toGCThing()) {}
@@ -130,6 +131,10 @@ struct JSCompartment
     bool                         isSystem;
     bool                         isSelfHosting;
     bool                         marked;
+
+    // A null add-on ID means that the compartment is not associated with an
+    // add-on.
+    JSAddonId                    *addonId;
 
 #ifdef DEBUG
     bool                         firedOnNewGlobalObject;
@@ -312,16 +317,15 @@ struct JSCompartment
     bool wrap(JSContext *cx, js::HeapPtrString *strp);
     bool wrap(JSContext *cx, JS::MutableHandleObject obj,
               JS::HandleObject existingArg = js::NullPtr());
-    bool wrapId(JSContext *cx, jsid *idp);
     bool wrap(JSContext *cx, js::PropertyOp *op);
     bool wrap(JSContext *cx, js::StrictPropertyOp *op);
     bool wrap(JSContext *cx, JS::MutableHandle<js::PropertyDescriptor> desc);
-    bool wrap(JSContext *cx, js::AutoIdVector &props);
+    bool wrap(JSContext *cx, JS::MutableHandle<js::PropDesc> desc);
 
     bool putWrapper(JSContext *cx, const js::CrossCompartmentKey& wrapped, const js::Value& wrapper);
 
     js::WrapperMap::Ptr lookupWrapper(const js::Value& wrapped) {
-        return crossCompartmentWrappers.lookup(wrapped);
+        return crossCompartmentWrappers.lookup(js::CrossCompartmentKey(wrapped));
     }
 
     void removeWrapper(js::WrapperMap::Ptr p) {
@@ -329,7 +333,7 @@ struct JSCompartment
     }
 
     struct WrapperEnum : public js::WrapperMap::Enum {
-        WrapperEnum(JSCompartment *c) : js::WrapperMap::Enum(c->crossCompartmentWrappers) {}
+        explicit WrapperEnum(JSCompartment *c) : js::WrapperMap::Enum(c->crossCompartmentWrappers) {}
     };
 
     void trace(JSTracer *trc);
@@ -540,8 +544,8 @@ ExclusiveContext::global() const
 class AssertCompartmentUnchanged
 {
   public:
-    AssertCompartmentUnchanged(JSContext *cx
-                                MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    explicit AssertCompartmentUnchanged(JSContext *cx
+                                        MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : cx(cx), oldCompartment(cx->compartment())
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
@@ -649,11 +653,11 @@ class AutoWrapperVector : public AutoVectorRooter<WrapperValue>
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
-class AutoWrapperRooter : private AutoGCRooter {
+class AutoWrapperRooter : private JS::AutoGCRooter {
   public:
     AutoWrapperRooter(JSContext *cx, WrapperValue v
                       MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : AutoGCRooter(cx, WRAPPER), value(v)
+      : JS::AutoGCRooter(cx, WRAPPER), value(v)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     }
@@ -662,7 +666,7 @@ class AutoWrapperRooter : private AutoGCRooter {
         return value.get().toObjectOrNull();
     }
 
-    friend void AutoGCRooter::trace(JSTracer *trc);
+    friend void JS::AutoGCRooter::trace(JSTracer *trc);
 
   private:
     WrapperValue value;

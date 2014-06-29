@@ -95,7 +95,7 @@ FilePickerParent::FileSizeAndDateRunnable::Run()
   }
 
   // Dispatch ourselves back on the main thread.
-  if (NS_FAILED(NS_DispatchToMainThread(this, NS_DISPATCH_NORMAL))) {
+  if (NS_FAILED(NS_DispatchToMainThread(this))) {
     // It's hard to see how we can recover gracefully in this case. The child
     // process is waiting for an IPC, but that can only happen on the main
     // thread.
@@ -113,7 +113,7 @@ FilePickerParent::FileSizeAndDateRunnable::Destroy()
 void
 FilePickerParent::SendFiles(const nsCOMArray<nsIDOMFile>& aDomfiles)
 {
-  ContentParent* parent = static_cast<ContentParent*>(Manager()->Manager());
+  nsIContentParent* parent = static_cast<TabParent*>(Manager())->Manager();
   InfallibleTArray<PBlobParent*> files;
 
   for (unsigned i = 0; i < aDomfiles.Length(); i++) {
@@ -149,7 +149,7 @@ FilePickerParent::Done(int16_t aResult)
       iter->GetNext(getter_AddRefs(supports));
       if (supports) {
         nsCOMPtr<nsIFile> file = do_QueryInterface(supports);
-        nsCOMPtr<nsIDOMFile> domfile = new nsDOMFileFile(file);
+        nsCOMPtr<nsIDOMFile> domfile = DOMFile::CreateFromFile(file);
         domfiles.AppendElement(domfile);
       }
     }
@@ -157,7 +157,7 @@ FilePickerParent::Done(int16_t aResult)
     nsCOMPtr<nsIFile> file;
     mFilePicker->GetFile(getter_AddRefs(file));
     if (file) {
-      nsCOMPtr<nsIDOMFile> domfile = new nsDOMFileFile(file);
+      nsCOMPtr<nsIDOMFile> domfile = DOMFile::CreateFromFile(file);
       domfiles.AppendElement(domfile);
     }
   }

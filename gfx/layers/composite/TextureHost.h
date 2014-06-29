@@ -16,6 +16,7 @@
 #include "mozilla/gfx/Point.h"          // for IntSize, IntPoint
 #include "mozilla/gfx/Types.h"          // for SurfaceFormat, etc
 #include "mozilla/layers/CompositorTypes.h"  // for TextureFlags, etc
+#include "mozilla/layers/FenceUtils.h"  // for FenceHandle
 #include "mozilla/layers/LayersTypes.h"  // for LayerRenderState, etc
 #include "mozilla/mozalloc.h"           // for operator delete
 #include "nsCOMPtr.h"                   // for already_AddRefed
@@ -32,6 +33,9 @@ struct nsIntSize;
 struct nsIntRect;
 
 namespace mozilla {
+namespace gfx {
+class SurfaceStream;
+}
 namespace ipc {
 class Shmem;
 }
@@ -43,6 +47,7 @@ class CompositableHost;
 class CompositableBackendSpecificData;
 class CompositableParentManager;
 class SurfaceDescriptor;
+class SurfaceStreamDescriptor;
 class ISurfaceAllocator;
 class TextureHostOGL;
 class TextureSourceOGL;
@@ -416,6 +421,10 @@ public:
    */
   PTextureParent* GetIPDLActor();
 
+  static void SendFenceHandleIfPresent(PTextureParent* actor);
+
+  FenceHandle GetAndResetReleaseFenceHandle();
+
   /**
    * Specific to B2G's Composer2D
    * XXX - more doc here
@@ -433,11 +442,11 @@ public:
   // to forget about the shmem _without_ releasing it.
   virtual void OnShutdown() {}
 
-  // Forget buffer actor. Used only for hacky fix for bug 966446. 
+  // Forget buffer actor. Used only for hacky fix for bug 966446.
   virtual void ForgetBufferActor() {}
 
   virtual const char *Name() { return "TextureHost"; }
-  virtual void PrintInfo(nsACString& aTo, const char* aPrefix);
+  virtual void PrintInfo(std::stringstream& aStream, const char* aPrefix);
 
   /**
    * Indicates whether the TextureHost implementation is backed by an
@@ -585,6 +594,50 @@ public:
 
 protected:
   uint8_t* mBuffer;
+};
+
+/**
+ * A TextureHost for shared SurfaceStream
+ */
+class StreamTextureHost : public TextureHost
+{
+public:
+  StreamTextureHost(TextureFlags aFlags,
+                    const SurfaceStreamDescriptor& aDesc);
+
+  virtual ~StreamTextureHost();
+
+  virtual void DeallocateDeviceData() MOZ_OVERRIDE {};
+
+  virtual void SetCompositor(Compositor* aCompositor) MOZ_OVERRIDE;
+
+  virtual bool Lock() MOZ_OVERRIDE;
+
+  virtual void Unlock() MOZ_OVERRIDE;
+
+  virtual gfx::SurfaceFormat GetFormat() const MOZ_OVERRIDE;
+
+  virtual NewTextureSource* GetTextureSources() MOZ_OVERRIDE
+  {
+    return mTextureSource;
+  }
+
+  virtual TemporaryRef<gfx::DataSourceSurface> GetAsSurface() MOZ_OVERRIDE
+  {
+    return nullptr; // XXX - implement this (for MOZ_DUMP_PAINTING)
+  }
+
+  virtual gfx::IntSize GetSize() const MOZ_OVERRIDE;
+
+#ifdef MOZ_LAYERS_HAVE_LOG
+  virtual const char* Name() { return "StreamTextureHost"; }
+#endif
+
+protected:
+  Compositor* mCompositor;
+  gfx::SurfaceStream* mStream;
+  RefPtr<NewTextureSource> mTextureSource;
+  RefPtr<DataTextureSource> mDataTextureSource;
 };
 
 class MOZ_STACK_CLASS AutoLockTextureHost

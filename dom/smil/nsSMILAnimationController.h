@@ -45,7 +45,6 @@ class nsSMILAnimationController : public nsSMILTimeContainer,
 {
 public:
   nsSMILAnimationController(nsIDocument* aDoc);
-  ~nsSMILAnimationController();
 
   // Clears mDocument pointer. (Called by our nsIDocument when it's going away)
   void Disconnect();
@@ -107,6 +106,8 @@ public:
   { return mAnimationElementTable.Count() != 0; }
 
 protected:
+  ~nsSMILAnimationController();
+
   // Typedefs
   typedef nsPtrHashKey<nsSMILTimeContainer> TimeContainerPtrKey;
   typedef nsTHashtable<TimeContainerPtrKey> TimeContainerHashtable;
@@ -213,6 +214,9 @@ protected:
   // animation element. Then we'll reset this flag and actually start sampling.
   bool                       mDeferredStartSampling;
   bool                       mRunningSample;
+
+  // Are we registered with our document's refresh driver?
+  bool                       mRegisteredWithRefreshDriver;
 
   // Store raw ptr to mDocument.  It owns the controller, so controller
   // shouldn't outlive it

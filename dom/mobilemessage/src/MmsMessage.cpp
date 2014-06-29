@@ -382,7 +382,7 @@ MmsMessage::GetData(ContentParent* aParent,
     // doesn't have a valid last modified date, making the ContentParent
     // send a "Mystery Blob" to the ContentChild. Attempting to get the
     // last modified date of blob can force that value to be initialized.
-    nsDOMFileBase* file = static_cast<nsDOMFileBase*>(element.content.get());
+    DOMFile* file = static_cast<DOMFile*>(element.content.get());
     if (file->IsDateUnknown()) {
       uint64_t date;
       if (NS_FAILED(file->GetMozLastModifiedDate(&date))) {
@@ -485,11 +485,11 @@ MmsMessage::GetSender(nsAString& aSender)
 NS_IMETHODIMP
 MmsMessage::GetReceivers(JSContext* aCx, JS::MutableHandle<JS::Value> aReceivers)
 {
-  JS::Rooted<JSObject*> reveiversObj(aCx);
-  nsresult rv = nsTArrayToJSArray(aCx, mReceivers, reveiversObj.address());
+  JS::Rooted<JSObject*> receiversObj(aCx);
+  nsresult rv = nsTArrayToJSArray(aCx, mReceivers, &receiversObj);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  aReceivers.setObject(*reveiversObj);
+  aReceivers.setObject(*receiversObj);
   return NS_OK;
 }
 

@@ -23,7 +23,7 @@
 #include "base/basictypes.h"
 #include "nsDebug.h"
 #include "mozilla/layers/TextureClient.h"
-#include "mozilla/Preferences.h"
+#include "CameraPreferences.h"
 #include "mozilla/RefPtr.h"
 #include "GonkCameraControl.h"
 #include "GonkNativeWindow.h"
@@ -172,19 +172,20 @@ GonkCameraHardware::Init()
   // Disable shutter sound in android CameraService because gaia camera app will play it
   mCamera->sendCommand(CAMERA_CMD_ENABLE_SHUTTER_SOUND, 0, 0);
 
-  mNativeWindow = new GonkNativeWindow();
-  mNativeWindow->setNewFrameCallback(this);
-  mCamera->setListener(this);
-
 #if defined(MOZ_WIDGET_GONK)
 
 #if ANDROID_VERSION >= 19
+  mNativeWindow = new GonkNativeWindow(GonkCameraHardware::MIN_UNDEQUEUED_BUFFERS);
   mCamera->setPreviewTarget(mNativeWindow->getBufferQueue());
-#elif (ANDROID_VERSION == 17) || (ANDROID_VERSION == 18)
+#elif ANDROID_VERSION >= 17
+  mNativeWindow = new GonkNativeWindow(GonkCameraHardware::MIN_UNDEQUEUED_BUFFERS);
   mCamera->setPreviewTexture(mNativeWindow->getBufferQueue());
 #else
+  mNativeWindow = new GonkNativeWindow();
   mCamera->setPreviewTexture(mNativeWindow);
 #endif
+  mNativeWindow->setNewFrameCallback(this);
+  mCamera->setListener(this);
 
 #if ANDROID_VERSION >= 16
   rv = mCamera->sendCommand(CAMERA_CMD_ENABLE_FOCUS_MOVE_MSG, 1, 0);
@@ -211,8 +212,8 @@ GonkCameraHardware::Connect(mozilla::nsGonkCameraControl* aTarget, uint32_t aCam
     return nullptr;
   }
 
-  const nsAdoptingCString& test =
-    mozilla::Preferences::GetCString("camera.control.test.enabled");
+  nsCString test;
+  CameraPreferences::GetPref("camera.control.test.enabled", test);
   sp<GonkCameraHardware> cameraHardware;
   if (test.EqualsASCII("hardware")) {
     NS_WARNING("Using test Gonk hardware layer");

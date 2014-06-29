@@ -1036,6 +1036,29 @@ nsNativeThemeCocoa::DrawPushButton(CGContextRef cgContext, const HIRect& inBoxRe
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
+void
+nsNativeThemeCocoa::DrawFocusOutline(CGContextRef cgContext, const HIRect& inBoxRect,
+                                     EventStates inState, uint8_t aWidgetType,
+                                     nsIFrame* aFrame)
+{
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
+  HIThemeFrameDrawInfo fdi;
+  fdi.version = 0;
+  fdi.kind = kHIThemeFrameTextFieldSquare;
+  fdi.state = kThemeStateActive;
+  fdi.isFocused = TRUE;
+
+#if DRAW_IN_FRAME_DEBUG
+  CGContextSetRGBFillColor(cgContext, 0.0, 0.0, 0.5, 0.25);
+  CGContextFillRect(cgContext, inBoxRect);
+#endif
+
+  HIThemeDrawFrame(&inBoxRect, &fdi, cgContext, HITHEME_ORIENTATION);
+
+  NS_OBJC_END_TRY_ABORT_BLOCK;
+}
+
 typedef void (*RenderHIThemeControlFunction)(CGContextRef cgContext, const HIRect& aRenderRect, void* aData);
 
 static void
@@ -2069,10 +2092,25 @@ nsNativeThemeCocoa::DrawResizer(CGContextRef cgContext, const HIRect& aRect,
 }
 
 static bool
-IsHiDPIContext(nsDeviceContext* aContext)
+ScrollbarTrackAndThumbDrawSeparately()
+{
+  return nsLookAndFeel::UseOverlayScrollbars() || nsCocoaFeatures::OnLionOrLater();
+}
+
+bool
+nsNativeThemeCocoa::IsParentScrollbarRolledOver(nsIFrame* aFrame)
+{
+  nsIFrame* scrollbarFrame = GetParentScrollbarFrame(aFrame);
+  return nsLookAndFeel::UseOverlayScrollbars()
+    ? CheckBooleanAttr(scrollbarFrame, nsGkAtoms::hover)
+    : GetContentState(scrollbarFrame, NS_THEME_NONE).HasState(NS_EVENT_STATE_HOVER);
+}
+
+static bool
+IsHiDPIContext(nsPresContext* aContext)
 {
   return nsPresContext::AppUnitsPerCSSPixel() >=
-    2 * aContext->UnscaledAppUnitsPerDevPixel();
+    2 * aContext->DeviceContext()->UnscaledAppUnitsPerDevPixel();
 }
 
 NS_IMETHODIMP
@@ -2085,7 +2123,7 @@ nsNativeThemeCocoa::DrawWidgetBackground(nsRenderingContext* aContext,
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
   // setup to draw into the correct port
-  int32_t p2a = aContext->AppUnitsPerDevPixel();
+  int32_t p2a = aFrame->PresContext()->AppUnitsPerDevPixel();
 
   gfxRect nativeDirtyRect(aDirtyRect.x, aDirtyRect.y,
                           aDirtyRect.width, aDirtyRect.height);
@@ -2102,7 +2140,7 @@ nsNativeThemeCocoa::DrawWidgetBackground(nsRenderingContext* aContext,
 
   gfxContextMatrixAutoSaveRestore save(thebesCtx);
 
-  bool hidpi = IsHiDPIContext(aContext->DeviceContext());
+  bool hidpi = IsHiDPIContext(aFrame->PresContext());
   if (hidpi) {
     // Use high-resolution drawing.
     nativeWidgetRect.ScaleInverse(2.0f);
@@ -2127,7 +2165,7 @@ nsNativeThemeCocoa::DrawWidgetBackground(nsRenderingContext* aContext,
     fprintf(stderr, "Native theme drawing widget %d [%p] dis:%d in rect [%d %d %d %d]\n",
             aWidgetType, aFrame, IsDisabled(aFrame), aRect.x, aRect.y, aRect.width, aRect.height);
     fprintf(stderr, "Cairo matrix: [%f %f %f %f %f %f]\n",
-            mat.xx, mat.yx, mat.xy, mat.yy, mat.x0, mat.y0);
+            mat._11, mat._12, mat._21, mat._22, mat._31, mat._32);
     fprintf(stderr, "Native theme xform[0]: [%f %f %f %f %f %f]\n",
             mm0.a, mm0.b, mm0.c, mm0.d, mm0.tx, mm0.ty);
     CGAffineTransform mm = CGContextGetCTM(cgContext);
@@ -2251,6 +2289,10 @@ nsNativeThemeCocoa::DrawWidgetBackground(nsRenderingContext* aContext,
       } else {
         DrawPushButton(cgContext, macRect, eventState, aWidgetType, aFrame);
       }
+      break;
+
+    case NS_THEME_FOCUS_OUTLINE:
+      DrawFocusOutline(cgContext, macRect, eventState, aWidgetType, aFrame);
       break;
 
     case NS_THEME_MOZ_MAC_HELP_BUTTON:
@@ -2398,13 +2440,20 @@ nsNativeThemeCocoa::DrawWidgetBackground(nsRenderingContext* aContext,
       break;
 
     case NS_THEME_PROGRESSBAR:
-      if (!QueueAnimatedContentForRefresh(aFrame->GetContent(), 30)) {
-        NS_WARNING("Unable to animate progressbar!");
+    {
+      double value = GetProgressValue(aFrame);
+      double maxValue = GetProgressMaxValue(aFrame);
+      // Don't request repaints for scrollbars at 100% because those don't animate.
+      if (value < maxValue) {
+        if (!QueueAnimatedContentForRefresh(aFrame->GetContent(), 30)) {
+          NS_WARNING("Unable to animate progressbar!");
+        }
       }
       DrawProgress(cgContext, macRect, IsIndeterminateProgress(aFrame, eventState),
                    aFrame->StyleDisplay()->mOrient != NS_STYLE_ORIENT_VERTICAL,
-		   GetProgressValue(aFrame), GetProgressMaxValue(aFrame), aFrame);
+                   value, maxValue, aFrame);
       break;
+    }
 
     case NS_THEME_PROGRESSBAR_VERTICAL:
       DrawProgress(cgContext, macRect, IsIndeterminateProgress(aFrame, eventState),
@@ -2500,17 +2549,17 @@ nsNativeThemeCocoa::DrawWidgetBackground(nsRenderingContext* aContext,
 
     case NS_THEME_SCROLLBAR_SMALL:
     case NS_THEME_SCROLLBAR:
-      if (!nsLookAndFeel::UseOverlayScrollbars()) {
+      if (!ScrollbarTrackAndThumbDrawSeparately()) {
         DrawScrollbar(cgContext, macRect, aFrame);
       }
       break;
     case NS_THEME_SCROLLBAR_THUMB_VERTICAL:
     case NS_THEME_SCROLLBAR_THUMB_HORIZONTAL:
-      if (nsLookAndFeel::UseOverlayScrollbars()) {
+      if (ScrollbarTrackAndThumbDrawSeparately()) {
+        BOOL isOverlay = nsLookAndFeel::UseOverlayScrollbars();
         BOOL isHorizontal = (aWidgetType == NS_THEME_SCROLLBAR_THUMB_HORIZONTAL);
-        BOOL isRolledOver = CheckBooleanAttr(GetParentScrollbarFrame(aFrame),
-                                             nsGkAtoms::hover);
-        if (!nsCocoaFeatures::OnMountainLionOrLater() || !isRolledOver) {
+        BOOL isRolledOver = IsParentScrollbarRolledOver(aFrame);
+        if (isOverlay && (!nsCocoaFeatures::OnMountainLionOrLater() || !isRolledOver)) {
           if (isHorizontal) {
             macRect.origin.y += 4;
             macRect.size.height -= 4;
@@ -2525,9 +2574,9 @@ nsNativeThemeCocoa::DrawWidgetBackground(nsRenderingContext* aContext,
         const BOOL isOnTopOfDarkBackground = IsDarkBackground(aFrame);
         CUIDraw([NSWindow coreUIRenderer], macRect, cgContext,
                 (CFDictionaryRef)[NSDictionary dictionaryWithObjectsAndKeys:
-                  @"kCUIWidgetOverlayScrollBar", @"widget",
+                  (isOverlay ? @"kCUIWidgetOverlayScrollBar" : @"scrollbar"), @"widget",
                   @"regular", @"size",
-                  (isRolledOver ? @"rollover" : @""), @"state",
+                  (isRolledOver ? @"rollover" : @"normal"), @"state",
                   (isHorizontal ? @"kCUIOrientHorizontal" : @"kCUIOrientVertical"), @"kCUIOrientationKey",
                   (isOnTopOfDarkBackground ? @"kCUIVariantWhite" : @""), @"kCUIVariantKey",
                   [NSNumber numberWithBool:YES], @"indiconly",
@@ -2553,35 +2602,37 @@ nsNativeThemeCocoa::DrawWidgetBackground(nsRenderingContext* aContext,
     break;
     case NS_THEME_SCROLLBAR_TRACK_HORIZONTAL:
     case NS_THEME_SCROLLBAR_TRACK_VERTICAL:
-      if (nsLookAndFeel::UseOverlayScrollbars() &&
-          CheckBooleanAttr(GetParentScrollbarFrame(aFrame), nsGkAtoms::hover)) {
-        BOOL isHorizontal = (aWidgetType == NS_THEME_SCROLLBAR_TRACK_HORIZONTAL);
-        if (!nsCocoaFeatures::OnMountainLionOrLater()) {
-          // On OSX 10.7, scrollbars don't grow when hovered. The adjustments
-          // below were obtained by trial and error.
-          if (isHorizontal) {
-            macRect.origin.y += 2.0;
-          } else {
-            if (aFrame->StyleVisibility()->mDirection !=
-                  NS_STYLE_DIRECTION_RTL) {
-              macRect.origin.x += 3.0;
+      if (ScrollbarTrackAndThumbDrawSeparately()) {
+        BOOL isOverlay = nsLookAndFeel::UseOverlayScrollbars();
+        if (!isOverlay || IsParentScrollbarRolledOver(aFrame)) {
+          BOOL isHorizontal = (aWidgetType == NS_THEME_SCROLLBAR_TRACK_HORIZONTAL);
+          if (isOverlay && !nsCocoaFeatures::OnMountainLionOrLater()) {
+            // On OSX 10.7, scrollbars don't grow when hovered.
+            // The adjustments below were obtained by trial and error.
+            if (isHorizontal) {
+              macRect.origin.y += 2.0;
             } else {
-              macRect.origin.x -= 1.0;
+              if (aFrame->StyleVisibility()->mDirection !=
+                    NS_STYLE_DIRECTION_RTL) {
+                macRect.origin.x += 3.0;
+              } else {
+                macRect.origin.x -= 1.0;
+              }
             }
           }
+          const BOOL isOnTopOfDarkBackground = IsDarkBackground(aFrame);
+          CUIDraw([NSWindow coreUIRenderer], macRect, cgContext,
+                  (CFDictionaryRef)[NSDictionary dictionaryWithObjectsAndKeys:
+                    (isOverlay ? @"kCUIWidgetOverlayScrollBar" : @"scrollbar"), @"widget",
+                    @"regular", @"size",
+                    (isHorizontal ? @"kCUIOrientHorizontal" : @"kCUIOrientVertical"), @"kCUIOrientationKey",
+                    (isOnTopOfDarkBackground ? @"kCUIVariantWhite" : @""), @"kCUIVariantKey",
+                    [NSNumber numberWithBool:YES], @"noindicator",
+                    [NSNumber numberWithBool:YES], @"kCUIThumbProportionKey",
+                    [NSNumber numberWithBool:YES], @"is.flipped",
+                    nil],
+                  nil);
         }
-        const BOOL isOnTopOfDarkBackground = IsDarkBackground(aFrame);
-        CUIDraw([NSWindow coreUIRenderer], macRect, cgContext,
-                (CFDictionaryRef)[NSDictionary dictionaryWithObjectsAndKeys:
-                  @"kCUIWidgetOverlayScrollBar", @"widget",
-                  @"regular", @"size",
-                  (isHorizontal ? @"kCUIOrientHorizontal" : @"kCUIOrientVertical"), @"kCUIOrientationKey",
-                  (isOnTopOfDarkBackground ? @"kCUIVariantWhite" : @""), @"kCUIVariantKey",
-                  [NSNumber numberWithBool:YES], @"noindicator",
-                  [NSNumber numberWithBool:YES], @"kCUIThumbProportionKey",
-                  [NSNumber numberWithBool:YES], @"is.flipped",
-                  nil],
-                nil);
       }
       break;
 
@@ -2793,7 +2844,7 @@ nsNativeThemeCocoa::GetWidgetBorder(nsDeviceContext* aContext,
       break;
   }
 
-  if (IsHiDPIContext(aContext)) {
+  if (IsHiDPIContext(aFrame->PresContext())) {
     *aResult = *aResult + *aResult; // doubled
   }
 
@@ -2831,7 +2882,7 @@ bool
 nsNativeThemeCocoa::GetWidgetOverflow(nsDeviceContext* aContext, nsIFrame* aFrame,
                                       uint8_t aWidgetType, nsRect* aOverflowRect)
 {
-  int32_t p2a = aContext->AppUnitsPerDevPixel();
+  int32_t p2a = aFrame->PresContext()->AppUnitsPerDevPixel();
   switch (aWidgetType) {
     case NS_THEME_BUTTON:
     case NS_THEME_MOZ_MAC_HELP_BUTTON:
@@ -2868,6 +2919,11 @@ nsNativeThemeCocoa::GetWidgetOverflow(nsDeviceContext* aContext, nsIFrame* aFram
       aOverflowRect->Inflate(m);
       return true;
     }
+    case NS_THEME_FOCUS_OUTLINE:
+    {
+      aOverflowRect->Inflate(NSIntPixelsToAppUnits(2, p2a));
+      return true;
+    }
   }
 
   return false;
@@ -2877,7 +2933,7 @@ static const int32_t kRegularScrollbarThumbMinSize = 26;
 static const int32_t kSmallScrollbarThumbMinSize = 26;
 
 NS_IMETHODIMP
-nsNativeThemeCocoa::GetMinimumWidgetSize(nsRenderingContext* aContext,
+nsNativeThemeCocoa::GetMinimumWidgetSize(nsPresContext* aPresContext,
                                          nsIFrame* aFrame,
                                          uint8_t aWidgetType,
                                          nsIntSize* aResult,
@@ -3167,7 +3223,7 @@ nsNativeThemeCocoa::GetMinimumWidgetSize(nsRenderingContext* aContext,
     }
   }
 
-  if (IsHiDPIContext(aContext->DeviceContext())) {
+  if (IsHiDPIContext(aPresContext)) {
     *aResult = *aResult * 2;
   }
 
@@ -3225,6 +3281,18 @@ nsNativeThemeCocoa::WidgetStateChanged(nsIFrame* aFrame, uint8_t aWidgetType,
         aAttribute == nsGkAtoms::open ||
         aAttribute == nsGkAtoms::hover)
       *aShouldRepaint = true;
+
+    if ((aWidgetType == NS_THEME_SCROLLBAR ||
+         aWidgetType == NS_THEME_SCROLLBAR_SMALL) &&
+        !ScrollbarTrackAndThumbDrawSeparately() &&
+        (aAttribute == nsGkAtoms::curpos ||
+         aAttribute == nsGkAtoms::minpos ||
+         aAttribute == nsGkAtoms::maxpos ||
+         aAttribute == nsGkAtoms::pageincrement)) {
+      // 10.6-style scrollbars paint the thumb as part of the scrollbar,
+      // so we need to invalidate the scrollbar when the thumb moves.
+      *aShouldRepaint = true;
+    }
   }
 
   return NS_OK;
@@ -3351,6 +3419,8 @@ nsNativeThemeCocoa::ThemeSupportsWidget(nsPresContext* aPresContext, nsIFrame* a
               scrollFrame && scrollFrame->GetScrollbarVisibility());
       break;
     }
+    case NS_THEME_FOCUS_OUTLINE:
+      return true;
   }
 
   return false;

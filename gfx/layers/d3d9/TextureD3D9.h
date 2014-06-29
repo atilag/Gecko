@@ -207,11 +207,9 @@ public:
 
   virtual gfx::SurfaceFormat GetFormat() const { return mFormat; }
 
-  virtual TextureClientData* DropTextureData() MOZ_OVERRIDE;
-
   virtual bool CanExposeDrawTarget() const MOZ_OVERRIDE { return true; }
 
-  virtual TemporaryRef<gfx::DrawTarget> GetAsDrawTarget() MOZ_OVERRIDE;
+  virtual gfx::DrawTarget* BorrowDrawTarget() MOZ_OVERRIDE;
 
   virtual bool AllocateForSurface(gfx::IntSize aSize,
                                   TextureAllocationFlags aFlags = ALLOC_DEFAULT) MOZ_OVERRIDE;
@@ -227,6 +225,7 @@ private:
   gfx::SurfaceFormat mFormat;
   bool mIsLocked;
   bool mNeedsClear;
+  bool mNeedsClearWhite;
   bool mLockRect;
 };
 
@@ -258,11 +257,9 @@ public:
 
   virtual gfx::SurfaceFormat GetFormat() const { return mFormat; }
 
-  virtual TextureClientData* DropTextureData() MOZ_OVERRIDE;
-
   virtual bool CanExposeDrawTarget() const MOZ_OVERRIDE { return true; }
 
-  virtual TemporaryRef<gfx::DrawTarget> GetAsDrawTarget() MOZ_OVERRIDE;
+  virtual gfx::DrawTarget* BorrowDrawTarget() MOZ_OVERRIDE;
 
   virtual bool AllocateForSurface(gfx::IntSize aSize,
                                   TextureAllocationFlags aFlags = ALLOC_DEFAULT) MOZ_OVERRIDE;
@@ -313,8 +310,6 @@ public:
   {
     return gfx::IntSize(mDesc.Width, mDesc.Height);
   }
-
-  virtual TextureClientData* DropTextureData() MOZ_OVERRIDE;
 
   virtual bool HasInternalBuffer() const MOZ_OVERRIDE { return true; }
 

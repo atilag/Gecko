@@ -91,12 +91,14 @@ from its prototype:
     If a function has no name, SpiderMonkey attempts to infer an appropriate
     name for it given its context. For example:
 
-        function f() {}          // display name: f (the given name)
-        var g = function () {};  // display name: g
-        o.p = function () {};    // display name: o.p
-        var q = {
-          r: function () {}      // display name: q.r
-        };
+    ```language-js
+    function f() {}          // display name: f (the given name)
+    var g = function () {};  // display name: g
+    o.p = function () {};    // display name: o.p
+    var q = {
+      r: function () {}      // display name: q.r
+    };
+    ```
 
     Note that the display name may not be a proper JavaScript identifier,
     or even a proper expression: we attempt to find helpful names even when
@@ -106,11 +108,13 @@ from its prototype:
     refer to a function that occurs somewhere within an expression that is
     assigned to <i>a</i>. For example:
 
-        function h() {
-          var i = function() {};    // display name: h/i
-          f(function () {});        // display name: h/<
-        }
-        var s = f(function () {});  // display name: s<
+    ```language-js
+    function h() {
+      var i = function() {};    // display name: h/i
+      f(function () {});        // display name: h/<
+    }
+    var s = f(function () {});  // display name: s<
+    ```
 
 `parameterNames`
 :   If the referent is a debuggee function, the names of the its parameters,
@@ -127,12 +131,16 @@ from its prototype:
     reflect the structure of the parameters. For example, if the referent is
     a function declared in this way:
 
-        function f(a, [b, c], {d, e:f}) { ... }
+    ```language-js
+    function f(a, [b, c], {d, e:f}) { ... }
+    ```
 
     then this `Debugger.Object` instance's `parameterNames` property would
     have the value:
 
-        ["a", ["b", "c"], {d:"d", e:"f"}]
+    ```language-js
+    ["a", ["b", "c"], {d:"d", e:"f"}]
+    ```
 
 `script`
 :   If the referent is a function that is debuggee code, this is that
@@ -172,32 +180,6 @@ from its prototype:
     wrappers: if the referent is a wrapper, the result refers to the
     wrapper's global, not the wrapped object's global. The result refers to
     the global directly, not via a wrapper.
-
-`hostAnnotations`
-:   A JavaScript object providing further metadata about the referent, or
-    `null` if none is available. The metadata object is in the same
-    compartment as this `Debugger.Object` instance. The same metadata
-    object is returned each time for a given `Debugger.Object` instance.
-
-    A typical JavaScript embedding provides "host objects" to expose
-    application-specific functionality to scripts. The `hostAnnotations`
-    accessor consults the embedding for additional information about the
-    referent that might be of interest to the debugger. The returned
-    object's properties' meanings are up to the embedding. For example, a
-    web browser might provide host annotations for global objects to
-    distinguish top-level windows, iframes, and internal JavaScript scopes.
-
-    By convention, host annotation objects have a string-valued `"type"`
-    property that, taken together with the object's class, indicate what
-    sort of thing the referent is. The host annotation object's other
-    properties provide further details, as appropriate for the type. For
-    example, in Firefox, a metadata object for a JavaScript Module's global
-    object might look like this:
-
-        { "type":"jsm", "uri":"resource:://gre/modules/XPCOMUtils.jsm" }
-
-    Firefox provides [DebuggerHostAnnotationsForFirefox annotations] for its
-    host objects.
 
 
 

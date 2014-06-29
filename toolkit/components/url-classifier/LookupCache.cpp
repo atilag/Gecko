@@ -181,7 +181,7 @@ LookupCache::Dump()
 
   for (uint32_t i = 0; i < mCompletions.Length(); i++) {
     nsAutoCString str;
-    mCompletions[i].ToString(str);
+    mCompletions[i].ToHexString(str);
     LOG(("Completion: %s", str.get()));
   }
 }
@@ -394,7 +394,7 @@ LookupCache::GetKey(const nsACString& aSpec,
   if (IsCanonicalizedIP(host)) {
     nsAutoCString key;
     key.Assign(host);
-    key.Append("/");
+    key.Append('/');
     return aHash->FromPlaintext(key, aCryptoHash);
   }
 
@@ -409,13 +409,13 @@ LookupCache::GetKey(const nsACString& aSpec,
 
   if (hostComponents.Length() > 2) {
     lookupHost.Append(hostComponents[last - 2]);
-    lookupHost.Append(".");
+    lookupHost.Append('.');
   }
 
   lookupHost.Append(hostComponents[last - 1]);
-  lookupHost.Append(".");
+  lookupHost.Append('.');
   lookupHost.Append(hostComponents[last]);
-  lookupHost.Append("/");
+  lookupHost.Append('/');
 
   return aHash->FromPlaintext(lookupHost, aCryptoHash);
 }
@@ -695,10 +695,13 @@ LookupCache::GetPrefixes(nsTArray<uint32_t>* aAddPrefixes)
   uint32_t *arr;
   nsresult rv = mPrefixSet->GetPrefixes(&cnt, &arr);
   NS_ENSURE_SUCCESS(rv, rv);
-  if (!aAddPrefixes->AppendElements(arr, cnt))
-    return NS_ERROR_FAILURE;
+  bool appendOk = aAddPrefixes->AppendElements(arr, cnt);
   nsMemory::Free(arr);
-  return NS_OK;
+  if (appendOk) {
+    return NS_OK;
+  } else {
+    return NS_ERROR_FAILURE;
+  }
 }
 
 

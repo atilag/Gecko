@@ -8,6 +8,7 @@
 #include "nsFrameTraversal.h"
 #include "nsFrameList.h"
 #include "nsPlaceholderFrame.h"
+#include "nsContainerFrame.h"
 
 
 class nsFrameIterator : public nsIFrameEnumerator
@@ -16,8 +17,6 @@ public:
   typedef nsIFrame::ChildListID ChildListID;
 
   NS_DECL_ISUPPORTS
-
-  virtual ~nsFrameIterator() {}
 
   virtual void First() MOZ_OVERRIDE;
   virtual void Next() MOZ_OVERRIDE;
@@ -31,6 +30,8 @@ public:
                   nsIteratorType aType, bool aLockScroll, bool aFollowOOFs);
 
 protected:
+  virtual ~nsFrameIterator() {}
+
   void      setCurrent(nsIFrame *aFrame){mCurrent = aFrame;}
   nsIFrame *getCurrent(){return mCurrent;}
   nsIFrame *getStart(){return mStart;}

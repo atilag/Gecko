@@ -1,4 +1,4 @@
-// -*- Mode: js2; tab-width: 2; indent-tabs-mode: nil; js2-basic-offset: 2; js2-skip-preprocessor-directives: t; -*-
+// -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -12,7 +12,7 @@ Cu.import("resource://gre/modules/SimpleServiceDiscovery.jsm");
 function discovery_observer(subject, topic, data) {
   do_print("Observer: " + data);
 
-  let service = SimpleServiceDiscovery.findServiceForLocation(data);
+  let service = SimpleServiceDiscovery.findServiceForID(data);
   if (!service)
     return;
 
@@ -24,12 +24,21 @@ function discovery_observer(subject, topic, data) {
   run_next_test();
 };
 
+var testTarget = {
+  target: "test:service",
+  factory: function(service) { /* dummy */  }
+};
+
 add_test(function test_default() {
   do_register_cleanup(function cleanup() {
+    SimpleServiceDiscovery.unregisterTarget(testTarget);
     Services.obs.removeObserver(discovery_observer, "ssdp-service-found");
   });
 
   Services.obs.addObserver(discovery_observer, "ssdp-service-found", false);
+
+  // We need to register a target or processService will ignore us
+  SimpleServiceDiscovery.registerTarget(testTarget);
 
   // Create a pretend service
   let service = {

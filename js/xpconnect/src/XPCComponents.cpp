@@ -13,6 +13,7 @@
 #include "nsJSUtils.h"
 #include "mozJSComponentLoader.h"
 #include "nsContentUtils.h"
+#include "JavaScriptParent.h"
 #include "jsfriendapi.h"
 #include "js/StructuredClone.h"
 #include "mozilla/Attributes.h"
@@ -107,9 +108,10 @@ public:
 
 public:
     nsXPCComponents_Interfaces();
-    virtual ~nsXPCComponents_Interfaces();
 
 private:
+    virtual ~nsXPCComponents_Interfaces();
+
     nsCOMArray<nsIInterfaceInfo> mInterfaces;
 };
 
@@ -357,9 +359,10 @@ public:
 
 public:
     nsXPCComponents_InterfacesByID();
-    virtual ~nsXPCComponents_InterfacesByID();
 
 private:
+    virtual ~nsXPCComponents_InterfacesByID();
+
     nsCOMArray<nsIInterfaceInfo> mInterfaces;
 };
 
@@ -612,6 +615,8 @@ public:
 
 public:
     nsXPCComponents_Classes();
+
+private:
     virtual ~nsXPCComponents_Classes();
 };
 
@@ -851,6 +856,8 @@ public:
 
 public:
     nsXPCComponents_ClassesByID();
+
+private:
     virtual ~nsXPCComponents_ClassesByID();
 };
 
@@ -1112,6 +1119,8 @@ public:
 
 public:
     nsXPCComponents_Results();
+
+private:
     virtual ~nsXPCComponents_Results();
 };
 
@@ -1331,9 +1340,9 @@ public:
 
 public:
     nsXPCComponents_ID();
-    virtual ~nsXPCComponents_ID();
 
 private:
+    virtual ~nsXPCComponents_ID();
     static nsresult CallOrConstruct(nsIXPConnectWrappedNative *wrapper,
                                     JSContext *cx, HandleObject obj,
                                     const CallArgs &args, bool *_retval);
@@ -1548,9 +1557,9 @@ public:
 
 public:
     nsXPCComponents_Exception();
-    virtual ~nsXPCComponents_Exception();
 
 private:
+    virtual ~nsXPCComponents_Exception();
     static nsresult CallOrConstruct(nsIXPConnectWrappedNative *wrapper,
                                     JSContext *cx, HandleObject obj,
                                     const CallArgs &args, bool *_retval);
@@ -1934,9 +1943,9 @@ public:
     nsXPCConstructor(nsIJSCID* aClassID,
                      nsIJSIID* aInterfaceID,
                      const char* aInitializer);
-    virtual ~nsXPCConstructor();
 
 private:
+    virtual ~nsXPCConstructor();
     nsresult CallOrConstruct(nsIXPConnectWrappedNative *wrapper,
                              JSContext *cx, HandleObject obj,
                              const CallArgs &args, bool *_retval);
@@ -2146,7 +2155,7 @@ nsXPCConstructor::CallOrConstruct(nsIXPConnectWrappedNative *wrapper,JSContext *
 
     JS::Rooted<JS::Value> arg(cx, ObjectValue(*iidObj));
     RootedValue rval(cx);
-    if (!JS_CallFunctionName(cx, cidObj, "createInstance", arg, &rval) ||
+    if (!JS_CallFunctionName(cx, cidObj, "createInstance", JS::HandleValueArray(arg), &rval) ||
         rval.isPrimitive()) {
         // createInstance will have thrown an exception
         *_retval = false;
@@ -2193,9 +2202,9 @@ public:
 
 public:
     nsXPCComponents_Constructor();
-    virtual ~nsXPCComponents_Constructor();
 
 private:
+    virtual ~nsXPCComponents_Constructor();
     static nsresult CallOrConstruct(nsIXPConnectWrappedNative *wrapper,
                                     JSContext *cx, HandleObject obj,
                                     const CallArgs &args, bool *_retval);
@@ -2506,9 +2515,9 @@ public:
 
 public:
     nsXPCComponents_Utils() { }
-    virtual ~nsXPCComponents_Utils() { }
 
 private:
+    virtual ~nsXPCComponents_Utils() { }
     nsCOMPtr<nsIXPCComponents_utils_Sandbox> mSandbox;
 };
 
@@ -2674,6 +2683,21 @@ nsXPCComponents_Utils::EvalInSandbox(const nsAString& source,
 }
 
 NS_IMETHODIMP
+nsXPCComponents_Utils::GetSandboxAddonId(HandleValue sandboxVal,
+                                         JSContext *cx, MutableHandleValue rval)
+{
+    if (!sandboxVal.isObject())
+        return NS_ERROR_INVALID_ARG;
+
+    RootedObject sandbox(cx, &sandboxVal.toObject());
+    sandbox = js::CheckedUnwrap(sandbox);
+    if (!sandbox || !xpc::IsSandbox(sandbox))
+        return NS_ERROR_INVALID_ARG;
+
+    return xpc::GetSandboxAddonId(cx, sandbox, rval);
+}
+
+NS_IMETHODIMP
 nsXPCComponents_Utils::GetSandboxMetadata(HandleValue sandboxVal,
                                           JSContext *cx, MutableHandleValue rval)
 {
@@ -2722,6 +2746,18 @@ nsXPCComponents_Utils::Import(const nsACString& registryLocation,
     if (!moduleloader)
         return NS_ERROR_FAILURE;
     return moduleloader->Import(registryLocation, targetObj, cx, optionalArgc, retval);
+}
+
+/* boolean isModuleLoaded (in AUTF8String registryLocation);
+ */
+NS_IMETHODIMP
+nsXPCComponents_Utils::IsModuleLoaded(const nsACString& registryLocation, bool *retval)
+{
+    nsCOMPtr<xpcIJSModuleLoader> moduleloader =
+        do_GetService(MOZJSCOMPONENTLOADER_CONTRACTID);
+    if (!moduleloader)
+        return NS_ERROR_FAILURE;
+    return moduleloader->IsModuleLoaded(registryLocation, retval);
 }
 
 /* unload (in AUTF8String registryLocation);
@@ -2796,11 +2832,27 @@ nsXPCComponents_Utils::FinishCC()
     return NS_OK;
 }
 
-/* void ccSlice(long long budget); */
+/* void ccSlice(in long long budget); */
 NS_IMETHODIMP
 nsXPCComponents_Utils::CcSlice(int64_t budget)
 {
-    nsCycleCollector_collectSliceWork(budget);
+    nsJSContext::RunCycleCollectorWorkSlice(budget);
+    return NS_OK;
+}
+
+/* long getMaxCCSliceTimeSinceClear(); */
+NS_IMETHODIMP
+nsXPCComponents_Utils::GetMaxCCSliceTimeSinceClear(int32_t *out)
+{
+    *out = nsJSContext::GetMaxCCSliceTimeSinceClear();
+    return NS_OK;
+}
+
+/* void clearMaxCCTime(); */
+NS_IMETHODIMP
+nsXPCComponents_Utils::ClearMaxCCTime()
+{
+    nsJSContext::ClearMaxCCSliceTime();
     return NS_OK;
 }
 
@@ -2893,7 +2945,7 @@ nsXPCComponents_Utils::NondeterministicGetWeakMapKeys(HandleValue aMap,
     return NS_OK;
 }
 
-/* void getDebugObject(); */
+/* [implicit_jscontext] jsval getJSTestingFunctions(); */
 NS_IMETHODIMP
 nsXPCComponents_Utils::GetJSTestingFunctions(JSContext *cx,
                                              MutableHandleValue retval)
@@ -2936,50 +2988,6 @@ nsXPCComponents_Utils::GetGlobalForObject(HandleValue object,
 
     retval.setObject(*obj);
     return NS_OK;
-}
-
-/* jsval createObjectIn(in jsval vobj); */
-bool
-xpc::CreateObjectIn(JSContext *cx, HandleValue vobj, CreateObjectInOptions &options,
-                    MutableHandleValue rval)
-{
-    if (!vobj.isObject()) {
-        JS_ReportError(cx, "Expected an object as the target scope");
-        return false;
-    }
-
-    RootedObject scope(cx, js::CheckedUnwrap(&vobj.toObject()));
-    if (!scope) {
-        JS_ReportError(cx, "Permission denied to create object in the target scope");
-        return false;
-    }
-
-    bool define = !JSID_IS_VOID(options.defineAs);
-
-    if (define && js::IsScriptedProxy(scope)) {
-        JS_ReportError(cx, "Defining property on proxy object is not allowed");
-        return false;
-    }
-
-    RootedObject obj(cx);
-    {
-        JSAutoCompartment ac(cx, scope);
-        obj = JS_NewObject(cx, nullptr, JS::NullPtr(), scope);
-        if (!obj)
-            return false;
-
-        if (define) {
-            if (!JS_DefinePropertyById(cx, scope, options.defineAs, obj, JSPROP_ENUMERATE,
-                                       JS_PropertyStub, JS_StrictPropertyStub))
-                return false;
-        }
-    }
-
-    rval.setObject(*obj);
-    if (!WrapperFactory::WaiveXrayAndWrap(cx, rval))
-        return false;
-
-    return true;
 }
 
 /* boolean isProxy(in value vobj); */
@@ -3095,6 +3103,17 @@ nsXPCComponents_Utils::IsDeadWrapper(HandleValue obj, bool *out)
     // wrapper, meaning that, if passed to another compartment, we'll generate
     // a CCW for it. Make sure that IsDeadWrapper sees through the confusion.
     *out = JS_IsDeadWrapper(js::CheckedUnwrap(&obj.toObject()));
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsXPCComponents_Utils::IsCrossProcessWrapper(HandleValue obj, bool *out)
+{
+    *out = false;
+    if (obj.isPrimitive())
+        return NS_ERROR_INVALID_ARG;
+
+    *out = jsipc::IsCPOW(js::CheckedUnwrap(&obj.toObject()));
     return NS_OK;
 }
 
@@ -3359,7 +3378,7 @@ nsXPCComponents_Utils::GetIncumbentGlobal(HandleValue aCallback,
     // Invoke the callback, if passed.
     if (aCallback.isObject()) {
         RootedValue ignored(aCx);
-        if (!JS_CallFunctionValue(aCx, JS::NullPtr(), aCallback, globalVal, &ignored))
+        if (!JS_CallFunctionValue(aCx, JS::NullPtr(), aCallback, JS::HandleValueArray(globalVal), &ignored))
             return NS_ERROR_FAILURE;
     }
 
@@ -3381,9 +3400,11 @@ class WrappedJSHolder : public nsISupports
 {
     NS_DECL_ISUPPORTS
     WrappedJSHolder() {}
-    virtual ~WrappedJSHolder() {}
 
     nsRefPtr<nsXPCWrappedJS> mWrappedJS;
+
+private:
+    virtual ~WrappedJSHolder() {}
 };
 NS_IMPL_ISUPPORTS0(WrappedJSHolder);
 
@@ -3448,122 +3469,6 @@ nsXPCComponents_Utils::GetJSEngineTelemetryValue(JSContext *cx, MutableHandleVal
     return NS_OK;
 }
 
-class MOZ_STACK_CLASS CloneIntoOptions : public OptionsBase
-{
-public:
-    CloneIntoOptions(JSContext *cx = xpc_GetSafeJSContext(),
-                     JSObject *options = nullptr)
-        : OptionsBase(cx, options)
-        , cloneFunctions(false)
-    {}
-
-    virtual bool Parse()
-    {
-        return ParseBoolean("cloneFunctions", &cloneFunctions);
-    }
-
-    bool cloneFunctions;
-};
-
-class MOZ_STACK_CLASS CloneIntoCallbacksData
-{
-public:
-    CloneIntoCallbacksData(JSContext *aCx, CloneIntoOptions *aOptions)
-        : mOptions(aOptions)
-        , mFunctions(aCx)
-    {}
-
-    CloneIntoOptions *mOptions;
-    AutoObjectVector mFunctions;
-};
-
-static JSObject*
-CloneIntoReadStructuredClone(JSContext *cx,
-                             JSStructuredCloneReader *reader,
-                             uint32_t tag,
-                             uint32_t value,
-                             void* closure)
-{
-    CloneIntoCallbacksData* data = static_cast<CloneIntoCallbacksData*>(closure);
-    MOZ_ASSERT(data);
-
-    if (tag == mozilla::dom::SCTAG_DOM_BLOB || tag == mozilla::dom::SCTAG_DOM_FILELIST) {
-        MOZ_ASSERT(!value, "Data should be empty");
-
-        nsISupports *supports;
-        if (JS_ReadBytes(reader, &supports, sizeof(supports))) {
-            RootedValue val(cx);
-            if (NS_SUCCEEDED(nsContentUtils::WrapNative(cx, supports, &val)))
-                return val.toObjectOrNull();
-        }
-    }
-
-    if (tag == mozilla::dom::SCTAG_DOM_FUNCTION) {
-      MOZ_ASSERT(value < data->mFunctions.length());
-
-      RootedValue functionValue(cx);
-      RootedObject obj(cx, data->mFunctions[value]);
-
-      if (!JS_WrapObject(cx, &obj))
-          return nullptr;
-
-      if (!xpc::NewFunctionForwarder(cx, obj, false, &functionValue))
-          return nullptr;
-
-      return &functionValue.toObject();
-    }
-
-    return nullptr;
-}
-
-static bool
-CloneIntoWriteStructuredClone(JSContext *cx,
-                              JSStructuredCloneWriter *writer,
-                              HandleObject obj,
-                              void *closure)
-{
-    CloneIntoCallbacksData* data = static_cast<CloneIntoCallbacksData*>(closure);
-    MOZ_ASSERT(data);
-
-    nsCOMPtr<nsIXPConnectWrappedNative> wrappedNative;
-    nsContentUtils::XPConnect()->GetWrappedNativeOfJSObject(cx, obj, getter_AddRefs(wrappedNative));
-    if (wrappedNative) {
-        uint32_t scTag = 0;
-        nsISupports *supports = wrappedNative->Native();
-
-        nsCOMPtr<nsIDOMBlob> blob = do_QueryInterface(supports);
-        if (blob)
-            scTag = mozilla::dom::SCTAG_DOM_BLOB;
-        else {
-            nsCOMPtr<nsIDOMFileList> list = do_QueryInterface(supports);
-            if (list)
-                scTag = mozilla::dom::SCTAG_DOM_FILELIST;
-        }
-
-        if (scTag) {
-            return JS_WriteUint32Pair(writer, scTag, 0) &&
-                   JS_WriteBytes(writer, &supports, sizeof(supports));
-        }
-    }
-
-    if (data->mOptions->cloneFunctions && JS_ObjectIsCallable(cx, obj)) {
-        data->mFunctions.append(obj);
-        return JS_WriteUint32Pair(writer, mozilla::dom::SCTAG_DOM_FUNCTION,
-                                  data->mFunctions.length() - 1);
-    }
-
-    return false;
-}
-
-// These functions serialize raw XPCOM pointers in the data stream, and thus
-// should only be used when the read and write are done together
-// synchronously.
-static JSStructuredCloneCallbacks CloneIntoCallbacks = {
-    CloneIntoReadStructuredClone,
-    CloneIntoWriteStructuredClone,
-    nullptr
-};
-
 bool
 xpc::CloneInto(JSContext *aCx, HandleValue aValue, HandleValue aScope,
                HandleValue aOptions, MutableHandleValue aCloned)
@@ -3585,14 +3490,14 @@ xpc::CloneInto(JSContext *aCx, HandleValue aValue, HandleValue aScope,
 
     RootedObject optionsObject(aCx, aOptions.isObject() ? &aOptions.toObject()
                                                         : nullptr);
-    CloneIntoOptions options(aCx, optionsObject);
+    StackScopedCloneOptions options(aCx, optionsObject);
     if (aOptions.isObject() && !options.Parse())
         return false;
 
     {
-        CloneIntoCallbacksData data(aCx, &options);
         JSAutoCompartment ac(aCx, scope);
-        if (!JS_StructuredClone(aCx, aValue, aCloned, &CloneIntoCallbacks, &data))
+        aCloned.set(aValue);
+        if (!StackScopedClone(aCx, options, aCloned))
             return false;
     }
 
@@ -3631,7 +3536,7 @@ nsXPCComponents_Utils::GetObjectPrincipal(HandleValue val, JSContext *cx,
     obj = js::CheckedUnwrap(obj);
     MOZ_ASSERT(obj);
 
-    nsCOMPtr<nsIPrincipal> prin = nsContentUtils::GetObjectPrincipal(obj);
+    nsCOMPtr<nsIPrincipal> prin = nsContentUtils::ObjectPrincipal(obj);
     prin.forget(result);
     return NS_OK;
 }

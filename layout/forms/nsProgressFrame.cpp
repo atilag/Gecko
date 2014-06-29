@@ -12,7 +12,6 @@
 #include "nsIDocument.h"
 #include "nsIPresShell.h"
 #include "nsNodeInfoManager.h"
-#include "nsINodeInfo.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsContentUtils.h"
 #include "nsFormControlFrame.h"
@@ -96,7 +95,8 @@ nsProgressFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   BuildDisplayListForInline(aBuilder, aDirtyRect, aLists);
 }
 
-nsresult nsProgressFrame::Reflow(nsPresContext*           aPresContext,
+void
+nsProgressFrame::Reflow(nsPresContext*           aPresContext,
                                       nsHTMLReflowMetrics&     aDesiredSize,
                                       const nsHTMLReflowState& aReflowState,
                                       nsReflowStatus&          aStatus)
@@ -130,8 +130,6 @@ nsresult nsProgressFrame::Reflow(nsPresContext*           aPresContext,
   aStatus = NS_FRAME_COMPLETE;
 
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
-
-  return NS_OK;
 }
 
 void

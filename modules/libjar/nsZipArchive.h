@@ -95,12 +95,12 @@ class nsZipArchive
 {
   friend class nsZipFind;
 
+  /** destructing the object closes the archive */
+  ~nsZipArchive();
+
 public:
   /** constructing does not open the archive. See OpenArchive() */
   nsZipArchive();
-
-  /** destructing the object closes the archive */
-  ~nsZipArchive();
 
   /** 
    * OpenArchive 
@@ -177,6 +177,13 @@ public:
    * Gets an undependent handle to the mapped file.
    */
   nsZipHandle* GetFD();
+
+  /**
+   * Gets the data offset.
+   * @param   aItem       Pointer to nsZipItem
+   * returns 0 on failure.
+   */
+  uint32_t GetDataOffset(nsZipItem* aItem);
 
   /**
    * Get pointer to the data of the item.

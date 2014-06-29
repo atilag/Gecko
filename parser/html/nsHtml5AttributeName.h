@@ -211,6 +211,7 @@ class nsHtml5AttributeName
     static nsHtml5AttributeName* ATTR_STYLE;
     static nsHtml5AttributeName* ATTR_RULES;
     static nsHtml5AttributeName* ATTR_STEMH;
+    static nsHtml5AttributeName* ATTR_SIZES;
     static nsHtml5AttributeName* ATTR_STEMV;
     static nsHtml5AttributeName* ATTR_START;
     static nsHtml5AttributeName* ATTR_XMLNS;
@@ -265,6 +266,7 @@ class nsHtml5AttributeName
     static nsHtml5AttributeName* ATTR_RADIUS;
     static nsHtml5AttributeName* ATTR_RESULT;
     static nsHtml5AttributeName* ATTR_REPEAT;
+    static nsHtml5AttributeName* ATTR_SRCSET;
     static nsHtml5AttributeName* ATTR_RSPACE;
     static nsHtml5AttributeName* ATTR_ROTATE;
     static nsHtml5AttributeName* ATTR_RQUOTE;
@@ -387,6 +389,7 @@ class nsHtml5AttributeName
     static nsHtml5AttributeName* ATTR_FILL_RULE;
     static nsHtml5AttributeName* ATTR_FONTSTYLE;
     static nsHtml5AttributeName* ATTR_FONT_SIZE;
+    static nsHtml5AttributeName* ATTR_KEYSYSTEM;
     static nsHtml5AttributeName* ATTR_KEYPOINTS;
     static nsHtml5AttributeName* ATTR_HIDEFOCUS;
     static nsHtml5AttributeName* ATTR_ONMESSAGE;

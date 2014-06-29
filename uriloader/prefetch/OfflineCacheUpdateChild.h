@@ -11,7 +11,6 @@
 
 #include "nsCOMArray.h"
 #include "nsCOMPtr.h"
-#include "nsICacheService.h"
 #include "nsIDOMDocument.h"
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
@@ -43,11 +42,12 @@ public:
                const bool& isUpgrade) MOZ_OVERRIDE;
 
     OfflineCacheUpdateChild(nsIDOMWindow* aWindow);
-    ~OfflineCacheUpdateChild();
 
     void SetDocument(nsIDOMDocument *aDocument);
 
 private:
+    ~OfflineCacheUpdateChild();
+
     nsresult AssociateDocument(nsIDOMDocument *aDocument,
                                nsIApplicationCache *aApplicationCache);
     void GatherObservers(nsCOMArray<nsIOfflineCacheUpdateObserver> &aObservers);

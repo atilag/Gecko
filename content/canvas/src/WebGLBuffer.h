@@ -26,8 +26,6 @@ class WebGLBuffer MOZ_FINAL
 public:
     WebGLBuffer(WebGLContext *context);
 
-    ~WebGLBuffer();
-
     void Delete();
 
     size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
@@ -49,6 +47,8 @@ public:
     bool Validate(GLenum type, uint32_t max_allowed, size_t first, size_t count,
                   uint32_t* out_upperBound);
 
+    bool IsElementArrayUsedWithMultipleTypes() const;
+
     WebGLContext *GetParentObject() const {
         return Context();
     }
@@ -59,6 +59,7 @@ public:
     NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(WebGLBuffer)
 
 protected:
+    ~WebGLBuffer();
 
     GLuint mGLName;
     bool mHasEverBeenBound;

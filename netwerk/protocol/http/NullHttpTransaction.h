@@ -21,18 +21,20 @@ class nsAHttpConnection;
 class nsHttpConnectionInfo;
 class nsHttpRequestHead;
 
-class NullHttpTransaction MOZ_FINAL : public nsAHttpTransaction
+// 6c445340-3b82-4345-8efa-4902c3b8805a
+#define NS_NULLHTTPTRANSACTION_IID \
+{ 0x6c445340, 0x3b82, 0x4345, {0x8e, 0xfa, 0x49, 0x02, 0xc3, 0xb8, 0x80, 0x5a }}
+
+class NullHttpTransaction : public nsAHttpTransaction
 {
 public:
+  NS_DECLARE_STATIC_IID_ACCESSOR(NS_NULLHTTPTRANSACTION_IID)
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSAHTTPTRANSACTION
 
   NullHttpTransaction(nsHttpConnectionInfo *ci,
                       nsIInterfaceRequestor *callbacks,
                       uint32_t caps);
-  ~NullHttpTransaction();
-
-  nsHttpConnectionInfo *ConnectionInfo() { return mConnectionInfo; }
 
   // Overload of nsAHttpTransaction methods
   bool IsNullTransaction() MOZ_OVERRIDE MOZ_FINAL { return true; }
@@ -42,8 +44,10 @@ public:
     return PR_SecondsToInterval(15);
   }
 
-private:
+protected:
+  virtual ~NullHttpTransaction();
 
+private:
   nsresult mStatus;
   uint32_t mCaps;
   // mCapsToClear holds flags that should be cleared in mCaps, e.g. unset
@@ -58,6 +62,8 @@ private:
   nsHttpRequestHead *mRequestHead;
   bool mIsDone;
 };
+
+NS_DEFINE_STATIC_IID_ACCESSOR(NullHttpTransaction, NS_NULLHTTPTRANSACTION_IID)
 
 }} // namespace mozilla::net
 

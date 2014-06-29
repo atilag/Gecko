@@ -489,6 +489,7 @@ private:
 // Used as the nsIEditorSpellCheck::InitSpellChecker callback.
 class InitEditorSpellCheckCallback MOZ_FINAL : public nsIEditorSpellCheckCallback
 {
+  ~InitEditorSpellCheckCallback() {}
 public:
   NS_DECL_ISUPPORTS
 
@@ -1251,7 +1252,7 @@ mozInlineSpellChecker::SkipSpellCheckForNode(nsIEditor* aEditor,
       {
         nsAutoString classname;
         parentElement->GetAttribute(NS_LITERAL_STRING("class"),classname);
-        if (classname.Equals(NS_LITERAL_STRING("moz-signature")))
+        if (classname.EqualsLiteral("moz-signature"))
           *checkSpelling = false;
       }
 
@@ -2001,6 +2002,8 @@ public:
   }
 
 private:
+  ~UpdateCurrentDictionaryCallback() {}
+
   nsRefPtr<mozInlineSpellChecker> mSpellChecker;
   uint32_t mDisabledAsyncToken;
 };

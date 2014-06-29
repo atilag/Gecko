@@ -12,13 +12,37 @@ import org.mozilla.gecko.FennecMochitestAssert;
 import org.mozilla.gecko.FennecNativeDriver;
 import org.mozilla.gecko.FennecTalosAssert;
 
+import org.mozilla.gecko.AppConstants;
+
 import android.app.Activity;
 import android.test.ActivityInstrumentationTestCase2;
+import android.util.Log;
 
 public abstract class BaseRobocopTest extends ActivityInstrumentationTestCase2<Activity> {
     public enum Type {
         MOCHITEST,
         TALOS
+    }
+
+    private static final String DEFAULT_ROOT_PATH = "/mnt/sdcard/tests";
+
+    /**
+     * The Java Class instance that launches the browser.
+     * <p>
+     * This should always agree with {@link AppConstants#BROWSER_INTENT_CLASS_NAME}.
+     */
+    public static final Class<? extends Activity> BROWSER_INTENT_CLASS;
+
+    // Use reflection here so we don't have to preprocess this file.
+    static {
+        Class<? extends Activity> cl;
+        try {
+            cl = (Class<? extends Activity>) Class.forName(AppConstants.BROWSER_INTENT_CLASS_NAME);
+        } catch (ClassNotFoundException e) {
+            // Oh well.
+            cl = Activity.class;
+        }
+        BROWSER_INTENT_CLASS = cl;
     }
 
     protected Assert mAsserter;
@@ -38,7 +62,7 @@ public abstract class BaseRobocopTest extends ActivityInstrumentationTestCase2<A
      */
     @SuppressWarnings("unchecked")
     public BaseRobocopTest() {
-        this((Class<Activity>) TestConstants.BROWSER_INTENT_CLASS);
+        this((Class<Activity>) BROWSER_INTENT_CLASS);
     }
 
     /**
@@ -66,6 +90,10 @@ public abstract class BaseRobocopTest extends ActivityInstrumentationTestCase2<A
     protected void setUp() throws Exception {
         // Load config file from root path (set up by Python script).
         mRootPath = FennecInstrumentationTestRunner.getFennecArguments().getString("deviceroot");
+        if (mRootPath == null) {
+            Log.w("Robocop", "Did not find deviceroot in arguments; falling back to: " + DEFAULT_ROOT_PATH);
+            mRootPath = DEFAULT_ROOT_PATH;
+        }
         String configFile = FennecNativeDriver.getFile(mRootPath + "/robotium.config");
         mConfig = FennecNativeDriver.convertTextToTable(configFile);
         mLogFile = (String) mConfig.get("logfile");

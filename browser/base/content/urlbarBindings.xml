@@ -118,7 +118,7 @@
         this.inputField.removeEventListener("underflow", this, false);
       ]]></destructor>
 
-      <field name="_value"></field>
+      <field name="_value">""</field>
 
       <!--
         onBeforeValueGet is called by the base-binding's .value getter.
@@ -143,7 +143,9 @@
           this._value = aValue;
           var returnValue = aValue;
           var action = this._parseActionUrl(aValue);
-          if (action) {
+          // Don't put back the action if we are invoked while override actions
+          // is active.
+          if (action && this._numNoActionsKeys <= 0) {
             returnValue = action.param;
             this.setAttribute("actiontype", action.type);
           } else {

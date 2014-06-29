@@ -23,13 +23,14 @@ namespace dom {
 class AudioParam MOZ_FINAL : public nsWrapperCache,
                              public AudioParamTimeline
 {
+  virtual ~AudioParam();
+
 public:
   typedef void (*CallbackType)(AudioNode*);
 
   AudioParam(AudioNode* aNode,
              CallbackType aCallback,
              float aDefaultValue);
-  virtual ~AudioParam();
 
   NS_IMETHOD_(MozExternalRefCountType) AddRef(void);
   NS_IMETHOD_(MozExternalRefCountType) Release(void);
@@ -55,6 +56,7 @@ public:
       aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
       return;
     }
+    aValues.ComputeLengthAndData();
     AudioParamTimeline::SetValueCurveAtTime(aValues.Data(), aValues.Length(),
                                             DOMTimeToStreamTime(aStartTime), aDuration, aRv);
     mCallback(mNode);

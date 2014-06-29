@@ -120,6 +120,23 @@ WrapperFactory::DoubleWrap(JSContext *cx, HandleObject obj, unsigned flags)
     return obj;
 }
 
+// In general, we're trying to deprecate COWs incrementally as we introduce
+// Xrays to the corresponding object types. But switching off COWs for Object
+// and Array instances would be too tumultuous at present, so we punt on that
+// for later.
+static bool
+ForceCOWBehavior(JSObject *obj)
+{
+    JSProtoKey key = IdentifyStandardInstanceOrPrototype(obj);
+    if (key == JSProto_Object || key == JSProto_Array || key == JSProto_Function) {
+        MOZ_ASSERT(GetXrayType(obj) == XrayForJSObject,
+                   "We should use XrayWrappers for standard ES Object, Array, and Function "
+                   "instances modulo this hack");
+        return true;
+    }
+    return false;
+}
+
 JSObject *
 WrapperFactory::PrepareForWrapping(JSContext *cx, HandleObject scope,
                                    HandleObject objArg, unsigned flags)
@@ -169,7 +186,7 @@ WrapperFactory::PrepareForWrapping(JSContext *cx, HandleObject scope,
     bool subsumes = AccessCheck::subsumes(js::GetContextCompartment(cx),
                                           js::GetObjectCompartment(obj));
     XrayType xrayType = GetXrayType(obj);
-    if (!subsumes && xrayType == NotXray) {
+    if (!subsumes && (xrayType == NotXray || ForceCOWBehavior(obj))) {
         JSProtoKey key = JSProto_Null;
         {
             JSAutoCompartment ac(cx, obj);
@@ -343,13 +360,6 @@ SelectWrapper(bool securityWrapper, bool wantXrays, XrayType xrayType,
     if (!wantXrays || xrayType == NotXray) {
         if (!securityWrapper)
             return &CrossCompartmentWrapper::singleton;
-        // In general, we don't want opaque function wrappers to be callable.
-        // But in the case of XBL, we rely on content being able to invoke
-        // functions exposed from the XBL scope. We could remove this exception,
-        // if needed, by using ExportFunction to generate the content-side
-        // representations of XBL methods.
-        else if (originIsXBLScope)
-            return &FilteringWrapper<CrossCompartmentSecurityWrapper, OpaqueWithCall>::singleton;
         return &FilteringWrapper<CrossCompartmentSecurityWrapper, Opaque>::singleton;
     }
 
@@ -373,14 +383,21 @@ SelectWrapper(bool securityWrapper, bool wantXrays, XrayType xrayType,
                                  CrossOriginAccessiblePropertiesOnly>::singleton;
     // There's never any reason to expose pure JS objects to non-subsuming actors.
     // Just use an opaque wrapper in this case.
+    //
+    // In general, we don't want opaque function wrappers to be callable.
+    // But in the case of XBL, we rely on content being able to invoke
+    // functions exposed from the XBL scope. We could remove this exception,
+    // if needed, by using ExportFunction to generate the content-side
+    // representations of XBL methods.
     MOZ_ASSERT(xrayType == XrayForJSObject);
+    if (originIsXBLScope)
+        return &FilteringWrapper<CrossCompartmentSecurityWrapper, OpaqueWithCall>::singleton;
     return &FilteringWrapper<CrossCompartmentSecurityWrapper, Opaque>::singleton;
 }
 
 JSObject *
 WrapperFactory::Rewrap(JSContext *cx, HandleObject existing, HandleObject obj,
-                       HandleObject wrappedProto, HandleObject parent,
-                       unsigned flags)
+                       HandleObject parent, unsigned flags)
 {
     MOZ_ASSERT(!IsWrapper(obj) ||
                GetProxyHandler(obj) == &XrayWaiver ||
@@ -418,7 +435,12 @@ WrapperFactory::Rewrap(JSContext *cx, HandleObject existing, HandleObject obj,
 
     // If this is a chrome object being exposed to content without Xrays, use
     // a COW.
-    else if (originIsChrome && !targetIsChrome && xrayType == NotXray) {
+    //
+    // We make an exception for Object instances, because we still rely on COWs
+    // for those in a lot of places in the tree.
+    else if (originIsChrome && !targetIsChrome &&
+             (xrayType == NotXray || ForceCOWBehavior(obj)))
+    {
         wrapper = &ChromeObjectWrapper::singleton;
     }
 
@@ -431,7 +453,7 @@ WrapperFactory::Rewrap(JSContext *cx, HandleObject existing, HandleObject obj,
     // See bug 843829.
     else if (targetSubsumesOrigin && !originSubsumesTarget &&
              !waiveXrayFlag && xrayType == NotXray &&
-             IsXBLScope(target))
+             IsContentXBLScope(target))
     {
         wrapper = &FilteringWrapper<CrossCompartmentSecurityWrapper, GentlyOpaque>::singleton;
     }
@@ -462,10 +484,10 @@ WrapperFactory::Rewrap(JSContext *cx, HandleObject existing, HandleObject obj,
 
         // We have slightly different behavior for the case when the object
         // being wrapped is in an XBL scope.
-        bool originIsXBLScope = IsXBLScope(origin);
+        bool originIsContentXBLScope = IsContentXBLScope(origin);
 
         wrapper = SelectWrapper(securityWrapper, wantXrays, xrayType, waiveXrays,
-                                originIsXBLScope);
+                                originIsContentXBLScope);
     }
 
     if (!targetSubsumesOrigin) {

@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- /
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- /
 /* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -43,6 +43,16 @@ ProcessGlobal.prototype = {
     switch (topic) {
     case 'app-startup': {
       Services.obs.addObserver(this, 'console-api-log-event', false);
+      let inParent = Cc["@mozilla.org/xre/app-info;1"]
+                       .getService(Ci.nsIXULRuntime)
+                       .processType == Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
+      if (inParent) {
+        let ppmm = Cc["@mozilla.org/parentprocessmessagemanager;1"]
+                     .getService(Ci.nsIMessageListenerManager);
+        ppmm.addMessageListener("getProfD", function(message) {
+          return Services.dirsvc.get("ProfD", Ci.nsIFile).path;
+        });
+      }
       break;
     }
     case 'console-api-log-event': {

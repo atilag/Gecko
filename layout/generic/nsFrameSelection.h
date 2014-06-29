@@ -591,7 +591,12 @@ public:
 
   void DisconnectFromPresShell();
   nsresult ClearNormalSelection();
+
+  static HINT GetHintForPosition(nsIContent* aContent, int32_t aOffset);
+
 private:
+  ~nsFrameSelection() {}
+
   nsresult TakeFocus(nsIContent *aNewFocus,
                      uint32_t aContentOffset,
                      uint32_t aContentEndOffset,

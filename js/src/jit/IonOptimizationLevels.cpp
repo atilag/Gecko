@@ -29,10 +29,10 @@ OptimizationInfo::initNormalOptimizationInfo()
     inlineInterpreted_ = true;
     inlineNative_ = true;
     gvn_ = true;
-    gvnKind_ = GVN_Optimistic;
     licm_ = true;
     uce_ = true;
     rangeAnalysis_ = true;
+    autoTruncate_ = true;
     registerAllocator_ = RegisterAllocator_LSRA;
 
     inlineMaxTotalBytecodeLength_ = 1000;
@@ -55,6 +55,7 @@ OptimizationInfo::initAsmjsOptimizationInfo()
     level_ = Optimization_AsmJS;
     edgeCaseAnalysis_ = false;
     eliminateRedundantChecks_ = false;
+    autoTruncate_ = false;
     registerAllocator_ = RegisterAllocator_Backtracking;
 }
 

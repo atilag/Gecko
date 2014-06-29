@@ -1,4 +1,4 @@
-/* -*- tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -6,7 +6,7 @@
 
 "use strict";
 
-const { Ci } = require("chrome");
+const { Ci, Cu } = require("chrome");
 const Services = require("Services");
 const { ActorPool, appendExtraActors, createExtraActors } = require("devtools/server/actors/common");
 const { DebuggerServer } = require("devtools/server/main");
@@ -98,6 +98,35 @@ RootActor.prototype = {
   constructor: RootActor,
   applicationType: "browser",
 
+  traits: {
+    sources: true,
+    editOuterHTML: true,
+    // Whether the server-side highlighter actor exists and can be used to
+    // remotely highlight nodes (see server/actors/highlighter.js)
+    highlightable: true,
+    // Which custom highlighter does the server-side highlighter actor supports?
+    // (see server/actors/highlighter.js)
+    customHighlighters: [
+      "BoxModelHighlighter",
+      "CssTransformHighlighter"
+    ],
+    // Whether the inspector actor implements the getImageDataFromURL
+    // method that returns data-uris for image URLs. This is used for image
+    // tooltips for instance
+    urlToImageDataResolver: true,
+    networkMonitor: true,
+    // Whether the storage inspector actor to inspect cookies, etc.
+    storageInspector: true,
+    // Whether storage inspector is read only
+    storageInspectorReadOnly: true,
+    // Whether conditional breakpoints are supported
+    conditionalBreakpoints: true,
+    bulk: true,
+    // Whether the style rule actor implements the modifySelector method
+    // that modifies the rule's selector
+    selectorEditable: true
+  },
+
   /**
    * Return a 'hello' packet as specified by the Remote Debugging Protocol.
    */
@@ -107,24 +136,7 @@ RootActor.prototype = {
       applicationType: this.applicationType,
       /* This is not in the spec, but it's used by tests. */
       testConnectionPrefix: this.conn.prefix,
-      traits: {
-        sources: true,
-        editOuterHTML: true,
-        // Wether the server-side highlighter actor exists and can be used to
-        // remotely highlight nodes (see server/actors/highlighter.js)
-        highlightable: true,
-        // Wether the inspector actor implements the getImageDataFromURL
-        // method that returns data-uris for image URLs. This is used for image
-        // tooltips for instance
-        urlToImageDataResolver: true,
-        networkMonitor: true,
-        // Wether the storage inspector actor to inspect cookies, etc.
-        storageInspector: true,
-        // Wether storage inspector is read only
-        storageInspectorReadOnly: true,
-        // Wether conditional breakpoints are supported
-        conditionalBreakpoints: true
-      }
+      traits: this.traits
     };
   },
 
@@ -136,7 +148,17 @@ RootActor.prototype = {
   /**
    * The (chrome) window, for use by child actors
    */
-  get window() Services.wm.getMostRecentWindow(DebuggerServer.chromeWindowType),
+  get window() isWorker ? null : Services.wm.getMostRecentWindow(DebuggerServer.chromeWindowType),
+
+  /**
+   * The list of all windows
+   */
+  get windows() {
+    return this.docShells.map(docShell => {
+      return docShell.QueryInterface(Ci.nsIInterfaceRequestor)
+                     .getInterface(Ci.nsIDOMWindow);
+    });
+  },
 
   /**
    * URL of the chrome window.
@@ -144,12 +166,36 @@ RootActor.prototype = {
   get url() { return this.window ? this.window.document.location.href : null; },
 
   /**
+   * The top level window's docshell
+   */
+  get docShell() {
+    return this.window
+      .QueryInterface(Ci.nsIInterfaceRequestor)
+      .getInterface(Ci.nsIDocShell);
+  },
+
+  /**
+   * The list of all docshells
+   */
+  get docShells() {
+    let docShellsEnum = this.docShell.getDocShellEnumerator(
+      Ci.nsIDocShellTreeItem.typeAll,
+      Ci.nsIDocShell.ENUMERATE_FORWARDS
+    );
+
+    let docShells = [];
+    while (docShellsEnum.hasMoreElements()) {
+      docShells.push(docShellsEnum.getNext());
+    }
+
+    return docShells;
+  },
+
+  /**
    * Getter for the best nsIWebProgress for to watching this window.
    */
   get webProgress() {
-    return this.window
-      .QueryInterface(Ci.nsIInterfaceRequestor)
-      .getInterface(Ci.nsIDocShell)
+    return this.docShell
       .QueryInterface(Ci.nsIInterfaceRequestor)
       .getInterface(Ci.nsIWebProgress);
   },
@@ -291,7 +337,7 @@ RootActor.prototype = {
      * Request packets are frozen. Copy aRequest, so that
      * DebuggerServerConnection.onPacket can attach a 'from' property.
      */
-    return JSON.parse(JSON.stringify(aRequest));
+    return Cu.cloneInto(aRequest, {});
   },
 
   onProtocolDescription: dumpProtocolSpec,

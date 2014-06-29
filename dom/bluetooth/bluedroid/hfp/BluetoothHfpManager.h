@@ -7,9 +7,7 @@
 #ifndef mozilla_dom_bluetooth_bluetoothhfpmanager_h__
 #define mozilla_dom_bluetooth_bluetoothhfpmanager_h__
 
-#include <hardware/bluetooth.h>
-#include <hardware/bt_hf.h>
-
+#include "BluetoothInterface.h"
 #include "BluetoothCommon.h"
 #include "BluetoothHfpManagerBase.h"
 #include "BluetoothRilListener.h"
@@ -84,6 +82,8 @@ public:
 
   static BluetoothHfpManager* Get();
   virtual ~BluetoothHfpManager();
+  static void InitHfpInterface();
+  static void DeinitHfpInterface();
 
   bool ConnectSco();
   bool DisconnectSco();
@@ -134,8 +134,7 @@ private:
 
   BluetoothHfpManager();
   bool Init();
-  bool InitHfpInterface();
-  void DeinitHfpInterface();
+  void Cleanup();
 
   void HandleShutdown();
   void HandleVolumeChanged(const nsAString& aData);

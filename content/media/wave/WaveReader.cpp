@@ -158,6 +158,13 @@ nsresult WaveReader::ReadMetadata(MediaInfo* aInfo,
   return NS_OK;
 }
 
+bool
+WaveReader::IsMediaSeekable()
+{
+  // not used
+  return true;
+}
+
 template <typename T> T UnsignedByteToAudioSample(uint8_t aValue);
 template <typename T> T SignedShortToAudioSample(int16_t aValue);
 
@@ -577,7 +584,7 @@ WaveReader::LoadListChunk(uint32_t aChunkSize,
     uint32_t length = ReadUint32LE(&p);
 
     // Subchunk shall not exceed parent chunk.
-    if (p + length > end) {
+    if (uint32_t(end - p) < length) {
       break;
     }
 

@@ -9,14 +9,10 @@ import re
 
 def get_dm(marionette=None,**kwargs):
     dm_type = os.environ.get('DM_TRANS', 'adb')
-    if marionette and marionette.emulator:
-        adb_path = marionette.emulator.b2g.adb_path
-        return mozdevice.DeviceManagerADB(adbPath=adb_path,
-                                          deviceSerial='emulator-%d' % marionette.emulator.port,
-                                          **kwargs)
+    if marionette and hasattr(marionette.runner, 'device'):
+        return marionette.runner.app_ctx.dm
     elif marionette and marionette.device_serial and dm_type == 'adb':
-        return mozdevice.DeviceManagerADB(deviceSerial=marionette.device_serial,
-                                          **kwargs)
+        return mozdevice.DeviceManagerADB(deviceSerial=marionette.device_serial, **kwargs)
     else:
         if dm_type == 'adb':
             return mozdevice.DeviceManagerADB(**kwargs)
@@ -44,13 +40,15 @@ class B2GTestCaseMixin(object):
         self._device_manager = None
 
     def get_device_manager(self, *args, **kwargs):
-        if not self._device_manager:
+        capabilities = self.marionette.session_capabilities
+        if not self._device_manager and capabilities['device'] != 'desktop':
             self._device_manager = get_dm(self.marionette, **kwargs)
         return self._device_manager
 
     @property
     def device_manager(self):
         return self.get_device_manager()
+
 
 class B2GTestResultMixin(object):
 

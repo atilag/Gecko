@@ -90,9 +90,15 @@ ImageHost::Composite(EffectChain& aEffectChain,
   if (!source) {
     return;
   }
+
+  bool isAlphaPremultiplied = true;
+  if (mFrontBuffer->GetFlags() & TextureFlags::NON_PREMULTIPLIED)
+    isAlphaPremultiplied = false;
+
   RefPtr<TexturedEffect> effect = CreateTexturedEffect(mFrontBuffer->GetFormat(),
                                                        source,
-                                                       aFilter);
+                                                       aFilter,
+                                                       isAlphaPremultiplied);
   if (!effect) {
     return;
   }
@@ -106,11 +112,25 @@ ImageHost::Composite(EffectChain& aEffectChain,
   gfx::Rect pictureRect(0, 0,
                         mPictureRect.width,
                         mPictureRect.height);
-  //XXX: We might have multiple texture sources here (e.g. 3 YCbCr textures), and we're
-  // only iterating over the tiles of the first one. Are we assuming that the tiling
-  // will be identical? Can we ensure that somehow?
   BigImageIterator* it = source->AsBigImageIterator();
   if (it) {
+
+    // This iteration does not work if we have multiple texture sources here
+    // (e.g. 3 YCbCr textures). There's nothing preventing the different
+    // planes from having different resolutions or tile sizes. For example, a
+    // YCbCr frame could have Cb and Cr planes that are half the resolution of
+    // the Y plane, in such a way that the Y plane overflows the maximum
+    // texture size and the Cb and Cr planes do not. Then the Y plane would be
+    // split into multiple tiles and the Cb and Cr planes would just be one
+    // tile each.
+    // To handle the general case correctly, we'd have to create a grid of
+    // intersected tiles over all planes, and then draw each grid tile using
+    // the corresponding source tiles from all planes, with appropriate
+    // per-plane per-tile texture coords.
+    // DrawQuad currently assumes that all planes use the same texture coords.
+    MOZ_ASSERT(it->GetTileCount() == 1 || !source->GetNextSibling(),
+               "Can't handle multi-plane BigImages");
+
     it->BeginBigImageIteration();
     do {
       nsIntRect tileRect = it->GetTileRect();
@@ -123,6 +143,10 @@ ImageHost::Composite(EffectChain& aEffectChain,
                                       Float(rect.height) / tileRect.height);
       } else {
         effect->mTextureCoords = Rect(0, 0, 1, 1);
+      }
+      if (mFrontBuffer->GetFlags() & TextureFlags::NEEDS_Y_FLIP) {
+        effect->mTextureCoords.y = effect->mTextureCoords.YMost();
+        effect->mTextureCoords.height = -effect->mTextureCoords.height;
       }
       GetCompositor()->DrawQuad(rect, aClipRect, aEffectChain,
                                 aOpacity, aTransform);
@@ -171,36 +195,33 @@ ImageHost::SetCompositor(Compositor* aCompositor)
 }
 
 void
-ImageHost::PrintInfo(nsACString& aTo, const char* aPrefix)
+ImageHost::PrintInfo(std::stringstream& aStream, const char* aPrefix)
 {
-  aTo += aPrefix;
-  aTo += nsPrintfCString("ImageHost (0x%p)", this);
+  aStream << aPrefix;
+  aStream << nsPrintfCString("ImageHost (0x%p)", this).get();
 
-  AppendToString(aTo, mPictureRect, " [picture-rect=", "]");
+  AppendToString(aStream, mPictureRect, " [picture-rect=", "]");
 
   if (mFrontBuffer) {
     nsAutoCString pfx(aPrefix);
     pfx += "  ";
-    aTo += "\n";
-    mFrontBuffer->PrintInfo(aTo, pfx.get());
+    aStream << "\n";
+    mFrontBuffer->PrintInfo(aStream, pfx.get());
   }
 }
 
 #ifdef MOZ_DUMP_PAINTING
 void
-ImageHost::Dump(FILE* aFile,
+ImageHost::Dump(std::stringstream& aStream,
                 const char* aPrefix,
                 bool aDumpHtml)
 {
-  if (!aFile) {
-    aFile = stderr;
-  }
   if (mFrontBuffer) {
-    fprintf_stderr(aFile, "%s", aPrefix);
-    fprintf_stderr(aFile, aDumpHtml ? "<ul><li>TextureHost: "
+    aStream << aPrefix;
+    aStream << (aDumpHtml ? "<ul><li>TextureHost: "
                              : "TextureHost: ");
-    DumpTextureHost(aFile, mFrontBuffer);
-    fprintf_stderr(aFile, aDumpHtml ? " </li></ul> " : " ");
+    DumpTextureHost(aStream, mFrontBuffer);
+    aStream << (aDumpHtml ? " </li></ul> " : " ");
   }
 }
 #endif

@@ -25,7 +25,7 @@
 #include "nsIDOMHTMLFormElement.h"
 #include "nsIDOMXULDocument.h"
 #include "nsIFormControl.h"
-#include "nsINodeInfo.h"
+#include "mozilla/dom/NodeInfo.h"
 #include "nsIScriptContext.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIServiceManager.h"
@@ -371,7 +371,7 @@ XULContentSinkImpl::FlushText(bool aCreateTextNode)
 
         bool stripWhitespace = false;
         if (node->mType == nsXULPrototypeNode::eType_Element) {
-            nsINodeInfo *nodeInfo =
+            mozilla::dom::NodeInfo *nodeInfo =
                 static_cast<nsXULPrototypeElement*>(node.get())->mNodeInfo;
 
             if (nodeInfo->NamespaceEquals(kNameSpaceID_XUL))
@@ -426,7 +426,7 @@ XULContentSinkImpl::NormalizeAttributeString(const char16_t *aExpatName,
         return NS_OK;
     }
 
-    nsCOMPtr<nsINodeInfo> ni;
+    nsRefPtr<mozilla::dom::NodeInfo> ni;
     ni = mNodeInfoManager->GetNodeInfo(localName, prefix,
                                        nameSpaceID,
                                        nsIDOMNode::ATTRIBUTE_NODE);
@@ -436,7 +436,7 @@ XULContentSinkImpl::NormalizeAttributeString(const char16_t *aExpatName,
 }
 
 nsresult
-XULContentSinkImpl::CreateElement(nsINodeInfo *aNodeInfo,
+XULContentSinkImpl::CreateElement(mozilla::dom::NodeInfo *aNodeInfo,
                                   nsXULPrototypeElement** aResult)
 {
     nsXULPrototypeElement* element = new nsXULPrototypeElement();
@@ -456,13 +456,11 @@ NS_IMETHODIMP
 XULContentSinkImpl::HandleStartElement(const char16_t *aName, 
                                        const char16_t **aAtts,
                                        uint32_t aAttsCount, 
-                                       int32_t aIndex, 
                                        uint32_t aLineNumber)
 { 
   // XXX Hopefully the parser will flag this before we get here. If
   // we're in the epilog, there should be no new elements
   NS_PRECONDITION(mState != eInEpilog, "tag in XUL doc epilog");
-  NS_PRECONDITION(aIndex >= -1, "Bogus aIndex");
   NS_PRECONDITION(aAttsCount % 2 == 0, "incorrect aAttsCount");
   // Adjust aAttsCount so it's the actual number of attributes
   aAttsCount /= 2;
@@ -479,7 +477,7 @@ XULContentSinkImpl::HandleStartElement(const char16_t *aName,
   nsContentUtils::SplitExpatName(aName, getter_AddRefs(prefix),
                                  getter_AddRefs(localName), &nameSpaceID);
 
-  nsCOMPtr<nsINodeInfo> nodeInfo;
+  nsRefPtr<mozilla::dom::NodeInfo> nodeInfo;
   nodeInfo = mNodeInfoManager->GetNodeInfo(localName, prefix, nameSpaceID,
                                            nsIDOMNode::ELEMENT_NODE);
   
@@ -501,15 +499,6 @@ XULContentSinkImpl::HandleStartElement(const char16_t *aName,
              aLineNumber));
       rv = NS_ERROR_UNEXPECTED; // XXX
       break;
-  }
-
-  // Set the ID attribute atom on the node info object for this node
-  if (aIndex != -1 && NS_SUCCEEDED(rv)) {
-    nsCOMPtr<nsIAtom> IDAttr = do_GetAtom(aAtts[aIndex]);
-
-    if (IDAttr) {
-      nodeInfo->SetIDAttributeAtom(IDAttr);
-    }
   }
 
   return rv;
@@ -566,7 +555,7 @@ XULContentSinkImpl::HandleEndElement(const char16_t *aName)
             script->mOutOfLine = false;
             if (doc)
                 script->Compile(mText, mTextLength, mDocumentURL,
-                                script->mLineNo, doc, mPrototype);
+                                script->mLineNo, doc);
         }
 
         FlushText(false);
@@ -721,7 +710,7 @@ XULContentSinkImpl::ReportError(const char16_t* aErrorText,
   parsererror.Append((char16_t)0xFFFF);
   parsererror.AppendLiteral("parsererror");
   
-  rv = HandleStartElement(parsererror.get(), noAtts, 0, -1, 0);
+  rv = HandleStartElement(parsererror.get(), noAtts, 0, 0);
   NS_ENSURE_SUCCESS(rv,rv);
 
   rv = HandleCharacterData(aErrorText, NS_strlen(aErrorText));
@@ -731,7 +720,7 @@ XULContentSinkImpl::ReportError(const char16_t* aErrorText,
   sourcetext.Append((char16_t)0xFFFF);
   sourcetext.AppendLiteral("sourcetext");
 
-  rv = HandleStartElement(sourcetext.get(), noAtts, 0, -1, 0);
+  rv = HandleStartElement(sourcetext.get(), noAtts, 0, 0);
   NS_ENSURE_SUCCESS(rv,rv);
   
   rv = HandleCharacterData(aSourceText, NS_strlen(aSourceText));
@@ -749,7 +738,7 @@ XULContentSinkImpl::ReportError(const char16_t* aErrorText,
 nsresult
 XULContentSinkImpl::OpenRoot(const char16_t** aAttributes, 
                              const uint32_t aAttrLen, 
-                             nsINodeInfo *aNodeInfo)
+                             mozilla::dom::NodeInfo *aNodeInfo)
 {
     NS_ASSERTION(mState == eInProlog, "how'd we get here?");
     if (mState != eInProlog)
@@ -804,7 +793,7 @@ nsresult
 XULContentSinkImpl::OpenTag(const char16_t** aAttributes, 
                             const uint32_t aAttrLen,
                             const uint32_t aLineNumber,
-                            nsINodeInfo *aNodeInfo)
+                            mozilla::dom::NodeInfo *aNodeInfo)
 {
     nsresult rv;
 

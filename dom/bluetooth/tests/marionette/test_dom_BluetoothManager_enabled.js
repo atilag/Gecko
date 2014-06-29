@@ -1,6 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: sw=2 ts=2 sts=2 et filetype=javascript
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -33,19 +31,24 @@ function test(aEnabled) {
 
   let deferred = Promise.defer();
 
-  Promise.all([setBluetoothEnabled(aEnabled),
-               waitEitherEnabledOrDisabled()])
+  // Ensures that we can always receive that "enabled"/"disabled" event by
+  // installing the event handler *before* we ever enable/disable Bluetooth. Or
+  // we might just miss those events and get a timeout error.
+  let promises = [];
+  promises.push(waitEitherEnabledOrDisabled());
+  promises.push(setBluetoothEnabled(aEnabled));
+  Promise.all(promises)
     .then(function(aResults) {
       /* aResults is an array of two elements:
-       *   [ <result of setBluetoothEnabled>,
-       *     <result of waitEitherEnabledOrDisabled> ]
+       *   [ <result of waitEitherEnabledOrDisabled>,
+       *     <result of setBluetoothEnabled>]
        */
       log("  Examine results " + JSON.stringify(aResults));
 
       is(bluetoothManager.enabled, aEnabled, "bluetoothManager.enabled");
-      is(aResults[1], aEnabled, "'adapteradded' event received");
+      is(aResults[0], aEnabled, "'adapteradded' event received");
 
-      if (bluetoothManager.enabled === aEnabled && aResults[1] === aEnabled) {
+      if (bluetoothManager.enabled === aEnabled && aResults[0] === aEnabled) {
         deferred.resolve();
       } else {
         deferred.reject();

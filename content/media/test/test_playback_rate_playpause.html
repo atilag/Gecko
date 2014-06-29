@@ -10,15 +10,6 @@
 <pre id="test">
 <script class="testbody" type='application/javascript;version=1.8'>
 
-if (navigator.platform.startsWith("Win")) {
-  SimpleTest.expectAssertions(0, 1);
-} else if (navigator.platform.startsWith("Mac")) {
-  SimpleTest.expectAssertions(0, 2);
-} else if (navigator.platform.startsWith("Linux")) {
-  // Bug 897024
-  SimpleTest.expectAssertions(0, 2);
-}
-
 let manager = new MediaTestManager;
 
 function ontimeupdate(e) {
@@ -43,9 +34,7 @@ function onpaused(e) {
 
 function finish_test(element) {
   dump(element.token + " finish_test.\n");
-  if (element.parentNode)
-    element.parentNode.removeChild(element);
-  element.src="";
+  removeNodeAndSource(element);
   manager.finished(element.token);
 }
 
@@ -56,6 +45,7 @@ function startTest(test, token) {
   element.token = token;
   element.controls = true;
   element.playbackRate = 0.5;
+  element.preload = "metadata";
   element.addEventListener("timeupdate", ontimeupdate);
   element.addEventListener("pause", onpaused);
   element.addEventListener("loadedmetadata", function() {

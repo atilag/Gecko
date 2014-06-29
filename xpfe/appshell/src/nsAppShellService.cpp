@@ -20,7 +20,6 @@
 #include "nsPIDOMWindow.h"
 #include "nsWebShellWindow.h"
 
-#include "nsCRT.h"
 #include "prprf.h"
 
 #include "nsWidgetInitData.h"
@@ -127,7 +126,7 @@ nsAppShellService::CreateHiddenWindowHelper(bool aIsPrivate)
   if (!aIsPrivate) {
     rv = JustCreateTopWindow(nullptr, url,
                              chromeMask, initialWidth, initialHeight,
-                             true, getter_AddRefs(newWindow));
+                             true, nullptr, getter_AddRefs(newWindow));
     NS_ENSURE_SUCCESS(rv, rv);
 
     mHiddenWindow.swap(newWindow);
@@ -137,7 +136,7 @@ nsAppShellService::CreateHiddenWindowHelper(bool aIsPrivate)
 
     rv = JustCreateTopWindow(nullptr, url,
                              chromeMask, initialWidth, initialHeight,
-                             true, getter_AddRefs(newWindow));
+                             true, nullptr, getter_AddRefs(newWindow));
     NS_ENSURE_SUCCESS(rv, rv);
 
     nsCOMPtr<nsIDocShell> docShell;
@@ -181,6 +180,7 @@ nsAppShellService::CreateTopLevelWindow(nsIXULWindow *aParent,
                                         uint32_t aChromeMask,
                                         int32_t aInitialWidth,
                                         int32_t aInitialHeight,
+                                        nsITabParent *aOpeningTab,
                                         nsIXULWindow **aResult)
 
 {
@@ -191,7 +191,7 @@ nsAppShellService::CreateTopLevelWindow(nsIXULWindow *aParent,
   nsWebShellWindow *newWindow = nullptr;
   rv = JustCreateTopWindow(aParent, aUrl,
                            aChromeMask, aInitialWidth, aInitialHeight,
-                           false, &newWindow);  // addrefs
+                           false, aOpeningTab, &newWindow);  // addrefs
 
   *aResult = newWindow; // transfer ref
 
@@ -214,8 +214,9 @@ nsAppShellService::CreateTopLevelWindow(nsIXULWindow *aParent,
 class WebBrowserChrome2Stub : public nsIWebBrowserChrome2,
                               public nsIInterfaceRequestor,
                               public nsSupportsWeakReference {
-public:
+protected:
     virtual ~WebBrowserChrome2Stub() {}
+public:
     NS_DECL_ISUPPORTS
     NS_DECL_NSIWEBBROWSERCHROME
     NS_DECL_NSIWEBBROWSERCHROME2
@@ -332,6 +333,7 @@ public:
   NS_FORWARD_NSIWEBNAVIGATION(mWebNavigation->)
   NS_FORWARD_NSIINTERFACEREQUESTOR(mInterfaceRequestor->)
 private:
+  ~WindowlessBrowserStub() {}
   nsCOMPtr<nsIWebBrowser> mBrowser;
   nsCOMPtr<nsIWebNavigation> mWebNavigation;
   nsCOMPtr<nsIInterfaceRequestor> mInterfaceRequestor;
@@ -482,11 +484,12 @@ CheckForFullscreenWindow()
  */
 nsresult
 nsAppShellService::JustCreateTopWindow(nsIXULWindow *aParent,
-                                       nsIURI *aUrl, 
+                                       nsIURI *aUrl,
                                        uint32_t aChromeMask,
                                        int32_t aInitialWidth,
                                        int32_t aInitialHeight,
                                        bool aIsHiddenWindow,
+                                       nsITabParent *aOpeningTab,
                                        nsWebShellWindow **aResult)
 {
   *aResult = nullptr;
@@ -597,34 +600,46 @@ nsAppShellService::JustCreateTopWindow(nsIXULWindow *aParent,
 
   nsresult rv = window->Initialize(parent, center ? aParent : nullptr,
                                    aUrl, aInitialWidth, aInitialHeight,
-                                   aIsHiddenWindow, widgetInitData);
+                                   aIsHiddenWindow, aOpeningTab, widgetInitData);
 
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Enforce the Private Browsing autoStart pref first.
   bool isPrivateBrowsingWindow =
     Preferences::GetBool("browser.privatebrowsing.autostart");
+  bool isUsingRemoteTabs =
+    Preferences::GetBool("browser.tabs.remote.autostart");
+
   if (aChromeMask & nsIWebBrowserChrome::CHROME_PRIVATE_WINDOW) {
     // Caller requested a private window
     isPrivateBrowsingWindow = true;
   }
-  if (!isPrivateBrowsingWindow) {
+  if (aChromeMask & nsIWebBrowserChrome::CHROME_REMOTE_WINDOW) {
+    isUsingRemoteTabs = true;
+  }
+
+  nsCOMPtr<nsIDOMWindow> domWin = do_GetInterface(aParent);
+  nsCOMPtr<nsIWebNavigation> webNav = do_GetInterface(domWin);
+  nsCOMPtr<nsILoadContext> parentContext = do_QueryInterface(webNav);
+
+  if (!isPrivateBrowsingWindow && parentContext) {
     // Ensure that we propagate any existing private browsing status
     // from the parent, even if it will not actually be used
     // as a parent value.
-    nsCOMPtr<nsIDOMWindow> domWin = do_GetInterface(aParent);
-    nsCOMPtr<nsIWebNavigation> webNav = do_GetInterface(domWin);
-    nsCOMPtr<nsILoadContext> parentContext = do_QueryInterface(webNav);
-    if (parentContext) {
-      isPrivateBrowsingWindow = parentContext->UsePrivateBrowsing();
-    }
+    isPrivateBrowsingWindow = parentContext->UsePrivateBrowsing();
   }
+
+  if (!isUsingRemoteTabs && parentContext) {
+    isUsingRemoteTabs = parentContext->UseRemoteTabs();
+  }
+
   nsCOMPtr<nsIDOMWindow> newDomWin =
       do_GetInterface(NS_ISUPPORTS_CAST(nsIBaseWindow*, window));
   nsCOMPtr<nsIWebNavigation> newWebNav = do_GetInterface(newDomWin);
   nsCOMPtr<nsILoadContext> thisContext = do_GetInterface(newWebNav);
   if (thisContext) {
     thisContext->SetPrivateBrowsing(isPrivateBrowsingWindow);
+    thisContext->SetRemoteTabs(isUsingRemoteTabs);
   }
 
   window.swap(*aResult); // transfer reference
@@ -656,13 +671,11 @@ nsAppShellService::GetHiddenDOMWindow(nsIDOMWindow **aWindow)
 
   rv = mHiddenWindow->GetDocShell(getter_AddRefs(docShell));
   NS_ENSURE_SUCCESS(rv, rv);
+  NS_ENSURE_TRUE(docShell, NS_ERROR_FAILURE);
 
-  nsCOMPtr<nsIDOMWindow> hiddenDOMWindow(do_GetInterface(docShell, &rv));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  *aWindow = hiddenDOMWindow;
-  NS_IF_ADDREF(*aWindow);
-  return NS_OK;
+  nsCOMPtr<nsIDOMWindow> hiddenDOMWindow(docShell->GetWindow());
+  hiddenDOMWindow.forget(aWindow);
+  return *aWindow ? NS_OK : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
@@ -688,13 +701,11 @@ nsAppShellService::GetHiddenPrivateDOMWindow(nsIDOMWindow **aWindow)
 
   rv = mHiddenPrivateWindow->GetDocShell(getter_AddRefs(docShell));
   NS_ENSURE_SUCCESS(rv, rv);
+  NS_ENSURE_TRUE(docShell, NS_ERROR_FAILURE);
 
-  nsCOMPtr<nsIDOMWindow> hiddenPrivateDOMWindow(do_GetInterface(docShell, &rv));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  *aWindow = hiddenPrivateDOMWindow;
-  NS_IF_ADDREF(*aWindow);
-  return NS_OK;
+  nsCOMPtr<nsIDOMWindow> hiddenPrivateDOMWindow(docShell->GetWindow());
+  hiddenPrivateDOMWindow.forget(aWindow);
+  return *aWindow ? NS_OK : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
@@ -722,14 +733,16 @@ nsAppShellService::GetHiddenWindowAndJSContext(nsIDOMWindow **aWindow,
                 nsCOMPtr<nsIDocShell> docShell;
                 rv = mHiddenWindow->GetDocShell(getter_AddRefs(docShell));
                 if (NS_FAILED(rv)) break;
+                if (!docShell) {
+                  break;
+                }
 
                 // 2. Convert that to an nsIDOMWindow.
-                nsCOMPtr<nsIDOMWindow> hiddenDOMWindow(do_GetInterface(docShell));
+                nsCOMPtr<nsIDOMWindow> hiddenDOMWindow(docShell->GetWindow());
                 if(!hiddenDOMWindow) break;
 
                 // 3. Get script global object for the window.
-                nsCOMPtr<nsIScriptGlobalObject> sgo;
-                sgo = do_QueryInterface( hiddenDOMWindow );
+                nsCOMPtr<nsIScriptGlobalObject> sgo = docShell->GetScriptGlobalObject();
                 if (!sgo) { rv = NS_ERROR_FAILURE; break; }
 
                 // 4. Get script context from that.
@@ -771,7 +784,9 @@ nsAppShellService::RegisterTopLevelWindow(nsIXULWindow* aWindow)
 
   nsCOMPtr<nsIDocShell> docShell;
   aWindow->GetDocShell(getter_AddRefs(docShell));
-  nsCOMPtr<nsPIDOMWindow> domWindow(do_GetInterface(docShell));
+  NS_ENSURE_TRUE(docShell, NS_ERROR_FAILURE);
+
+  nsCOMPtr<nsPIDOMWindow> domWindow(docShell->GetWindow());
   NS_ENSURE_TRUE(domWindow, NS_ERROR_FAILURE);
   domWindow->SetInitialPrincipalToSubject();
 
@@ -843,7 +858,7 @@ nsAppShellService::UnregisterTopLevelWindow(nsIXULWindow* aWindow)
     nsCOMPtr<nsIDocShell> docShell;
     aWindow->GetDocShell(getter_AddRefs(docShell));
     if (docShell) {
-      nsCOMPtr<nsIDOMWindow> domWindow(do_GetInterface(docShell));
+      nsCOMPtr<nsIDOMWindow> domWindow(docShell->GetWindow());
       if (domWindow)
         wwatcher->RemoveWindow(domWindow);
     }

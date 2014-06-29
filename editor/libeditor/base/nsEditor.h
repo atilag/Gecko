@@ -8,6 +8,7 @@
 
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc.
 #include "mozilla/TypedEnum.h"          // for MOZ_BEGIN_ENUM_CLASS, etc.
+#include "mozilla/dom/Text.h"
 #include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCOMArray.h"                 // for nsCOMArray
 #include "nsCOMPtr.h"                   // for already_AddRefed, nsCOMPtr
@@ -38,7 +39,6 @@ class InsertTextTxn;
 class JoinElementTxn;
 class RemoveStyleSheetTxn;
 class SplitElementTxn;
-class nsCSSStyleSheet;
 class nsIAtom;
 class nsIContent;
 class nsIDOMCharacterData;
@@ -67,6 +67,7 @@ class nsString;
 class nsTransactionManager;
 
 namespace mozilla {
+class CSSStyleSheet;
 class ErrorResult;
 class TextComposition;
 
@@ -158,11 +159,14 @@ public:
    *  after the construction of the editor class.
    */
   nsEditor();
+
+protected:
   /** The default destructor. This should suffice. Should this be pure virtual 
    *  for someone to derive from the nsEditor later? I don't believe so.
    */
   virtual ~nsEditor();
 
+public:
 //Interfaces for addref and release and queryinterface
 //NOTE: Use   NS_DECL_ISUPPORTS_INHERITED in any class inherited from nsEditor
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -198,7 +202,7 @@ public:
                                int32_t *aInOutOffset,
                                nsIDOMDocument *aDoc);
   nsresult InsertTextIntoTextNodeImpl(const nsAString& aStringToInsert,
-                                      mozilla::dom::Text* aTextNode,
+                                      nsINode* aTextNode,
                                       int32_t aOffset,
                                       bool aSuppressIME = false);
   nsresult InsertTextIntoTextNodeImpl(const nsAString& aStringToInsert, 
@@ -263,28 +267,28 @@ protected:
 
   /** create a transaction for setting aAttribute to aValue on aElement
     */
-  NS_IMETHOD CreateTxnForSetAttribute(mozilla::dom::Element *aElement,
+  NS_IMETHOD CreateTxnForSetAttribute(nsIDOMElement *aElement,
                                       const nsAString &  aAttribute,
                                       const nsAString &  aValue,
                                       ChangeAttributeTxn ** aTxn);
 
   /** create a transaction for removing aAttribute on aElement
     */
-  NS_IMETHOD CreateTxnForRemoveAttribute(mozilla::dom::Element *aElement,
+  NS_IMETHOD CreateTxnForRemoveAttribute(nsIDOMElement *aElement,
                                          const nsAString &  aAttribute,
                                          ChangeAttributeTxn ** aTxn);
 
   /** create a transaction for creating a new child node of aParent of type aTag.
     */
   NS_IMETHOD CreateTxnForCreateElement(const nsAString & aTag,
-                                       nsINode         *aParent,
+                                       nsIDOMNode      *aParent,
                                        int32_t         aPosition,
                                        CreateElementTxn ** aTxn);
 
   /** create a transaction for inserting aNode as a child of aParent.
     */
-  NS_IMETHOD CreateTxnForInsertElement(nsINode    * aNode,
-                                       nsINode    * aParent,
+  NS_IMETHOD CreateTxnForInsertElement(nsIDOMNode * aNode,
+                                       nsIDOMNode * aParent,
                                        int32_t      aOffset,
                                        InsertElementTxn ** aTxn);
 
@@ -320,15 +324,24 @@ protected:
 
   /** create a transaction for adding a style sheet
     */
-  NS_IMETHOD CreateTxnForAddStyleSheet(nsCSSStyleSheet* aSheet, AddStyleSheetTxn* *aTxn);
+  NS_IMETHOD CreateTxnForAddStyleSheet(mozilla::CSSStyleSheet* aSheet,
+                                       AddStyleSheetTxn* *aTxn);
 
   /** create a transaction for removing a style sheet
     */
-  NS_IMETHOD CreateTxnForRemoveStyleSheet(nsCSSStyleSheet* aSheet, RemoveStyleSheetTxn* *aTxn);
+  NS_IMETHOD CreateTxnForRemoveStyleSheet(mozilla::CSSStyleSheet* aSheet,
+                                          RemoveStyleSheetTxn* *aTxn);
   
   NS_IMETHOD DeleteText(nsIDOMCharacterData *aElement,
                         uint32_t             aOffset,
                         uint32_t             aLength);
+
+  inline nsresult DeleteText(mozilla::dom::Text* aText, uint32_t aOffset,
+                             uint32_t aLength)
+  {
+    return DeleteText(static_cast<nsIDOMCharacterData*>(GetAsDOMNode(aText)),
+                      aOffset, aLength);
+  }
 
 //  NS_IMETHOD DeleteRange(nsIDOMRange *aRange);
 
@@ -342,12 +355,12 @@ protected:
                                        EDirection           aDirection,
                                        DeleteTextTxn**      aTxn);
 	
-  NS_IMETHOD CreateTxnForSplitNode(nsINode *aNode,
+  NS_IMETHOD CreateTxnForSplitNode(nsIDOMNode *aNode,
                                    uint32_t    aOffset,
                                    SplitElementTxn **aTxn);
 
-  NS_IMETHOD CreateTxnForJoinNode(nsINode  *aLeftNode,
-                                  nsINode  *aRightNode,
+  NS_IMETHOD CreateTxnForJoinNode(nsIDOMNode  *aLeftNode,
+                                  nsIDOMNode  *aRightNode,
                                   JoinElementTxn **aTxn);
 
   /**

@@ -50,6 +50,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef nricectx_h__
 #define nricectx_h__
 
+#include <string>
 #include <vector>
 
 #include "sigslot.h"
@@ -58,6 +59,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "mozilla/RefPtr.h"
 #include "mozilla/Scoped.h"
+#include "mozilla/TimeStamp.h"
 #include "nsAutoPtr.h"
 #include "nsIEventTarget.h"
 #include "nsITimer.h"
@@ -78,6 +80,11 @@ typedef struct nr_resolver_ nr_resolver;
 typedef void* NR_SOCKET;
 
 namespace mozilla {
+
+// Timestamps set whenever a packet is dropped due to global rate limiting
+// (see nr_socket_prsock.cpp)
+TimeStamp nr_socket_short_term_violation_time();
+TimeStamp nr_socket_long_term_violation_time();
 
 class NrIceMediaStream;
 
@@ -184,8 +191,6 @@ class NrIceCtx {
   static RefPtr<NrIceCtx> Create(const std::string& name,
                                  bool offerer,
                                  bool set_interface_priorities = true);
-  virtual ~NrIceCtx();
-
   nr_ice_ctx *ctx() { return ctx_; }
   nr_ice_peer_ctx *peer() { return peer_; }
 
@@ -217,6 +222,8 @@ class NrIceCtx {
 
   // Set whether we are controlling or not.
   nsresult SetControlling(Controlling controlling);
+
+  Controlling GetControlling();
 
   // Set the STUN servers. Must be called before StartGathering
   // (if at all).
@@ -271,6 +278,8 @@ class NrIceCtx {
     // XXX: offerer_ will be used eventually;  placate clang in the meantime.
     (void)offerer_;
   }
+
+  virtual ~NrIceCtx();
 
   DISALLOW_COPY_ASSIGN(NrIceCtx);
 

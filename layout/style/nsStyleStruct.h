@@ -16,7 +16,6 @@
 #include "nsColor.h"
 #include "nsCoord.h"
 #include "nsMargin.h"
-#include "nsRect.h"
 #include "nsFont.h"
 #include "nsStyleCoord.h"
 #include "nsStyleConsts.h"
@@ -25,11 +24,10 @@
 #include "nsCOMPtr.h"
 #include "nsCOMArray.h"
 #include "nsTArray.h"
-#include "nsIAtom.h"
 #include "nsCSSValue.h"
 #include "imgRequestProxy.h"
 #include "Orientation.h"
-#include <algorithm>
+#include "CounterStyleManager.h"
 
 class nsIFrame;
 class nsIURI;
@@ -360,7 +358,7 @@ struct nsStyleBackground {
   struct Position;
   friend struct Position;
   struct Position {
-    typedef nsStyleCoord::Calc PositionCoord;
+    typedef nsStyleCoord::CalcValue PositionCoord;
     PositionCoord mXPosition, mYPosition;
 
     // Initialize nothing
@@ -387,7 +385,7 @@ struct nsStyleBackground {
   struct Size;
   friend struct Size;
   struct Size {
-    struct Dimension : public nsStyleCoord::Calc {
+    struct Dimension : public nsStyleCoord::CalcValue {
       nscoord ResolveLengthPercentage(nscoord aAvailable) const {
         double d = double(mPercent) * double(aAvailable) + double(mLength);
         if (d < 0.0)
@@ -1111,7 +1109,7 @@ protected:
 
 
 struct nsStyleList {
-  nsStyleList(void);
+  nsStyleList(nsPresContext* aPresContext);
   nsStyleList(const nsStyleList& aStyleList);
   ~nsStyleList(void);
 
@@ -1144,9 +1142,28 @@ struct nsStyleList {
       mListStyleImage->LockImage();
   }
 
-  uint8_t   mListStyleType;             // [inherited] See nsStyleConsts.h
+  void GetListStyleType(nsSubstring& aType) const { aType = mListStyleType; }
+  mozilla::CounterStyle* GetCounterStyle() const
+  {
+    return mCounterStyle.get();
+  }
+  void SetListStyleType(const nsSubstring& aType,
+                        mozilla::CounterStyle* aStyle)
+  {
+    mListStyleType = aType;
+    mCounterStyle = aStyle;
+  }
+  void SetListStyleType(const nsSubstring& aType,
+                        nsPresContext* aPresContext)
+  {
+    SetListStyleType(aType, aPresContext->
+                     CounterStyleManager()->BuildCounterStyle(aType));
+  }
+
   uint8_t   mListStylePosition;         // [inherited]
 private:
+  nsString  mListStyleType;             // [inherited]
+  nsRefPtr<mozilla::CounterStyle> mCounterStyle; // [inherited]
   nsRefPtr<imgRequestProxy> mListStyleImage; // [inherited]
   nsStyleList& operator=(const nsStyleList& aOther) MOZ_DELETE;
 public:
@@ -1306,10 +1323,6 @@ struct nsStylePosition {
   float         mFlexGrow;              // [reset] float
   float         mFlexShrink;            // [reset] float
   nsStyleCoord  mZIndex;                // [reset] integer, auto
-  // NOTE: Fields so far can be memcpy()'ed, while following fields
-  // need to have their copy constructor called when we're being copied.
-  // See nsStylePosition::nsStylePosition(const nsStylePosition& aSource)
-  // in nsStyleStruct.cpp
   nsStyleGridTemplate mGridTemplateColumns;
   nsStyleGridTemplate mGridTemplateRows;
 
@@ -1463,7 +1476,9 @@ struct nsStyleTextReset {
 
   nsChangeHint CalcDifference(const nsStyleTextReset& aOther) const;
   static nsChangeHint MaxDifference() {
-    return NS_STYLE_HINT_REFLOW;
+    return nsChangeHint(
+        NS_STYLE_HINT_REFLOW | 
+        nsChangeHint_UpdateSubtreeOverflow);
   }
   static nsChangeHint MaxDifferenceNeverInherited() {
     // CalcDifference never returns nsChangeHint_NeedReflow or
@@ -1532,7 +1547,7 @@ struct nsStyleText {
   bool WhiteSpaceIsSignificant() const {
     return mWhiteSpace == NS_STYLE_WHITESPACE_PRE ||
            mWhiteSpace == NS_STYLE_WHITESPACE_PRE_WRAP ||
-           mWhiteSpace == NS_STYLE_WHITESPACE_PRE_DISCARD_NEWLINES;
+           mWhiteSpace == NS_STYLE_WHITESPACE_PRE_SPACE;
   }
 
   bool NewlineIsSignificant() const {
@@ -1541,15 +1556,16 @@ struct nsStyleText {
            mWhiteSpace == NS_STYLE_WHITESPACE_PRE_LINE;
   }
 
-  bool NewlineIsDiscarded() const {
-    return mWhiteSpace == NS_STYLE_WHITESPACE_PRE_DISCARD_NEWLINES;
-  }
-
   bool WhiteSpaceOrNewlineIsSignificant() const {
     return mWhiteSpace == NS_STYLE_WHITESPACE_PRE ||
            mWhiteSpace == NS_STYLE_WHITESPACE_PRE_WRAP ||
            mWhiteSpace == NS_STYLE_WHITESPACE_PRE_LINE ||
-           mWhiteSpace == NS_STYLE_WHITESPACE_PRE_DISCARD_NEWLINES;
+           mWhiteSpace == NS_STYLE_WHITESPACE_PRE_SPACE;
+  }
+
+  bool TabIsSignificant() const {
+    return mWhiteSpace == NS_STYLE_WHITESPACE_PRE ||
+           mWhiteSpace == NS_STYLE_WHITESPACE_PRE_WRAP;
   }
 
   bool WhiteSpaceCanWrapStyle() const {
@@ -1609,6 +1625,10 @@ struct nsStyleImageOrientation {
   bool IsDefault()   const { return mOrientation == 0; }
   bool IsFlipped()   const { return mOrientation & FLIP_MASK; }
   bool IsFromImage() const { return mOrientation & FROM_IMAGE_MASK; }
+  bool SwapsWidthAndHeight() const {
+    uint8_t angle = mOrientation & ORIENTATION_MASK;
+    return (angle == ANGLE_90) || (angle == ANGLE_270);
+  }
 
   mozilla::image::Angle Angle() const {
     switch (mOrientation & ORIENTATION_MASK) {
@@ -1789,9 +1809,11 @@ private:
   void AssignFromKeyword(int32_t aTimingFunctionType);
 };
 
-struct nsTransition {
-  nsTransition() { /* leaves uninitialized; see also SetInitialValues */ }
-  explicit nsTransition(const nsTransition& aCopy);
+namespace mozilla {
+
+struct StyleTransition {
+  StyleTransition() { /* leaves uninitialized; see also SetInitialValues */ }
+  explicit StyleTransition(const StyleTransition& aCopy);
 
   void SetInitialValues();
 
@@ -1813,7 +1835,7 @@ struct nsTransition {
       mProperty = aProperty;
     }
   void SetUnknownProperty(const nsAString& aUnknownProperty);
-  void CopyPropertyFrom(const nsTransition& aOther)
+  void CopyPropertyFrom(const StyleTransition& aOther)
     {
       mProperty = aOther.mProperty;
       mUnknownProperty = aOther.mUnknownProperty;
@@ -1830,9 +1852,9 @@ private:
                                       // eCSSProperty_UNKNOWN
 };
 
-struct nsAnimation {
-  nsAnimation() { /* leaves uninitialized; see also SetInitialValues */ }
-  explicit nsAnimation(const nsAnimation& aCopy);
+struct StyleAnimation {
+  StyleAnimation() { /* leaves uninitialized; see also SetInitialValues */ }
+  explicit StyleAnimation(const StyleAnimation& aCopy);
 
   void SetInitialValues();
 
@@ -1868,8 +1890,10 @@ private:
   uint8_t mDirection;
   uint8_t mFillMode;
   uint8_t mPlayState;
-  float mIterationCount; // NS_IEEEPositiveInfinity() means infinite
+  float mIterationCount; // mozilla::PositiveInfinity<float>() means infinite
 };
+
+} // namespace mozilla
 
 struct nsStyleDisplay {
   nsStyleDisplay();
@@ -1948,7 +1972,7 @@ struct nsStyleDisplay {
   nsStyleCoord mChildPerspective; // [reset] coord
   nsStyleCoord mPerspectiveOrigin[2]; // [reset] percent, coord, calc
 
-  nsAutoTArray<nsTransition, 1> mTransitions; // [reset]
+  nsAutoTArray<mozilla::StyleTransition, 1> mTransitions; // [reset]
   // The number of elements in mTransitions that are not from repeating
   // a list due to another property being longer.
   uint32_t mTransitionTimingFunctionCount,
@@ -1956,7 +1980,7 @@ struct nsStyleDisplay {
            mTransitionDelayCount,
            mTransitionPropertyCount;
 
-  nsAutoTArray<nsAnimation, 1> mAnimations; // [reset]
+  nsAutoTArray<mozilla::StyleAnimation, 1> mAnimations; // [reset]
   // The number of elements in mAnimations that are not from repeating
   // a list due to another property being longer.
   uint32_t mAnimationTimingFunctionCount,

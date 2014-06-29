@@ -26,15 +26,12 @@
 #include "nsDOMCID.h"
 #include "nsNodeInfoManager.h"
 #include "nsContentUtils.h"
-#include "nsCxPusher.h"
 #include "nsCCUncollectableMarker.h"
 #include "nsDOMJSUtils.h" // for GetScriptContextFromJSContext
 #include "xpcpublic.h"
 #include "mozilla/dom/BindingUtils.h"
 
 using mozilla::dom::DestroyProtoAndIfaceCache;
-using mozilla::AutoPushJSContext;
-using mozilla::AutoSafeJSContext;
 using mozilla::dom::XULDocument;
 
 uint32_t nsXULPrototypeDocument::gRefCnt;
@@ -72,7 +69,7 @@ nsXULPrototypeDocument::~nsXULPrototypeDocument()
 NS_IMPL_CYCLE_COLLECTION_CLASS(nsXULPrototypeDocument)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXULPrototypeDocument)
-    tmp->mPrototypeWaiters.Clear();
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(mPrototypeWaiters)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsXULPrototypeDocument)
     if (nsCCUncollectableMarker::InGeneration(cb, tmp->mCCGeneration)) {
@@ -80,10 +77,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsXULPrototypeDocument)
     }
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRoot)
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mNodeInfoManager)
-    for (uint32_t i = 0; i < tmp->mPrototypeWaiters.Length(); ++i) {
-        NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mPrototypeWaiters[i]");
-        cb.NoteXPCOMChild(static_cast<nsINode*>(tmp->mPrototypeWaiters[i].get()));
-    }
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPrototypeWaiters)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsXULPrototypeDocument)
@@ -162,8 +156,8 @@ nsXULPrototypeDocument::Read(nsIObjectInputStream* aStream)
     if (! mRoot)
        return NS_ERROR_OUT_OF_MEMORY;
 
-    // nsINodeInfo table
-    nsCOMArray<nsINodeInfo> nodeInfos;
+    // mozilla::dom::NodeInfo table
+    nsTArray<nsRefPtr<mozilla::dom::NodeInfo>> nodeInfos;
 
     tmp = aStream->Read32(&count);
     if (NS_FAILED(tmp)) {
@@ -195,7 +189,7 @@ nsXULPrototypeDocument::Read(nsIObjectInputStream* aStream)
           rv = tmp;
         }
 
-        nsCOMPtr<nsINodeInfo> nodeInfo;
+        nsRefPtr<mozilla::dom::NodeInfo> nodeInfo;
         // Using UINT16_MAX here as we don't know which nodeinfos will be
         // used for attributes and which for elements. And that doesn't really
         // matter.
@@ -205,8 +199,7 @@ nsXULPrototypeDocument::Read(nsIObjectInputStream* aStream)
         if (NS_FAILED(tmp)) {
           rv = tmp;
         }
-        if (!nodeInfos.AppendObject(nodeInfo))
-          rv = NS_ERROR_OUT_OF_MEMORY;
+        nodeInfos.AppendElement(nodeInfo);
     }
 
     // Document contents
@@ -254,19 +247,16 @@ nsXULPrototypeDocument::Read(nsIObjectInputStream* aStream)
 
 static nsresult
 GetNodeInfos(nsXULPrototypeElement* aPrototype,
-             nsCOMArray<nsINodeInfo>& aArray)
+             nsTArray<nsRefPtr<mozilla::dom::NodeInfo>>& aArray)
 {
-    nsresult rv;
-    if (aArray.IndexOf(aPrototype->mNodeInfo) < 0) {
-        if (!aArray.AppendObject(aPrototype->mNodeInfo)) {
-            return NS_ERROR_OUT_OF_MEMORY;
-        }
+    if (aArray.IndexOf(aPrototype->mNodeInfo) == aArray.NoIndex) {
+        aArray.AppendElement(aPrototype->mNodeInfo);
     }
 
     // Search attributes
     uint32_t i;
     for (i = 0; i < aPrototype->mNumAttributes; ++i) {
-        nsCOMPtr<nsINodeInfo> ni;
+        nsRefPtr<mozilla::dom::NodeInfo> ni;
         nsAttrName* name = &aPrototype->mAttributes[i].mName;
         if (name->IsAtom()) {
             ni = aPrototype->mNodeInfo->NodeInfoManager()->
@@ -277,10 +267,8 @@ GetNodeInfos(nsXULPrototypeElement* aPrototype,
             ni = name->NodeInfo();
         }
 
-        if (aArray.IndexOf(ni) < 0) {
-            if (!aArray.AppendObject(ni)) {
-                return NS_ERROR_OUT_OF_MEMORY;
-            }
+        if (aArray.IndexOf(ni) == aArray.NoIndex) {
+            aArray.AppendElement(ni);
         }
     }
 
@@ -288,8 +276,8 @@ GetNodeInfos(nsXULPrototypeElement* aPrototype,
     for (i = 0; i < aPrototype->mChildren.Length(); ++i) {
         nsXULPrototypeNode* child = aPrototype->mChildren[i];
         if (child->mType == nsXULPrototypeNode::eType_Element) {
-            rv = GetNodeInfos(static_cast<nsXULPrototypeElement*>(child),
-                              aArray);
+            nsresult rv =
+              GetNodeInfos(static_cast<nsXULPrototypeElement*>(child), aArray);
             NS_ENSURE_SUCCESS(rv, rv);
         }
     }
@@ -335,8 +323,8 @@ nsXULPrototypeDocument::Write(nsIObjectOutputStream* aStream)
     }
 #endif
 
-    // nsINodeInfo table
-    nsCOMArray<nsINodeInfo> nodeInfos;
+    // mozilla::dom::NodeInfo table
+    nsTArray<nsRefPtr<mozilla::dom::NodeInfo>> nodeInfos;
     if (mRoot) {
       tmp = GetNodeInfos(mRoot, nodeInfos);
       if (NS_FAILED(tmp)) {
@@ -344,13 +332,13 @@ nsXULPrototypeDocument::Write(nsIObjectOutputStream* aStream)
       }
     }
 
-    uint32_t nodeInfoCount = nodeInfos.Count();
+    uint32_t nodeInfoCount = nodeInfos.Length();
     tmp = aStream->Write32(nodeInfoCount);
     if (NS_FAILED(tmp)) {
       rv = tmp;
     }
     for (i = 0; i < nodeInfoCount; ++i) {
-        nsINodeInfo *nodeInfo = nodeInfos[i];
+        mozilla::dom::NodeInfo *nodeInfo = nodeInfos[i];
         NS_ENSURE_TRUE(nodeInfo, NS_ERROR_FAILURE);
 
         nsAutoString namespaceURI;

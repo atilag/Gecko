@@ -222,6 +222,24 @@ WebGLContext::GetParameter(JSContext* cx, GLenum pname, ErrorResult& rv)
             gl->fGetIntegerv(pname, &i);
             return JS::NumberValue(uint32_t(i));
         }
+        case LOCAL_GL_IMPLEMENTATION_COLOR_READ_TYPE: {
+            GLint i = 0;
+            if (gl->IsSupported(gl::GLFeature::ES2_compatibility)) {
+                gl->fGetIntegerv(pname, &i);
+            } else {
+                i = LOCAL_GL_UNSIGNED_BYTE;
+            }
+            return JS::NumberValue(uint32_t(i));
+        }
+        case LOCAL_GL_IMPLEMENTATION_COLOR_READ_FORMAT: {
+            GLint i = 0;
+            if (gl->IsSupported(gl::GLFeature::ES2_compatibility)) {
+                gl->fGetIntegerv(pname, &i);
+            } else {
+                i = LOCAL_GL_RGBA;
+            }
+            return JS::NumberValue(uint32_t(i));
+        }
         // int
         case LOCAL_GL_STENCIL_CLEAR_VALUE:
         case LOCAL_GL_STENCIL_REF:
@@ -423,7 +441,7 @@ WebGLContext::GetParameter(JSContext* cx, GLenum pname, ErrorResult& rv)
         }
 
         case LOCAL_GL_ELEMENT_ARRAY_BUFFER_BINDING: {
-            return WebGLObjectAsJSValue(cx, mBoundVertexArray->mBoundElementArrayBuffer.get(), rv);
+            return WebGLObjectAsJSValue(cx, mBoundVertexArray->mElementArrayBuffer.get(), rv);
         }
 
         case LOCAL_GL_RENDERBUFFER_BINDING: {
@@ -454,11 +472,14 @@ WebGLContext::GetParameter(JSContext* cx, GLenum pname, ErrorResult& rv)
     return JS::NullValue();
 }
 
-JS::Value
-WebGLContext::GetParameterIndexed(JSContext* cx, GLenum pname, GLuint index)
+void
+WebGLContext::GetParameterIndexed(JSContext* cx, GLenum pname, GLuint index,
+                                  JS::MutableHandle<JS::Value> retval)
 {
-    if (IsContextLost())
-        return JS::NullValue();
+    if (IsContextLost()) {
+        retval.setNull();
+        return;
+    }
 
     MakeContextCurrent();
 
@@ -467,9 +488,11 @@ WebGLContext::GetParameterIndexed(JSContext* cx, GLenum pname, GLuint index)
         {
             if (index >= mGLMaxTransformFeedbackSeparateAttribs) {
                 ErrorInvalidValue("getParameterIndexed: index should be less than MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS", index);
-                return JS::NullValue();
+                retval.setNull();
+                return;
             }
-            return JS::NullValue(); // See bug 903594
+            retval.setNull(); // See bug 903594
+            return;
         }
 
         default:
@@ -477,7 +500,7 @@ WebGLContext::GetParameterIndexed(JSContext* cx, GLenum pname, GLuint index)
     }
 
     ErrorInvalidEnumInfo("getParameterIndexed: parameter", pname);
-    return JS::NullValue();
+    retval.setNull();
 }
 
 bool

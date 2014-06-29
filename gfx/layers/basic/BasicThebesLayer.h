@@ -53,17 +53,18 @@ public:
     NS_ASSERTION(BasicManager()->InConstruction(),
                  "Can only set properties in construction phase");
     mInvalidRegion.Or(mInvalidRegion, aRegion);
+    mInvalidRegion.SimplifyOutward(20);
     mValidRegion.Sub(mValidRegion, mInvalidRegion);
   }
 
   virtual void PaintThebes(gfxContext* aContext,
                            Layer* aMaskLayer,
                            LayerManager::DrawThebesLayerCallback aCallback,
-                           void* aCallbackData,
-                           ReadbackProcessor* aReadback);
+                           void* aCallbackData);
 
   virtual void Validate(LayerManager::DrawThebesLayerCallback aCallback,
-                        void* aCallbackData) MOZ_OVERRIDE;
+                        void* aCallbackData,
+                        ReadbackProcessor* aReadback) MOZ_OVERRIDE;
 
   virtual void ClearCachedResources()
   {

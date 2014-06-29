@@ -25,12 +25,15 @@ namespace net {
 
 class Http2PushedStream;
 class Http2Stream;
+class nsHttpTransaction;
 
 class Http2Session MOZ_FINAL : public ASpdySession
   , public nsAHttpConnection
   , public nsAHttpSegmentReader
   , public nsAHttpSegmentWriter
 {
+  ~Http2Session();
+
 public:
   NS_DECL_ISUPPORTS
     NS_DECL_NSAHTTPTRANSACTION
@@ -38,10 +41,10 @@ public:
     NS_DECL_NSAHTTPSEGMENTREADER
     NS_DECL_NSAHTTPSEGMENTWRITER
 
-   Http2Session(nsAHttpTransaction *, nsISocketTransport *, int32_t);
-  ~Http2Session();
+  Http2Session(nsISocketTransport *);
 
-  bool AddStream(nsAHttpTransaction *, int32_t);
+  bool AddStream(nsAHttpTransaction *, int32_t,
+                 bool, nsIInterfaceRequestor *);
   bool CanReuse() { return !mShouldGoAway && !mClosed; }
   bool RoomForMoreStreams();
 
@@ -82,9 +85,7 @@ public:
     FRAME_TYPE_GOAWAY = 7,
     FRAME_TYPE_WINDOW_UPDATE = 8,
     FRAME_TYPE_CONTINUATION = 9,
-    FRAME_TYPE_ALTSVC = 10,
-    FRAME_TYPE_BLOCKED = 11,
-    FRAME_TYPE_LAST = 12
+    FRAME_TYPE_LAST = 10
   };
 
   // NO_ERROR is a macro defined on windows, so we'll name the HTTP2 goaway
@@ -112,17 +113,14 @@ public:
   const static uint8_t kFlag_END_PUSH_PROMISE = 0x04; // push promise
   const static uint8_t kFlag_ACK = 0x01; // ping and settings
   const static uint8_t kFlag_END_SEGMENT = 0x02; // data
-  const static uint8_t kFlag_PAD_LOW = 0x08; // data, headers, push promise, continuation
-  const static uint8_t kFlag_PAD_HIGH = 0x10; // data, headers, push promise, continuation
-  const static uint8_t kFlag_COMPRESSED = 0x20; // data
+  const static uint8_t kFlag_PADDED = 0x08; // data, headers, push promise, continuation
   const static uint8_t kFlag_PRIORITY = 0x20; // headers
 
   enum {
     SETTINGS_TYPE_HEADER_TABLE_SIZE = 1, // compression table size
     SETTINGS_TYPE_ENABLE_PUSH = 2,     // can be used to disable push
     SETTINGS_TYPE_MAX_CONCURRENT = 3,  // streams recvr allowed to initiate
-    SETTINGS_TYPE_INITIAL_WINDOW = 4,  // bytes for flow control default
-    SETTINGS_TYPE_COMPRESS_DATA = 5 // whether other side allowes compressed DATA
+    SETTINGS_TYPE_INITIAL_WINDOW = 4  // bytes for flow control default
   };
 
   // This should be big enough to hold all of your control packets,
@@ -163,12 +161,7 @@ public:
   static nsresult RecvGoAway(Http2Session *);
   static nsresult RecvWindowUpdate(Http2Session *);
   static nsresult RecvContinuation(Http2Session *);
-  static nsresult RecvAltSvc(Http2Session *);
-  static nsresult RecvBlocked(Http2Session *);
 
-  template<typename T>
-  static void EnsureBuffer(nsAutoArrayPtr<T> &,
-                           uint32_t, uint32_t, uint32_t &);
   char       *EnsureOutputBuffer(uint32_t needed);
 
   template<typename charType>
@@ -447,6 +440,22 @@ private:
   // by the load group and the serial number can be used as part of the cache key
   // to make sure streams aren't shared across sessions.
   uint64_t        mSerial;
+
+  // If push is disabled, we want to be able to send PROTOCOL_ERRORs if we
+  // receive a PUSH_PROMISE, but we have to wait for the SETTINGS ACK before
+  // we can actually tell the other end to go away. These help us keep track
+  // of that state so we can behave appropriately.
+  bool mWaitingForSettingsAck;
+  bool mGoAwayOnPush;
+
+private:
+/// connect tunnels
+  void DispatchOnTunnel(nsAHttpTransaction *, nsIInterfaceRequestor *);
+  void RegisterTunnel(Http2Stream *);
+  void UnRegisterTunnel(Http2Stream *);
+  uint32_t FindTunnelCount(nsHttpConnectionInfo *);
+
+  nsDataHashtable<nsCStringHashKey, uint32_t> mTunnelHash;
 };
 
 } // namespace mozilla::net

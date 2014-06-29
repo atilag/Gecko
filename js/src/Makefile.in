@@ -4,14 +4,12 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-ifndef .PYMAKE
 ifeq (,$(MAKE_VERSION))
 $(error GNU Make is required)
 endif
 make_min_ver := 3.81
 ifneq ($(make_min_ver),$(firstword $(sort $(make_min_ver) $(MAKE_VERSION))))
 $(error GNU Make $(make_min_ver) or higher is required)
-endif
 endif
 
 TOPLEVEL_BUILD := 1
@@ -37,6 +35,11 @@ else
 SHARED_LIBRARY_LIBS += \
     ctypes/libffi/.libs/libffi.$(LIB_SUFFIX) \
     $(NULL)
+endif
+
+# Windows needs this to be linked with a static library.
+ifndef MOZ_NATIVE_FFI
+DEFINES += -DFFI_BUILDING
 endif
 
 endif # JS_HAS_CTYPES
@@ -384,6 +387,7 @@ selfhosted_out_h_deps := \
   $(srcdir)/js.msg \
   $(srcdir)/builtin/embedjs.py \
   $(srcdir)/builtin/TypedObjectConstants.h \
+  $(srcdir)/builtin/SelfHostingDefines.h \
   $(NULL)
 
 SELFHOSTED_DEFINES += $(DEFINES) $(ACDEFINES)
@@ -395,7 +399,8 @@ endif
 
 selfhosted.out.h: $(selfhosted_out_h_deps)
 	$(PYTHON) $(srcdir)/builtin/embedjs.py $(SELFHOSTED_DEFINES) \
-	  -p '$(CPP)' -m $(srcdir)/js.msg -o $@ $(selfhosting_srcs)
+	  -c '$(CCC)' -p '$(PREPROCESS_OPTION)' -m $(srcdir)/js.msg \
+	  -o $@ $(selfhosting_srcs)
 
 ###############################################
 # Generating source package tarballs

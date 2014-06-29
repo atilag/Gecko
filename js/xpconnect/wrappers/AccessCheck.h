@@ -22,7 +22,6 @@ class AccessCheck {
     static bool subsumesConsideringDomain(JSCompartment *a, JSCompartment *b);
     static bool isChrome(JSCompartment *compartment);
     static bool isChrome(JSObject *obj);
-    static bool callerIsChrome();
     static nsIPrincipal *getPrincipal(JSCompartment *compartment);
     static bool isCrossOriginAccessPermitted(JSContext *cx, JSObject *obj, jsid id,
                                              js::Wrapper::Action act);
@@ -102,7 +101,9 @@ struct ExposedPropertiesOnly : public Policy {
         // Fail silently for GETs and ENUMERATEs.
         return act == js::Wrapper::GET || act == js::Wrapper::ENUMERATE;
     }
-    static bool allowNativeCall(JSContext *cx, JS::IsAcceptableThis test, JS::NativeImpl impl);
+    static bool allowNativeCall(JSContext *cx, JS::IsAcceptableThis test, JS::NativeImpl impl) {
+        return false;
+    }
 };
 
 }

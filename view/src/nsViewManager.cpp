@@ -722,7 +722,8 @@ nsViewManager::DispatchEvent(WidgetGUIEvent *aEvent,
                              nsView* aView,
                              nsEventStatus* aStatus)
 {
-  PROFILER_LABEL("event", "nsViewManager::DispatchEvent");
+  PROFILER_LABEL("nsViewManager", "DispatchEvent",
+    js::ProfileEntry::Category::EVENTS);
 
   WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent();
   if ((mouseEvent &&
@@ -1092,6 +1093,10 @@ void
 nsViewManager::CallWillPaintOnObservers()
 {
   NS_PRECONDITION(IsRootVM(), "Must be root VM for this to be called!");
+
+  if (NS_WARN_IF(!gViewManagers)) {
+    return;
+  }
 
   uint32_t index;
   for (index = 0; index < gViewManagers->Length(); index++) {

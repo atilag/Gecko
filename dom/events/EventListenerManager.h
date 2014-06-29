@@ -20,6 +20,7 @@ class nsIDOMEvent;
 class nsIEventListenerInfo;
 class nsIScriptContext;
 class nsPIDOMWindow;
+class JSTracer;
 
 struct EventTypeData;
 
@@ -150,6 +151,8 @@ inline EventListenerFlags AllEventsAtSystemGroupCapture()
 
 class EventListenerManager MOZ_FINAL
 {
+  ~EventListenerManager();
+
 public:
   struct Listener
   {
@@ -209,7 +212,6 @@ public:
   };
 
   EventListenerManager(dom::EventTarget* aTarget);
-  virtual ~EventListenerManager();
 
   NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(EventListenerManager)
 
@@ -291,7 +293,6 @@ public:
   // documents?  Need to double-check the spec here.
   nsresult SetEventHandler(nsIAtom *aName,
                            const nsAString& aFunc,
-                           uint32_t aLanguage,
                            bool aDeferCompilation,
                            bool aPermitUntrustedEvents,
                            dom::Element* aElement);
@@ -403,6 +404,8 @@ public:
   }
 
   void MarkForCC();
+
+  void TraceListeners(JSTracer* aTrc);
 
   dom::EventTarget* GetTarget() { return mTarget; }
 

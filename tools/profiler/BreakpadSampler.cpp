@@ -97,7 +97,7 @@ void genProfileEntry(/*MODIFIED*/UnwinderThreadBuffer* utb,
       // Cast to *((void**) to pass the text data to a void*
       utb__addEntry( utb, ProfileEntry('d', *((void**)(&text[0]))) );
     }
-    if (entry.js()) {
+    if (entry.isJs()) {
       if (!entry.pc()) {
         // The JIT only allows the top-most entry to have a nullptr pc
         MOZ_ASSERT(&entry == &stack->mStack[stack->stackSize() - 1]);
@@ -194,7 +194,7 @@ void populateBuffer(UnwinderThreadBuffer* utb, TickSample* sample,
       // only record the events when we have a we haven't seen a tracer
       // event for 100ms
       if (!sLastTracerEvent.IsNull()) {
-        TimeDuration delta = sample->timestamp - sLastTracerEvent;
+        mozilla::TimeDuration delta = sample->timestamp - sLastTracerEvent;
         if (delta.ToMilliseconds() > 100.0) {
             recordSample = true;
         }
@@ -227,19 +227,19 @@ void populateBuffer(UnwinderThreadBuffer* utb, TickSample* sample,
       MOZ_CRASH();
   }
 
-  if (recordSample) {    
+  if (recordSample) {
     // add a "flush now" hint
     utb__addEntry( utb, ProfileEntry('h'/*hint*/, 'F'/*flush*/) );
   }
 
   // Add any extras
   if (!sLastTracerEvent.IsNull() && sample) {
-    TimeDuration delta = sample->timestamp - sLastTracerEvent;
+    mozilla::TimeDuration delta = sample->timestamp - sLastTracerEvent;
     utb__addEntry( utb, ProfileEntry('r', static_cast<float>(delta.ToMilliseconds())) );
   }
 
   if (sample) {
-    TimeDuration delta = sample->timestamp - sStartTime;
+    mozilla::TimeDuration delta = sample->timestamp - sStartTime;
     utb__addEntry( utb, ProfileEntry('t', static_cast<float>(delta.ToMilliseconds())) );
   }
 

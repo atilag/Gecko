@@ -14,7 +14,8 @@
 #include "nsError.h"
 #include "nsTreeBodyFrame.h"
 
-NS_IMPL_CYCLE_COLLECTION(nsTreeBoxObject, mView)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(nsTreeBoxObject, nsBoxObject,
+                                   mView)
 
 NS_IMPL_ADDREF_INHERITED(nsTreeBoxObject, nsBoxObject)
 NS_IMPL_RELEASE_INHERITED(nsTreeBoxObject, nsBoxObject)
@@ -56,7 +57,7 @@ static nsIContent* FindBodyElement(nsIContent* aParent)
 {
   mozilla::dom::FlattenedChildIterator iter(aParent);
   for (nsIContent* content = iter.GetNextChild(); content; content = iter.GetNextChild()) {
-    nsINodeInfo *ni = content->NodeInfo();
+    mozilla::dom::NodeInfo *ni = content->NodeInfo();
     if (ni->Equals(nsGkAtoms::treechildren, kNameSpaceID_XUL)) {
       return content;
     } else if (ni->Equals(nsGkAtoms::tree, kNameSpaceID_XUL)) {

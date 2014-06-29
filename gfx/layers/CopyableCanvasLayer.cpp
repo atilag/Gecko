@@ -17,21 +17,23 @@
 #include "gfxUtils.h"                   // for gfxUtils
 #include "gfx2DGlue.h"                  // for thebes --> moz2d transition
 #include "mozilla/gfx/BaseSize.h"       // for BaseSize
+#include "mozilla/gfx/Tools.h"
 #include "nsDebug.h"                    // for NS_ASSERTION, NS_WARNING, etc
 #include "nsISupportsImpl.h"            // for gfxContext::AddRef, etc
 #include "nsRect.h"                     // for nsIntRect
 #include "nsSize.h"                     // for nsIntSize
-#include "LayerUtils.h"
-
-using namespace mozilla::gfx;
-using namespace mozilla::gl;
+#include "gfxUtils.h"
 
 namespace mozilla {
 namespace layers {
 
+using namespace mozilla::gfx;
+using namespace mozilla::gl;
+
 CopyableCanvasLayer::CopyableCanvasLayer(LayerManager* aLayerManager, void *aImplData) :
   CanvasLayer(aLayerManager, aImplData)
   , mStream(nullptr)
+  , mIsAlphaPremultiplied(true)
 {
   MOZ_COUNT_CTOR(CopyableCanvasLayer);
 }
@@ -49,7 +51,7 @@ CopyableCanvasLayer::Initialize(const Data& aData)
   if (aData.mGLContext) {
     mGLContext = aData.mGLContext;
     mStream = aData.mStream;
-    mIsGLAlphaPremult = aData.mIsGLAlphaPremult;
+    mIsAlphaPremultiplied = aData.mIsGLAlphaPremult;
     mNeedsYFlip = true;
     MOZ_ASSERT(mGLContext->IsOffscreen(), "canvas gl context isn't offscreen");
 
@@ -90,6 +92,7 @@ CopyableCanvasLayer::UpdateTarget(DrawTarget* aDestTarget)
       aDestTarget->CopySurface(mSurface,
                                IntRect(0, 0, mBounds.width, mBounds.height),
                                IntPoint(0, 0));
+      mSurface = nullptr;
     }
     return;
   }
@@ -111,7 +114,7 @@ CopyableCanvasLayer::UpdateTarget(DrawTarget* aDestTarget)
     SurfaceFormat format = (GetContentFlags() & CONTENT_OPAQUE)
                             ? SurfaceFormat::B8G8R8X8
                             : SurfaceFormat::B8G8R8A8;
-    bool needsPremult = sharedSurf->HasAlpha() && !mIsGLAlphaPremult;
+    bool needsPremult = sharedSurf->HasAlpha() && !mIsAlphaPremultiplied;
 
     // Try to read back directly into aDestTarget's output buffer
     if (aDestTarget) {
@@ -125,7 +128,7 @@ CopyableCanvasLayer::UpdateTarget(DrawTarget* aDestTarget)
             Factory::CreateWrappingDataSourceSurface(destData, destStride, destSize, destFormat);
           mGLContext->Screen()->Readback(sharedSurf, data);
           if (needsPremult) {
-            PremultiplySurface(data);
+              gfxUtils::PremultiplyDataSurface(data, data);
           }
           aDestTarget->ReleaseBits(destData);
           return;
@@ -143,7 +146,7 @@ CopyableCanvasLayer::UpdateTarget(DrawTarget* aDestTarget)
       // Readback handles Flush/MarkDirty.
       mGLContext->Screen()->Readback(sharedSurf, data);
       if (needsPremult) {
-        PremultiplySurface(data);
+        gfxUtils::PremultiplyDataSurface(data, data);
       }
       resultSurf = data;
     }
@@ -169,7 +172,9 @@ CopyableCanvasLayer::GetTempSurface(const IntSize& aSize,
       aSize != mCachedTempSurface->GetSize() ||
       aFormat != mCachedTempSurface->GetFormat())
   {
-    mCachedTempSurface = Factory::CreateDataSourceSurface(aSize, aFormat);
+    // Create a surface aligned to 8 bytes since that's the highest alignment WebGL can handle.
+    uint32_t stride = GetAlignedStride<8>(aSize.width * BytesPerPixel(aFormat));
+    mCachedTempSurface = Factory::CreateDataSourceSurfaceWithStride(aSize, aFormat, stride);
   }
 
   return mCachedTempSurface;

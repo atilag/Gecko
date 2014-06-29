@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
@@ -467,31 +467,6 @@ function promiseStartExternalHelperAppServiceDownload(aSourceUrl) {
 }
 
 /**
- * Waits for a download to finish, in case it has not finished already.
- *
- * @param aDownload
- *        The Download object to wait upon.
- *
- * @return {Promise}
- * @resolves When the download has finished successfully.
- * @rejects JavaScript exception if the download failed.
- */
-function promiseDownloadStopped(aDownload) {
-  if (!aDownload.stopped) {
-    // The download is in progress, wait for the current attempt to finish and
-    // report any errors that may occur.
-    return aDownload.start();
-  }
-
-  if (aDownload.succeeded) {
-    return Promise.resolve();
-  }
-
-  // The download failed or was canceled.
-  return Promise.reject(aDownload.error || new Error("Download canceled."));
-}
-
-/**
  * Waits for a download to reach half of its progress, in case it has not
  * reached the expected progress already.
  *
@@ -808,6 +783,17 @@ add_task(function test_common_initialize()
                          TEST_DATA_SHORT_GZIP_ENCODED_SECOND.length);
     });
 
+  gHttpServer.registerPathHandler("/shorter-than-content-length-http-1-1.txt",
+    function (aRequest, aResponse) {
+      aResponse.processAsync();
+      aResponse.setStatusLine("1.1", 200, "OK");
+      aResponse.setHeader("Content-Type", "text/plain", false);
+      aResponse.setHeader("Content-Length", "" + (TEST_DATA_SHORT.length * 2),
+                          false);
+      aResponse.write(TEST_DATA_SHORT);
+      aResponse.finish();
+    });
+
   // This URL will emulate being blocked by Windows Parental controls
   gHttpServer.registerPathHandler("/parentalblocked.zip",
     function (aRequest, aResponse) {
@@ -826,6 +812,10 @@ add_task(function test_common_initialize()
   DownloadIntegration.dontOpenFileAndFolder = true;
   DownloadIntegration._deferTestOpenFile = Promise.defer();
   DownloadIntegration._deferTestShowDir = Promise.defer();
+
+  // Avoid leaking uncaught promise errors
+  DownloadIntegration._deferTestOpenFile.promise.then(null, () => undefined);
+  DownloadIntegration._deferTestShowDir.promise.then(null, () => undefined);
 
   // Get a reference to nsIComponentRegistrar, and ensure that is is freed
   // before the XPCOM shutdown.

@@ -16,7 +16,6 @@
 class nsIAtom;
 class nsIContent;
 class nsIDocument;
-class nsINodeInfo;
 class nsPIDOMWindow;
 class nsXBLPrototypeBinding;
 class nsTagNameMapEntry;
@@ -43,14 +42,14 @@ public:
   NS_DECL_NSIMUTATIONOBSERVER_CONTENTINSERTED
   NS_DECL_NSIMUTATIONOBSERVER_CONTENTREMOVED
 
-  ShadowRoot(nsIContent* aContent, already_AddRefed<nsINodeInfo>&& aNodeInfo,
+  ShadowRoot(nsIContent* aContent, already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
              nsXBLPrototypeBinding* aProtoBinding);
   virtual ~ShadowRoot();
 
   void AddToIdTable(Element* aElement, nsIAtom* aId);
   void RemoveFromIdTable(Element* aElement, nsIAtom* aId);
-  void InsertSheet(nsCSSStyleSheet* aSheet, nsIContent* aLinkingContent);
-  void RemoveSheet(nsCSSStyleSheet* aSheet);
+  void InsertSheet(CSSStyleSheet* aSheet, nsIContent* aLinkingContent);
+  void RemoveSheet(CSSStyleSheet* aSheet);
   bool ApplyAuthorStyles();
   void SetApplyAuthorStyles(bool aApplyAuthorStyles);
   StyleSheetList* StyleSheets();
@@ -113,6 +112,9 @@ public:
   static ShadowRoot* FromNode(nsINode* aNode);
   static bool IsShadowInsertionPoint(nsIContent* aContent);
 
+  static void RemoveDestInsertionPoint(nsIContent* aInsertionPoint,
+                                       nsTArray<nsIContent*>& aDestInsertionPoints);
+
   // WebIDL methods.
   Element* GetElementById(const nsAString& aElementId);
   already_AddRefed<nsContentList>
@@ -124,8 +126,8 @@ public:
     GetElementsByClassName(const nsAString& aClasses);
   void GetInnerHTML(nsAString& aInnerHTML);
   void SetInnerHTML(const nsAString& aInnerHTML, ErrorResult& aError);
+  void StyleSheetChanged();
 protected:
-  void Restyle();
 
   // The pool host is the parent of the nodes that will be distributed
   // into the insertion points in this ShadowRoot. See |ChangeShadowRoot|.
@@ -185,7 +187,7 @@ public:
   }
 
   virtual uint32_t Length() MOZ_OVERRIDE;
-  virtual nsCSSStyleSheet* IndexedGetter(uint32_t aIndex, bool& aFound) MOZ_OVERRIDE;
+  virtual CSSStyleSheet* IndexedGetter(uint32_t aIndex, bool& aFound) MOZ_OVERRIDE;
 
 protected:
   nsRefPtr<ShadowRoot> mShadowRoot;

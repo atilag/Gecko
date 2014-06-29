@@ -14,7 +14,7 @@
 #include "DOMSVGPathSeg.h"
 
 nsresult NS_NewSVGPathElement(nsIContent **aResult,
-                              already_AddRefed<nsINodeInfo>&& aNodeInfo);
+                              already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
 
 class gfxContext;
 
@@ -34,11 +34,14 @@ friend class nsSVGPathFrame;
 
 protected:
   friend nsresult (::NS_NewSVGPathElement(nsIContent **aResult,
-                                          already_AddRefed<nsINodeInfo>&& aNodeInfo));
+                                          already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo));
   virtual JSObject* WrapNode(JSContext *cx) MOZ_OVERRIDE;
-  SVGPathElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
+  SVGPathElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo);
 
 public:
+  // DOM memory reporter participant
+  NS_DECL_SIZEOF_EXCLUDING_THIS
+
   // nsIContent interface
   NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* name) const MOZ_OVERRIDE;
 
@@ -61,7 +64,7 @@ public:
     GetPathForLengthOrPositionMeasuring() MOZ_OVERRIDE;
 
   // nsIContent interface
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
+  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
   virtual SVGAnimatedPathSegList* GetAnimPathSegList() MOZ_OVERRIDE {
     return &mD;

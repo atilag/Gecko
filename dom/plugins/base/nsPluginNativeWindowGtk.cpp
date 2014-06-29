@@ -17,7 +17,11 @@
 #include <gdk/gdkx.h>
 #include <gdk/gdk.h>
 
+#if (GTK_MAJOR_VERSION == 3)
+#include <gtk/gtkx.h>
+#else
 #include "gtk2xtbin.h"
+#endif
 #include "mozilla/X11Util.h"
 
 class nsPluginNativeWindowGtk : public nsPluginNativeWindow {
@@ -337,5 +341,9 @@ socket_unrealize_cb(GtkWidget *widget, gpointer data)
   if (children) XFree(children);
 
   mozilla::FinishX(display);
+#if (MOZ_WIDGET_GTK == 3)
+  gdk_error_trap_pop_ignored();
+#else
   gdk_error_trap_pop();
+#endif
 }

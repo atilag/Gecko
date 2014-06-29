@@ -10,11 +10,13 @@
 #include "nsClassHashtable.h"
 #include "nsNetUtil.h"
 #include "nsIPrincipal.h"
-#include "nsIDOMFile.h"
+#include "nsDOMFile.h"
 #include "nsIDOMMediaStream.h"
 #include "mozilla/dom/MediaSource.h"
 #include "nsIMemoryReporter.h"
 #include "mozilla/Preferences.h"
+
+using mozilla::dom::DOMFileImpl;
 
 // -----------------------------------------------------------------------
 // Hash table
@@ -33,11 +35,13 @@ namespace mozilla {
 
 class HostObjectURLsReporter MOZ_FINAL : public nsIMemoryReporter
 {
+  ~HostObjectURLsReporter() {}
+
  public:
   NS_DECL_ISUPPORTS
 
   NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
-                            nsISupports* aData)
+                            nsISupports* aData, bool aAnonymize)
   {
     return MOZ_COLLECT_REPORT(
       "host-object-urls", KIND_OTHER, UNITS_COUNT,
@@ -55,11 +59,12 @@ class BlobURLsReporter MOZ_FINAL : public nsIMemoryReporter
   NS_DECL_ISUPPORTS
 
   NS_IMETHOD CollectReports(nsIHandleReportCallback* aCallback,
-                            nsISupports* aData)
+                            nsISupports* aData, bool aAnonymize)
   {
     EnumArg env;
     env.mCallback = aCallback;
     env.mData = aData;
+    env.mAnonymize = aAnonymize;
 
     if (gDataTable) {
       gDataTable->EnumerateRead(CountCallback, &env);
@@ -131,9 +136,12 @@ class BlobURLsReporter MOZ_FINAL : public nsIMemoryReporter
   }
 
  private:
+  ~BlobURLsReporter() {}
+
   struct EnumArg {
     nsIHandleReportCallback* mCallback;
     nsISupports* mData;
+    bool mAnonymize;
     nsDataHashtable<nsPtrHashKey<nsIDOMBlob>, uint32_t> mRefCounts;
   };
 
@@ -190,16 +198,28 @@ class BlobURLsReporter MOZ_FINAL : public nsIMemoryReporter
           !owner.IsEmpty()) {
         owner.ReplaceChar('/', '\\');
         path += "owner(";
-        path += owner;
+        if (envp->mAnonymize) {
+          path += "<anonymized>";
+        } else {
+          path += owner;
+        }
         path += ")";
       } else {
         path += "owner unknown";
       }
       path += "/";
-      path += aInfo->mStack;
+      if (envp->mAnonymize) {
+        path += "<anonymized-stack>";
+      } else {
+        path += aInfo->mStack;
+      }
       url = aKey;
       url.ReplaceChar('/', '\\');
-      path += url;
+      if (envp->mAnonymize) {
+        path += "<anonymized-url>";
+      } else {
+        path += url;
+      }
       if (refCount > 1) {
         nsAutoCString addrStr;
 
@@ -460,8 +480,9 @@ nsHostObjectProtocolHandler::NewChannel(nsIURI* uri, nsIChannel* *result)
   if (!info) {
     return NS_ERROR_DOM_BAD_URI;
   }
-  nsCOMPtr<nsIDOMBlob> blob = do_QueryInterface(info->mObject);
-  if (!blob) {
+
+  nsCOMPtr<PIDOMFileImpl> blobImpl = do_QueryInterface(info->mObject);
+  if (!blobImpl) {
     return NS_ERROR_DOM_BAD_URI;
   }
 
@@ -474,6 +495,7 @@ nsHostObjectProtocolHandler::NewChannel(nsIURI* uri, nsIChannel* *result)
   }
 #endif
 
+  DOMFileImpl* blob = static_cast<DOMFileImpl*>(blobImpl.get());
   nsCOMPtr<nsIInputStream> stream;
   nsresult rv = blob->GetInternalStream(getter_AddRefs(stream));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -490,10 +512,9 @@ nsHostObjectProtocolHandler::NewChannel(nsIURI* uri, nsIChannel* *result)
   rv = blob->GetType(type);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIDOMFile> file = do_QueryInterface(info->mObject);
-  if (file) {
+  if (blob->IsFile()) {
     nsString filename;
-    rv = file->GetName(filename);
+    rv = blob->GetName(filename);
     NS_ENSURE_SUCCESS(rv, rv);
     channel->SetContentDispositionFilename(filename);
   }
@@ -556,11 +577,12 @@ NS_GetStreamForBlobURI(nsIURI* aURI, nsIInputStream** aStream)
 
   *aStream = nullptr;
 
-  nsCOMPtr<nsIDOMBlob> blob = do_QueryInterface(GetDataObject(aURI));
-  if (!blob) {
+  nsCOMPtr<PIDOMFileImpl> blobImpl = do_QueryInterface(GetDataObject(aURI));
+  if (!blobImpl) {
     return NS_ERROR_DOM_BAD_URI;
   }
 
+  DOMFileImpl* blob = static_cast<DOMFileImpl*>(blobImpl.get());
   return blob->GetInternalStream(aStream);
 }
 

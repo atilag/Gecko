@@ -53,6 +53,8 @@ var items = [
   require('../types/resource').items,
   require('../types/setting').items,
   require('../types/string').items,
+  require('../types/union').items,
+  require('../types/url').items,
 
   require('../fields/delegate').items,
   require('../fields/selection').items,

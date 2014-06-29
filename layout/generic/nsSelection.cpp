@@ -53,6 +53,8 @@ static NS_DEFINE_CID(kFrameTraversalCID, NS_FRAMETRAVERSAL_CID);
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
 #include "nsCaret.h"
+#include "TouchCaret.h"
+#include "SelectionCarets.h"
 
 #include "mozilla/MouseEvents.h"
 #include "mozilla/TextEvents.h"
@@ -145,12 +147,6 @@ public:
   {
   }
 
-  virtual ~nsAutoScrollTimer()
-  {
-   if (mTimer)
-       mTimer->Cancel();
-  }
-
   // aPoint is relative to aPresContext's root frame
   nsresult Start(nsPresContext *aPresContext, nsPoint &aPoint)
   {
@@ -220,6 +216,15 @@ public:
     }
     return NS_OK;
   }
+
+protected:
+  virtual ~nsAutoScrollTimer()
+  {
+   if (mTimer) {
+     mTimer->Cancel();
+   }
+  }
+
 private:
   nsFrameSelection *mFrameSelection;
   Selection* mSelection;
@@ -683,6 +688,20 @@ GetCellParent(nsINode *aDomNode)
     return nullptr;
 }
 
+nsFrameSelection::HINT
+nsFrameSelection::GetHintForPosition(nsIContent* aContent, int32_t aOffset)
+{
+  HINT hint = HINTLEFT;
+  if (!aContent || aOffset < 1) {
+    return hint;
+  }
+  const nsTextFragment* text = aContent->GetText();
+  if (text && text->CharAt(aOffset - 1) == '\n') {
+    // Attach the caret to the next line if needed
+    hint = HINTRIGHT;
+  }
+  return hint;
+}
 
 void
 nsFrameSelection::Init(nsIPresShell *aShell, nsIContent *aLimiter)
@@ -693,6 +712,23 @@ nsFrameSelection::Init(nsIPresShell *aShell, nsIContent *aLimiter)
   mLimiter = aLimiter;
   mCaretMovementStyle =
     Preferences::GetInt("bidi.edit.caret_movement_style", 2);
+  // Set touch caret as selection listener
+  nsRefPtr<TouchCaret> touchCaret = mShell->GetTouchCaret();
+  if (touchCaret) {
+    int8_t index = GetIndexFromSelectionType(nsISelectionController::SELECTION_NORMAL);
+    if (mDomSelections[index]) {
+      mDomSelections[index]->AddSelectionListener(touchCaret);
+    }
+  }
+
+  // Set selection caret as selection listener
+  nsRefPtr<SelectionCarets> selectionCarets = mShell->GetSelectionCarets();
+  if (selectionCarets) {
+    int8_t index = GetIndexFromSelectionType(nsISelectionController::SELECTION_NORMAL);
+    if (mDomSelections[index]) {
+      mDomSelections[index]->AddSelectionListener(selectionCarets);
+    }
+  }
 }
 
 nsresult
@@ -1207,7 +1243,7 @@ nsFrameSelection::MaintainSelection(nsSelectionAmount aAmount)
 
   const nsRange* anchorFocusRange =
     mDomSelections[index]->GetAnchorFocusRange();
-  if (anchorFocusRange) {
+  if (anchorFocusRange && aAmount != eSelectNoAmount) {
     mMaintainRange = anchorFocusRange->CloneRange();
     return NS_OK;
   }
@@ -3011,6 +3047,19 @@ nsFrameSelection::SetDelayedCaretData(WidgetMouseEvent* aMouseEvent)
 void
 nsFrameSelection::DisconnectFromPresShell()
 {
+  // Remove touch caret as selection listener
+  nsRefPtr<TouchCaret> touchCaret = mShell->GetTouchCaret();
+  if (touchCaret) {
+    int8_t index = GetIndexFromSelectionType(nsISelectionController::SELECTION_NORMAL);
+    mDomSelections[index]->RemoveSelectionListener(touchCaret);
+  }
+
+  nsRefPtr<SelectionCarets> selectionCarets = mShell->GetSelectionCarets();
+  if (selectionCarets) {
+    int8_t index = GetIndexFromSelectionType(nsISelectionController::SELECTION_NORMAL);
+    mDomSelections[index]->RemoveSelectionListener(selectionCarets);
+  }
+
   StopAutoScrollTimer();
   for (int32_t i = 0; i < nsISelectionController::NUM_SELECTIONTYPES; i++) {
     mDomSelections[i]->Clear(nullptr);
@@ -3101,8 +3150,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Selection)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(Selection)
-
-DOMCI_DATA(Selection, Selection)
 
 // QueryInterface implementation for Selection
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Selection)
@@ -5666,6 +5713,7 @@ Selection::Modify(const nsAString& aAlter, const nsAString& aDirection,
            aGranularity.LowerCaseEqualsLiteral("paragraphboundary") ||
            aGranularity.LowerCaseEqualsLiteral("documentboundary")) {
     aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
+    return;
   }
   else {
     aRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);

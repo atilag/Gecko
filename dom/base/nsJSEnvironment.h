@@ -38,7 +38,6 @@ class nsJSContext : public nsIScriptContext
 {
 public:
   nsJSContext(bool aGCOnDestruction, nsIScriptGlobalObject* aGlobalObject);
-  virtual ~nsJSContext();
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(nsJSContext,
@@ -68,11 +67,6 @@ public:
   static void LoadStart();
   static void LoadEnd();
 
-  enum IsCompartment {
-    CompartmentGC,
-    NonCompartmentGC
-  };
-
   enum IsShrinking {
     ShrinkingGC,
     NonShrinkingGC
@@ -88,7 +82,6 @@ public:
 
   static void GarbageCollectNow(JS::gcreason::Reason reason,
                                 IsIncremental aIncremental = NonIncrementalGC,
-                                IsCompartment aCompartment = NonCompartmentGC,
                                 IsShrinking aShrinking = NonShrinkingGC,
                                 int64_t aSliceMillis = 0);
   static void ShrinkGCBuffersNow();
@@ -101,8 +94,15 @@ public:
   // Run a cycle collector slice, using a heuristic to decide how long to run it.
   static void RunCycleCollectorSlice();
 
+  // Run a cycle collector slice, using the given work budget.
+  static void RunCycleCollectorWorkSlice(int64_t aWorkBudget);
+
   static void BeginCycleCollectionCallback();
   static void EndCycleCollectionCallback(mozilla::CycleCollectorResults &aResults);
+
+  // Return the longest CC slice time since ClearMaxCCSliceTime() was last called.
+  static uint32_t GetMaxCCSliceTimeSinceClear();
+  static void ClearMaxCCSliceTime();
 
   static void RunNextCollectorTimer();
 
@@ -133,7 +133,7 @@ public:
     return global ? mGlobalObjectRef.get() : nullptr;
   }
 protected:
-  nsresult InitializeExternalClasses();
+  virtual ~nsJSContext();
 
   // Helper to convert xpcom datatypes to jsvals.
   nsresult ConvertSupportsTojsvals(nsISupports *aArgs,

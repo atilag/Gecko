@@ -19,6 +19,7 @@
 #include "xpcom-config.h"               // for CPP_THROW_NEW
 
 class nsIntRegion;
+class gfx3DMatrix;
 
 #include "pixman.h"
 
@@ -221,6 +222,7 @@ public:
   nsRegion ConvertAppUnitsRoundIn (int32_t aFromAPP, int32_t aToAPP) const;
   nsRegion& ScaleRoundOut(float aXScale, float aYScale);
   nsRegion& ScaleInverseRoundOut(float aXScale, float aYScale);
+  nsRegion& Transform (const gfx3DMatrix &aTransform);
   nsIntRegion ScaleToOutsidePixels (float aXScale, float aYScale, nscoord aAppUnitsPerPixel) const;
   nsIntRegion ScaleToInsidePixels (float aXScale, float aYScale, nscoord aAppUnitsPerPixel) const;
   nsIntRegion ScaleToNearestPixels (float aXScale, float aYScale, nscoord aAppUnitsPerPixel) const;
@@ -259,6 +261,16 @@ public:
   nsCString ToString() const;
 private:
   pixman_region32_t mImpl;
+
+#ifndef MOZ_TREE_PIXMAN
+  // For compatibility with pixman versions older than 0.25.2.
+  static inline void
+  pixman_region32_clear(pixman_region32_t *region)
+  {
+    pixman_region32_fini(region);
+    pixman_region32_init(region);
+  }
+#endif
 
   nsIntRegion ToPixels(nscoord aAppUnitsPerPixel, bool aOutsidePixels) const;
 
@@ -533,6 +545,12 @@ public:
   nsIntRegion& ScaleRoundOut (float aXScale, float aYScale)
   {
     mImpl.ScaleRoundOut(aXScale, aYScale);
+    return *this;
+  }
+
+  nsIntRegion& Transform (const gfx3DMatrix &aTransform)
+  {
+    mImpl.Transform(aTransform);
     return *this;
   }
 

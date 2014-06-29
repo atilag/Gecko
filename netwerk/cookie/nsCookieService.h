@@ -97,9 +97,9 @@ public:
   {
     // TODO: more efficient way to generate hash?
     nsAutoCString temp(aKey->mBaseDomain);
-    temp.Append("#");
+    temp.Append('#');
     temp.Append(aKey->mAppId);
-    temp.Append("#");
+    temp.Append('#');
     temp.Append(aKey->mInBrowserElement ? 1 : 0);
     return mozilla::HashString(temp);
   }
@@ -256,7 +256,6 @@ class nsCookieService : public nsICookieService
     NS_DECL_NSIMEMORYREPORTER
 
     nsCookieService();
-    virtual ~nsCookieService();
     static nsICookieService*      GetXPCOMSingleton();
     nsresult                      Init();
 
@@ -269,6 +268,8 @@ class nsCookieService : public nsICookieService
   static void AppClearDataObserverInit();
 
   protected:
+    virtual ~nsCookieService();
+
     void                          PrefChanged(nsIPrefBranch *aPrefBranch);
     void                          InitDBStates();
     OpenDBResult                  TryInitDB(bool aDeleteExistingDB);

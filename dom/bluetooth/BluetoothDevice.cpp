@@ -15,6 +15,7 @@
 
 #include "mozilla/dom/bluetooth/BluetoothTypes.h"
 #include "mozilla/dom/BluetoothDeviceBinding.h"
+#include "mozilla/dom/ScriptSettings.h"
 
 USING_BLUETOOTH_NAMESPACE
 
@@ -129,15 +130,15 @@ BluetoothDevice::SetPropertyByValue(const BluetoothNamedValue& aValue)
     mPaired = value.get_bool();
   } else if (name.EqualsLiteral("UUIDs")) {
     mUuids = value.get_ArrayOfnsString();
-    nsresult rv;
-    nsIScriptContext* sc = GetContextForEventHandlers(&rv);
-    NS_ENSURE_SUCCESS_VOID(rv);
-    NS_ENSURE_TRUE_VOID(sc);
 
-    AutoPushJSContext cx(sc->GetNativeContext());
-
+    AutoJSAPI jsapi;
+    if (!jsapi.Init(GetOwner())) {
+      BT_WARNING("Failed to initialise AutoJSAPI!");
+      return;
+    }
+    JSContext* cx = jsapi.cx();
     JS::Rooted<JSObject*> uuids(cx);
-    if (NS_FAILED(nsTArrayToJSArray(cx, mUuids, uuids.address()))) {
+    if (NS_FAILED(nsTArrayToJSArray(cx, mUuids, &uuids))) {
       BT_WARNING("Cannot set JS UUIDs object!");
       return;
     }
@@ -145,15 +146,15 @@ BluetoothDevice::SetPropertyByValue(const BluetoothNamedValue& aValue)
     Root();
   } else if (name.EqualsLiteral("Services")) {
     mServices = value.get_ArrayOfnsString();
-    nsresult rv;
-    nsIScriptContext* sc = GetContextForEventHandlers(&rv);
-    NS_ENSURE_SUCCESS_VOID(rv);
-    NS_ENSURE_TRUE_VOID(sc);
 
-    AutoPushJSContext cx(sc->GetNativeContext());
-
+    AutoJSAPI jsapi;
+    if (!jsapi.Init(GetOwner())) {
+      BT_WARNING("Failed to initialise AutoJSAPI!");
+      return;
+    }
+    JSContext* cx = jsapi.cx();
     JS::Rooted<JSObject*> services(cx);
-    if (NS_FAILED(nsTArrayToJSArray(cx, mServices, services.address()))) {
+    if (NS_FAILED(nsTArrayToJSArray(cx, mServices, &services))) {
       BT_WARNING("Cannot set JS Services object!");
       return;
     }
@@ -206,30 +207,34 @@ BluetoothDevice::Notify(const BluetoothSignal& aData)
   }
 }
 
-JS::Value
-BluetoothDevice::GetUuids(JSContext* aCx, ErrorResult& aRv)
+void
+BluetoothDevice::GetUuids(JSContext* aContext,
+                           JS::MutableHandle<JS::Value> aUuids,
+                           ErrorResult& aRv)
 {
   if (!mJsUuids) {
     BT_WARNING("UUIDs not yet set!");
     aRv.Throw(NS_ERROR_FAILURE);
-    return JS::NullValue();
+    return;
   }
 
   JS::ExposeObjectToActiveJS(mJsUuids);
-  return JS::ObjectValue(*mJsUuids);
+  aUuids.setObject(*mJsUuids);
 }
 
-JS::Value
-BluetoothDevice::GetServices(JSContext* aCx, ErrorResult& aRv)
+void
+BluetoothDevice::GetServices(JSContext* aCx,
+                             JS::MutableHandle<JS::Value> aServices,
+                             ErrorResult& aRv)
 {
   if (!mJsServices) {
     BT_WARNING("Services not yet set!");
     aRv.Throw(NS_ERROR_FAILURE);
-    return JS::Value(JSVAL_NULL);
+    return;
   }
 
   JS::ExposeObjectToActiveJS(mJsServices);
-  return JS::ObjectValue(*mJsServices);
+  aServices.setObject(*mJsServices);
 }
 
 JSObject*

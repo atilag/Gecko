@@ -39,7 +39,7 @@ class nsITimer;
 class nsIURI;
 
 namespace JS {
-class RuntimeStats;
+struct RuntimeStats;
 }
 
 namespace mozilla {
@@ -61,6 +61,13 @@ class WorkerControlRunnable;
 class WorkerGlobalScope;
 class WorkerPrivate;
 class WorkerRunnable;
+
+enum WorkerType
+{
+  WorkerTypeDedicated,
+  WorkerTypeShared,
+  WorkerTypeService
+};
 
 // SharedMutex is a small wrapper around an (internal) reference-counted Mutex
 // object. It exists to avoid changing a lot of code to use Mutex* instead of
@@ -192,12 +199,6 @@ public:
       mIsInPrivilegedApp = aOther.mIsInPrivilegedApp;
       mIsInCertifiedApp = aOther.mIsInCertifiedApp;
     }
-  };
-
-  enum WorkerType
-  {
-    WorkerTypeDedicated,
-    WorkerTypeShared
   };
 
 protected:
@@ -638,7 +639,7 @@ public:
   }
 
   // The ability to be a chrome worker is orthogonal to the type of
-  // worker [Dedicated|Shared].
+  // worker [Dedicated|Shared|Service].
   bool
   IsChromeWorker() const
   {
@@ -655,6 +656,12 @@ public:
   IsSharedWorker() const
   {
     return mWorkerType == WorkerTypeShared;
+  }
+
+  bool
+  IsServiceWorker() const
+  {
+    return mWorkerType == WorkerTypeService;
   }
 
   const nsCString&
@@ -778,6 +785,7 @@ class WorkerPrivate : public WorkerPrivateParent<WorkerPrivate>
   bool mCancelAllPendingRunnables;
   bool mPeriodicGCTimerRunning;
   bool mIdleGCTimerRunning;
+  bool mWorkerScriptExecutedSuccessfully;
 
 #ifdef DEBUG
   PRThread* mPRThread;
@@ -798,6 +806,11 @@ public:
   Constructor(const GlobalObject& aGlobal, const nsAString& aScriptURL,
               bool aIsChromeWorker, WorkerType aWorkerType,
               const nsACString& aSharedWorkerName,
+              LoadInfo* aLoadInfo, ErrorResult& aRv);
+
+  static already_AddRefed<WorkerPrivate>
+  Constructor(JSContext* aCx, const nsAString& aScriptURL, bool aIsChromeWorker,
+              WorkerType aWorkerType, const nsACString& aSharedWorkerName,
               LoadInfo* aLoadInfo, ErrorResult& aRv);
 
   static bool
@@ -935,7 +948,7 @@ public:
   ScheduleDeletion(WorkerRanOrNot aRanOrNot);
 
   bool
-  BlockAndCollectRuntimeStats(JS::RuntimeStats* aRtStats);
+  BlockAndCollectRuntimeStats(JS::RuntimeStats* aRtStats, bool aAnonymize);
 
 #ifdef JS_GC_ZEAL
   void
@@ -1055,6 +1068,23 @@ public:
 #else
   { }
 #endif
+
+  void
+  SetWorkerScriptExecutedSuccessfully()
+  {
+    AssertIsOnWorkerThread();
+    // Should only be called once!
+    MOZ_ASSERT(!mWorkerScriptExecutedSuccessfully);
+    mWorkerScriptExecutedSuccessfully = true;
+  }
+
+  // Only valid after CompileScriptRunnable has finished running!
+  bool
+  WorkerScriptExecutedSuccessfully() const
+  {
+    AssertIsOnWorkerThread();
+    return mWorkerScriptExecutedSuccessfully;
+  }
 
 private:
   WorkerPrivate(JSContext* aCx, WorkerPrivate* aParent,

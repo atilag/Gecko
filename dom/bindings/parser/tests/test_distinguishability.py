@@ -158,6 +158,7 @@ def WebIDLTest(parser, harness):
                  "CallbackInterface?", "CallbackInterface2",
                  "object", "Callback", "Callback2", "optional Dict",
                  "optional Dict2", "sequence<long>", "sequence<short>",
+                 "MozMap<object>", "MozMap<Dict>", "MozMap<long>",
                  "long[]", "short[]", "Date", "Date?", "any" ]
     # When we can parse Date and RegExp, we need to add them here.
 
@@ -183,6 +184,8 @@ def WebIDLTest(parser, harness):
     otherObjects = allBut(argTypes, nonUserObjects + ["object"])
     notRelatedInterfaces = (nonObjects + ["UnrelatedInterface"] +
                             otherObjects + dates)
+    mozMaps = [ "MozMap<object>", "MozMap<Dict>", "MozMap<long>" ]
+    sequences = [ "sequence<long>", "sequence<short>" ]
 
     # Build a representation of the distinguishability table as a dict
     # of dicts, holding True values where needed, holes elsewhere.
@@ -217,8 +220,11 @@ def WebIDLTest(parser, harness):
     setDistinguishable("Callback2", nonUserObjects)
     setDistinguishable("optional Dict", allBut(nonUserObjects, nullables))
     setDistinguishable("optional Dict2", allBut(nonUserObjects, nullables))
-    setDistinguishable("sequence<long>", nonUserObjects)
-    setDistinguishable("sequence<short>", nonUserObjects)
+    setDistinguishable("sequence<long>", nonUserObjects + mozMaps)
+    setDistinguishable("sequence<short>", nonUserObjects + mozMaps)
+    setDistinguishable("MozMap<object>", nonUserObjects + sequences)
+    setDistinguishable("MozMap<Dict>", nonUserObjects + sequences)
+    setDistinguishable("MozMap<long>", nonUserObjects + sequences)
     setDistinguishable("long[]", nonUserObjects)
     setDistinguishable("short[]", nonUserObjects)
     setDistinguishable("Date", allBut(argTypes, dates + ["object"]))

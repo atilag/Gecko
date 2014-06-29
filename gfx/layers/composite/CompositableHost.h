@@ -70,45 +70,8 @@ public:
   }
 
   virtual void SetCompositor(Compositor* aCompositor) {}
-  virtual void ClearData()
-  {
-    mCurrentReleaseFenceTexture = nullptr;
-    ClearPendingReleaseFenceTextureList();
-  }
+  virtual void ClearData() {}
 
-  /**
-   * Store a texture currently used for Composition.
-   * This function is called when the texutre might receive ReleaseFence
-   * as a result of Composition.
-   */
-  void SetCurrentReleaseFenceTexture(TextureHost* aTexture)
-  {
-    if (mCurrentReleaseFenceTexture) {
-      mPendingReleaseFenceTextures.push_back(mCurrentReleaseFenceTexture);
-    }
-    mCurrentReleaseFenceTexture = aTexture;
-  }
-
-  virtual std::vector< RefPtr<TextureHost> >& GetPendingReleaseFenceTextureList()
-  {
-    return mPendingReleaseFenceTextures;
-  }
-
-  virtual void ClearPendingReleaseFenceTextureList()
-  {
-    return mPendingReleaseFenceTextures.clear();
-  }
-protected:
-  /**
-   * Store a TextureHost currently used for Composition
-   * and it might receive ReleaseFence for the texutre.
-   */
-  RefPtr<TextureHost> mCurrentReleaseFenceTexture;
-  /**
-   * Store TextureHosts that might have ReleaseFence to be delivered
-   * to TextureClient by CompositableHost.
-   */
-  std::vector< RefPtr<TextureHost> > mPendingReleaseFenceTextures;
 };
 
 /**
@@ -287,15 +250,15 @@ public:
   bool IsAttached() { return mAttached; }
 
 #ifdef MOZ_DUMP_PAINTING
-  virtual void Dump(FILE* aFile=nullptr,
+  virtual void Dump(std::stringstream& aStream,
                     const char* aPrefix="",
                     bool aDumpHtml=false) { }
-  static void DumpTextureHost(FILE* aFile, TextureHost* aTexture);
+  static void DumpTextureHost(std::stringstream& aStream, TextureHost* aTexture);
 
   virtual TemporaryRef<gfx::DataSourceSurface> GetAsSurface() { return nullptr; }
 #endif
 
-  virtual void PrintInfo(nsACString& aTo, const char* aPrefix) = 0;
+  virtual void PrintInfo(std::stringstream& aStream, const char* aPrefix) = 0;
 
   virtual void UseTextureHost(TextureHost* aTexture);
   virtual void UseComponentAlphaTextures(TextureHost* aTextureOnBlack,

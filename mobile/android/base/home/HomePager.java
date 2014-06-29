@@ -53,7 +53,8 @@ public class HomePager extends ViewPager {
     private final Drawable mOriginalBackground;
 
     // Telemetry session for current panel.
-    private String mCurrentPanelSession;
+    private TelemetryContract.Session mCurrentPanelSession;
+    private String mCurrentPanelSessionSuffix;
 
     // Current load state of HomePager.
     private LoadState mLoadState;
@@ -63,13 +64,12 @@ public class HomePager extends ViewPager {
 
     // This is mostly used by UI tests to easily fetch
     // specific list views at runtime.
-    static final String LIST_TAG_HISTORY = "history";
-    static final String LIST_TAG_BOOKMARKS = "bookmarks";
-    static final String LIST_TAG_READING_LIST = "reading_list";
-    static final String LIST_TAG_TOP_SITES = "top_sites";
-    static final String LIST_TAG_MOST_RECENT = "most_recent";
-    static final String LIST_TAG_LAST_TABS = "last_tabs";
-    static final String LIST_TAG_BROWSER_SEARCH = "browser_search";
+    public static final String LIST_TAG_HISTORY = "history";
+    public static final String LIST_TAG_BOOKMARKS = "bookmarks";
+    public static final String LIST_TAG_READING_LIST = "reading_list";
+    public static final String LIST_TAG_TOP_SITES = "top_sites";
+    public static final String LIST_TAG_RECENT_TABS = "recent_tabs";
+    public static final String LIST_TAG_BROWSER_SEARCH = "browser_search";
 
     public interface OnUrlOpenListener {
         public enum Flags {
@@ -81,7 +81,7 @@ public class HomePager extends ViewPager {
     }
 
     public interface OnNewTabsListener {
-        public void onNewTabs(String[] urls);
+        public void onNewTabs(List<String> urls);
     }
 
     /**
@@ -509,8 +509,9 @@ public class HomePager extends ViewPager {
         // Stop the current panel's session if we have one.
         stopCurrentPanelTelemetrySession();
 
-        mCurrentPanelSession = TelemetryContract.Session.HOME_PANEL + panelId;
-        Telemetry.startUISession(mCurrentPanelSession);
+        mCurrentPanelSession = TelemetryContract.Session.HOME_PANEL;
+        mCurrentPanelSessionSuffix = panelId;
+        Telemetry.startUISession(mCurrentPanelSession, mCurrentPanelSessionSuffix);
     }
 
     /**
@@ -518,8 +519,9 @@ public class HomePager extends ViewPager {
      */
     private void stopCurrentPanelTelemetrySession() {
         if (mCurrentPanelSession != null) {
-            Telemetry.stopUISession(mCurrentPanelSession);
+            Telemetry.stopUISession(mCurrentPanelSession, mCurrentPanelSessionSuffix);
             mCurrentPanelSession = null;
+            mCurrentPanelSessionSuffix = null;
         }
     }
 }

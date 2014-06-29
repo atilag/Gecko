@@ -245,11 +245,23 @@ struct AssemblerBuffer
     // Break the instruction stream so we can go back and edit it at this point
     void perforate() {
         Slice *tmp = newSlice(LifoAlloc_);
-        if (!tmp)
+        if (!tmp) {
             m_oom = true;
+            return;
+        }
         bufferSize += tail->size();
         tail->setNext(tmp);
         tail = tmp;
+    }
+
+    void executableCopy(uint8_t *dest_) {
+        if (this->oom())
+            return;
+
+        for (Slice *cur = head; cur != nullptr; cur = cur->getNext()) {
+            memcpy(dest_, &cur->instructions, cur->size());
+            dest_ += cur->size();
+        }
     }
 
     class AssemblerBufferInstIterator {

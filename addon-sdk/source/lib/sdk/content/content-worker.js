@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const ContentWorker = Object.freeze({
+Object.freeze({
   // TODO: Bug 727854 Use same implementation than common JS modules,
   // i.e. EventEmitter module
 
@@ -70,6 +70,7 @@ const ContentWorker = Object.freeze({
    *              onChromeEvent --> callback registered through pipe.on
    */
   createPipe: function createPipe(emitToChrome) {
+    let ContentWorker = this;
     function onEvent(type, ...args) {
       // JSON.stringify is buggy with cross-sandbox values,
       // it may return "{}" on functions. Use a replacer to match them correctly.
@@ -271,6 +272,7 @@ const ContentWorker = Object.freeze({
 
   injectMessageAPI: function injectMessageAPI(exports, pipe, console) {
 
+    let ContentWorker = this;
     let { eventEmitter: port, emit : portEmit } =
       ContentWorker.createEventEmitter(pipe.emit.bind(null, "event"));
     pipe.on("event", portEmit);
@@ -292,7 +294,7 @@ const ContentWorker = Object.freeze({
                     "function, which works the same. Replace calls to `on()` " +
                     "with calls to `self.on()`" +
                     "For more info on `self.on`, see " +
-                    "<https://addons.mozilla.org/en-US/developers/docs/sdk/latest/dev-guide/addon-development/web-content.html>.");
+                    "<https://developer.mozilla.org/en-US/Add-ons/SDK/Guides/Content_Scripts/using_postMessage>.");
       return self.on.apply(null, arguments);
     };
 
@@ -309,7 +311,7 @@ const ContentWorker = Object.freeze({
                       "definitions with calls to `self.on('message', " +
                       "function (data){})`. " +
                       "For more info on `self.on`, see " +
-                      "<https://addons.mozilla.org/en-US/developers/docs/sdk/latest/dev-guide/addon-development/web-content.html>.");
+                      "<https://developer.mozilla.org/en-US/Add-ons/SDK/Guides/Content_Scripts/using_postMessage>.");
         onMessage = v;
         if (typeof onMessage == "function")
           self.on("message", onMessage);
@@ -322,6 +324,7 @@ const ContentWorker = Object.freeze({
   },
 
   inject: function (exports, chromeAPI, emitToChrome, options) {
+    let ContentWorker = this;
     let { pipe, onChromeEvent, hasListenerFor } =
       ContentWorker.createPipe(emitToChrome);
 

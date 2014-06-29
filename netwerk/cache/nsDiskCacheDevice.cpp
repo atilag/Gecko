@@ -187,9 +187,9 @@ public:
     {
     }
 
-    virtual ~nsDiskCacheDeviceInfo() {}
-    
 private:
+    virtual ~nsDiskCacheDeviceInfo() {}
+
     nsDiskCacheDevice* mDevice;
 };
 
@@ -393,8 +393,6 @@ nsDiskCacheDevice::Init()
     rv = mBindery.Init();
     if (NS_FAILED(rv))
         return rv;
-
-    nsDeleteDir::RemoveOldTrashes(mCacheDirectory);
 
     // Open Disk Cache
     rv = OpenDiskCache();

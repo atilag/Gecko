@@ -218,6 +218,8 @@ SetJournalMode(nsCOMPtr<mozIStorageConnection>& aDBConn,
 class ConnectionCloseCallback MOZ_FINAL : public mozIStorageCompletionCallback {
   bool mDone;
 
+  ~ConnectionCloseCallback() {}
+
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_MOZISTORAGECOMPLETIONCALLBACK
@@ -314,7 +316,7 @@ CreateRoot(nsCOMPtr<mozIStorageConnection>& aDBConn,
 
   // The 'places' root is a folder containing the other roots.
   // The first bookmark in a folder has position 0.
-  if (!aRootName.Equals("places"))
+  if (!aRootName.EqualsLiteral("places"))
     ++itemPosition;
 
   return NS_OK;

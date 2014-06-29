@@ -1,6 +1,13 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set ts=8 sts=2 et sw=2 tw=80: */
-/* Copyright 2013 Mozilla Foundation
+/* This code is made available to you under your choice of the following sets
+ * of licensing terms:
+ */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ */
+/* Copyright 2013 Mozilla Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -171,14 +178,11 @@ private:
 };
 
 OCSPResponseContext::OCSPResponseContext(PLArenaPool* arena,
-                                         CERTCertificate* cert,
-                                         PRTime time)
+                                         const CertID& certID, PRTime time)
   : arena(arena)
-  , cert(CERT_DupCertificate(cert))
+  , certID(certID)
   , responseStatus(successful)
   , skipResponseBytes(false)
-  , issuerNameDER(nullptr)
-  , issuerSPKI(nullptr)
   , signerNameDER(nullptr)
   , producedAt(time)
   , extensions(nullptr)
@@ -236,7 +240,7 @@ HashAlgorithmToLength(SECOidTag hashAlg)
 }
 
 static SECItem*
-HashedOctetString(PLArenaPool* arena, const SECItem* bytes, SECOidTag hashAlg)
+HashedOctetString(PLArenaPool* arena, const SECItem& bytes, SECOidTag hashAlg)
 {
   size_t hashLen = HashAlgorithmToLength(hashAlg);
   if (hashLen == 0) {
@@ -246,7 +250,7 @@ HashedOctetString(PLArenaPool* arena, const SECItem* bytes, SECOidTag hashAlg)
   if (!hashBuf) {
     return nullptr;
   }
-  if (PK11_HashBuf(hashAlg, hashBuf->data, bytes->data, bytes->len)
+  if (PK11_HashBuf(hashAlg, hashBuf->data, bytes.data, bytes.len)
         != SECSuccess) {
     return nullptr;
   }
@@ -260,7 +264,7 @@ KeyHashHelper(PLArenaPool* arena, const CERTSubjectPublicKeyInfo* spki)
   // We only need a shallow copy here.
   SECItem spk = spki->subjectPublicKey;
   DER_ConvertBitString(&spk); // bits to bytes
-  return HashedOctetString(arena, &spk, SEC_OID_SHA1);
+  return HashedOctetString(arena, spk, SEC_OID_SHA1);
 }
 
 static SECItem*
@@ -590,20 +594,36 @@ GenerateKeyPair(/*out*/ ScopedSECKEYPublicKey& publicKey,
   if (!slot) {
     return SECFailure;
   }
-  PK11RSAGenParams params;
-  params.keySizeInBits = 2048;
-  params.pe = 3;
-  SECKEYPublicKey* publicKeyTemp = nullptr;
-  privateKey = PK11_GenerateKeyPair(slot.get(), CKM_RSA_PKCS_KEY_PAIR_GEN,
-  				    &params, &publicKeyTemp, false, true,
-                                    nullptr);
-  if (!privateKey) {
+
+  // Bug 1012786: PK11_GenerateKeyPair can fail if there is insufficient
+  // entropy to generate a random key. Attempting to add some entropy and
+  // retrying appears to solve this issue.
+  for (uint32_t retries = 0; retries < 10; retries++) {
+    PK11RSAGenParams params;
+    params.keySizeInBits = 2048;
+    params.pe = 3;
+    SECKEYPublicKey* publicKeyTemp = nullptr;
+    privateKey = PK11_GenerateKeyPair(slot.get(), CKM_RSA_PKCS_KEY_PAIR_GEN,
+                                      &params, &publicKeyTemp, false, true,
+                                      nullptr);
+    if (privateKey) {
+      publicKey = publicKeyTemp;
+      PR_ASSERT(publicKey);
+      return SECSuccess;
+    }
+
     PR_ASSERT(!publicKeyTemp);
-    return SECFailure;
+
+    if (PR_GetError() != SEC_ERROR_PKCS11_FUNCTION_FAILED) {
+      return SECFailure;
+    }
+
+    PRTime now = PR_Now();
+    if (PK11_RandomUpdate(&now, sizeof(PRTime)) != SECSuccess) {
+      return SECFailure;
+    }
   }
-  publicKey = publicKeyTemp;
-  PR_ASSERT(publicKey);
-  return SECSuccess;
+  return SECFailure;
 }
 
 
@@ -611,7 +631,7 @@ GenerateKeyPair(/*out*/ ScopedSECKEYPublicKey& publicKey,
 // Certificates
 
 static SECItem* TBSCertificate(PLArenaPool* arena, long version,
-                               long serialNumber, SECOidTag signature,
+                               const SECItem* serialNumber, SECOidTag signature,
                                const SECItem* issuer, PRTime notBefore,
                                PRTime notAfter, const SECItem* subject,
                                const SECKEYPublicKey* subjectPublicKey,
@@ -623,13 +643,13 @@ static SECItem* TBSCertificate(PLArenaPool* arena, long version,
 //         signatureValue       BIT STRING  }
 SECItem*
 CreateEncodedCertificate(PLArenaPool* arena, long version,
-                         SECOidTag signature, long serialNumber,
+                         SECOidTag signature, const SECItem* serialNumber,
                          const SECItem* issuerNameDER, PRTime notBefore,
                          PRTime notAfter, const SECItem* subjectNameDER,
                          /*optional*/ SECItem const* const* extensions,
                          /*optional*/ SECKEYPrivateKey* issuerPrivateKey,
                          SECOidTag signatureHashAlg,
-                         /*out*/ ScopedSECKEYPrivateKey& privateKey)
+                         /*out*/ ScopedSECKEYPrivateKey& privateKeyResult)
 {
   PR_ASSERT(arena);
   PR_ASSERT(issuerNameDER);
@@ -639,8 +659,12 @@ CreateEncodedCertificate(PLArenaPool* arena, long version,
     return nullptr;
   }
 
+  // It may be the case that privateKeyResult refers to the
+  // ScopedSECKEYPrivateKey that owns issuerPrivateKey; thus, we can't set
+  // privateKeyResult until after we're done with issuerPrivateKey.
   ScopedSECKEYPublicKey publicKey;
-  if (GenerateKeyPair(publicKey, privateKey) != SECSuccess) {
+  ScopedSECKEYPrivateKey privateKeyTemp;
+  if (GenerateKeyPair(publicKey, privateKeyTemp) != SECSuccess) {
     return nullptr;
   }
 
@@ -652,10 +676,17 @@ CreateEncodedCertificate(PLArenaPool* arena, long version,
     return nullptr;
   }
 
-  return MaybeLogOutput(SignedData(arena, tbsCertificate,
-                                   issuerPrivateKey ? issuerPrivateKey
-                                                    : privateKey.get(),
-                                   signatureHashAlg, false, nullptr), "cert");
+  SECItem*
+    result(MaybeLogOutput(SignedData(arena, tbsCertificate,
+                                     issuerPrivateKey ? issuerPrivateKey
+                                                      : privateKeyTemp.get(),
+                                     signatureHashAlg, false, nullptr),
+                          "cert"));
+  if (!result) {
+    return nullptr;
+  }
+  privateKeyResult = privateKeyTemp.release();
+  return result;
 }
 
 // TBSCertificate  ::=  SEQUENCE  {
@@ -674,7 +705,7 @@ CreateEncodedCertificate(PLArenaPool* arena, long version,
 //                           -- If present, version MUST be v3 --  }
 static SECItem*
 TBSCertificate(PLArenaPool* arena, long versionValue,
-               long serialNumberValue, SECOidTag signatureOidTag,
+               const SECItem* serialNumber, SECOidTag signatureOidTag,
                const SECItem* issuer, PRTime notBeforeTime,
                PRTime notAfterTime, const SECItem* subject,
                const SECKEYPublicKey* subjectPublicKey,
@@ -691,7 +722,7 @@ TBSCertificate(PLArenaPool* arena, long versionValue,
 
   Output output;
 
-  if (versionValue != der::v1) {
+  if (versionValue != static_cast<long>(der::Version::v1)) {
     SECItem* versionInteger(Integer(arena, versionValue));
     if (!versionInteger) {
       return nullptr;
@@ -707,10 +738,6 @@ TBSCertificate(PLArenaPool* arena, long versionValue,
     }
   }
 
-  SECItem* serialNumber(Integer(arena, serialNumberValue));
-  if (!serialNumber) {
-    return nullptr;
-  }
   if (output.Add(serialNumber) != der::Success) {
     return nullptr;
   }
@@ -798,12 +825,29 @@ TBSCertificate(PLArenaPool* arena, long versionValue,
   return output.Squash(arena, der::SEQUENCE);
 }
 
+const SECItem*
+ASCIIToDERName(PLArenaPool* arena, const char* cn)
+{
+  ScopedPtr<CERTName, CERT_DestroyName> certName(CERT_AsciiToName(cn));
+  if (!certName) {
+    return nullptr;
+  }
+  return SEC_ASN1EncodeItem(arena, nullptr, certName.get(),
+                            SEC_ASN1_GET(CERT_NameTemplate));
+}
+
+SECItem*
+CreateEncodedSerialNumber(PLArenaPool* arena, long serialNumberValue)
+{
+  return Integer(arena, serialNumberValue);
+}
+
 // BasicConstraints ::= SEQUENCE {
 //         cA                      BOOLEAN DEFAULT FALSE,
 //         pathLenConstraint       INTEGER (0..MAX) OPTIONAL }
 SECItem*
 CreateEncodedBasicConstraints(PLArenaPool* arena, bool isCA,
-                              long pathLenConstraintValue,
+                              /*optional*/ long* pathLenConstraintValue,
                               ExtensionCriticality criticality)
 {
   PR_ASSERT(arena);
@@ -820,12 +864,14 @@ CreateEncodedBasicConstraints(PLArenaPool* arena, bool isCA,
     }
   }
 
-  SECItem* pathLenConstraint(Integer(arena, pathLenConstraintValue));
-  if (!pathLenConstraint) {
-    return nullptr;
-  }
-  if (value.Add(pathLenConstraint) != der::Success) {
-    return nullptr;
+  if (pathLenConstraintValue) {
+    SECItem* pathLenConstraint(Integer(arena, *pathLenConstraintValue));
+    if (!pathLenConstraint) {
+      return nullptr;
+    }
+    if (value.Add(pathLenConstraint) != der::Success) {
+      return nullptr;
+    }
   }
 
   return Extension(arena, SEC_OID_X509_BASIC_CONSTRAINTS, criticality, value);
@@ -870,8 +916,7 @@ CreateEncodedOCSPResponse(OCSPResponseContext& context)
   }
 
   if (!context.skipResponseBytes) {
-    if (!context.cert || !context.issuerNameDER || !context.issuerSPKI ||
-        !context.signerPrivateKey) {
+    if (!context.signerPrivateKey) {
       PR_SetError(SEC_ERROR_INVALID_ARGS, 0);
       return nullptr;
     }
@@ -1211,21 +1256,29 @@ CertID(OCSPResponseContext& context)
     return nullptr;
   }
   SECItem* issuerNameHash = HashedOctetString(context.arena,
-                                              context.issuerNameDER,
+                                              context.certID.issuer,
                                               context.certIDHashAlg);
   if (!issuerNameHash) {
     return nullptr;
   }
-  SECItem* issuerKeyHash = KeyHashHelper(context.arena, context.issuerSPKI);
+
+  ScopedPtr<CERTSubjectPublicKeyInfo, SECKEY_DestroySubjectPublicKeyInfo>
+    spki(SECKEY_DecodeDERSubjectPublicKeyInfo(
+          &context.certID.issuerSubjectPublicKeyInfo));
+  if (!spki) {
+    return nullptr;
+  }
+  SECItem* issuerKeyHash(KeyHashHelper(context.arena, spki.get()));
   if (!issuerKeyHash) {
     return nullptr;
   }
+
   static const SEC_ASN1Template serialTemplate[] = {
-    { SEC_ASN1_INTEGER, offsetof(CERTCertificate, serialNumber) },
+    { SEC_ASN1_INTEGER, 0 },
     { 0 }
   };
   SECItem* serialNumber = SEC_ASN1EncodeItem(context.arena, nullptr,
-                                             context.cert.get(),
+                                             &context.certID.serialNumber,
                                              serialTemplate);
   if (!serialNumber) {
     return nullptr;

@@ -10,6 +10,7 @@
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/dom/EventSourceBinding.h"
 #include "mozilla/dom/MessageEvent.h"
+#include "mozilla/dom/ScriptSettings.h"
 
 #include "js/OldDebugAPI.h"
 #include "nsNetUtil.h"
@@ -29,7 +30,6 @@
 #include "nsIChannelPolicy.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsContentUtils.h"
-#include "nsCxPusher.h"
 #include "mozilla/Preferences.h"
 #include "xpcpublic.h"
 #include "nsCrossSiteListenerProxy.h"
@@ -382,7 +382,7 @@ EventSource::OnStartRequest(nsIRequest *aRequest,
     NS_NewRunnableMethod(this, &EventSource::AnnounceConnection);
   NS_ENSURE_STATE(event);
 
-  rv = NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
+  rv = NS_DispatchToMainThread(event);
   NS_ENSURE_SUCCESS(rv, rv);
 
   mStatus = PARSE_STATE_BEGIN_OF_STREAM;
@@ -484,7 +484,7 @@ EventSource::OnStopRequest(nsIRequest *aRequest,
     NS_NewRunnableMethod(this, &EventSource::ReestablishConnection);
   NS_ENSURE_STATE(event);
 
-  rv = NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
+  rv = NS_DispatchToMainThread(event);
   NS_ENSURE_SUCCESS(rv, rv);
 
   return healthOfRequestResult;
@@ -518,6 +518,7 @@ public:
   }
 
 private:
+  ~AsyncVerifyRedirectCallbackFwr() {}
   nsRefPtr<EventSource> mEventSource;
 };
 
@@ -1010,7 +1011,7 @@ EventSource::DispatchFailConnection()
     NS_NewRunnableMethod(this, &EventSource::FailConnection);
   NS_ENSURE_STATE(event);
 
-  return NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
+  return NS_DispatchToMainThread(event);
 }
 
 void
@@ -1156,7 +1157,7 @@ EventSource::Thaw()
 
     mGoingToDispatchAllMessages = true;
 
-    rv = NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
+    rv = NS_DispatchToMainThread(event);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -1216,7 +1217,7 @@ EventSource::DispatchCurrentMessageEvent()
 
     mGoingToDispatchAllMessages = true;
 
-    return NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
+    return NS_DispatchToMainThread(event);
   }
 
   return NS_OK;
@@ -1236,15 +1237,11 @@ EventSource::DispatchAllMessageEvents()
     return;
   }
 
-  // Let's play get the JSContext
-  nsCOMPtr<nsIScriptGlobalObject> sgo = do_QueryInterface(GetOwner());
-  NS_ENSURE_TRUE_VOID(sgo);
-
-  nsIScriptContext* scriptContext = sgo->GetContext();
-  NS_ENSURE_TRUE_VOID(scriptContext);
-
-  AutoPushJSContext cx(scriptContext->GetNativeContext());
-  NS_ENSURE_TRUE_VOID(cx);
+  AutoJSAPI jsapi;
+  if (NS_WARN_IF(!jsapi.Init(GetOwner()))) {
+    return;
+  }
+  JSContext* cx = jsapi.cx();
 
   while (mMessagesToDispatch.GetSize() > 0) {
     nsAutoPtr<Message>
