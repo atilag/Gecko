@@ -1,0 +1,41 @@
+From 0e3be4c7f209556a9176dddf9a8e02703eadfbfa Mon Sep 17 00:00:00 2001
+From: Juan Gomez <atilag@gmail.com>
+Date: Wed, 26 Nov 2014 11:25:52 +0100
+Subject: [PATCH] Bug 1056337 - Upgrade toolchain used for B2G ICS builds *
+ OPUS Library causes an internal compiler error in gcc-4.8 based toolchain if
+ we compile with optimizations enabled (-O3). A patch has been made to disable
+ optimizations just in the offendind code
+
+---
+ media/libopus/celt/rate.c | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/media/libopus/celt/rate.c b/media/libopus/celt/rate.c
+index e13d839..e6aaa1f 100644
+--- a/media/libopus/celt/rate.c
++++ b/media/libopus/celt/rate.c
+@@ -523,6 +523,12 @@ static OPUS_INLINE int interp_bits2pulses(const CELTMode *m, int start, int end,
+    return codedBands;
+ }
+ 
++#if !defined(__clang__) && defined(__GNUC__) && \
++    __GNUC__ == 4 && __GNUC_MINOR__ == 8
++#warning "OPUS library causes an internal compiler error for gcc-4.8 based toolchain"
++#pragma GCC push_options
++#pragma GCC optimize ("O0")
++#endif
+ int compute_allocation(const CELTMode *m, int start, int end, const int *offsets, const int *cap, int alloc_trim, int *intensity, int *dual_stereo,
+       opus_int32 total, opus_int32 *balance, int *pulses, int *ebits, int *fine_priority, int C, int LM, ec_ctx *ec, int encode, int prev, int signalBandwidth)
+ {
+@@ -635,4 +641,7 @@ int compute_allocation(const CELTMode *m, int start, int end, const int *offsets
+    RESTORE_STACK;
+    return codedBands;
+ }
+-
++#if !defined(__clang__) && defined(__GNUC__) && \
++    __GNUC__ == 4 && __GNUC_MINOR__ == 8
++#pragma GCC pop_options
++#endif
+-- 
+2.1.0
+
