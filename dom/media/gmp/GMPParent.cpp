@@ -30,6 +30,8 @@ using CrashReporter::AnnotationTable;
 using CrashReporter::GetIDFromMinidump;
 #endif
 
+#include "mozilla/Telemetry.h"
+
 namespace mozilla {
 
 #ifdef LOG
@@ -653,6 +655,8 @@ GMPParent::ActorDestroy(ActorDestroyReason aWhy)
   LOGD(("%s::%s: %p (%d)", __CLASS__, __FUNCTION__, this, (int) aWhy));
 #ifdef MOZ_CRASHREPORTER
   if (AbnormalShutdown == aWhy) {
+    Telemetry::Accumulate(Telemetry::SUBPROCESS_ABNORMAL_ABORT,
+                          NS_LITERAL_CSTRING("gmplugin"), 1);
     nsString dumpID;
     GetCrashID(dumpID);
     nsString id;
@@ -962,7 +966,7 @@ GMPParent::ReadGMPMetaData()
     }
 
 #if defined(XP_LINUX) && defined(MOZ_GMP_SANDBOX)
-    if (cap->mAPIName.EqualsLiteral("eme-decrypt") &&
+    if (cap->mAPIName.EqualsLiteral(GMP_API_DECRYPTOR) &&
         !mozilla::SandboxInfo::Get().CanSandboxMedia()) {
       printf_stderr("GMPParent::ReadGMPMetaData: Plugin \"%s\" is an EME CDM"
                     " but this system can't sandbox it; not loading.\n",

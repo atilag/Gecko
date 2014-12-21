@@ -114,6 +114,7 @@ pref("browser.display.remotetabs.timeout", 10);
 /* session history */
 pref("browser.sessionhistory.max_total_viewers", 1);
 pref("browser.sessionhistory.max_entries", 50);
+pref("browser.sessionhistory.contentViewerTimeout", 360);
 
 /* session store */
 pref("browser.sessionstore.resume_session_once", false);
@@ -279,13 +280,13 @@ pref("browser.search.noCurrentEngine", true);
 pref("browser.search.official", true);
 #endif
 
-// Control media casting feature
+// Control media casting & mirroring features
 pref("browser.casting.enabled", true);
+pref("browser.mirroring.enabled", true);
 #ifdef RELEASE_BUILD
-pref("browser.mirroring.enabled", false);
+// Roku does not yet support mirroring in production
 pref("browser.mirroring.enabled.roku", false);
 #else
-pref("browser.mirroring.enabled", true);
 pref("browser.mirroring.enabled.roku", true);
 #endif
 
@@ -380,11 +381,7 @@ pref("javascript.options.mem.gc_low_frequency_heap_growth", 120);
 pref("javascript.options.mem.high_water_mark", 16);
 pref("javascript.options.mem.gc_allocation_threshold_mb", 3);
 pref("javascript.options.mem.gc_decommit_threshold_mb", 1);
-#ifdef JSGC_GENERATIONAL
 pref("javascript.options.mem.gc_min_empty_chunk_count", 1);
-#else
-pref("javascript.options.mem.gc_min_empty_chunk_count", 0);
-#endif
 pref("javascript.options.mem.gc_max_empty_chunk_count", 2);
 #else
 pref("javascript.options.mem.high_water_mark", 32);
@@ -855,3 +852,6 @@ pref("home.sync.checkIntervalSecs", 3600);
 
 // Enable device storage API
 pref("device.storage.enabled", true);
+
+// Enable meta-viewport support for font inflation code
+pref("dom.meta-viewport.enabled", true);

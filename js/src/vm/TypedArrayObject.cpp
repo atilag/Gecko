@@ -67,7 +67,7 @@ using JS::GenericNaN;
 TypedArrayLayout TypedArrayObject::layout_(false, // shared
                                            true,  // neuterable
                                            &TypedArrayObject::classes[0],
-                                           &TypedArrayObject::classes[Scalar::TypeMax]);
+                                           &TypedArrayObject::classes[Scalar::MaxTypedArrayViewType]);
 
 TypedArrayLayout::TypedArrayLayout(bool isShared, bool isNeuterable, const Class *firstClass,
                                    const Class *maxClass)
@@ -242,14 +242,10 @@ class TypedArrayObjectTemplate : public TypedArrayObject
     finishClassInit(JSContext *cx, HandleObject ctor, HandleObject proto)
     {
         RootedValue bytesValue(cx, Int32Value(BYTES_PER_ELEMENT));
-        if (!JSObject::defineProperty(cx, ctor,
-                                      cx->names().BYTES_PER_ELEMENT, bytesValue,
-                                      JS_PropertyStub, JS_StrictPropertyStub,
-                                      JSPROP_PERMANENT | JSPROP_READONLY) ||
-            !JSObject::defineProperty(cx, proto,
-                                      cx->names().BYTES_PER_ELEMENT, bytesValue,
-                                      JS_PropertyStub, JS_StrictPropertyStub,
-                                      JSPROP_PERMANENT | JSPROP_READONLY))
+        if (!JSObject::defineProperty(cx, ctor, cx->names().BYTES_PER_ELEMENT, bytesValue,
+                                      nullptr, nullptr, JSPROP_PERMANENT | JSPROP_READONLY) ||
+            !JSObject::defineProperty(cx, proto, cx->names().BYTES_PER_ELEMENT, bytesValue,
+                                      nullptr, nullptr, JSPROP_PERMANENT | JSPROP_READONLY))
         {
             return false;
         }
@@ -785,6 +781,11 @@ TypedArrayObject::protoFunctions[] = {
     JS_FN("subarray", TypedArrayObject::subarray, 2, 0),
     JS_FN("set", TypedArrayObject::set, 2, 0),
     JS_FN("copyWithin", TypedArrayObject::copyWithin, 2, 0),
+    JS_SELF_HOSTED_FN("find", "TypedArrayFind", 2, 0),
+    JS_SELF_HOSTED_FN("findIndex", "TypedArrayFindIndex", 2, 0),
+    JS_SELF_HOSTED_FN("indexOf", "TypedArrayIndexOf", 2, 0),
+    JS_SELF_HOSTED_FN("lastIndexOf", "TypedArrayLastIndexOf", 2, 0),
+    JS_SELF_HOSTED_FN("reverse", "TypedArrayReverse", 0, 0),
     JS_FS_END
 };
 
@@ -804,13 +805,13 @@ TypedArrayObject::sharedTypedArrayPrototypeClass = {
     // until we implement @@toStringTag.
     "???",
     JSCLASS_HAS_CACHED_PROTO(JSProto_TypedArray),
-    JS_PropertyStub,        /* addProperty */
-    JS_DeletePropertyStub,  /* delProperty */
-    JS_PropertyStub,        /* getProperty */
-    JS_StrictPropertyStub,  /* setProperty */
-    JS_EnumerateStub,
-    JS_ResolveStub,
-    JS_ConvertStub,
+    nullptr,                /* addProperty */
+    nullptr,                /* delProperty */
+    nullptr,                /* getProperty */
+    nullptr,                /* setProperty */
+    nullptr,                /* enumerate */
+    nullptr,                /* resolve */
+    nullptr,                /* convert */
     nullptr,                /* finalize */
     nullptr,                /* call */
     nullptr,                /* hasInstance */
@@ -1613,7 +1614,9 @@ TypedArrayObject::getElement(uint32_t index)
         return Float64Array::getIndexValue(this, index);
       case Scalar::Uint8Clamped:
         return Uint8ClampedArray::getIndexValue(this, index);
-      case Scalar::TypeMax:
+      case Scalar::Float32x4:
+      case Scalar::Int32x4:
+      case Scalar::MaxTypedArrayViewType:
         break;
     }
 
@@ -1653,7 +1656,9 @@ TypedArrayObject::setElement(TypedArrayObject &obj, uint32_t index, double d)
       case Scalar::Float64:
         Float64Array::setIndexValue(obj, index, d);
         return;
-      case Scalar::TypeMax:
+      case Scalar::Float32x4:
+      case Scalar::Int32x4:
+      case Scalar::MaxTypedArrayViewType:
         break;
     }
 
@@ -1759,13 +1764,13 @@ IMPL_TYPED_ARRAY_COMBINED_UNWRAPPERS(Float64, double, double)
     JSCLASS_HAS_RESERVED_SLOTS(TypedArrayLayout::RESERVED_SLOTS) |             \
     JSCLASS_HAS_PRIVATE | JSCLASS_IMPLEMENTS_BARRIERS |                        \
     JSCLASS_HAS_CACHED_PROTO(JSProto_##_typedArray),                           \
-    JS_PropertyStub,         /* addProperty */                                 \
-    JS_DeletePropertyStub,   /* delProperty */                                 \
-    JS_PropertyStub,         /* getProperty */                                 \
-    JS_StrictPropertyStub,   /* setProperty */                                 \
-    JS_EnumerateStub,                                                          \
-    JS_ResolveStub,                                                            \
-    JS_ConvertStub,                                                            \
+    nullptr,                 /* addProperty */                                 \
+    nullptr,                 /* delProperty */                                 \
+    nullptr,                 /* getProperty */                                 \
+    nullptr,                 /* setProperty */                                 \
+    nullptr,                 /* enumerate   */                                 \
+    nullptr,                 /* resolve     */                                 \
+    nullptr,                 /* convert     */                                 \
     nullptr,                 /* finalize    */                                 \
     nullptr,                 /* call        */                                 \
     nullptr,                 /* hasInstance */                                 \
@@ -1774,7 +1779,7 @@ IMPL_TYPED_ARRAY_COMBINED_UNWRAPPERS(Float64, double, double)
     TYPED_ARRAY_CLASS_SPEC(_typedArray)                                        \
 }
 
-const Class TypedArrayObject::classes[Scalar::TypeMax] = {
+const Class TypedArrayObject::classes[Scalar::MaxTypedArrayViewType] = {
     IMPL_TYPED_ARRAY_CLASS(Int8Array),
     IMPL_TYPED_ARRAY_CLASS(Uint8Array),
     IMPL_TYPED_ARRAY_CLASS(Int16Array),
@@ -1804,18 +1809,18 @@ const Class TypedArrayObject::classes[Scalar::TypeMax] = {
      */ \
     #typedArray "Prototype", \
     JSCLASS_HAS_CACHED_PROTO(JSProto_##typedArray), \
-    JS_PropertyStub,        /* addProperty */ \
-    JS_DeletePropertyStub,  /* delProperty */ \
-    JS_PropertyStub,        /* getProperty */ \
-    JS_StrictPropertyStub,  /* setProperty */ \
-    JS_EnumerateStub, \
-    JS_ResolveStub, \
-    JS_ConvertStub, \
-    nullptr,                 /* finalize    */ \
-    nullptr,                 /* call        */ \
-    nullptr,                 /* hasInstance */ \
-    nullptr,                 /* construct   */ \
-    nullptr,                 /* trace  */ \
+    nullptr, /* addProperty */ \
+    nullptr, /* delProperty */ \
+    nullptr, /* getProperty */ \
+    nullptr, /* setProperty */ \
+    nullptr, /* enumerate */ \
+    nullptr, /* resolve */ \
+    nullptr, /* convert */ \
+    nullptr, /* finalize */ \
+    nullptr, /* call */ \
+    nullptr, /* hasInstance */ \
+    nullptr, /* construct */ \
+    nullptr, /* trace  */ \
     { \
         typedArray::createConstructor, \
         typedArray::createPrototype, \
@@ -1827,7 +1832,7 @@ const Class TypedArrayObject::classes[Scalar::TypeMax] = {
     } \
 }
 
-const Class TypedArrayObject::protoClasses[Scalar::TypeMax] = {
+const Class TypedArrayObject::protoClasses[Scalar::MaxTypedArrayViewType] = {
     IMPL_TYPED_ARRAY_PROTO_CLASS(Int8Array),
     IMPL_TYPED_ARRAY_PROTO_CLASS(Uint8Array),
     IMPL_TYPED_ARRAY_PROTO_CLASS(Int16Array),
@@ -1849,14 +1854,7 @@ const Class DataViewObject::protoClass = {
     "DataViewPrototype",
     JSCLASS_HAS_PRIVATE |
     JSCLASS_HAS_RESERVED_SLOTS(TypedArrayLayout::RESERVED_SLOTS) |
-    JSCLASS_HAS_CACHED_PROTO(JSProto_DataView),
-    JS_PropertyStub,         /* addProperty */
-    JS_DeletePropertyStub,   /* delProperty */
-    JS_PropertyStub,         /* getProperty */
-    JS_StrictPropertyStub,   /* setProperty */
-    JS_EnumerateStub,
-    JS_ResolveStub,
-    JS_ConvertStub
+    JSCLASS_HAS_CACHED_PROTO(JSProto_DataView)
 };
 
 const Class DataViewObject::class_ = {
@@ -1865,18 +1863,18 @@ const Class DataViewObject::class_ = {
     JSCLASS_IMPLEMENTS_BARRIERS |
     JSCLASS_HAS_RESERVED_SLOTS(TypedArrayLayout::RESERVED_SLOTS) |
     JSCLASS_HAS_CACHED_PROTO(JSProto_DataView),
-    JS_PropertyStub,         /* addProperty */
-    JS_DeletePropertyStub,   /* delProperty */
-    JS_PropertyStub,         /* getProperty */
-    JS_StrictPropertyStub,   /* setProperty */
-    JS_EnumerateStub,
-    JS_ResolveStub,
-    JS_ConvertStub,
-    nullptr,                 /* finalize */
-    nullptr,                 /* call        */
-    nullptr,                 /* hasInstance */
-    nullptr,                 /* construct   */
-    ArrayBufferViewObject::trace, /* trace       */
+    nullptr, /* addProperty */
+    nullptr, /* delProperty */
+    nullptr, /* getProperty */
+    nullptr, /* setProperty */
+    nullptr, /* enumerate */
+    nullptr, /* resolve */
+    nullptr, /* convert */
+    nullptr, /* finalize */
+    nullptr, /* call */
+    nullptr, /* hasInstance */
+    nullptr, /* construct */
+    ArrayBufferViewObject::trace
 };
 
 const JSFunctionSpec DataViewObject::jsfuncs[] = {
@@ -2019,7 +2017,7 @@ js::IsTypedArrayConstructor(HandleValue v, uint32_t type)
         return IsNativeFunction(v, Float64Array::class_constructor);
       case Scalar::Uint8Clamped:
         return IsNativeFunction(v, Uint8ClampedArray::class_constructor);
-      case Scalar::TypeMax:
+      case Scalar::MaxTypedArrayViewType:
         break;
     }
     MOZ_CRASH("unexpected typed array type");
@@ -2120,12 +2118,12 @@ JS_GetArrayBufferViewType(JSObject *obj)
 {
     obj = CheckedUnwrap(obj);
     if (!obj)
-        return Scalar::TypeMax;
+        return Scalar::MaxTypedArrayViewType;
 
     if (obj->is<TypedArrayObject>())
         return obj->as<TypedArrayObject>().type();
     else if (obj->is<DataViewObject>())
-        return Scalar::TypeMax;
+        return Scalar::MaxTypedArrayViewType;
     MOZ_CRASH("invalid ArrayBufferView type");
 }
 

@@ -5,8 +5,10 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 SOURCES += [
+    'TestBadImplicitConversionCtor.cpp',
     'TestCustomHeap.cpp',
     'TestMustOverride.cpp',
+    'TestNoArithmeticExprInArgument.cpp',
     'TestNonHeapClass.cpp',
     'TestStackClass.cpp',
 ]

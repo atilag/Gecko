@@ -17,10 +17,15 @@
 #include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 #include "ImageContainer.h"             // for PlanarYCbCrData, etc
 #include "mozilla/gfx/2D.h"
+#include "mozilla/gfx/Logging.h"        // for gfxDebug
 #include "mozilla/layers/TextureClientOGL.h"
 #include "mozilla/layers/PTextureChild.h"
 #include "SharedSurface.h"
 #include "GLContext.h"
+#include "mozilla/gfx/DataSurfaceHelpers.h" // for CreateDataSourceSurfaceByCloning
+#include "nsPrintfCString.h"            // for nsPrintfCString
+#include "LayersLogging.h"              // for AppendToString
+#include "gfxUtils.h"                   // for gfxUtils::GetAsLZ4Base64Str
 
 #ifdef XP_WIN
 #include "mozilla/layers/TextureD3D9.h"
@@ -385,6 +390,10 @@ TextureClient::CreateForDrawing(ISurfaceAllocator* aAllocator,
     return texture;
   }
 
+  if (aAllocFlags & ALLOC_DISALLOW_BUFFERTEXTURECLIENT) {
+    return nullptr;
+  }
+
   if (texture) {
     NS_WARNING("Failed to allocate a TextureClient, falling back to BufferTextureClient.");
   }
@@ -522,14 +531,12 @@ bool TextureClient::CopyToTextureClient(TextureClient* aTarget,
     return false;
   }
 
-  DrawTarget* destinationTarget = aTarget->BorrowDrawTarget();
-  DrawTarget* sourceTarget = BorrowDrawTarget();
+  RefPtr<DrawTarget> destinationTarget = aTarget->BorrowDrawTarget();
+  RefPtr<DrawTarget> sourceTarget = BorrowDrawTarget();
   RefPtr<gfx::SourceSurface> source = sourceTarget->Snapshot();
   destinationTarget->CopySurface(source,
                                  aRect ? *aRect : gfx::IntRect(gfx::IntPoint(0, 0), GetSize()),
                                  aPoint ? *aPoint : gfx::IntPoint(0, 0));
-  source = nullptr;
-
   return true;
 }
 
@@ -567,6 +574,28 @@ TextureClient::ShouldDeallocateInDestructor() const
   return !IsSharedWithCompositor() || (GetFlags() & TextureFlags::DEALLOCATE_CLIENT);
 }
 
+void
+TextureClient::PrintInfo(std::stringstream& aStream, const char* aPrefix)
+{
+  aStream << aPrefix;
+  aStream << nsPrintfCString("TextureClient (0x%p)", this).get();
+  AppendToString(aStream, GetSize(), " [size=", "]");
+  AppendToString(aStream, GetFormat(), " [format=", "]");
+  AppendToString(aStream, mFlags, " [flags=", "]");
+
+#ifdef MOZ_DUMP_PAINTING
+  if (gfxPrefs::LayersDumpTexture() || profiler_feature_active("layersdump")) {
+    nsAutoCString pfx(aPrefix);
+    pfx += "  ";
+
+    aStream << "\n" << pfx.get() << "Surface: ";
+    RefPtr<gfx::DataSourceSurface> dSurf = GetAsSurface();
+    if (dSurf) {
+      aStream << gfxUtils::GetAsLZ4Base64Str(dSurf).get();
+    }
+  }
+#endif
+}
 bool
 ShmemTextureClient::ToSurfaceDescriptor(SurfaceDescriptor& aDescriptor)
 {
@@ -584,8 +613,10 @@ bool
 ShmemTextureClient::Allocate(uint32_t aSize)
 {
   MOZ_ASSERT(mValid);
-  SharedMemory::SharedMemoryType memType = OptimalShmemType();
-  mAllocated = GetAllocator()->AllocUnsafeShmem(aSize, memType, &mShmem);
+  if (aSize > 0) {
+    SharedMemory::SharedMemoryType memType = OptimalShmemType();
+    mAllocated = GetAllocator()->AllocUnsafeShmem(aSize, memType, &mShmem);
+  }
   return mAllocated;
 }
 
@@ -716,8 +747,12 @@ BufferTextureClient::AllocateForSurface(gfx::IntSize aSize, TextureAllocationFla
   MOZ_ASSERT(mFormat != gfx::SurfaceFormat::YUV, "This textureClient cannot use YCbCr data");
   MOZ_ASSERT(aSize.width > 0 && aSize.height > 0);
 
-  int bufSize
-    = ImageDataSerializer::ComputeMinBufferSize(aSize, mFormat);
+  if (aSize.width <= 0 || aSize.height <= 0) {
+    gfxDebug() << "Asking for buffer of invalid size " << aSize.width << "x" << aSize.height;
+    return false;
+  }
+
+  uint32_t bufSize = ImageDataSerializer::ComputeMinBufferSize(aSize, mFormat);
   if (!Allocate(bufSize)) {
     return false;
   }
@@ -855,6 +890,20 @@ BufferTextureClient::GetLockedData() const
   return serializer.GetData();
 }
 
+TemporaryRef<gfx::DataSourceSurface>
+BufferTextureClient::GetAsSurface()
+{
+  ImageDataSerializer serializer(GetBuffer(), GetBufferSize());
+  MOZ_ASSERT(serializer.IsValid());
+
+  RefPtr<gfx::DataSourceSurface> wrappingSurf =
+    gfx::Factory::CreateWrappingDataSourceSurface(serializer.GetData(),
+                                                  serializer.GetStride(),
+                                                  serializer.GetSize(),
+                                                  serializer.GetFormat());
+  return gfx::CreateDataSourceSurfaceByCloning(wrappingSurf);
+}
+
 ////////////////////////////////////////////////////////////////////////
 // SharedSurfaceTextureClient
 
@@ -877,6 +926,22 @@ SharedSurfaceTextureClient::ToSurfaceDescriptor(SurfaceDescriptor& aOutDescripto
 {
   aOutDescriptor = SharedSurfaceDescriptor((uintptr_t)mSurf);
   return true;
+}
+
+TemporaryRef<SyncObject>
+SyncObject::CreateSyncObject(SyncHandle aHandle)
+{
+  if (!aHandle) {
+    return nullptr;
+  }
+
+#ifdef XP_WIN
+  RefPtr<SyncObject> syncObject = new SyncObjectD3D11(aHandle);
+  return syncObject;
+#else
+  MOZ_ASSERT_UNREACHABLE();
+  return nullptr;
+#endif
 }
 
 }

@@ -203,6 +203,14 @@ describe("loop.standaloneRoomViews", function() {
             expect(view.getDOMNode().querySelector(".failed-room-message"))
               .not.eql(null);
           });
+
+        it("should display a retry button",
+          function() {
+            activeRoomStore.setStoreState({roomState: ROOM_STATES.FAILED});
+
+            expect(view.getDOMNode().querySelector(".btn-info"))
+              .not.eql(null);
+          });
       });
 
       describe("Join button", function() {
@@ -323,6 +331,26 @@ describe("loop.standaloneRoomViews", function() {
             expect(view.getDOMNode().querySelector(".local-stream-audio"))
               .not.eql(null);
           });
+      });
+
+      describe("Marketplace hidden iframe", function() {
+
+        it("should set src when the store state change",
+           function(done) {
+
+          var marketplace = view.getDOMNode().querySelector("#marketplace");
+          expect(marketplace.src).to.be.equal("");
+
+          activeRoomStore.setStoreState({
+            marketplaceSrc: "http://market/",
+            onMarketplaceMessage: function () {}
+          });
+
+          view.forceUpdate(function() {
+            expect(marketplace.src).to.be.equal("http://market/");
+            done();
+          });
+        });
       });
     });
   });

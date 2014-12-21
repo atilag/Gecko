@@ -154,6 +154,7 @@ JitRuntime::JitRuntime()
   : execAlloc_(nullptr),
     ionAlloc_(nullptr),
     exceptionTail_(nullptr),
+    exceptionTailParallel_(nullptr),
     bailoutTail_(nullptr),
     enterJIT_(nullptr),
     bailoutHandler_(nullptr),
@@ -207,8 +208,16 @@ JitRuntime::initialize(JSContext *cx)
         return false;
 
     JitSpew(JitSpew_Codegen, "# Emitting exception tail stub");
-    exceptionTail_ = generateExceptionTailStub(cx);
+
+    void *handler = JS_FUNC_TO_DATA_PTR(void *, jit::HandleException);
+    void *handlerParallel = JS_FUNC_TO_DATA_PTR(void *, jit::HandleParallelFailure);
+
+    exceptionTail_ = generateExceptionTailStub(cx, handler);
     if (!exceptionTail_)
+        return false;
+
+    exceptionTailParallel_ = generateExceptionTailStub(cx, handlerParallel);
+    if (!exceptionTailParallel_)
         return false;
 
     JitSpew(JitSpew_Codegen, "# Emitting bailout tail stub");
@@ -974,10 +983,8 @@ IonScript::trace(JSTracer *trc)
 /* static */ void
 IonScript::writeBarrierPre(Zone *zone, IonScript *ionScript)
 {
-#ifdef JSGC_INCREMENTAL
     if (zone->needsIncrementalBarrier())
         ionScript->trace(zone->barrierTracer());
-#endif
 }
 
 void
@@ -1538,7 +1545,7 @@ OptimizeMIR(MIRGenerator *mir)
             return false;
     }
 
-    if (mir->optimizationInfo().sinkEnabled()) {
+    {
         AutoTraceLog log(logger, TraceLogger::EliminateDeadCode);
         if (!Sink(mir, graph))
             return false;
@@ -2501,7 +2508,7 @@ jit::SetEnterJitData(JSContext *cx, EnterJitData &data, RunState &state, AutoVal
         {
             ScriptFrameIter iter(cx);
             if (iter.isFunctionFrame())
-                data.calleeToken = CalleeToToken(iter.callee(), /* constructing = */ false);
+                data.calleeToken = CalleeToToken(iter.callee(cx), /* constructing = */ false);
         }
     }
 

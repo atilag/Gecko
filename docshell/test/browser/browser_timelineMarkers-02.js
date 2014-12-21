@@ -7,6 +7,7 @@
 // restyles, reflows and paints occur
 
 let URL = '<!DOCTYPE html><style>' +
+          'body {margin:0; padding: 0;} ' +
           'div {width:100px;height:100px;background:red;} ' +
           '.resize-change-color {width:50px;height:50px;background:blue;} ' +
           '.change-color {width:50px;height:50px;background:yellow;} ' +
@@ -15,18 +16,27 @@ let URL = '<!DOCTYPE html><style>' +
 
 let TESTS = [{
   desc: "Changing the width of the test element",
+  searchFor: "Paint",
   setup: function(div) {
     div.setAttribute("class", "resize-change-color");
   },
   check: function(markers) {
     ok(markers.length > 0, "markers were returned");
     console.log(markers);
+    info(JSON.stringify(markers.filter(m => m.name == "Paint")));
     ok(markers.some(m => m.name == "Reflow"), "markers includes Reflow");
     ok(markers.some(m => m.name == "Paint"), "markers includes Paint");
+    for (let marker of markers.filter(m => m.name == "Paint")) {
+      // This change should generate at least one rectangle.
+      ok(marker.rectangles.length >= 1, "marker has one rectangle");
+      // One of the rectangles should contain the div.
+      ok(marker.rectangles.some(r => rectangleContains(r, 0, 0, 100, 100)));
+    }
     ok(markers.some(m => m.name == "Styles"), "markers includes Restyle");
   }
 }, {
   desc: "Changing the test element's background color",
+  searchFor: "Paint",
   setup: function(div) {
     div.setAttribute("class", "change-color");
   },
@@ -34,10 +44,17 @@ let TESTS = [{
     ok(markers.length > 0, "markers were returned");
     ok(!markers.some(m => m.name == "Reflow"), "markers doesn't include Reflow");
     ok(markers.some(m => m.name == "Paint"), "markers includes Paint");
+    for (let marker of markers.filter(m => m.name == "Paint")) {
+      // This change should generate at least one rectangle.
+      ok(marker.rectangles.length >= 1, "marker has one rectangle");
+      // One of the rectangles should contain the div.
+      ok(marker.rectangles.some(r => rectangleContains(r, 0, 0, 50, 50)));
+    }
     ok(markers.some(m => m.name == "Styles"), "markers includes Restyle");
   }
 }, {
   desc: "Changing the test element's classname",
+  searchFor: "Paint",
   setup: function(div) {
     div.setAttribute("class", "change-color add-class");
   },
@@ -49,6 +66,7 @@ let TESTS = [{
   }
 }, {
   desc: "sync console.time/timeEnd",
+  searchFor: "ConsoleTime",
   setup: function(div, docShell) {
     content.console.time("FOOBAR");
     content.console.timeEnd("FOOBAR");
@@ -88,7 +106,7 @@ let test = Task.async(function*() {
   info("Start recording");
   docShell.recordProfileTimelineMarkers = true;
 
-  for (let {desc, setup, check} of TESTS) {
+  for (let {desc, searchFor, setup, check} of TESTS) {
 
     info("Running test: " + desc);
 
@@ -96,7 +114,7 @@ let test = Task.async(function*() {
     docShell.popProfileTimelineMarkers();
 
     info("Running the test setup function");
-    let onMarkers = waitForMarkers(docShell);
+    let onMarkers = waitForMarkers(docShell, searchFor);
     setup(div, docShell);
     info("Waiting for new markers on the docShell");
     let markers = yield onMarkers;
@@ -126,22 +144,26 @@ function openUrl(url) {
   });
 }
 
-function waitForMarkers(docshell) {
+function waitForMarkers(docshell, searchFor) {
   return new Promise(function(resolve, reject) {
     let waitIterationCount = 0;
     let maxWaitIterationCount = 10; // Wait for 2sec maximum
+    let markers = [];
 
     let interval = setInterval(() => {
-      let markers = docshell.popProfileTimelineMarkers();
-      if (markers.length > 0) {
+      let newMarkers = docshell.popProfileTimelineMarkers();
+      markers = [...markers, ...newMarkers];
+      if (newMarkers.some(m => m.name == searchFor) ||
+          waitIterationCount > maxWaitIterationCount) {
         clearInterval(interval);
         resolve(markers);
-      }
-      if (waitIterationCount > maxWaitIterationCount) {
-        clearInterval(interval);
-        resolve([]);
       }
       waitIterationCount++;
     }, 200);
   });
+}
+
+function rectangleContains(rect, x, y, width, height) {
+  return rect.x <= x && rect.y <= y && rect.width >= width &&
+    rect.height >= height;
 }

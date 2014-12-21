@@ -77,8 +77,6 @@ abstract class BaseTest extends BaseRobocopTest {
     protected Solo mSolo;
     protected Driver mDriver;
     protected Actions mActions;
-    protected String mBaseUrl;
-    protected String mRawBaseUrl;
     protected String mProfile;
     public Device mDevice;
     protected DatabaseHelper mDatabaseHelper;
@@ -113,8 +111,6 @@ abstract class BaseTest extends BaseRobocopTest {
         super.setUp();
 
         // Create the intent to be used with all the important arguments.
-        mBaseUrl = mConfig.get("host").replaceAll("(/$)", "");
-        mRawBaseUrl = mConfig.get("rawhost").replaceAll("(/$)", "");
         Intent i = new Intent(Intent.ACTION_MAIN);
         mProfile = mConfig.get("profile");
         i.putExtra("args", "-no-remote -profile " + mProfile);
@@ -210,6 +206,7 @@ abstract class BaseTest extends BaseRobocopTest {
         boolean success = waitForCondition(new Condition() {
             @Override
             public boolean isSatisfied() {
+                mSolo.waitForView(R.id.url_edit_text);
                 EditText urlEditText = (EditText) mSolo.getView(R.id.url_edit_text);
                 if (urlEditText.isInputMethodTarget()) {
                     return true;
@@ -310,11 +307,11 @@ abstract class BaseTest extends BaseRobocopTest {
     }
 
     protected final String getAbsoluteUrl(String url) {
-        return mBaseUrl + "/" + url.replaceAll("(^/)", "");
+        return mBaseHostnameUrl + "/" + url.replaceAll("(^/)", "");
     }
 
     protected final String getAbsoluteRawUrl(String url) {
-        return mRawBaseUrl + "/" + url.replaceAll("(^/)", "");
+        return mBaseIpUrl + "/" + url.replaceAll("(^/)", "");
     }
 
     /*
@@ -583,6 +580,28 @@ abstract class BaseTest extends BaseRobocopTest {
             }
         }, MAX_WAIT_MS);
         mAsserter.ok(success, "Top site item was pinned: " + isPinned, null);
+    }
+
+    public void pinTopSite(String gridItemTitle) {
+        verifyPinned(false, gridItemTitle);
+        mSolo.clickLongOnText(gridItemTitle);
+        boolean dialogOpened = mSolo.waitForDialogToOpen();
+        mAsserter.ok(dialogOpened, "Pin site dialog opened: " + gridItemTitle, null);
+        boolean pinSiteFound = waitForText(StringHelper.CONTEXT_MENU_PIN_SITE);
+        mAsserter.ok(pinSiteFound, "Found pin site menu item", null);
+        mSolo.clickOnText(StringHelper.CONTEXT_MENU_PIN_SITE);
+        verifyPinned(true, gridItemTitle);
+    }
+
+    public void unpinTopSite(String gridItemTitle) {
+        verifyPinned(true, gridItemTitle);
+        mSolo.clickLongOnText(gridItemTitle);
+        boolean dialogOpened = mSolo.waitForDialogToOpen();
+        mAsserter.ok(dialogOpened, "Pin site dialog opened: " + gridItemTitle, null);
+        boolean unpinSiteFound = waitForText(StringHelper.CONTEXT_MENU_UNPIN_SITE);
+        mAsserter.ok(unpinSiteFound, "Found unpin site menu item", null);
+        mSolo.clickOnText(StringHelper.CONTEXT_MENU_UNPIN_SITE);
+        verifyPinned(false, gridItemTitle);
     }
 
     // Used to perform clicks on pop-up buttons without having to close the virtual keyboard

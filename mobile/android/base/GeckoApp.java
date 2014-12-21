@@ -160,8 +160,9 @@ public abstract class GeckoApp
     // after a version upgrade.
     private static final int CLEANUP_DEFERRAL_SECONDS = 15;
 
-    protected RelativeLayout mRootLayout;
+    protected OuterLayout mRootLayout;
     protected RelativeLayout mMainLayout;
+
     protected RelativeLayout mGeckoLayout;
     private View mCameraView;
     private OrientationEventListener mCameraOrientationEventListener;
@@ -1277,7 +1278,7 @@ public abstract class GeckoApp
         setContentView(getLayout());
 
         // Set up Gecko layout.
-        mRootLayout = (RelativeLayout) findViewById(R.id.root_layout);
+        mRootLayout = (OuterLayout) findViewById(R.id.root_layout);
         mGeckoLayout = (RelativeLayout) findViewById(R.id.gecko_layout);
         mMainLayout = (RelativeLayout) findViewById(R.id.main_layout);
 
@@ -1383,7 +1384,7 @@ public abstract class GeckoApp
             throw new RuntimeException("onLocaleReady must always be called from the UI thread.");
         }
 
-        final Locale loc = BrowserLocaleManager.parseLocaleCode(locale);
+        final Locale loc = Locales.parseLocaleCode(locale);
         if (loc.equals(mLastLocale)) {
             Log.d(LOGTAG, "New locale same as old; onLocaleReady has nothing to do.");
         }
@@ -1650,6 +1651,7 @@ public abstract class GeckoApp
             // updated before Gecko has restored.
             if (mShouldRestore) {
                 final JSONArray tabs = new JSONArray();
+                final JSONObject windowObject = new JSONObject();
                 SessionParser parser = new SessionParser() {
                     @Override
                     public void onTabRead(SessionTab sessionTab) {
@@ -1670,6 +1672,11 @@ public abstract class GeckoApp
                         }
                         tabs.put(tabObject);
                     }
+
+                    @Override
+                    public void onClosedTabsRead(final JSONArray closedTabData) throws JSONException {
+                        windowObject.put("closedTabs", closedTabData);
+                    }
                 };
 
                 if (mPrivateBrowsingSession == null) {
@@ -1679,7 +1686,8 @@ public abstract class GeckoApp
                 }
 
                 if (tabs.length() > 0) {
-                    sessionString = new JSONObject().put("windows", new JSONArray().put(new JSONObject().put("tabs", tabs))).toString();
+                    windowObject.put("tabs", tabs);
+                    sessionString = new JSONObject().put("windows", new JSONArray().put(windowObject)).toString();
                 } else {
                     throw new SessionRestoreException("No tabs could be read from session file");
                 }
@@ -1688,7 +1696,6 @@ public abstract class GeckoApp
             JSONObject restoreData = new JSONObject();
             restoreData.put("sessionString", sessionString);
             return restoreData.toString();
-
         } catch (JSONException e) {
             throw new SessionRestoreException(e);
         }
@@ -2119,7 +2126,7 @@ public abstract class GeckoApp
         final LocaleManager localeManager = BrowserLocaleManager.getInstance();
         final Locale changed = localeManager.onSystemConfigurationChanged(this, getResources(), newConfig, mLastLocale);
         if (changed != null) {
-            onLocaleChanged(BrowserLocaleManager.getLanguageTag(changed));
+            onLocaleChanged(Locales.getLanguageTag(changed));
         }
 
         // onConfigurationChanged is not called for 180 degree orientation changes,
@@ -2397,9 +2404,22 @@ public abstract class GeckoApp
     public static class MainLayout extends RelativeLayout {
         private TouchEventInterceptor mTouchEventInterceptor;
         private MotionEventInterceptor mMotionEventInterceptor;
+        private LayoutInterceptor mLayoutInterceptor;
 
         public MainLayout(Context context, AttributeSet attrs) {
             super(context, attrs);
+        }
+
+        @Override
+        protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+            super.onLayout(changed, left, top, right, bottom);
+            if (mLayoutInterceptor != null) {
+                mLayoutInterceptor.onLayout();
+            }
+        }
+
+        public void setLayoutInterceptor(LayoutInterceptor interceptor) {
+            mLayoutInterceptor = interceptor;
         }
 
         public void setTouchEventInterceptor(TouchEventInterceptor interceptor) {

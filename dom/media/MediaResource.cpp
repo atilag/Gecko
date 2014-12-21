@@ -367,9 +367,8 @@ ChannelMediaResource::OnStartRequest(nsIRequest* aRequest)
     mIgnoreResume = false;
   }
 
-  // Fires an initial progress event and sets up the stall counter so stall events
-  // fire if no download occurs within the required time frame.
-  mDecoder->Progress(false);
+  // Fires an initial progress event.
+  owner->DownloadProgressed();
 
   return NS_OK;
 }
@@ -1010,6 +1009,13 @@ ChannelMediaResource::CacheClientNotifyPrincipalChanged()
   mDecoder->NotifyPrincipalChanged();
 }
 
+void
+ChannelMediaResource::CacheClientNotifySuspendedStatusChanged()
+{
+  NS_ASSERTION(NS_IsMainThread(), "Don't call on non-main thread");
+  mDecoder->NotifySuspendedStatusChanged();
+}
+
 nsresult
 ChannelMediaResource::CacheClientSeek(int64_t aOffset, bool aResume)
 {
@@ -1068,8 +1074,6 @@ nsresult
 ChannelMediaResource::CacheClientSuspend()
 {
   Suspend(false);
-
-  mDecoder->NotifySuspendedStatusChanged();
   return NS_OK;
 }
 
@@ -1077,8 +1081,6 @@ nsresult
 ChannelMediaResource::CacheClientResume()
 {
   Resume();
-
-  mDecoder->NotifySuspendedStatusChanged();
   return NS_OK;
 }
 

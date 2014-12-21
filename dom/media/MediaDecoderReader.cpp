@@ -27,6 +27,16 @@ extern PRLogModuleInfo* gMediaDecoderLog;
 #define DECODER_LOG(x, ...)
 #endif
 
+PRLogModuleInfo* gMediaPromiseLog;
+
+void
+EnsureMediaPromiseLog()
+{
+  if (!gMediaPromiseLog) {
+    gMediaPromiseLog = PR_NewLogModule("MediaPromise");
+  }
+}
+
 class VideoQueueMemoryFunctor : public nsDequeFunctor {
 public:
   VideoQueueMemoryFunctor() : mSize(0) {}
@@ -63,14 +73,19 @@ MediaDecoderReader::MediaDecoderReader(AbstractMediaDecoder* aDecoder)
   , mDecoder(aDecoder)
   , mIgnoreAudioOutputFormat(false)
   , mStartTime(-1)
+  , mHitAudioDecodeError(false)
+  , mTaskQueueIsBorrowed(false)
   , mAudioDiscontinuity(false)
   , mVideoDiscontinuity(false)
+  , mShutdown(false)
 {
   MOZ_COUNT_CTOR(MediaDecoderReader);
+  EnsureMediaPromiseLog();
 }
 
 MediaDecoderReader::~MediaDecoderReader()
 {
+  MOZ_ASSERT(mShutdown);
   ResetDecode();
   MOZ_COUNT_DTOR(MediaDecoderReader);
 }
@@ -87,6 +102,16 @@ size_t MediaDecoderReader::SizeOfAudioQueueInBytes() const
   AudioQueueMemoryFunctor functor;
   mAudioQueue.LockedForEach(functor);
   return functor.mSize;
+}
+
+size_t MediaDecoderReader::SizeOfVideoQueueInFrames()
+{
+  return mVideoQueue.GetSize();
+}
+
+size_t MediaDecoderReader::SizeOfAudioQueueInFrames()
+{
+  return mAudioQueue.GetSize();
 }
 
 nsresult MediaDecoderReader::ResetDecode()
@@ -174,10 +199,11 @@ private:
   int64_t mTimeThreshold;
 };
 
-void
+nsRefPtr<MediaDecoderReader::VideoDataPromise>
 MediaDecoderReader::RequestVideoData(bool aSkipToNextKeyframe,
                                      int64_t aTimeThreshold)
 {
+  nsRefPtr<VideoDataPromise> p = mBaseVideoPromise.Ensure(__func__);
   bool skip = aSkipToNextKeyframe;
   while (VideoQueue().GetSize() == 0 &&
          !VideoQueue().IsFinished()) {
@@ -190,7 +216,7 @@ MediaDecoderReader::RequestVideoData(bool aSkipToNextKeyframe,
       // would hog the decode task queue.
       RefPtr<nsIRunnable> task(new RequestVideoWithSkipTask(this, aTimeThreshold));
       mTaskQueue->Dispatch(task);
-      return;
+      return p;
     }
   }
   if (VideoQueue().GetSize() > 0) {
@@ -199,15 +225,20 @@ MediaDecoderReader::RequestVideoData(bool aSkipToNextKeyframe,
       v->mDiscontinuity = true;
       mVideoDiscontinuity = false;
     }
-    GetCallback()->OnVideoDecoded(v);
+    mBaseVideoPromise.Resolve(v, __func__);
   } else if (VideoQueue().IsFinished()) {
-    GetCallback()->OnNotDecoded(MediaData::VIDEO_DATA, RequestSampleCallback::END_OF_STREAM);
+    mBaseVideoPromise.Reject(END_OF_STREAM, __func__);
+  } else {
+    MOZ_ASSERT(false, "Dropping this promise on the floor");
   }
+
+  return p;
 }
 
-void
+nsRefPtr<MediaDecoderReader::AudioDataPromise>
 MediaDecoderReader::RequestAudioData()
 {
+  nsRefPtr<AudioDataPromise> p = mBaseAudioPromise.Ensure(__func__);
   while (AudioQueue().GetSize() == 0 &&
          !AudioQueue().IsFinished()) {
     if (!DecodeAudioData()) {
@@ -222,7 +253,7 @@ MediaDecoderReader::RequestAudioData()
       RefPtr<nsIRunnable> task(NS_NewRunnableMethod(
           this, &MediaDecoderReader::RequestAudioData));
       mTaskQueue->Dispatch(task.forget());
-      return;
+      return p;
     }
   }
   if (AudioQueue().GetSize() > 0) {
@@ -231,102 +262,63 @@ MediaDecoderReader::RequestAudioData()
       a->mDiscontinuity = true;
       mAudioDiscontinuity = false;
     }
-    GetCallback()->OnAudioDecoded(a);
-    return;
+    mBaseAudioPromise.Resolve(a, __func__);
   } else if (AudioQueue().IsFinished()) {
-    GetCallback()->OnNotDecoded(MediaData::AUDIO_DATA, RequestSampleCallback::END_OF_STREAM);
-    return;
+    mBaseAudioPromise.Reject(mHitAudioDecodeError ? DECODE_ERROR : END_OF_STREAM, __func__);
+    mHitAudioDecodeError = false;
+  } else {
+    MOZ_ASSERT(false, "Dropping this promise on the floor");
   }
+
+  return p;
 }
 
-void
-MediaDecoderReader::SetCallback(RequestSampleCallback* aCallback)
+MediaTaskQueue*
+MediaDecoderReader::EnsureTaskQueue()
 {
-  mSampleDecodedCallback = aCallback;
-}
+  if (!mTaskQueue) {
+    MOZ_ASSERT(!mTaskQueueIsBorrowed);
+    RefPtr<SharedThreadPool> decodePool(GetMediaDecodeThreadPool());
+    NS_ENSURE_TRUE(decodePool, nullptr);
 
-void
-MediaDecoderReader::SetTaskQueue(MediaTaskQueue* aTaskQueue)
-{
-  mTaskQueue = aTaskQueue;
+    mTaskQueue = new MediaTaskQueue(decodePool.forget());
+  }
+
+  return mTaskQueue;
 }
 
 void
 MediaDecoderReader::BreakCycles()
 {
-  if (mSampleDecodedCallback) {
-    mSampleDecodedCallback->BreakCycles();
-    mSampleDecodedCallback = nullptr;
-  }
   mTaskQueue = nullptr;
 }
 
-void
+nsRefPtr<ShutdownPromise>
 MediaDecoderReader::Shutdown()
 {
-  MOZ_ASSERT(mDecoder->OnDecodeThread());
+  MOZ_ASSERT(OnDecodeThread());
+  mShutdown = true;
+
+  mBaseAudioPromise.RejectIfExists(END_OF_STREAM, __func__);
+  mBaseVideoPromise.RejectIfExists(END_OF_STREAM, __func__);
+
   ReleaseMediaResources();
-}
+  nsRefPtr<ShutdownPromise> p;
 
-AudioDecodeRendezvous::AudioDecodeRendezvous()
-  : mMonitor("AudioDecodeRendezvous")
-  , mHaveResult(false)
-{
-}
-
-AudioDecodeRendezvous::~AudioDecodeRendezvous()
-{
-}
-
-void
-AudioDecodeRendezvous::OnAudioDecoded(AudioData* aSample)
-{
-  MonitorAutoLock mon(mMonitor);
-  mSample = aSample;
-  mStatus = NS_OK;
-  mHaveResult = true;
-  mon.NotifyAll();
-}
-
-void
-AudioDecodeRendezvous::OnNotDecoded(MediaData::Type aType, NotDecodedReason aReason)
-{
-  MOZ_ASSERT(aType == MediaData::AUDIO_DATA);
-  MonitorAutoLock mon(mMonitor);
-  mSample = nullptr;
-  mStatus = aReason == DECODE_ERROR ? NS_ERROR_FAILURE : NS_OK;
-  mHaveResult = true;
-  mon.NotifyAll();
-}
-
-void
-AudioDecodeRendezvous::Reset()
-{
-  MonitorAutoLock mon(mMonitor);
-  mHaveResult = false;
-  mStatus = NS_OK;
-  mSample = nullptr;
-}
-
-nsresult
-AudioDecodeRendezvous::Await(nsRefPtr<AudioData>& aSample)
-{
-  MonitorAutoLock mon(mMonitor);
-  while (!mHaveResult) {
-    mon.Wait();
+  // Spin down the task queue if necessary. We wait until BreakCycles to null
+  // out mTaskQueue, since otherwise any remaining tasks could crash when they
+  // invoke GetTaskQueue()->IsCurrentThreadIn().
+  if (mTaskQueue && !mTaskQueueIsBorrowed) {
+    // If we own our task queue, shutdown ends when the task queue is done.
+    p = mTaskQueue->BeginShutdown();
+  } else {
+    // If we don't own our task queue, we resolve immediately (though
+    // asynchronously).
+    p = new ShutdownPromise(__func__);
+    p->Resolve(true, __func__);
   }
-  mHaveResult = false;
-  aSample = mSample;
-  return mStatus;
-}
 
-void
-AudioDecodeRendezvous::Cancel()
-{
-  MonitorAutoLock mon(mMonitor);
-  mStatus = NS_ERROR_ABORT;
-  mHaveResult = true;
-  mon.NotifyAll();
+  return p;
 }
 
 } // namespace mozilla

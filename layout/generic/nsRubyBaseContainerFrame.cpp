@@ -7,6 +7,7 @@
 /* rendering object for CSS "display: ruby-base-container" */
 
 #include "nsRubyBaseContainerFrame.h"
+#include "nsContentUtils.h"
 #include "nsLineLayout.h"
 #include "nsPresContext.h"
 #include "nsStyleContext.h"
@@ -273,14 +274,6 @@ nsRubyBaseContainerFrame::Reflow(nsPresContext* aPresContext,
 
   aStatus = NS_FRAME_COMPLETE;
   WritingMode lineWM = aReflowState.mLineLayout->GetWritingMode();
-  WritingMode frameWM = aReflowState.GetWritingMode();
-  LogicalMargin borderPadding = aReflowState.ComputedLogicalBorderPadding();
-  nscoord startEdge = borderPadding.IStart(frameWM);
-  nscoord endEdge = aReflowState.AvailableISize() - borderPadding.IEnd(frameWM);
-
-  aReflowState.mLineLayout->BeginSpan(this, &aReflowState,
-                                      startEdge, endEdge, &mBaseline);
-
   LogicalSize availSize(lineWM, aReflowState.AvailableWidth(),
                         aReflowState.AvailableHeight());
 
@@ -290,6 +283,9 @@ nsRubyBaseContainerFrame::Reflow(nsPresContext* aPresContext,
   // They are conceptually the state of the RTCs, but we don't actually
   // reflow those RTCs in this code. These two arrays are holders of
   // the reflow states and line layouts.
+  // Since there are pointers refer to reflow states and line layouts,
+  // it is necessary to guarantee that they won't be moved. For this
+  // reason, they are wrapped in UniquePtr here.
   nsAutoTArray<UniquePtr<nsHTMLReflowState>, RTC_ARRAY_SIZE> reflowStates;
   nsAutoTArray<UniquePtr<nsLineLayout>, RTC_ARRAY_SIZE> lineLayouts;
   reflowStates.SetCapacity(totalCount);
@@ -315,8 +311,10 @@ nsRubyBaseContainerFrame::Reflow(nsPresContext* aPresContext,
       aPresContext, *aReflowState.parentReflowState, textContainer, availSize);
     reflowStates.AppendElement(reflowState);
     reflowStateArray->AppendElement(reflowState);
-    nsLineLayout* lineLayout = new nsLineLayout(
-      aPresContext, reflowState->mFloatManager, reflowState, nullptr);
+    nsLineLayout* lineLayout = new nsLineLayout(aPresContext,
+                                                reflowState->mFloatManager,
+                                                reflowState, nullptr,
+                                                aReflowState.mLineLayout);
     lineLayouts.AppendElement(lineLayout);
 
     // Line number is useless for ruby text
@@ -334,7 +332,15 @@ nsRubyBaseContainerFrame::Reflow(nsPresContext* aPresContext,
                                 reflowState->ComputedISize(),
                                 NS_UNCONSTRAINEDSIZE,
                                 false, false, lineWM, containerWidth);
+    lineLayout->AttachRootFrameToBaseLineLayout();
   }
+
+  WritingMode frameWM = aReflowState.GetWritingMode();
+  LogicalMargin borderPadding = aReflowState.ComputedLogicalBorderPadding();
+  nscoord startEdge = borderPadding.IStart(frameWM);
+  nscoord endEdge = aReflowState.AvailableISize() - borderPadding.IEnd(frameWM);
+  aReflowState.mLineLayout->BeginSpan(this, &aReflowState,
+                                      startEdge, endEdge, &mBaseline);
 
   // Reflow pairs excluding any span
   nscoord pairsISize = ReflowPairs(aPresContext, aReflowState,
@@ -394,7 +400,7 @@ struct MOZ_STACK_CLASS nsRubyBaseContainerFrame::PullFrameState
   ContinuationTraversingState mBase;
   nsAutoTArray<ContinuationTraversingState, RTC_ARRAY_SIZE> mTexts;
 
-  PullFrameState(nsRubyBaseContainerFrame* aFrame);
+  explicit PullFrameState(nsRubyBaseContainerFrame* aFrame);
 };
 
 nscoord
@@ -518,15 +524,40 @@ nsRubyBaseContainerFrame::ReflowOnePair(nsPresContext* aPresContext,
   nscoord istart = aReflowState.mLineLayout->GetCurrentICoord();
   nscoord pairISize = 0;
 
+  nsAutoString baseText;
+  if (aBaseFrame) {
+    if (!nsContentUtils::GetNodeTextContent(aBaseFrame->GetContent(),
+                                            true, baseText)) {
+      NS_RUNTIMEABORT("OOM");
+    }
+  }
+
   // Reflow text frames
   for (uint32_t i = 0; i < rtcCount; i++) {
-    if (aTextFrames[i]) {
-      MOZ_ASSERT(aTextFrames[i]->GetType() == nsGkAtoms::rubyTextFrame);
+    nsIFrame* textFrame = aTextFrames[i];
+    if (textFrame) {
+      MOZ_ASSERT(textFrame->GetType() == nsGkAtoms::rubyTextFrame);
+      nsAutoString annotationText;
+      if (!nsContentUtils::GetNodeTextContent(textFrame->GetContent(),
+                                              true, annotationText)) {
+        NS_RUNTIMEABORT("OOM");
+      }
+      // Per CSS Ruby spec, the content comparison for auto-hiding
+      // takes place prior to white spaces collapsing (white-space)
+      // and text transformation (text-transform), and ignores elements
+      // (considers only the textContent of the boxes). Which means
+      // using the content tree text comparison is correct.
+      if (annotationText.Equals(baseText)) {
+        textFrame->AddStateBits(NS_RUBY_TEXT_FRAME_AUTOHIDE);
+      } else {
+        textFrame->RemoveStateBits(NS_RUBY_TEXT_FRAME_AUTOHIDE);
+      }
+
       nsReflowStatus reflowStatus;
       nsHTMLReflowMetrics metrics(*aReflowStates[i]);
 
       bool pushedFrame;
-      aReflowStates[i]->mLineLayout->ReflowFrame(aTextFrames[i], reflowStatus,
+      aReflowStates[i]->mLineLayout->ReflowFrame(textFrame, reflowStatus,
                                                  &metrics, pushedFrame);
       if (NS_INLINE_IS_BREAK(reflowStatus)) {
         // If any breaking occurs when reflowing a ruby text frame,
@@ -571,6 +602,9 @@ nsRubyBaseContainerFrame::ReflowOnePair(nsPresContext* aPresContext,
   for (uint32_t i = 0; i < rtcCount; i++) {
     nsLineLayout* lineLayout = aReflowStates[i]->mLineLayout;
     lineLayout->AdvanceICoord(icoord - lineLayout->GetCurrentICoord());
+    if (aBaseFrame && aTextFrames[i]) {
+      lineLayout->AttachLastFrameToBaseLineLayout();
+    }
   }
 
   mPairCount++;

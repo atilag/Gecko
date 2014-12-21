@@ -341,7 +341,7 @@ ClientTiledPaintedLayer::RenderLayer()
   TILING_LOG("TILING %p: Initial low-precision valid region %s\n", this, Stringify(mLowPrecisionValidRegion).c_str());
 
   nsIntRegion neededRegion = mVisibleRegion;
-#ifndef MOZ_GFX_OPTIMIZE_MOBILE
+#ifndef MOZ_IGNORE_PAINT_WILL_RESAMPLE
   // This is handled by PadDrawTargetOutFromRegion in TiledContentClient for mobile
   if (MayResample()) {
     // If we're resampling then bilinear filtering can read up to 1 pixel
@@ -468,6 +468,18 @@ ClientTiledPaintedLayer::RenderLayer()
   // If we get here, we've done all the high- and low-precision
   // paints we wanted to do, so we can finish the paint and chill.
   EndPaint();
+}
+
+void
+ClientTiledPaintedLayer::PrintInfo(std::stringstream& aStream, const char* aPrefix)
+{
+  PaintedLayer::PrintInfo(aStream, aPrefix);
+  if (mContentClient) {
+    aStream << "\n";
+    nsAutoCString pfx(aPrefix);
+    pfx += "  ";
+    mContentClient->PrintInfo(aStream, pfx.get());
+  }
 }
 
 } // mozilla

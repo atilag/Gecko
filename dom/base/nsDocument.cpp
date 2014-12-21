@@ -1440,6 +1440,8 @@ nsDOMStyleSheetSetList::nsDOMStyleSheetSetList(nsIDocument* aDocument)
 void
 nsDOMStyleSheetSetList::EnsureFresh()
 {
+  MOZ_ASSERT(NS_IsMainThread());
+
   mNames.Clear();
 
   if (!mDocument) {
@@ -1993,6 +1995,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsDocument)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mStateObjectCached)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mUndoManager)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAnimationTimeline)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPendingPlayerTracker)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTemplateContentsOwner)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mChildrenCollection)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRegistry)
@@ -2076,6 +2079,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDocument)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mCachedEncoder)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mUndoManager)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mAnimationTimeline)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mPendingPlayerTracker)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mTemplateContentsOwner)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mChildrenCollection)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mRegistry)
@@ -2985,6 +2989,33 @@ nsDocument::InitCSP(nsIChannel* aChannel)
     }
   }
 
+  // ----- Set up any Referrer Policy specified by CSP
+  bool hasReferrerPolicy = false;
+  uint32_t referrerPolicy = mozilla::net::RP_Default;
+  rv = csp->GetReferrerPolicy(&referrerPolicy, &hasReferrerPolicy);
+  NS_ENSURE_SUCCESS(rv, rv);
+  if (hasReferrerPolicy) {
+    // Referrer policy spec (section 6.1) says that once the referrer policy
+    // is set, any future attempts to change it result in No-Referrer.
+    if (!mReferrerPolicySet) {
+      mReferrerPolicy = static_cast<ReferrerPolicy>(referrerPolicy);
+      mReferrerPolicySet = true;
+    } else if (mReferrerPolicy != referrerPolicy) {
+      mReferrerPolicy = mozilla::net::RP_No_Referrer;
+#ifdef PR_LOGGING
+      {
+        PR_LOG(gCspPRLog, PR_LOG_DEBUG, ("%s %s",
+                "CSP wants to set referrer, but nsDocument"
+                "already has it set. No referrers will be sent"));
+      }
+#endif
+    }
+
+    // Referrer Policy is set separately for the speculative parser in
+    // nsHTMLDocument::StartDocumentLoad() so there's nothing to do here for
+    // speculative loads.
+  }
+
   rv = principal->SetCsp(csp);
   NS_ENSURE_SUCCESS(rv, rv);
 #ifdef PR_LOGGING
@@ -3565,7 +3596,12 @@ nsDocument::SetBaseURI(nsIURI* aURI)
   NS_ENSURE_SUCCESS(rv, rv);
   if (csp) {
     bool permitsBaseURI = false;
-    rv = csp->PermitsBaseURI(aURI, &permitsBaseURI);
+
+    // base-uri is only enforced if explicitly defined in the
+    // policy - do *not* consult default-src, see:
+    // http://www.w3.org/TR/CSP2/#directive-default-src
+    rv = csp->Permits(aURI, nsIContentSecurityPolicy::BASE_URI_DIRECTIVE,
+                      true, &permitsBaseURI);
     NS_ENSURE_SUCCESS(rv, rv);
     if (!permitsBaseURI) {
       return NS_OK;
@@ -5232,7 +5268,7 @@ nsIDocument::RemoveAnonymousContent(AnonymousContent& aContent,
                                     ErrorResult& aRv)
 {
   nsIPresShell* shell = GetShell();
-  if (!shell) {
+  if (!shell || !shell->GetCanvasFrame()) {
     aRv.Throw(NS_ERROR_UNEXPECTED);
     return;
   }
@@ -6260,7 +6296,13 @@ nsDocument::RegisterElement(JSContext* aCx, const nsAString& aType,
     return;
   }
 
-  aRetval.set(JS_GetFunctionObject(constructor));
+  JS::Rooted<JSObject*> constructorObj(aCx, JS_GetFunctionObject(constructor));
+  if (!JS_LinkConstructorAndPrototype(aCx, constructorObj, protoObject)) {
+    rv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+    return;
+  }
+
+  aRetval.set(constructorObj);
 }
 
 void
@@ -7349,6 +7391,16 @@ nsDocument::GetAnimationController()
   }
 
   return mAnimationController;
+}
+
+PendingPlayerTracker*
+nsDocument::GetOrCreatePendingPlayerTracker()
+{
+  if (!mPendingPlayerTracker) {
+    mPendingPlayerTracker = new PendingPlayerTracker();
+  }
+
+  return mPendingPlayerTracker;
 }
 
 /**
@@ -10175,18 +10227,25 @@ nsDocument::FindImageMap(const nsAString& aUseMapValue)
 }
 
 #define DEPRECATED_OPERATION(_op) #_op "Warning",
-static const char* kWarnings[] = {
+static const char* kDeprecationWarnings[] = {
 #include "nsDeprecatedOperationList.h"
   nullptr
 };
 #undef DEPRECATED_OPERATION
+
+#define DOCUMENT_WARNING(_op) #_op "Warning",
+static const char* kDocumentWarnings[] = {
+#include "nsDocumentWarningList.h"
+  nullptr
+};
+#undef DOCUMENT_WARNING
 
 bool
 nsIDocument::HasWarnedAbout(DeprecatedOperations aOperation)
 {
   static_assert(eDeprecatedOperationCount <= 64,
                 "Too many deprecated operations");
-  return mWarnedAbout & (1ull << aOperation);
+  return mDeprecationWarnedAbout & (1ull << aOperation);
 }
 
 void
@@ -10196,13 +10255,41 @@ nsIDocument::WarnOnceAbout(DeprecatedOperations aOperation,
   if (HasWarnedAbout(aOperation)) {
     return;
   }
-  mWarnedAbout |= (1ull << aOperation);
+  mDeprecationWarnedAbout |= (1ull << aOperation);
   uint32_t flags = asError ? nsIScriptError::errorFlag
                            : nsIScriptError::warningFlag;
   nsContentUtils::ReportToConsole(flags,
                                   NS_LITERAL_CSTRING("DOM Core"), this,
                                   nsContentUtils::eDOM_PROPERTIES,
-                                  kWarnings[aOperation]);
+                                  kDeprecationWarnings[aOperation]);
+}
+
+bool
+nsIDocument::HasWarnedAbout(DocumentWarnings aWarning)
+{
+  static_assert(eDocumentWarningCount <= 64,
+                "Too many document warnings");
+  return mDocWarningWarnedAbout & (1ull << aWarning);
+}
+
+void
+nsIDocument::WarnOnceAbout(DocumentWarnings aWarning,
+                           bool asError /* = false */,
+                           const char16_t **aParams /* = nullptr */,
+                           uint32_t aParamsLength /* = 0 */)
+{
+  if (HasWarnedAbout(aWarning)) {
+    return;
+  }
+  mDocWarningWarnedAbout |= (1ull << aWarning);
+  uint32_t flags = asError ? nsIScriptError::errorFlag
+                           : nsIScriptError::warningFlag;
+  nsContentUtils::ReportToConsole(flags,
+                                  NS_LITERAL_CSTRING("DOM Core"), this,
+                                  nsContentUtils::eDOM_PROPERTIES,
+                                  kDocumentWarnings[aWarning],
+                                  aParams,
+                                  aParamsLength);
 }
 
 nsresult

@@ -175,16 +175,22 @@ void MediaOmxReader::ReleaseDecoder()
   mOmxDecoder.clear();
 }
 
-void MediaOmxReader::Shutdown()
+nsRefPtr<ShutdownPromise>
+MediaOmxReader::Shutdown()
 {
   nsCOMPtr<nsIRunnable> cancelEvent =
     NS_NewRunnableMethod(this, &MediaOmxReader::CancelProcessCachedData);
   NS_DispatchToMainThread(cancelEvent);
 
-  ReleaseMediaResources();
-  nsCOMPtr<nsIRunnable> event =
-    NS_NewRunnableMethod(this, &MediaOmxReader::ReleaseDecoder);
-  NS_DispatchToMainThread(event);
+  nsRefPtr<ShutdownPromise> p = MediaDecoderReader::Shutdown();
+
+  // Wait for the superclass to finish tearing things down before releasing
+  // the decoder on the main thread.
+  nsCOMPtr<nsIThread> mt;
+  NS_GetMainThread(getter_AddRefs(mt));
+  p->Then(mt.get(), __func__, this, &MediaOmxReader::ReleaseDecoder, &MediaOmxReader::ReleaseDecoder);
+
+  return p;
 }
 
 bool MediaOmxReader::IsWaitingMediaResources()
@@ -539,7 +545,8 @@ bool MediaOmxReader::DecodeAudioData()
                                       source.mAudioChannels));
 }
 
-void MediaOmxReader::Seek(int64_t aTarget, int64_t aStartTime, int64_t aEndTime, int64_t aCurrentTime)
+nsRefPtr<MediaDecoderReader::SeekPromise>
+MediaOmxReader::Seek(int64_t aTarget, int64_t aStartTime, int64_t aEndTime, int64_t aCurrentTime)
 {
   NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
   EnsureActive();
@@ -565,7 +572,7 @@ void MediaOmxReader::Seek(int64_t aTarget, int64_t aStartTime, int64_t aEndTime,
     mAudioSeekTimeUs = mVideoSeekTimeUs = aTarget;
   }
 
-  GetCallback()->OnSeekCompleted(NS_OK);
+  return SeekPromise::CreateAndResolve(true, __func__);
 }
 
 void MediaOmxReader::SetIdle() {

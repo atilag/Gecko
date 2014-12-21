@@ -2,13 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-"use strict"
-
-/* static functions */
-const DEBUG = false;
-function debug(s) {
-  dump("-*- SettingsService: " + s + "\n");
-}
+"use strict";
 
 const Ci = Components.interfaces;
 const Cu = Components.utils;
@@ -17,14 +11,33 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import('resource://gre/modules/SettingsRequestManager.jsm');
 
+/* static functions */
+let DEBUG = false;
+let VERBOSE = false;
+
+try {
+  DEBUG   =
+    Services.prefs.getBoolPref("dom.mozSettings.SettingsService.debug.enabled");
+  VERBOSE =
+    Services.prefs.getBoolPref("dom.mozSettings.SettingsService.verbose.enabled");
+} catch (ex) { }
+
+function debug(s) {
+  dump("-*- SettingsService: " + s + "\n");
+}
+
 XPCOMUtils.defineLazyServiceGetter(this, "uuidgen",
                                    "@mozilla.org/uuid-generator;1",
                                    "nsIUUIDGenerator");
 XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
                                    "@mozilla.org/childprocessmessagemanager;1",
                                    "nsIMessageSender");
+XPCOMUtils.defineLazyServiceGetter(this, "mrm",
+                                   "@mozilla.org/memory-reporter-manager;1",
+                                   "nsIMemoryReporterManager");
 
-const nsIClassInfo            = Ci.nsIClassInfo;
+const nsIClassInfo                   = Ci.nsIClassInfo;
+const kXpcomShutdownObserverTopic    = "xpcom-shutdown";
 
 const SETTINGSSERVICELOCK_CONTRACTID = "@mozilla.org/settingsServiceLock;1";
 const SETTINGSSERVICELOCK_CID        = Components.ID("{d7a395a0-e292-11e1-834e-1761d57f5f99}");
@@ -39,14 +52,14 @@ function makeSettingsServiceRequest(aCallback, aName, aValue) {
 };
 
 function SettingsServiceLock(aSettingsService, aTransactionCallback) {
-  if (DEBUG) debug("settingsServiceLock constr!");
+  if (VERBOSE) debug("settingsServiceLock constr!");
   this._open = true;
   this._settingsService = aSettingsService;
   this._id = uuidgen.generateUUID().toString();
   this._transactionCallback = aTransactionCallback;
   this._requests = {};
   let closeHelper = function() {
-    if (DEBUG) debug("closing lock " + this._id);
+    if (VERBOSE) debug("closing lock " + this._id);
     this._open = false;
     this.runOrFinalizeQueries();
   }.bind(this);
@@ -76,6 +89,7 @@ SettingsServiceLock.prototype = {
 
   runOrFinalizeQueries: function() {
     if (!this._requests || Object.keys(this._requests).length == 0) {
+      this._settingsService.unregisterLock(this._id);
       cpmm.sendAsyncMessage("Settings:Finalize", {lockID: this._id}, undefined, Services.scriptSecurityManager.getSystemPrincipal());
     } else {
       cpmm.sendAsyncMessage("Settings:Run", {lockID: this._id}, undefined, Services.scriptSecurityManager.getSystemPrincipal());
@@ -90,13 +104,13 @@ SettingsServiceLock.prototype = {
     if(msg.lockID != this._id) {
       return;
     }
-    if (DEBUG) debug("receiveMessage (" + this._id + "): " + aMessage.name);
+    if (VERBOSE) debug("receiveMessage (" + this._id + "): " + aMessage.name);
     // Finalizing a transaction does not return a request ID since we are
     // supposed to fire callbacks.
     if (!msg.requestID) {
       switch (aMessage.name) {
         case "Settings:Finalize:OK":
-          if (DEBUG) debug("Lock finalize ok!");
+          if (VERBOSE) debug("Lock finalize ok!");
           this.callTransactionHandle();
           break;
         case "Settings:Finalize:KO":
@@ -149,7 +163,7 @@ SettingsServiceLock.prototype = {
   },
 
   get: function get(aName, aCallback) {
-    if (DEBUG) debug("get (" + this._id + "): " + aName);
+    if (VERBOSE) debug("get (" + this._id + "): " + aName);
     if (!this._open) {
       dump("Settings lock not open!\n");
       throw Components.results.NS_ERROR_ABORT;
@@ -164,7 +178,7 @@ SettingsServiceLock.prototype = {
   },
 
   set: function set(aName, aValue, aCallback) {
-    if (DEBUG) debug("set: " + aName + " " + aValue);
+    if (VERBOSE) debug("set: " + aName + " " + aValue);
     if (!this._open) {
       throw "Settings lock not open";
     }
@@ -219,18 +233,82 @@ const SETTINGSSERVICE_CID        = Components.ID("{f656f0c0-f776-11e1-a21f-08002
 
 function SettingsService()
 {
-  if (DEBUG) debug("settingsService Constructor");
+  if (VERBOSE) debug("settingsService Constructor");
+  this._locks = [];
+  this._createdLocks = 0;
+  this._unregisteredLocks = 0;
+  this.init();
 }
 
 SettingsService.prototype = {
 
+  init: function() {
+    Services.obs.addObserver(this, kXpcomShutdownObserverTopic, false);
+    mrm.registerStrongReporter(this);
+  },
+
+  uninit: function() {
+    Services.obs.removeObserver(this, kXpcomShutdownObserverTopic);
+    mrm.unregisterStrongReporter(this);
+  },
+
+  observe: function(aSubject, aTopic, aData) {
+    if (VERBOSE) debug("observe: " + aTopic);
+    if (aTopic === kXpcomShutdownObserverTopic) {
+      this.uninit();
+    }
+  },
+
   createLock: function createLock(aCallback) {
     var lock = new SettingsServiceLock(this, aCallback);
+    this.registerLock(lock._id);
     return lock;
   },
 
+  registerLock: function(aLockID) {
+    this._locks.push(aLockID);
+    this._createdLocks++;
+  },
+
+  unregisterLock: function(aLockID) {
+    let lock_index = this._locks.indexOf(aLockID);
+    if (lock_index != -1) {
+      if (VERBOSE) debug("Unregistering lock " + aLockID);
+      this._locks.splice(lock_index, 1);
+      this._unregisteredLocks++;
+    }
+  },
+
+  collectReports: function(aCallback, aData, aAnonymize) {
+    aCallback.callback("",
+                       "settings-service-locks/alive",
+                       Ci.nsIMemoryReporter.KIND_OTHER,
+                       Ci.nsIMemoryReporter.UNITS_COUNT,
+                       this._locks.length,
+                       "The number of service locks that are currently alives.",
+                       aData);
+
+    aCallback.callback("",
+                       "settings-service-locks/created",
+                       Ci.nsIMemoryReporter.KIND_OTHER,
+                       Ci.nsIMemoryReporter.UNITS_COUNT,
+                       this._createdLocks,
+                       "The number of service locks that were created.",
+                       aData);
+
+    aCallback.callback("",
+                       "settings-service-locks/deleted",
+                       Ci.nsIMemoryReporter.KIND_OTHER,
+                       Ci.nsIMemoryReporter.UNITS_COUNT,
+                       this._unregisteredLocks,
+                       "The number of service locks that were deleted.",
+                       aData);
+  },
+
   classID : SETTINGSSERVICE_CID,
-  QueryInterface : XPCOMUtils.generateQI([Ci.nsISettingsService])
+  QueryInterface : XPCOMUtils.generateQI([Ci.nsISettingsService,
+                                          Ci.nsIObserver,
+                                          Ci.nsIMemoryReporter])
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([SettingsService, SettingsServiceLock]);

@@ -86,6 +86,7 @@ namespace mozilla {
 class CSSStyleSheet;
 class ErrorResult;
 class EventStates;
+class PendingPlayerTracker;
 class SVGAttrAnimationRuleProcessor;
 
 namespace css {
@@ -1822,6 +1823,17 @@ public:
   // mAnimationController isn't yet initialized.
   virtual nsSMILAnimationController* GetAnimationController() = 0;
 
+  // Gets the tracker for animation players that are waiting to start.
+  // Returns nullptr if there is no pending player tracker for this document
+  // which will be the case if there have never been any CSS animations or
+  // transitions on elements in the document.
+  virtual mozilla::PendingPlayerTracker* GetPendingPlayerTracker() = 0;
+
+  // Gets the tracker for animation players that are waiting to start and
+  // creates it if it doesn't already exist. As a result, the return value
+  // will never be nullptr.
+  virtual mozilla::PendingPlayerTracker* GetOrCreatePendingPlayerTracker() = 0;
+
   // Makes the images on this document capable of having their animation
   // active or suspended. An Image will animate as long as at least one of its
   // owning Documents needs it to animate; otherwise it can suspend.
@@ -2102,6 +2114,18 @@ public:
 #undef DEPRECATED_OPERATION
   bool HasWarnedAbout(DeprecatedOperations aOperation);
   void WarnOnceAbout(DeprecatedOperations aOperation, bool asError = false);
+
+#define DOCUMENT_WARNING(_op) e##_op,
+  enum DocumentWarnings {
+#include "nsDocumentWarningList.h"
+    eDocumentWarningCount
+  };
+#undef DOCUMENT_WARNING
+  bool HasWarnedAbout(DocumentWarnings aWarning);
+  void WarnOnceAbout(DocumentWarnings aWarning,
+                     bool asError = false,
+                     const char16_t **aParams = nullptr,
+                     uint32_t aParamsLength = 0);
 
   virtual void PostVisibilityUpdateEvent() = 0;
   
@@ -2459,7 +2483,8 @@ public:
   bool DidFireDOMContentLoaded() const { return mDidFireDOMContentLoaded; }
 
 private:
-  uint64_t mWarnedAbout;
+  uint64_t mDeprecationWarnedAbout;
+  uint64_t mDocWarningWarnedAbout;
   SelectorCache mSelectorCache;
 
 protected:

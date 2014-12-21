@@ -423,9 +423,6 @@ SocialFlyout = {
         iframe.removeEventListener("load", documentLoaded, true);
         cb();
       }, true);
-      // Force a layout flush by calling .clientTop so
-      // that the docShell of this frame is created
-      iframe.clientTop;
       Social.setErrorListener(iframe, SocialFlyout.setFlyoutErrorMessage.bind(SocialFlyout))
       iframe.setAttribute("src", aURL);
     } else {
@@ -552,6 +549,7 @@ SocialShare = {
       button.setAttribute("image", provider.iconURL);
       button.setAttribute("tooltip", "share-button-tooltip");
       button.setAttribute("origin", provider.origin);
+      button.setAttribute("label", provider.name);
       button.setAttribute("oncommand", "SocialShare.sharePage(this.getAttribute('origin'));");
       if (provider == selectedProvider) {
         this.defaultButton = button;
@@ -1298,11 +1296,11 @@ SocialStatus = {
     }
   },
 
-  _onclose: function() {
-    let notificationFrameId = "social-status-" + origin;
-    let frame = document.getElementById(notificationFrameId);
+  _onclose: function(frame) {
     frame.removeEventListener("close", this._onclose, true);
     frame.removeEventListener("click", this._onclick, true);
+    if (frame.socialErrorListener)
+      frame.socialErrorListener.remove();
   },
 
   _onclick: function() {
@@ -1317,8 +1315,9 @@ SocialStatus = {
     PanelFrame.showPopup(window, aToolbarButton, "social", origin,
                          provider.statusURL, provider.getPageSize("status"),
                          (frame) => {
-                          frame.addEventListener("close", this._onclose, true);
+                          frame.addEventListener("close", () => { SocialStatus._onclose(frame) }, true);
                           frame.addEventListener("click", this._onclick, true);
+                          Social.setErrorListener(frame, this.setPanelErrorMessage.bind(this));
                         });
     Services.telemetry.getHistogramById("SOCIAL_TOOLBAR_BUTTONS").add(1);
   },

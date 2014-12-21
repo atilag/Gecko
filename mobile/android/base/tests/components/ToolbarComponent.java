@@ -76,6 +76,16 @@ public class ToolbarComponent extends BaseComponent {
         return this;
     }
 
+    public ToolbarComponent assertIsUrlEditTextSelected() {
+        fAssertTrue("The edit text is selected", isUrlEditTextSelected());
+        return this;
+    }
+
+    public ToolbarComponent assertIsUrlEditTextNotSelected() {
+        fAssertFalse("The edit text is not selected", isUrlEditTextSelected());
+        return this;
+    }
+
     /**
      * Returns the root View for the browser toolbar.
      */
@@ -112,8 +122,8 @@ public class ToolbarComponent extends BaseComponent {
     /**
      * Returns the View for the edit cancel button in the browser toolbar.
      */
-    private ImageButton getEditCancelButton() {
-        return (ImageButton) getToolbarView().findViewById(R.id.edit_cancel);
+    private View getEditCancelButton() {
+        return getToolbarView().findViewById(R.id.edit_cancel);
     }
 
     private String getTitle() {
@@ -175,7 +185,15 @@ public class ToolbarComponent extends BaseComponent {
     public ToolbarComponent dismissEditingMode() {
         assertIsEditing();
 
-        mSolo.clickOnView(getEditCancelButton());
+        if (DeviceHelper.isTablet()) {
+            final EditText urlEditText = getUrlEditText();
+            if (urlEditText.isFocused()) {
+                mSolo.goBack();
+            }
+            mSolo.goBack();
+        } else {
+            mSolo.clickOnView(getEditCancelButton());
+        }
 
         waitForNotEditing();
 
@@ -192,7 +210,7 @@ public class ToolbarComponent extends BaseComponent {
                 urlEditText.isInputMethodTarget());
 
         mSolo.clearEditText(urlEditText);
-        mSolo.enterText(urlEditText, url);
+        mSolo.typeText(urlEditText, url);
 
         return this;
     }
@@ -245,5 +263,9 @@ public class ToolbarComponent extends BaseComponent {
                 return !isEditing();
             }
         });
+    }
+
+    private boolean isUrlEditTextSelected() {
+        return getUrlEditText().isSelected();
     }
 }

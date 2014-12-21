@@ -21,6 +21,7 @@
 #include "mozilla/ipc/Shmem.h"          // for Shmem
 #include "mozilla/layers/AtomicRefCountedWithFinalize.h"
 #include "mozilla/layers/CompositorTypes.h"  // for TextureFlags, etc
+#include "mozilla/layers/LayersTypes.h"
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
 #include "mozilla/mozalloc.h"           // for operator delete
 #include "nsAutoPtr.h"                  // for nsRefPtr
@@ -70,7 +71,33 @@ class KeepAlive;
 enum TextureAllocationFlags {
   ALLOC_DEFAULT = 0,
   ALLOC_CLEAR_BUFFER = 1,
-  ALLOC_CLEAR_BUFFER_WHITE = 2
+  ALLOC_CLEAR_BUFFER_WHITE = 2,
+  ALLOC_DISALLOW_BUFFERTEXTURECLIENT = 4
+};
+
+#ifdef XP_WIN
+typedef void* SyncHandle;
+#else
+typedef uintptr_t SyncHandle;
+#endif // XP_WIN
+
+class SyncObject : public RefCounted<SyncObject>
+{
+public:
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(SyncObject)
+  virtual ~SyncObject() { }
+
+  static TemporaryRef<SyncObject> CreateSyncObject(SyncHandle aHandle);
+
+  MOZ_BEGIN_NESTED_ENUM_CLASS(SyncType)
+    D3D11,
+  MOZ_END_NESTED_ENUM_CLASS(SyncType)
+
+  virtual SyncType GetSyncType() = 0;
+  virtual void FinalizeFrame() = 0;
+
+protected:
+  SyncObject() { }
 };
 
 /**
@@ -254,6 +281,10 @@ public:
     return gfx::SurfaceFormat::UNKNOWN;
   }
 
+  virtual TemporaryRef<gfx::DataSourceSurface> GetAsSurface() { return nullptr; }
+
+  virtual void PrintInfo(std::stringstream& aStream, const char* aPrefix);
+
   /**
    * Copies a rectangle from this texture client to a position in aTarget.
    * It is assumed that the necessary locks are in place; so this should at
@@ -433,6 +464,8 @@ public:
    virtual void SetReadbackSink(TextureReadbackSink* aReadbackSink) {
      mReadbackSink = aReadbackSink;
    }
+   
+   virtual void SyncWithObject(SyncObject* aSyncObject) { }
 
 private:
   /**
@@ -554,6 +587,8 @@ public:
   virtual bool AllocateForYCbCr(gfx::IntSize aYSize,
                                 gfx::IntSize aCbCrSize,
                                 StereoMode aStereoMode) MOZ_OVERRIDE;
+
+  virtual TemporaryRef<gfx::DataSourceSurface> GetAsSurface() MOZ_OVERRIDE;
 
   virtual gfx::SurfaceFormat GetFormat() const MOZ_OVERRIDE { return mFormat; }
 

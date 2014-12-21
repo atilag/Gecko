@@ -168,18 +168,15 @@ static bool type##SignMask(JSContext *cx, unsigned argc, Value *vp) { \
 const Class SimdTypeDescr::class_ = {
     "SIMD",
     JSCLASS_HAS_RESERVED_SLOTS(JS_DESCR_SLOTS) | JSCLASS_BACKGROUND_FINALIZE,
-    JS_PropertyStub,         /* addProperty */
-    JS_DeletePropertyStub,   /* delProperty */
-    JS_PropertyStub,         /* getProperty */
-    JS_StrictPropertyStub,   /* setProperty */
-    JS_EnumerateStub,
-    JS_ResolveStub,
-    JS_ConvertStub,
+    nullptr, /* addProperty */
+    nullptr, /* delProperty */
+    nullptr, /* getProperty */
+    nullptr, /* setProperty */
+    nullptr, /* enumerate */
+    nullptr, /* resolve */
+    nullptr, /* convert */
     TypeDescr::finalize,
-    call,                /* call        */
-    nullptr,             /* hasInstance */
-    nullptr,             /* construct   */
-    nullptr
+    call
 };
 
 // These classes just exist to group together various properties and so on.
@@ -244,9 +241,7 @@ const JSFunctionSpec js::Int32x4Defn::TypedObjectMethods[] = {
 
 template<typename T>
 static JSObject *
-CreateSimdClass(JSContext *cx,
-              Handle<GlobalObject*> global,
-              HandlePropertyName stringRepr)
+CreateSimdClass(JSContext *cx, Handle<GlobalObject*> global, HandlePropertyName stringRepr)
 {
     const SimdTypeDescr::Type type = T::type;
 
@@ -257,7 +252,7 @@ CreateSimdClass(JSContext *cx,
     // Create type constructor itself and initialize its reserved slots.
 
     Rooted<SimdTypeDescr*> typeDescr(cx);
-    typeDescr = NewObjectWithProto<SimdTypeDescr>(cx, funcProto, global, TenuredObject);
+    typeDescr = NewObjectWithProto<SimdTypeDescr>(cx, funcProto, global, SingletonObject);
     if (!typeDescr)
         return nullptr;
 
@@ -267,7 +262,6 @@ CreateSimdClass(JSContext *cx,
     typeDescr->initReservedSlot(JS_DESCR_SLOT_SIZE, Int32Value(SimdTypeDescr::size(type)));
     typeDescr->initReservedSlot(JS_DESCR_SLOT_OPAQUE, BooleanValue(false));
     typeDescr->initReservedSlot(JS_DESCR_SLOT_TYPE, Int32Value(T::type));
-    typeDescr->initReservedSlot(JS_DESCR_SLOT_TRACE_LIST, PrivateValue(nullptr));
 
     if (!CreateUserSizeAndAlignmentProperties(cx, typeDescr))
         return nullptr;
@@ -278,10 +272,9 @@ CreateSimdClass(JSContext *cx,
     if (!objProto)
         return nullptr;
     Rooted<TypedProto*> proto(cx);
-    proto = NewObjectWithProto<TypedProto>(cx, objProto, nullptr, TenuredObject);
+    proto = NewObjectWithProto<TypedProto>(cx, objProto, nullptr, SingletonObject);
     if (!proto)
         return nullptr;
-    proto->initTypeDescrSlot(*typeDescr);
     typeDescr->initReservedSlot(JS_DESCR_SLOT_TYPROTO, ObjectValue(*proto));
 
     // Link constructor to prototype and install properties.
@@ -353,20 +346,8 @@ SimdTypeDescr::call(JSContext *cx, unsigned argc, Value *vp)
 // SIMD class
 
 const Class SIMDObject::class_ = {
-        "SIMD",
-        JSCLASS_HAS_CACHED_PROTO(JSProto_SIMD),
-        JS_PropertyStub,         /* addProperty */
-        JS_DeletePropertyStub,   /* delProperty */
-        JS_PropertyStub,         /* getProperty */
-        JS_StrictPropertyStub,   /* setProperty */
-        JS_EnumerateStub,
-        JS_ResolveStub,
-        JS_ConvertStub,
-        nullptr,             /* finalize    */
-        nullptr,             /* call        */
-        nullptr,             /* hasInstance */
-        nullptr,             /* construct   */
-        nullptr
+    "SIMD",
+    JSCLASS_HAS_CACHED_PROTO(JSProto_SIMD)
 };
 
 JSObject *

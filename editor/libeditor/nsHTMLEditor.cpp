@@ -3,6 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsHTMLEditor.h"
+
 #include "mozilla/DebugOnly.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/TextEvents.h"
@@ -11,7 +13,6 @@
 
 #include "nsUnicharUtils.h"
 
-#include "nsHTMLEditor.h"
 #include "nsHTMLEditRules.h"
 #include "nsTextEditUtils.h"
 #include "nsHTMLEditUtils.h"
@@ -3539,24 +3540,26 @@ nsHTMLEditor::SelectAll()
 
   nsCOMPtr<nsIContent> anchorContent = do_QueryInterface(anchorNode, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
-  
-  // If the anchor content has independent selection, we never need to explicitly
-  // select its children.
+
+  nsIContent *rootContent;
   if (anchorContent->HasIndependentSelection()) {
     rv = selection->SetAncestorLimiter(nullptr);
     NS_ENSURE_SUCCESS(rv, rv);
-    nsCOMPtr<nsIDOMNode> rootElement = do_QueryInterface(mRootElement, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
-    return selection->SelectAllChildren(rootElement);
+    rootContent = mRootElement;
+  } else {
+    nsCOMPtr<nsIPresShell> ps = GetPresShell();
+    rootContent = anchorContent->GetSelectionRootContent(ps);
   }
 
-  nsCOMPtr<nsIPresShell> ps = GetPresShell();
-  nsIContent *rootContent = anchorContent->GetSelectionRootContent(ps);
   NS_ENSURE_TRUE(rootContent, NS_ERROR_UNEXPECTED);
 
   nsCOMPtr<nsIDOMNode> rootElement = do_QueryInterface(rootContent, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  Maybe<mozilla::dom::Selection::AutoApplyUserSelectStyle> userSelection;
+  if (!rootContent->IsEditable()) {
+    userSelection.emplace(selection);
+  }
   return selection->SelectAllChildren(rootElement);
 }
 

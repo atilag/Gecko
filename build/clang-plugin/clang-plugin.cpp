@@ -12,11 +12,20 @@
 #include "clang/Frontend/MultiplexConsumer.h"
 #include "clang/Sema/Sema.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Path.h"
+#include <memory>
 
 #define CLANG_VERSION_FULL (CLANG_VERSION_MAJOR * 100 + CLANG_VERSION_MINOR)
 
 using namespace llvm;
 using namespace clang;
+
+#if CLANG_VERSION_FULL >= 306
+typedef std::unique_ptr<ASTConsumer> ASTConsumerPtr;
+#else
+typedef ASTConsumer *ASTConsumerPtr;
+#endif
 
 namespace {
 
@@ -25,7 +34,7 @@ class DiagnosticsMatcher {
 public:
   DiagnosticsMatcher();
 
-  ASTConsumer *makeASTConsumer() {
+  ASTConsumerPtr makeASTConsumer() {
     return astMatcher.newASTConsumer();
   }
 
@@ -42,10 +51,78 @@ private:
     void noteInferred(QualType T, DiagnosticsEngine &Diag);
   };
 
+  class ArithmeticArgChecker : public MatchFinder::MatchCallback {
+  public:
+    virtual void run(const MatchFinder::MatchResult &Result);
+  };
+
   StackClassChecker stackClassChecker;
   NonHeapClassChecker nonheapClassChecker;
+  ArithmeticArgChecker arithmeticArgChecker;
   MatchFinder astMatcher;
 };
+
+namespace {
+
+bool isInIgnoredNamespace(const Decl *decl) {
+  const DeclContext *DC = decl->getDeclContext()->getEnclosingNamespaceContext();
+  const NamespaceDecl *ND = dyn_cast<NamespaceDecl>(DC);
+  if (!ND) {
+    return false;
+  }
+
+  while (const DeclContext *ParentDC = ND->getParent()) {
+    if (!isa<NamespaceDecl>(ParentDC)) {
+      break;
+    }
+    ND = cast<NamespaceDecl>(ParentDC);
+  }
+
+  const auto& name = ND->getName();
+
+  // namespace std and icu are ignored for now
+  return name == "std" ||              // standard C++ lib
+         name == "__gnu_cxx" ||        // gnu C++ lib
+         name == "boost" ||            // boost
+         name == "webrtc" ||           // upstream webrtc
+         name == "icu_52" ||           // icu
+         name == "google" ||           // protobuf
+         name == "google_breakpad" ||  // breakpad
+         name == "soundtouch" ||       // libsoundtouch
+         name == "stagefright" ||      // libstagefright
+         name == "MacFileUtilities" || // MacFileUtilities
+         name == "dwarf2reader" ||     // dwarf2reader
+         name == "arm_ex_to_module" || // arm_ex_to_module
+         name == "testing";            // gtest
+}
+
+bool isIgnoredPath(const Decl *decl) {
+  decl = decl->getCanonicalDecl();
+  SourceLocation Loc = decl->getLocation();
+  const SourceManager &SM = decl->getASTContext().getSourceManager();
+  SmallString<1024> FileName = SM.getFilename(Loc);
+  llvm::sys::fs::make_absolute(FileName);
+  llvm::sys::path::reverse_iterator begin = llvm::sys::path::rbegin(FileName),
+                                    end   = llvm::sys::path::rend(FileName);
+  for (; begin != end; ++begin) {
+    if (begin->compare_lower(StringRef("skia")) == 0 ||
+        begin->compare_lower(StringRef("angle")) == 0 ||
+        begin->compare_lower(StringRef("harfbuzz")) == 0 ||
+        begin->compare_lower(StringRef("hunspell")) == 0 ||
+        begin->compare_lower(StringRef("scoped_ptr.h")) == 0 ||
+        begin->compare_lower(StringRef("graphite2")) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool isInterestingDecl(const Decl *decl) {
+  return !isInIgnoredNamespace(decl) &&
+         !isIgnoredPath(decl);
+}
+
+}
 
 class MozChecker : public ASTConsumer, public RecursiveASTVisitor<MozChecker> {
   DiagnosticsEngine &Diag;
@@ -54,7 +131,7 @@ class MozChecker : public ASTConsumer, public RecursiveASTVisitor<MozChecker> {
 public:
   MozChecker(const CompilerInstance &CI) : Diag(CI.getDiagnostics()), CI(CI) {}
 
-  ASTConsumer *getOtherConsumer() {
+  ASTConsumerPtr getOtherConsumer() {
     return matcher.makeASTConsumer();
   }
 
@@ -106,8 +183,10 @@ public:
         // The way that Clang checks if a method M overrides its parent method
         // is if the method has the same name but would not overload.
         if (M->getName() == (*it)->getName() &&
-            !CI.getSema().IsOverload(*M, (*it), false))
+            !CI.getSema().IsOverload(*M, (*it), false)) {
           overridden = true;
+          break;
+        }
       }
       if (!overridden) {
         unsigned overrideID = Diag.getDiagnosticIDs()->getCustomDiagID(
@@ -119,6 +198,32 @@ public:
         Diag.Report((*it)->getLocation(), overrideNote);
       }
     }
+
+    if (isInterestingDecl(d)) {
+      for (CXXRecordDecl::ctor_iterator ctor = d->ctor_begin(),
+           e = d->ctor_end(); ctor != e; ++ctor) {
+        // Ignore non-converting ctors
+        if (!ctor->isConvertingConstructor(false)) {
+          continue;
+        }
+        // Ignore copy or move constructors
+        if (ctor->isCopyOrMoveConstructor()) {
+          continue;
+        }
+        // Ignore deleted constructors
+        if (ctor->isDeleted()) {
+          continue;
+        }
+        // Ignore whitelisted constructors
+        if (MozChecker::hasCustomAnnotation(*ctor, "moz_implicit")) {
+          continue;
+        }
+        unsigned ctorID = Diag.getDiagnosticIDs()->getCustomDiagID(
+          DiagnosticIDs::Error, "bad implicit conversion constructor for %0");
+        Diag.Report(ctor->getLocation(), ctorID) << d->getDeclName();
+      }
+    }
+
     return true;
   }
 };
@@ -230,6 +335,49 @@ AST_MATCHER(QualType, nonheapClassAggregate) {
 AST_MATCHER(FunctionDecl, heapAllocator) {
   return MozChecker::hasCustomAnnotation(&Node, "moz_heap_allocator");
 }
+
+/// This matcher will match any declaration that is marked as not accepting
+/// arithmetic expressions in its arguments.
+AST_MATCHER(Decl, noArithmeticExprInArgs) {
+  return MozChecker::hasCustomAnnotation(&Node, "moz_no_arith_expr_in_arg");
+}
+
+/// This matcher will match all arithmetic binary operators.
+AST_MATCHER(BinaryOperator, binaryArithmeticOperator) {
+  BinaryOperatorKind opcode = Node.getOpcode();
+  return opcode == BO_Mul ||
+         opcode == BO_Div ||
+         opcode == BO_Rem ||
+         opcode == BO_Add ||
+         opcode == BO_Sub ||
+         opcode == BO_Shl ||
+         opcode == BO_Shr ||
+         opcode == BO_And ||
+         opcode == BO_Xor ||
+         opcode == BO_Or ||
+         opcode == BO_MulAssign ||
+         opcode == BO_DivAssign ||
+         opcode == BO_RemAssign ||
+         opcode == BO_AddAssign ||
+         opcode == BO_SubAssign ||
+         opcode == BO_ShlAssign ||
+         opcode == BO_ShrAssign ||
+         opcode == BO_AndAssign ||
+         opcode == BO_XorAssign ||
+         opcode == BO_OrAssign;
+}
+
+/// This matcher will match all arithmetic unary operators.
+AST_MATCHER(UnaryOperator, unaryArithmeticOperator) {
+  UnaryOperatorKind opcode = Node.getOpcode();
+  return opcode == UO_PostInc ||
+         opcode == UO_PostDec ||
+         opcode == UO_PreInc ||
+         opcode == UO_PreDec ||
+         opcode == UO_Plus ||
+         opcode == UO_Minus ||
+         opcode == UO_Not;
+}
 }
 }
 
@@ -268,6 +416,33 @@ DiagnosticsMatcher::DiagnosticsMatcher() {
   astMatcher.addMatcher(callExpr(callee(functionDecl(allOf(heapAllocator(),
       returns(pointerType(pointee(stackClassAggregate()))))))).bind("node"),
     &stackClassChecker);
+
+  astMatcher.addMatcher(callExpr(allOf(hasDeclaration(noArithmeticExprInArgs()),
+          anyOf(
+              hasDescendant(binaryOperator(allOf(binaryArithmeticOperator(),
+                  hasLHS(hasDescendant(declRefExpr())),
+                  hasRHS(hasDescendant(declRefExpr()))
+              )).bind("node")),
+              hasDescendant(unaryOperator(allOf(unaryArithmeticOperator(),
+                  hasUnaryOperand(allOf(hasType(builtinType()),
+                                        anyOf(hasDescendant(declRefExpr()), declRefExpr())))
+              )).bind("node"))
+          )
+      )).bind("call"),
+    &arithmeticArgChecker);
+  astMatcher.addMatcher(constructExpr(allOf(hasDeclaration(noArithmeticExprInArgs()),
+          anyOf(
+              hasDescendant(binaryOperator(allOf(binaryArithmeticOperator(),
+                  hasLHS(hasDescendant(declRefExpr())),
+                  hasRHS(hasDescendant(declRefExpr()))
+              )).bind("node")),
+              hasDescendant(unaryOperator(allOf(unaryArithmeticOperator(),
+                  hasUnaryOperand(allOf(hasType(builtinType()),
+                                        anyOf(hasDescendant(declRefExpr()), declRefExpr())))
+              )).bind("node"))
+          )
+      )).bind("call"),
+    &arithmeticArgChecker);
 }
 
 void DiagnosticsMatcher::StackClassChecker::run(
@@ -373,17 +548,39 @@ void DiagnosticsMatcher::NonHeapClassChecker::noteInferred(QualType T,
   noteInferred(cast<ValueDecl>(cause)->getType(), Diag);
 }
 
+void DiagnosticsMatcher::ArithmeticArgChecker::run(
+    const MatchFinder::MatchResult &Result) {
+  DiagnosticsEngine &Diag = Result.Context->getDiagnostics();
+  unsigned errorID = Diag.getDiagnosticIDs()->getCustomDiagID(
+      DiagnosticIDs::Error, "cannot pass an arithmetic expression of built-in types to %0");
+  const Expr *expr = Result.Nodes.getNodeAs<Expr>("node");
+  if (const CallExpr *call = Result.Nodes.getNodeAs<CallExpr>("call")) {
+    Diag.Report(expr->getLocStart(), errorID) << call->getDirectCallee();
+  } else if (const CXXConstructExpr *ctr = Result.Nodes.getNodeAs<CXXConstructExpr>("call")) {
+    Diag.Report(expr->getLocStart(), errorID) << ctr->getConstructor();
+  }
+}
+
 class MozCheckAction : public PluginASTAction {
 public:
-  ASTConsumer *CreateASTConsumer(CompilerInstance &CI, StringRef fileName) {
+  ASTConsumerPtr CreateASTConsumer(CompilerInstance &CI, StringRef fileName) override {
+#if CLANG_VERSION_FULL >= 306
+    std::unique_ptr<MozChecker> checker(make_unique<MozChecker>(CI));
+
+    std::vector<std::unique_ptr<ASTConsumer>> consumers;
+    consumers.push_back(std::move(checker));
+    consumers.push_back(checker->getOtherConsumer());
+    return make_unique<MultiplexConsumer>(std::move(consumers));
+#else
     MozChecker *checker = new MozChecker(CI);
 
     ASTConsumer *consumers[] = { checker, checker->getOtherConsumer() };
     return new MultiplexConsumer(consumers);
+#endif
   }
 
   bool ParseArgs(const CompilerInstance &CI,
-                 const std::vector<std::string> &args) {
+                 const std::vector<std::string> &args) override {
     return true;
   }
 };

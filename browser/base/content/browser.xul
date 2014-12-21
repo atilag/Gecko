@@ -278,7 +278,7 @@
 
     <panel id="abouthome-search-panel" orient="vertical" type="arrow" hidden="true"
            onclick="this.hidePopup()">
-      <hbox id="abouthome-search-panel-manage" class="abouthome-search-panel-item"
+      <hbox id="abouthome-search-panel-manage"
             onclick="openPreferences('paneSearch')">
         <label>&changeSearchSettings.button;</label>
       </hbox>
@@ -634,7 +634,6 @@
     </toolbar>
 
     <toolbar id="TabsToolbar"
-             class="toolbar-primary"
              fullscreentoolbar="true"
              customizable="true"
              mode="icons"
@@ -720,7 +719,7 @@
            to the default placements of buttons in CustomizableUI.jsm, so the
            customization code doesn't get confused.
       -->
-    <toolbar id="nav-bar" class="toolbar-primary chromeclass-toolbar"
+    <toolbar id="nav-bar"
              aria-label="&navbarCmd.label;"
              fullscreentoolbar="true" mode="icons" customizable="true"
              iconsize="small"

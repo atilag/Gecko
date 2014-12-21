@@ -27,6 +27,22 @@ XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
   "resource://gre/modules/PrivateBrowsingUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FormSubmitObserver",
   "resource:///modules/FormSubmitObserver.jsm");
+XPCOMUtils.defineLazyGetter(this, "SimpleServiceDiscovery", function() {
+  let ssdp = Cu.import("resource://gre/modules/SimpleServiceDiscovery.jsm", {}).SimpleServiceDiscovery;
+  // Register targets
+  ssdp.registerDevice({
+    id: "roku:ecp",
+    target: "roku:ecp",
+    factory: function(aService) {
+      Cu.import("resource://gre/modules/RokuApp.jsm");
+      return new RokuApp(aService);
+    },
+    mirror: true,
+    types: ["video/mp4"],
+    extensions: ["mp4"]
+  });
+  return ssdp;
+});
 
 // TabChildGlobal
 var global = this;
@@ -74,6 +90,16 @@ addMessageListener("Browser:Reload", function(message) {
 
 addMessageListener("MixedContent:ReenableProtection", function() {
   docShell.mixedContentChannel = null;
+});
+
+addMessageListener("SecondScreen:tab-mirror", function(message) {
+  let app = SimpleServiceDiscovery.findAppForService(message.data.service);
+  if (app) {
+    let width = content.innerWidth;
+    let height = content.innerHeight;
+    let viewport = {cssWidth: width, cssHeight: height, width: width, height: height};
+    app.mirror(function() {}, content, viewport, function() {}, content);
+  }
 });
 
 addEventListener("DOMFormHasPassword", function(event) {
@@ -327,12 +353,6 @@ let AboutHomeListener = {
       doc.documentElement.setAttribute("searchUIConfiguration", "oldsearchui");
     }
 
-    // XXX bug 738646 - when Marketplace is launched, remove this statement and
-    // the hidden attribute set on the apps button in aboutHome.xhtml
-    if (Services.prefs.getPrefType("browser.aboutHome.apps") == Services.prefs.PREF_BOOL &&
-        Services.prefs.getBoolPref("browser.aboutHome.apps"))
-      doc.getElementById("apps").removeAttribute("hidden");
-
     sendAsyncMessage("AboutHome:RequestUpdate");
     doc.addEventListener("AboutHomeSearchEvent", this, true, true);
     doc.addEventListener("AboutHomeSearchPanel", this, true, true);
@@ -559,6 +579,7 @@ let ClickEventHandler = {
             event.preventDefault(); // Need to prevent the pageload.
           }
         }
+        json.noReferrer = BrowserUtils.linkHasNoReferrer(node)
       }
 
       sendAsyncMessage("Content:Click", json);

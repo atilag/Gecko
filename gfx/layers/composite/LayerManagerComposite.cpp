@@ -629,6 +629,10 @@ LayerManagerComposite::Render()
   // Dump to console
   if (gfxPrefs::LayersDump()) {
     this->Dump();
+  } else if (profiler_feature_active("layersdump")) {
+    std::stringstream ss;
+    Dump(ss);
+    profiler_log(ss.str().c_str());
   }
 
   // Dump to LayerScope Viewer

@@ -26,7 +26,7 @@ browser.jar:
 * skin/classic/browser/devedition.css
 * skin/classic/browser/browser-lightweightTheme.css
   skin/classic/browser/click-to-play-warning-stripes.png
-* skin/classic/browser/content-contextmenu.svg
+  skin/classic/browser/content-contextmenu.svg
   skin/classic/browser/dots.png                             (../shared/dots.png)
   skin/classic/browser/dots@2x.png                          (../shared/dots@2x.png)
 * skin/classic/browser/engineManager.css
@@ -49,10 +49,11 @@ browser.jar:
   skin/classic/browser/menuPanel-exit.png
   skin/classic/browser/menuPanel-help.png
   skin/classic/browser/menuPanel-small.png
-  skin/classic/browser/bad-content-blocked-16.png
-  skin/classic/browser/bad-content-blocked-64.png
-  skin/classic/browser/bad-content-unblocked-16.png
-  skin/classic/browser/bad-content-unblocked-64.png
+  skin/classic/browser/bad-content-blocked-16.png           (../shared/bad-content-blocked-16.png)
+  skin/classic/browser/bad-content-blocked-16@2x.png        (../shared/bad-content-blocked-16@2x.png)
+  skin/classic/browser/bad-content-blocked-64.png           (../shared/bad-content-blocked-64.png)
+  skin/classic/browser/bad-content-unblocked-16.png         (../shared/bad-content-unblocked-16.png)
+  skin/classic/browser/bad-content-unblocked-64.png         (../shared/bad-content-unblocked-64.png)
   skin/classic/browser/monitor.png
   skin/classic/browser/monitor_16-10.png
   skin/classic/browser/notification-16.png
@@ -166,8 +167,12 @@ browser.jar:
   skin/classic/browser/preferences/in-content/favicon.ico     (../shared/incontentprefs/favicon.ico)
   skin/classic/browser/preferences/in-content/icons.png       (../shared/incontentprefs/icons.png)
   skin/classic/browser/preferences/in-content/icons@2x.png    (../shared/incontentprefs/icons@2x.png)
+  skin/classic/browser/preferences/in-content/search.css      (../shared/incontentprefs/search.css)
+  skin/classic/browser/preferences/in-content/check.png       (../shared/incontentprefs/check.png)
+  skin/classic/browser/preferences/in-content/check@2x.png    (../shared/incontentprefs/check@2x.png)
   skin/classic/browser/preferences/applications.css   (preferences/applications.css)
   skin/classic/browser/preferences/aboutPermissions.css (preferences/aboutPermissions.css)
+  skin/classic/browser/preferences/search.css         (preferences/search.css)
   skin/classic/browser/social/services-16.png         (social/services-16.png)
   skin/classic/browser/social/services-64.png         (social/services-64.png)
   skin/classic/browser/social/share-button.png        (social/share-button.png)
@@ -216,6 +221,7 @@ browser.jar:
   skin/classic/browser/devtools/filters.svg           (../shared/devtools/filters.svg)
   skin/classic/browser/devtools/controls.png          (../shared/devtools/images/controls.png)
   skin/classic/browser/devtools/controls@2x.png       (../shared/devtools/images/controls@2x.png)
+  skin/classic/browser/devtools/performance-icons.svg  (../shared/devtools/images/performance-icons.svg)
   skin/classic/browser/devtools/newtab.png             (../shared/devtools/images/newtab.png)
   skin/classic/browser/devtools/newtab@2x.png          (../shared/devtools/images/newtab@2x.png)
   skin/classic/browser/devtools/newtab-inverted.png    (../shared/devtools/images/newtab-inverted.png)

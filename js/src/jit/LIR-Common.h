@@ -366,8 +366,7 @@ class LSimdBinaryCompFx4 : public LSimdBinaryComp
 };
 
 // Binary SIMD arithmetic operation between two SIMD operands
-template<size_t Temps>
-class LSimdBinaryArith : public LInstructionHelper<1, 2, Temps>
+class LSimdBinaryArith : public LInstructionHelper<1, 2, 1>
 {
   public:
     LSimdBinaryArith() {}
@@ -377,6 +376,9 @@ class LSimdBinaryArith : public LInstructionHelper<1, 2, Temps>
     }
     const LAllocation *rhs() {
         return this->getOperand(1);
+    }
+    const LDefinition *temp() {
+        return getTemp(0);
     }
 
     MSimdBinaryArith::Operation operation() const {
@@ -388,23 +390,19 @@ class LSimdBinaryArith : public LInstructionHelper<1, 2, Temps>
 };
 
 // Binary SIMD arithmetic operation between two Int32x4 operands
-class LSimdBinaryArithIx4 : public LSimdBinaryArith<0>
+class LSimdBinaryArithIx4 : public LSimdBinaryArith
 {
   public:
     LIR_HEADER(SimdBinaryArithIx4);
-    LSimdBinaryArithIx4() : LSimdBinaryArith<0>() {}
+    LSimdBinaryArithIx4() : LSimdBinaryArith() {}
 };
 
 // Binary SIMD arithmetic operation between two Float32x4 operands
-class LSimdBinaryArithFx4 : public LSimdBinaryArith<1>
+class LSimdBinaryArithFx4 : public LSimdBinaryArith
 {
   public:
     LIR_HEADER(SimdBinaryArithFx4);
-    LSimdBinaryArithFx4() : LSimdBinaryArith<1>() {}
-
-    const LDefinition *temp() {
-        return getTemp(0);
-    }
+    LSimdBinaryArithFx4() : LSimdBinaryArith() {}
 };
 
 // Unary SIMD arithmetic operation on a SIMD operand
@@ -449,6 +447,9 @@ class LSimdBinaryBitwiseX4 : public LInstructionHelper<1, 2, 0>
     MSimdBinaryBitwise::Operation operation() const {
         return mir_->toSimdBinaryBitwise()->operation();
     }
+    MIRType type() const {
+        return mir_->type();
+    }
 };
 
 class LSimdShift : public LInstructionHelper<1, 2, 0>
@@ -475,7 +476,7 @@ class LSimdShift : public LInstructionHelper<1, 2, 0>
 
 // SIMD selection of lanes from two int32x4 or float32x4 arguments based on a
 // int32x4 argument.
-class LSimdSelect : public LInstructionHelper<1, 3, 0>
+class LSimdSelect : public LInstructionHelper<1, 3, 1>
 {
   public:
     LIR_HEADER(SimdSelect);
@@ -487,6 +488,9 @@ class LSimdSelect : public LInstructionHelper<1, 3, 0>
     }
     const LAllocation *rhs() {
         return getOperand(2);
+    }
+    const LDefinition *temp() {
+        return getTemp(0);
     }
     MSimdTernaryBitwise::Operation operation() const {
         return mir_->toSimdTernaryBitwise()->operation();
@@ -1165,7 +1169,7 @@ class LCheckOverRecursedPar : public LInstructionHelper<0, 1, 1>
     }
 };
 
-class LAsmJSInterruptCheck : public LInstructionHelper<0, 0, 1>
+class LAsmJSInterruptCheck : public LInstructionHelper<0, 0, 0>
 {
     Label *interruptExit_;
     const CallSiteDesc &funcDesc_;
@@ -1173,15 +1177,9 @@ class LAsmJSInterruptCheck : public LInstructionHelper<0, 0, 1>
   public:
     LIR_HEADER(AsmJSInterruptCheck);
 
-    LAsmJSInterruptCheck(const LDefinition &scratch, Label *interruptExit,
-                         const CallSiteDesc &funcDesc)
+    LAsmJSInterruptCheck(Label *interruptExit, const CallSiteDesc &funcDesc)
       : interruptExit_(interruptExit), funcDesc_(funcDesc)
     {
-        setTemp(0, scratch);
-    }
-
-    const LDefinition *scratch() {
-        return getTemp(0);
     }
 
     bool isCall() const {
@@ -4297,22 +4295,17 @@ class LTypedArrayElements : public LInstructionHelper<1, 1, 0>
     }
 };
 
-// Load a typed object's prototype, which is guaranteed to be a
-// TypedProto object.
-class LTypedObjectProto : public LCallInstructionHelper<1, 1, 1>
+// Load a typed object's descriptor.
+class LTypedObjectDescr : public LInstructionHelper<1, 1, 0>
 {
   public:
-    LIR_HEADER(TypedObjectProto)
+    LIR_HEADER(TypedObjectDescr)
 
-    LTypedObjectProto(const LAllocation &object, const LDefinition &temp1) {
+    explicit LTypedObjectDescr(const LAllocation &object) {
         setOperand(0, object);
-        setTemp(0, temp1);
     }
     const LAllocation *object() {
         return getOperand(0);
-    }
-    const LDefinition *temp() {
-        return getTemp(0);
     }
 };
 
@@ -5746,6 +5739,10 @@ class LCallSetElement : public LCallInstructionHelper<0, 1 + 2 * BOX_PIECES, 0>
 
     static const size_t Index = 1;
     static const size_t Value = 1 + BOX_PIECES;
+
+    const MCallSetElement *mir() const {
+        return mir_->toCallSetElement();
+    }
 };
 
 // Call js::InitElementArray.

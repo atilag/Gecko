@@ -19,16 +19,17 @@
     <copyfile dest="Makefile" src="core/root.mk"/>
   </project>
   <project name="fake-dalvik" path="dalvik" remote="b2g" revision="ca1f327d5acc198bb4be62fa51db2c039032c9ce"/>
-  <project name="gaia.git" path="gaia" remote="mozillaorg" revision="7119da7a86cd803840678ca3a6067e5622adc481"/>
-  <project name="gonk-misc" path="gonk-misc" remote="b2g" revision="50ad16a280fe9cfa0716f8c6ba16afdf7f266b49"/>
+  <project name="gaia.git" path="gaia" remote="mozillaorg" revision="ca6e91e09ef3ab417a0f6b6d6668d43597d85700"/>
+  <project name="gonk-misc" path="gonk-misc" remote="b2g" revision="8aee09c106f479f36c57b2a29af72d455e359211"/>
   <project name="rilproxy" path="rilproxy" remote="b2g" revision="827214fcf38d6569aeb5c6d6f31cb296d1f09272"/>
   <project name="platform_hardware_ril" path="hardware/ril" remote="b2g" revision="d5d3f93914558b6f168447b805cd799c8233e300"/>
-  <project name="platform_external_qemu" path="external/qemu" remote="b2g" revision="8b13bfc1d7d25cee4de55f332654fdba25b8460b"/>
+  <project name="platform_external_qemu" path="external/qemu" remote="b2g" revision="6fa7a4936414ceb4055fd27f7a30e76790f834fb"/>
   <project name="moztt" path="external/moztt" remote="b2g" revision="fe893bb760a3bb64375f62fdf4762a58c59df9ef"/>
-  <project name="apitrace" path="external/apitrace" remote="apitrace" revision="6499615ecece69e726657dc5caaeefa05fbb66bf"/>
+  <project name="apitrace" path="external/apitrace" remote="apitrace" revision="f11d3c6500659e3232fbe6fe7ea0204c40ab7fdd"/>
   <!-- Stock Android things -->
   <project name="platform/abi/cpp" path="abi/cpp" revision="dd924f92906085b831bf1cbbc7484d3c043d613c"/>
-  <project name="platform/bionic" path="bionic" revision="c72b8f6359de7ed17c11ddc9dfdde3f615d188a9"/>
+  <!-- project name="platform/bionic" path="bionic" revision="c72b8f6359de7ed17c11ddc9dfdde3f615d188a9"/ -->
+  <project name="platform/bionic" path="platform_bionic" remote="b2g" revision="b2g-4.0.4_r2.1"/>
   <project name="platform/bootable/recovery" path="bootable/recovery" revision="425f8b5fadf5889834c5acd27d23c9e0b2129c28"/>
   <project name="device/common" path="device/common" revision="42b808b7e93d0619286ae8e59110b176b7732389"/>
   <project name="device/sample" path="device/sample" revision="237bd668d0f114d801a8d6455ef5e02cc3577587"/>
@@ -106,4 +107,5 @@
   <project name="platform_prebuilts_qemu-kernel" path="prebuilts/qemu-kernel" remote="b2g" revision="02c32feb2fe97037be0ac4dace3a6a5025ac895d"/>
   <project name="android-sdk" path="sdk" remote="b2g" revision="4f46930827957afbce500a4a920755a218bf3155"/>
   <project name="darwinstreamingserver" path="system/darwinstreamingserver" remote="b2g" revision="cf85968c7f85e0ec36e72c87ceb4837a943b8af6"/>
+  <project path="prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.8" name="platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.8" />
 </manifest>

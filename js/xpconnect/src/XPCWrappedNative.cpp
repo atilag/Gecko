@@ -10,6 +10,7 @@
 #include "nsWrapperCacheInlines.h"
 #include "XPCLog.h"
 #include "jsprf.h"
+#include "JavaScriptParent.h"
 #include "AccessCheck.h"
 #include "WrapperFactory.h"
 #include "XrayWrapper.h"
@@ -77,7 +78,7 @@ NS_CYCLE_COLLECTION_CLASSNAME(XPCWrappedNative)::Traverse
 
         JSObject *obj = tmp->GetFlatJSObjectPreserveColor();
         NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mFlatJSObject");
-        cb.NoteJSChild(obj);
+        cb.NoteJSObject(obj);
     }
 
     // XPCWrappedNative keeps its native object alive.
@@ -730,12 +731,6 @@ XPCWrappedNative::GatherScriptableCreateInfo(nsISupports* obj,
                    "Can't set WANT_PRECREATE on an instance scriptable "
                    "without also setting it on the class scriptable");
 
-        MOZ_ASSERT(!(sciWrapper.GetFlags().DontEnumStaticProps() &&
-                     !sciProto.GetFlags().DontEnumStaticProps() &&
-                     sciProto.GetCallback()),
-                   "Can't set DONT_ENUM_STATIC_PROPS on an instance scriptable "
-                   "without also setting it on the class scriptable (if present and shared)");
-
         MOZ_ASSERT(!(sciWrapper.GetFlags().DontEnumQueryInterface() &&
                      !sciProto.GetFlags().DontEnumQueryInterface() &&
                      sciProto.GetCallback()),
@@ -804,11 +799,6 @@ XPCWrappedNative::Init(HandleObject parent,
     MOZ_ASSERT(jsclazz &&
                jsclazz->name &&
                jsclazz->flags &&
-               jsclazz->addProperty &&
-               jsclazz->delProperty &&
-               jsclazz->getProperty &&
-               jsclazz->setProperty &&
-               jsclazz->enumerate &&
                jsclazz->resolve &&
                jsclazz->convert &&
                jsclazz->finalize, "bad class");
@@ -2182,6 +2172,21 @@ CallMethodHelper::ConvertIndependentParam(uint8_t i)
                                                     &param_iid))) {
         ThrowBadParam(NS_ERROR_XPC_CANT_GET_PARAM_IFACE_INFO, i, mCallContext);
         return false;
+    }
+
+    // Don't allow CPOWs to be passed to native code (in case they try to cast
+    // to a concrete type).
+    if (src.isObject() &&
+        jsipc::IsWrappedCPOW(&src.toObject()) &&
+        type_tag == nsXPTType::T_INTERFACE &&
+        !param_iid.Equals(NS_GET_IID(nsISupports)))
+    {
+        // Allow passing CPOWs to XPCWrappedJS.
+        nsCOMPtr<nsIXPConnectWrappedJS> wrappedJS(do_QueryInterface(mCallee));
+        if (!wrappedJS) {
+            ThrowBadParam(NS_ERROR_XPC_CANT_PASS_CPOW_TO_NATIVE, i, mCallContext);
+            return false;
+        }
     }
 
     nsresult err;

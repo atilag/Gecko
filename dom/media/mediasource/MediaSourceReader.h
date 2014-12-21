@@ -46,17 +46,20 @@ public:
 
   bool IsWaitingMediaResources() MOZ_OVERRIDE;
 
-  void RequestAudioData() MOZ_OVERRIDE;
+  nsRefPtr<AudioDataPromise> RequestAudioData() MOZ_OVERRIDE;
+  nsRefPtr<VideoDataPromise>
+  RequestVideoData(bool aSkipToNextKeyframe, int64_t aTimeThreshold) MOZ_OVERRIDE;
+
+  virtual size_t SizeOfVideoQueueInFrames() MOZ_OVERRIDE;
+  virtual size_t SizeOfAudioQueueInFrames() MOZ_OVERRIDE;
 
   void OnAudioDecoded(AudioData* aSample);
-
-  void RequestVideoData(bool aSkipToNextKeyframe, int64_t aTimeThreshold) MOZ_OVERRIDE;
-
+  void OnAudioNotDecoded(NotDecodedReason aReason);
   void OnVideoDecoded(VideoData* aSample);
+  void OnVideoNotDecoded(NotDecodedReason aReason);
 
-  void OnNotDecoded(MediaData::Type aType, RequestSampleCallback::NotDecodedReason aReason);
-
-  void OnSeekCompleted(nsresult aResult);
+  void OnSeekCompleted();
+  void OnSeekFailed(nsresult aResult);
 
   bool HasVideo() MOZ_OVERRIDE
   {
@@ -85,8 +88,9 @@ public:
 
   nsresult ReadMetadata(MediaInfo* aInfo, MetadataTags** aTags) MOZ_OVERRIDE;
   void ReadUpdatedMetadata(MediaInfo* aInfo) MOZ_OVERRIDE;
-  void Seek(int64_t aTime, int64_t aStartTime, int64_t aEndTime,
-            int64_t aCurrentTime) MOZ_OVERRIDE;
+  nsRefPtr<SeekPromise>
+  Seek(int64_t aTime, int64_t aStartTime, int64_t aEndTime,
+       int64_t aCurrentTime) MOZ_OVERRIDE;
 
   // Acquires the decoder monitor, and is thus callable on any thread.
   nsresult GetBuffered(dom::TimeRanges* aBuffered) MOZ_OVERRIDE;
@@ -97,7 +101,7 @@ public:
   void RemoveTrackBuffer(TrackBuffer* aTrackBuffer);
   void OnTrackBufferConfigured(TrackBuffer* aTrackBuffer, const MediaInfo& aInfo);
 
-  void Shutdown();
+  nsRefPtr<ShutdownPromise> Shutdown() MOZ_OVERRIDE;
 
   virtual void BreakCycles();
 
@@ -130,14 +134,19 @@ private:
                                                     const nsTArray<nsRefPtr<SourceBufferDecoder>>& aTrackDecoders);
 
   void AttemptSeek();
+  void FinalizeSeek();
 
   nsRefPtr<MediaDecoderReader> mAudioReader;
   nsRefPtr<MediaDecoderReader> mVideoReader;
 
   nsTArray<nsRefPtr<TrackBuffer>> mTrackBuffers;
+  nsTArray<nsRefPtr<TrackBuffer>> mShutdownTrackBuffers;
   nsTArray<nsRefPtr<TrackBuffer>> mEssentialTrackBuffers;
   nsRefPtr<TrackBuffer> mAudioTrack;
   nsRefPtr<TrackBuffer> mVideoTrack;
+
+  MediaPromiseHolder<AudioDataPromise> mAudioPromise;
+  MediaPromiseHolder<VideoDataPromise> mVideoPromise;
 
 #ifdef MOZ_EME
   nsRefPtr<CDMProxy> mCDMProxy;
@@ -149,6 +158,7 @@ private:
 
   // Temporary seek information while we wait for the data
   // to be added to the track buffer.
+  MediaPromiseHolder<SeekPromise> mSeekPromise;
   int64_t mPendingSeekTime;
   int64_t mPendingStartTime;
   int64_t mPendingEndTime;
@@ -176,6 +186,9 @@ private:
   bool mVideoIsSeeking;
 
   bool mHasEssentialTrackBuffers;
+
+  void ContinueShutdown();
+  MediaPromiseHolder<ShutdownPromise> mMediaSourceShutdownPromise;
 #ifdef MOZ_FMP4
   nsRefPtr<SharedDecoderManager> mSharedDecoderManager;
 #endif

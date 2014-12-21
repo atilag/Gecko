@@ -1207,6 +1207,19 @@ MTypeBarrier::printOpcode(FILE *fp) const
     getOperand(0)->printName(fp);
 }
 
+bool
+MTypeBarrier::congruentTo(const MDefinition *def) const
+{
+    if (!def->isTypeBarrier())
+        return false;
+    const MTypeBarrier *other = def->toTypeBarrier();
+    if (barrierKind() != other->barrierKind() || isGuard() != other->isGuard())
+        return false;
+    if (!resultTypeSet()->equals(other->resultTypeSet()))
+        return false;
+    return congruentIfOperandsEqual(other);
+}
+
 #ifdef DEBUG
 void
 MPhi::assertLoopPhi() const
@@ -2709,13 +2722,18 @@ MResumePoint::New(TempAllocator &alloc, MBasicBlock *block, jsbytecode *pc, MRes
 }
 
 MResumePoint *
-MResumePoint::New(TempAllocator &alloc, MBasicBlock *block, jsbytecode *pc, MResumePoint *parent,
-                  Mode mode, const MDefinitionVector &operands)
+MResumePoint::New(TempAllocator &alloc, MBasicBlock *block, MResumePoint *model,
+                  const MDefinitionVector &operands)
 {
-    MResumePoint *resume = new(alloc) MResumePoint(block, pc, parent, mode);
+    MResumePoint *resume = new(alloc) MResumePoint(block, model->pc(), model->caller(), model->mode());
 
-    if (!resume->operands_.init(alloc, operands.length()))
+    // Allocate the same number of operands as the original resume point, and
+    // copy operands from the operands vector and not the not from the current
+    // block stack.
+    if (!resume->operands_.init(alloc, model->numAllocatedOperands()))
         return nullptr;
+
+    // Copy the operands.
     for (size_t i = 0; i < operands.length(); i++)
         resume->initOperand(i, operands[i]);
 
@@ -2729,9 +2747,11 @@ MResumePoint::Copy(TempAllocator &alloc, MResumePoint *src)
                                                    src->caller(), src->mode());
     // Copy the operands from the original resume point, and not from the
     // current block stack.
-    if (!resume->operands_.init(alloc, src->stackDepth()))
+    if (!resume->operands_.init(alloc, src->numAllocatedOperands()))
         return nullptr;
-    for (size_t i = 0; i < resume->stackDepth(); i++)
+
+    // Copy the operands.
+    for (size_t i = 0; i < resume->numOperands(); i++)
         resume->initOperand(i, src->getOperand(i));
     return resume;
 }
@@ -2747,7 +2767,8 @@ MResumePoint::MResumePoint(MBasicBlock *block, jsbytecode *pc, MResumePoint *cal
     block->addResumePoint(this);
 }
 
-bool MResumePoint::init(TempAllocator &alloc)
+bool
+MResumePoint::init(TempAllocator &alloc)
 {
     return operands_.init(alloc, block()->stackDepth());
 }
@@ -2758,6 +2779,29 @@ MResumePoint::inherit(MBasicBlock *block)
     // FixedList doesn't initialize its elements, so do unchecked inits.
     for (size_t i = 0; i < stackDepth(); i++)
         initOperand(i, block->getSlot(i));
+}
+
+void
+MResumePoint::addStore(TempAllocator &alloc, MDefinition *store, const MResumePoint *cache)
+{
+    MOZ_ASSERT(block()->outerResumePoint() != this);
+    MOZ_ASSERT_IF(cache, !cache->stores_.empty());
+
+    if (cache && cache->stores_.begin()->operand == store) {
+        // If the last resume point had the same side-effect stack, then we can
+        // reuse the current side effect without cloning it. This is a simple
+        // way to share common context by making a spaghetti stack.
+        if (++cache->stores_.begin() == stores_.begin()) {
+            stores_.copy(cache->stores_);
+            return;
+        }
+    }
+
+    // Ensure that the store would not be deleted by DCE.
+    MOZ_ASSERT(store->isEffectful());
+
+    MStoreToRecover *top = new(alloc) MStoreToRecover(store);
+    stores_.push(top);
 }
 
 void
@@ -3374,7 +3418,7 @@ MBeta::printOpcode(FILE *fp) const
 bool
 MNewObject::shouldUseVM() const
 {
-    NativeObject *obj = templateObject();
+    PlainObject *obj = templateObject();
     return obj->hasSingletonType() || obj->hasDynamicSlots();
 }
 
@@ -3394,8 +3438,10 @@ MObjectState::MObjectState(MDefinition *obj)
     NativeObject *templateObject = nullptr;
     if (obj->isNewObject())
         templateObject = obj->toNewObject()->templateObject();
-    else
+    else if (obj->isCreateThisWithTemplate())
         templateObject = obj->toCreateThisWithTemplate()->templateObject();
+    else
+        templateObject = obj->toNewCallObject()->templateObject();
     numSlots_ = templateObject->slotSpan();
     numFixedSlots_ = templateObject->numFixedSlots();
 }
@@ -3405,6 +3451,7 @@ MObjectState::init(TempAllocator &alloc, MDefinition *obj)
 {
     if (!MVariadicInstruction::init(alloc, numSlots() + 1))
         return false;
+    // +1, for the Object.
     initOperand(0, obj);
     return true;
 }
@@ -3429,6 +3476,51 @@ MObjectState::Copy(TempAllocator &alloc, MObjectState *state)
         return nullptr;
     for (size_t i = 0; i < res->numSlots(); i++)
         res->initSlot(i, state->getSlot(i));
+    return res;
+}
+
+MArrayState::MArrayState(MDefinition *arr)
+{
+    // This instruction is only used as a summary for bailout paths.
+    setResultType(MIRType_Object);
+    setRecoveredOnBailout();
+    numElements_ = arr->toNewArray()->count();
+}
+
+bool
+MArrayState::init(TempAllocator &alloc, MDefinition *obj, MDefinition *len)
+{
+    if (!MVariadicInstruction::init(alloc, numElements() + 2))
+        return false;
+    // +1, for the Array object.
+    initOperand(0, obj);
+    // +1, for the length value of the array.
+    initOperand(1, len);
+    return true;
+}
+
+MArrayState *
+MArrayState::New(TempAllocator &alloc, MDefinition *arr, MDefinition *undefinedVal,
+                 MDefinition *initLength)
+{
+    MArrayState *res = new(alloc) MArrayState(arr);
+    if (!res || !res->init(alloc, arr, initLength))
+        return nullptr;
+    for (size_t i = 0; i < res->numElements(); i++)
+        res->initElement(i, undefinedVal);
+    return res;
+}
+
+MArrayState *
+MArrayState::Copy(TempAllocator &alloc, MArrayState *state)
+{
+    MDefinition *arr = state->array();
+    MDefinition *len = state->initializedLength();
+    MArrayState *res = new(alloc) MArrayState(arr);
+    if (!res || !res->init(alloc, arr, len))
+        return nullptr;
+    for (size_t i = 0; i < res->numElements(); i++)
+        res->initElement(i, state->getElement(i));
     return res;
 }
 
@@ -3741,6 +3833,23 @@ MLoadTypedArrayElementStatic::length() const
     return AnyTypedArrayByteLength(someTypedArray_);
 }
 
+bool
+MLoadTypedArrayElementStatic::congruentTo(const MDefinition *ins) const
+{
+    if (!ins->isLoadTypedArrayElementStatic())
+        return false;
+    const MLoadTypedArrayElementStatic *other = ins->toLoadTypedArrayElementStatic();
+    if (offset() != other->offset())
+        return false;
+    if (needsBoundsCheck() != other->needsBoundsCheck())
+        return false;
+    if (viewType() != other->viewType())
+        return false;
+    if (base() != other->base())
+        return false;
+    return congruentIfOperandsEqual(other);
+}
+
 void *
 MStoreTypedArrayElementStatic::base() const
 {
@@ -3977,10 +4086,10 @@ jit::ElementAccessIsAnyTypedArray(MDefinition *obj, MDefinition *id,
         return false;
 
     *arrayType = types->getTypedArrayType();
-    if (*arrayType != Scalar::TypeMax)
+    if (*arrayType != Scalar::MaxTypedArrayViewType)
         return true;
     *arrayType = types->getSharedTypedArrayType();
-    return *arrayType != Scalar::TypeMax;
+    return *arrayType != Scalar::MaxTypedArrayViewType;
 }
 
 bool
@@ -4340,11 +4449,8 @@ TryAddTypeBarrierForWrite(TempAllocator &alloc, types::CompilerConstraintList *c
         if (!aggregateProperty) {
             aggregateProperty.emplace(property);
         } else {
-            if (!aggregateProperty->maybeTypes()->isSubset(property.maybeTypes()) ||
-                !property.maybeTypes()->isSubset(aggregateProperty->maybeTypes()))
-            {
+            if (!aggregateProperty->maybeTypes()->equals(property.maybeTypes()))
                 return false;
-            }
         }
     }
 

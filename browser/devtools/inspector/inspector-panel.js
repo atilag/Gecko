@@ -8,7 +8,7 @@ const {Cc, Ci, Cu, Cr} = require("chrome");
 
 Cu.import("resource://gre/modules/Services.jsm");
 
-let promise = require("devtools/toolkit/deprecated-sync-thenables");
+let promise = require("resource://gre/modules/Promise.jsm").Promise;
 let EventEmitter = require("devtools/toolkit/event-emitter");
 let clipboard = require("sdk/clipboard");
 
@@ -48,8 +48,14 @@ const LAYOUT_CHANGE_TIMER = 250;
  *      Fired when a property is expanded in the computed rules view
  * - computed-view-property-collapsed
  *      Fired when a property is collapsed in the computed rules view
+ * - computed-view-sourcelinks-updated
+ *      Fired when the stylesheet source links have been updated (when switching
+ *      to source-mapped files)
  * - rule-view-refreshed
  *      Fired when the rule view updates to a new node
+ * - rule-view-sourcelinks-updated
+ *      Fired when the stylesheet source links have been updated (when switching
+ *      to source-mapped files)
  */
 function InspectorPanel(iframeWindow, toolbox) {
   this._toolbox = toolbox;
@@ -418,9 +424,18 @@ InspectorPanel.prototype = {
     if (reason !== "navigateaway" &&
         this.canGetUniqueSelector &&
         this.selection.isElementNode()) {
-      selection.getUniqueSelector().then((selector) => {
+      selection.getUniqueSelector().then(selector => {
         this.selectionCssSelector = selector;
-      }).then(null, console.error);
+      }).then(null, e => {
+        // Only log this as an error if the panel hasn't been destroyed in the
+        // meantime.
+        if (!this._panelDestroyer) {
+          console.error(e);
+        } else {
+          console.warn("Could not set the unique selector for the newly "+
+            "selected node, the inspector was destroyed.");
+        }
+      });
     }
 
     let selfUpdate = this.updating("inspector-panel");

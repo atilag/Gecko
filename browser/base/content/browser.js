@@ -154,9 +154,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "SafeBrowsing",
   "resource://gre/modules/SafeBrowsing.jsm");
 #endif
 
-XPCOMUtils.defineLazyModuleGetter(this, "gBrowserNewTabPreloader",
-  "resource:///modules/BrowserNewTabPreloader.jsm", "BrowserNewTabPreloader");
-
 XPCOMUtils.defineLazyModuleGetter(this, "gCustomizationTabPreloader",
   "resource:///modules/CustomizationTabPreloader.jsm", "CustomizationTabPreloader");
 
@@ -208,20 +205,20 @@ let gInitialPages = [
 ];
 
 #include browser-addons.js
+#include browser-ctrlTab.js
 #include browser-customization.js
 #include browser-devedition.js
 #include browser-feeds.js
 #include browser-fullScreen.js
 #include browser-fullZoom.js
+#include browser-gestureSupport.js
 #include browser-loop.js
 #include browser-places.js
 #include browser-plugins.js
 #include browser-safebrowsing.js
 #include browser-social.js
-#include browser-tabPreviews.js
 #include browser-tabview.js
 #include browser-thumbnails.js
-#include browser-gestureSupport.js
 
 #ifdef MOZ_DATA_REPORTING
 #include browser-data-submission-info-bar.js
@@ -404,33 +401,6 @@ const gSessionHistoryObserver = {
       gURLBar.editor.transactionManager.clear()
     }
   }
-};
-
-const gGatherTelemetryObserver = {
-  observe: function(subject, topic, data) {
-    if (topic != "gather-telemetry") {
-      return;
-    }
-
-    let engine;
-    try {
-      engine = Services.search.defaultEngine;
-    } catch (e) {}
-    let name;
-
-    if (!engine) {
-      name = "NONE";
-    } else if (engine.identifier) {
-      name = engine.identifier;
-    } else if (engine.name) {
-      name = "other-" + engine.name;
-    } else {
-      name = "UNDEFINED";
-    }
-
-    let engines = Services.telemetry.getKeyedHistogramById("SEARCH_DEFAULT_ENGINE");
-    engines.add(name, true)
-  },
 };
 
 /**
@@ -939,7 +909,7 @@ var gBrowserInit = {
         .getService(Ci.nsIEventListenerService)
         .addSystemEventListener(gBrowser, "click", contentAreaClick, true);
     } else {
-      gBrowser.updateBrowserRemoteness(gBrowser.mCurrentBrowser, true);
+      gBrowser.updateBrowserRemoteness(gBrowser.selectedBrowser, true);
     }
 
     // hook up UI through progress listener
@@ -1216,7 +1186,6 @@ var gBrowserInit = {
     Services.obs.addObserver(gXPInstallObserver, "addon-install-blocked", false);
     Services.obs.addObserver(gXPInstallObserver, "addon-install-failed", false);
     Services.obs.addObserver(gXPInstallObserver, "addon-install-complete", false);
-    Services.obs.addObserver(gGatherTelemetryObserver, "gather-telemetry", false);
     window.messageManager.addMessageListener("Browser:URIFixup", gKeywordURIFixup);
     window.messageManager.addMessageListener("Browser:LoadURI", RedirectLoad);
 
@@ -1537,7 +1506,6 @@ var gBrowserInit = {
       Services.obs.removeObserver(gXPInstallObserver, "addon-install-blocked");
       Services.obs.removeObserver(gXPInstallObserver, "addon-install-failed");
       Services.obs.removeObserver(gXPInstallObserver, "addon-install-complete");
-      Services.obs.removeObserver(gGatherTelemetryObserver, "gather-telemetry");
       window.messageManager.removeMessageListener("Browser:URIFixup", gKeywordURIFixup);
       window.messageManager.removeMessageListener("Browser:LoadURI", RedirectLoad);
 
@@ -2090,17 +2058,11 @@ function BrowserTryToCloseWindow()
 }
 
 function loadURI(uri, referrer, postData, allowThirdPartyFixup) {
-  if (postData === undefined)
-    postData = null;
-
-  var flags = nsIWebNavigation.LOAD_FLAGS_NONE;
-  if (allowThirdPartyFixup) {
-    flags |= nsIWebNavigation.LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP;
-    flags |= nsIWebNavigation.LOAD_FLAGS_FIXUP_SCHEME_TYPOS;
-  }
-
   try {
-    gBrowser.loadURIWithFlags(uri, flags, referrer, null, postData);
+    openLinkIn(uri, "current",
+               { referrerURI: referrer,
+                 postData: postData,
+                 allowThirdPartyFixup: allowThirdPartyFixup });
   } catch (e) {}
 }
 
@@ -2550,9 +2512,9 @@ let gMenuButtonUpdateBadge = {
         updateButtonText = gNavigatorBundle.getFormattedString(stringId,
                                                                [brandShortName]);
 
-        updateButton.label = updateButtonText;
-        updateButton.hidden = false;
+        updateButton.setAttribute("label", updateButtonText);
         updateButton.setAttribute("update-status", "succeeded");
+        updateButton.hidden = false;
 
         PanelUI.panel.addEventListener("popupshowing", this, true);
 
@@ -2565,9 +2527,9 @@ let gMenuButtonUpdateBadge = {
         stringId = "appmenu.updateFailed.description";
         updateButtonText = gNavigatorBundle.getString(stringId);
 
-        updateButton.label = updateButtonText;
-        updateButton.hidden = false;
+        updateButton.setAttribute("label", updateButtonText);
         updateButton.setAttribute("update-status", "failed");
+        updateButton.hidden = false;
 
         PanelUI.panel.addEventListener("popupshowing", this, true);
 
@@ -2976,6 +2938,30 @@ function BrowserFullScreen()
 {
   window.fullScreen = !window.fullScreen;
 }
+
+function mirrorShow(popup) {
+  let services = CastingApps.getServicesForMirroring();
+  popup.ownerDocument.getElementById("menu_mirrorTabCmd").disabled = !services.length;
+}
+
+function mirrorMenuItemClicked(event) {
+  gBrowser.selectedBrowser.messageManager.sendAsyncMessage("SecondScreen:tab-mirror",
+                                                           {service: event.originalTarget._service});
+}
+
+function populateMirrorTabMenu(popup) {
+  let videoEl = this.target;
+  popup.innerHTML = null;
+  let doc = popup.ownerDocument;
+  let services = CastingApps.getServicesForMirroring();
+  services.forEach(service => {
+    let item = doc.createElement("menuitem");
+    item.setAttribute("label", service.friendlyName);
+    item._service = service;
+    item.addEventListener("command", mirrorMenuItemClicked);
+    popup.appendChild(item);
+  });
+};
 
 function _checkDefaultAndSwitchToMetro() {
 #ifdef HAVE_SHELL_SERVICE
@@ -5698,9 +5684,11 @@ function handleLinkClick(event, href, linkNode) {
   }
 
   urlSecurityCheck(href, doc.nodePrincipal);
-  openLinkIn(href, where, { referrerURI: referrerURI,
-                            charset: doc.characterSet,
-                            allowMixedContent: persistAllowMixedContentInChildTab });
+  let params = { charset: doc.characterSet,
+                 allowMixedContent: persistAllowMixedContentInChildTab };
+  if (!BrowserUtils.linkHasNoReferrer(linkNode))
+    params.referrerURI = referrerURI;
+  openLinkIn(href, where, params);
   event.preventDefault();
   return true;
 }
@@ -6758,7 +6746,7 @@ function isTabEmpty(aTab) {
   if (!gMultiProcessBrowser && browser.contentWindow.opener)
     return false;
 
-  if (browser.sessionHistory && browser.sessionHistory.count >= 2)
+  if (browser.canGoForward || browser.canGoBack)
     return false;
 
   return true;
@@ -6984,7 +6972,7 @@ var gIdentityHandler = {
 
     // Chrome URIs however get special treatment. Some chrome URIs are
     // whitelisted to provide a positive security signal to the user.
-    let whitelist = /^about:(accounts|addons|app-manager|config|crashes|customizing|healthreport|home|license|newaddon|permissions|preferences|privatebrowsing|rights|sessionrestore|support|welcomeback)/i;
+    let whitelist = /^about:(accounts|addons|app-manager|config|crashes|customizing|downloads|healthreport|home|license|newaddon|permissions|preferences|privatebrowsing|rights|sessionrestore|support|welcomeback)/i;
     let isChromeUI = uri.schemeIs("about") && whitelist.test(uri.spec);
     if (isChromeUI) {
       this.setMode(this.IDENTITY_MODE_CHROMEUI);
@@ -7477,8 +7465,10 @@ let gRemoteTabsUI = {
  *        This object also allows:
  *        - 'ignoreFragment' property to be set to true to exclude fragment-portion
  *        matching when comparing URIs.
+ *        - 'ignoreQueryString' property to be set to true to exclude query string
+ *        matching when comparing URIs.
  *        - 'replaceQueryString' property to be set to true to exclude query string
- *        matching when comparing URIs and ovewrite the initial query string with
+ *        matching when comparing URIs and overwrite the initial query string with
  *        the one from the new URI.
  * @return True if an existing tab was found, false otherwise
  */
@@ -7486,15 +7476,18 @@ function switchToTabHavingURI(aURI, aOpenNew, aOpenParams={}) {
   // Certain URLs can be switched to irrespective of the source or destination
   // window being in private browsing mode:
   const kPrivateBrowsingWhitelist = new Set([
+    "about:addons",
     "about:customizing",
   ]);
 
   let ignoreFragment = aOpenParams.ignoreFragment;
+  let ignoreQueryString = aOpenParams.ignoreQueryString;
   let replaceQueryString = aOpenParams.replaceQueryString;
 
-  // This property is only used by switchToTabHavingURI and should
+  // These properties are only used by switchToTabHavingURI and should
   // not be used as a parameter for the new load.
   delete aOpenParams.ignoreFragment;
+  delete aOpenParams.ignoreQueryString;
 
   // This will switch to the tab in aWindow having aURI, if present.
   function switchIfURIInWindow(aWindow) {
@@ -7523,12 +7516,14 @@ function switchToTabHavingURI(aURI, aOpenNew, aOpenParams={}) {
         }
         return true;
       }
-      if (replaceQueryString) {
+      if (ignoreQueryString || replaceQueryString) {
         if (browser.currentURI.spec.split("?")[0] == aURI.spec.split("?")[0]) {
           // Focus the matching window & tab
           aWindow.focus();
           aWindow.gBrowser.tabContainer.selectedIndex = i;
-          browser.loadURI(aURI.spec);
+          if (replaceQueryString) {
+            browser.loadURI(aURI.spec);
+          }
           return true;
         }
       }
@@ -7743,7 +7738,8 @@ XPCOMUtils.defineLazyGetter(ResponsiveUI, "ResponsiveUIManager", function() {
 });
 
 function openEyedropper() {
-  var eyedropper = new this.Eyedropper(this);
+  var eyedropper = new this.Eyedropper(this, { context: "menu",
+                                               copyOnSelect: true });
   eyedropper.open();
 }
 
