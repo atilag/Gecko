@@ -167,7 +167,7 @@ GonkMediaDataDecoder::ProcessDecode(mp4_demuxer::MP4Sample* aSample)
   nsresult rv = mManager->Input(aSample);
   if (rv != NS_OK) {
     NS_WARNING("GonkAudioDecoder failed to input data");
-    GMDD_LOG("Failed to input data err: %d",rv);
+    GMDD_LOG("Failed to input data err: %d",int(rv));
     mCallback->Error();
     return;
   }
