@@ -5487,7 +5487,7 @@ if test -n "$MOZ_VPX" -a -z "$MOZ_NATIVE_LIBVPX"; then
         VPX_AS=$AS
         dnl These flags are a lie; they're just used to enable the requisite
         dnl opcodes; actual arch detection is done at runtime.
-        VPX_ASFLAGS="-march=armv7-a -mfpu=neon"
+        VPX_ASFLAGS="-march=armv7-a -mfpu=neon -mfloat-abi=hard"
         VPX_AS_CONVERSION='$(PERL) $(topsrcdir)/media/libvpx/build/make/ads2gas.pl'
         VPX_ASM_SUFFIX="$ASM_SUFFIX"
         VPX_ARM_ASM=1
