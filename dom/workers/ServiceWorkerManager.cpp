@@ -401,7 +401,7 @@ ServiceWorkerManager::~ServiceWorkerManager()
 void
 ServiceWorkerManager::Init()
 {
-  if (XRE_GetProcessType() == GeckoProcessType_Default) {
+  if (XRE_IsParentProcess()) {
     nsRefPtr<ServiceWorkerRegistrar> swr = ServiceWorkerRegistrar::Get();
     MOZ_ASSERT(swr);
 
@@ -4497,7 +4497,7 @@ ServiceWorkerManager::Observe(nsISupports* aSubject,
                               const char* aTopic,
                               const char16_t* aData)
 {
-  MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
+  MOZ_ASSERT(XRE_IsParentProcess());
 
   if (strcmp(aTopic, PURGE_SESSION_HISTORY) == 0) {
     RemoveAll();
