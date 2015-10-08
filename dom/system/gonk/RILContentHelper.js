@@ -56,7 +56,8 @@ const RIL_IPC_MSG_NAMES = [
   "RIL:ReadIccContacts",
   "RIL:UpdateIccContact",
   "RIL:MatchMvno",
-  "RIL:GetServiceState"
+  "RIL:GetServiceState",
+  "RIL:GetIccSimChallengeResponse"
 ];
 
 XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
@@ -149,12 +150,14 @@ RILContentHelper.prototype = {
   __proto__: DOMRequestIpcHelper.prototype,
 
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIIccProvider,
+                                         Ci.nsIIccAuthenticator,
                                          Ci.nsIObserver,
                                          Ci.nsISupportsWeakReference]),
   classID:   RILCONTENTHELPER_CID,
   classInfo: XPCOMUtils.generateCI({classID: RILCONTENTHELPER_CID,
                                     classDescription: "RILContentHelper",
-                                    interfaces: [Ci.nsIIccProvider]}),
+                                    interfaces: [Ci.nsIIccProvider,
+                                                 Ci.nsIIccAuthenticator]}),
 
   updateDebugFlag: function() {
     try {
@@ -562,6 +565,21 @@ RILContentHelper.prototype = {
     });
   },
 
+  getIccChallengeResponse: function(cardType, authType, challenge, callback) {
+    let requestId = UUIDGenerator.generateUUID().toString();
+    this._addIccChannelCallback(requestId, callback);
+
+    cpmm.sendAsyncMessage("RIL:GetIccSimChallengeResponse", {
+      clientId: 0,
+      data: {
+        requestId: requestId,
+        appType: cardType,
+        //authType: authType,
+        data: challenge
+      }
+    });
+  },
+
   _iccListeners: null,
 
   registerListener: function(listenerType, clientId, listener) {
@@ -803,6 +821,9 @@ RILContentHelper.prototype = {
       case "RIL:GetServiceState":
         this.handleGetServiceState(data);
         break;
+      case "RIL:GetIccSimChallengeResponse":
+        this.handleGetIccSimChallengeResponse(data);
+        break;
     }
   },
 
@@ -917,6 +938,17 @@ RILContentHelper.prototype = {
     }
 
     resolver.resolve(message.result);
+  },
+
+  handleGetIccSimChallengeResponse: function(message) {
+    let requestId = message.requestId;
+    let callback = this._getIccChannelCallback(requestId);
+    if (!callback) {
+      return;
+    }
+
+    return !message.errorMsg ? callback.notifySuccess(message.sw1, message.sw2, message.authRsp) :
+                               callback.notifyError(message.errorMsg);
   },
 
   _deliverEvent: function(clientId, listenerType, name, args) {

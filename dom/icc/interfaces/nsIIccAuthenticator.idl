@@ -1,0 +1,63 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+/**
+ * The XPCOM helper for UICC Authentication.
+ */
+
+#include "nsISupports.idl"
+
+[scriptable, uuid(8a4a5422-edd6-4dd5-ae08-0027c57a2493)]
+interface nsIIccAuthCallback : nsISupports
+{
+  /**
+   * Callback function to notify the result from UICC.
+   *
+   * @param aSw1
+   *        First Status Byte
+   * @param aSw2
+   *        Second Status Byte
+   * @param aResponse
+   *        Response data in HEX string.
+   */
+  void notifySuccess(in octet aSw1, in octet aSw2, in DOMString aResponse);
+
+  /**
+   * Callback function to notify error.
+   *
+   * @param aReason
+   *        error cause in readable string.
+   */
+  void notifyError(in DOMString aReason);
+};
+
+[scriptable, uuid(de400143-2c51-4713-a2c2-24e7f06f6970)]
+interface nsIIccAuthenticator : nsISupports
+{
+  const unsigned long CARD_APPTYPE_SIM = 1;
+  const unsigned long CARD_APPTYPE_USIM = 2;
+  const unsigned long CARD_APPTYPE_RUIM = 3;
+  const unsigned long CARD_APPTYPE_CSIM = 4;
+  const unsigned long CARD_APPTYPE_ISIM = 5;
+
+  const unsigned short SECURITY_CONTEXT_GSM = 0x80;
+  const unsigned short SECURITY_CONTEXT_3G = 0x81;
+
+  /**
+   * Callback function to notify the result from UICC.
+   *
+   * @param aCardType
+   *        one of CARD_APPTYPE_*;
+   * @param aAuthType
+   *        one of AUTH_CONTEXT_*;
+   * @param aChallenge
+   *        Challenge data in HEX string.
+   * @param aCallback
+   *        an instance of nsIIccAuthCallback.
+   */
+  void getIccChallengeResponse(in unsigned long aCardType,
+                               in unsigned short aAuthType,
+                               in DOMString aChallenge,
+                               in nsIIccAuthCallback aCallback);
+};
