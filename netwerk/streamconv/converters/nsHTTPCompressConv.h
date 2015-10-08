@@ -57,7 +57,8 @@ private:
     virtual ~nsHTTPCompressConv ();
 
     nsIStreamListener   *mListener; // this guy gets the converted data via his OnDataAvailable ()
-	CompressMode        mMode;
+    CompressMode mInputMode;
+    CompressMode mOutputMode;
 
     unsigned char *mOutBuffer;
     unsigned char *mInpBuffer;
@@ -67,6 +68,18 @@ private:
 	
     nsCOMPtr<nsISupports>   mAsyncConvContext;
     nsCOMPtr<nsIStringInputStream>  mStream;
+
+    nsresult CompressOnDataAvailable(nsIRequest* request,
+                                     nsISupports *aContext,
+                                     nsIInputStream *iStr,
+                                     uint64_t aSourceOffset,
+                                     uint32_t aCount);
+
+    nsresult DecompressOnDataAvailable(nsIRequest* request,
+                                       nsISupports *aContext,
+                                       nsIInputStream *iStr,
+                                       uint64_t aSourceOffset,
+                                       uint32_t aCount);
 
     nsresult do_OnDataAvailable (nsIRequest *request, nsISupports *aContext,
                                  uint64_t aSourceOffset, const char *buffer,

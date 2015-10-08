@@ -22,7 +22,8 @@ NS_IMPL_ISUPPORTS(nsHTTPCompressConv,
 // nsFTPDirListingConv methods
 nsHTTPCompressConv::nsHTTPCompressConv()
     : mListener(nullptr)
-    , mMode(HTTP_COMPRESS_IDENTITY)
+    , mInputMode(HTTP_COMPRESS_IDENTITY)
+    , mOutputMode(HTTP_COMPRESS_IDENTITY)
     , mOutBuffer(nullptr)
     , mInpBuffer(nullptr)
     , mOutBufferLen(0)
@@ -49,8 +50,24 @@ nsHTTPCompressConv::~nsHTTPCompressConv()
 
     // For some reason we are not getting Z_STREAM_END.  But this was also seen
     //    for mozilla bug 198133.  Need to handle this case.
-    if (mStreamInitialized && !mStreamEnded)
+    if (mStreamInitialized && !mStreamEnded && mOutputMode == HTTP_COMPRESS_IDENTITY)
         inflateEnd (&d_stream);
+}
+
+CompressMode
+getCompressMode(const char *aType)
+{
+
+    if (!PL_strncasecmp(aType, HTTP_COMPRESS_TYPE, sizeof(HTTP_COMPRESS_TYPE)-1) ||
+        !PL_strncasecmp(aType, HTTP_X_COMPRESS_TYPE, sizeof(HTTP_X_COMPRESS_TYPE)-1)) {
+        return HTTP_COMPRESS_COMPRESS;
+    } else if (!PL_strncasecmp(aType, HTTP_GZIP_TYPE, sizeof(HTTP_GZIP_TYPE)-1) ||
+              !PL_strncasecmp(aType, HTTP_X_GZIP_TYPE, sizeof(HTTP_X_GZIP_TYPE)-1)) {
+        return HTTP_COMPRESS_GZIP;
+    } else if (!PL_strncasecmp(aType, HTTP_DEFLATE_TYPE, sizeof(HTTP_DEFLATE_TYPE)-1)) {
+        return HTTP_COMPRESS_DEFLATE;
+    }
+    return HTTP_COMPRESS_IDENTITY;
 }
 
 NS_IMETHODIMP
@@ -59,16 +76,15 @@ nsHTTPCompressConv::AsyncConvertData(const char *aFromType,
                                      nsIStreamListener *aListener, 
                                      nsISupports *aCtxt)
 {
-    if (!PL_strncasecmp(aFromType, HTTP_COMPRESS_TYPE, sizeof(HTTP_COMPRESS_TYPE)-1) ||
-        !PL_strncasecmp(aFromType, HTTP_X_COMPRESS_TYPE, sizeof(HTTP_X_COMPRESS_TYPE)-1))
-        mMode = HTTP_COMPRESS_COMPRESS;
+    mInputMode = getCompressMode(aFromType);
+    mOutputMode = getCompressMode(aToType);
 
-    else if (!PL_strncasecmp(aFromType, HTTP_GZIP_TYPE, sizeof(HTTP_GZIP_TYPE)-1) ||
-             !PL_strncasecmp(aFromType, HTTP_X_GZIP_TYPE, sizeof(HTTP_X_GZIP_TYPE)-1))
-        mMode = HTTP_COMPRESS_GZIP;
-
-    else if (!PL_strncasecmp(aFromType, HTTP_DEFLATE_TYPE, sizeof(HTTP_DEFLATE_TYPE)-1))
-        mMode = HTTP_COMPRESS_DEFLATE;
+    if (mOutputMode != HTTP_COMPRESS_IDENTITY) {
+        if (mOutputMode != HTTP_COMPRESS_GZIP ||
+            mInputMode != HTTP_COMPRESS_IDENTITY) {
+            return NS_ERROR_INVALID_CONTENT_ENCODING;
+        }
+    }
 
     // hook ourself up with the receiving listener. 
     mListener = aListener;
@@ -81,6 +97,20 @@ nsHTTPCompressConv::AsyncConvertData(const char *aFromType,
 NS_IMETHODIMP
 nsHTTPCompressConv::OnStartRequest(nsIRequest* request, nsISupports *aContext)
 {
+    if (!mStreamInitialized) {
+        memset(&d_stream, 0, sizeof (d_stream));
+
+        if (deflateInit2(&d_stream,
+                         Z_DEFAULT_COMPRESSION,
+                         Z_DEFLATED,
+                         31,
+                         8,
+                         Z_DEFAULT_STRATEGY) != Z_OK)
+            return NS_ERROR_FAILURE;
+
+        mStreamInitialized = true;
+    }
+
     return mListener->OnStartRequest(request, aContext);
 } 
 
@@ -88,6 +118,26 @@ NS_IMETHODIMP
 nsHTTPCompressConv::OnStopRequest(nsIRequest* request, nsISupports *aContext, 
                                   nsresult aStatus)
 {
+    if (mOutputMode == HTTP_COMPRESS_GZIP) {
+        d_stream.avail_out = 0;
+
+        while (d_stream.avail_out == 0) {
+            d_stream.next_out = mOutBuffer;
+            d_stream.avail_out = (uInt)mOutBufferLen;
+            int code = deflate(&d_stream, Z_FINISH);
+            unsigned bytesWritten = (uInt)mOutBufferLen - d_stream.avail_out;
+            if (code == Z_OK || code == Z_STREAM_END) {
+                if (bytesWritten) {
+                    nsresult rv = do_OnDataAvailable(request, aContext, d_stream.total_in, (char *)mOutBuffer, bytesWritten);
+                    if (NS_FAILED(rv)) {
+                        return rv;
+                    }
+                }
+            } else if (code != Z_BUF_ERROR) {
+                return NS_ERROR_FAILURE;
+            }
+        }
+    }
     return mListener->OnStopRequest(request, aContext, aStatus);
 } 
 
@@ -97,6 +147,71 @@ nsHTTPCompressConv::OnDataAvailable(nsIRequest* request,
                                     nsIInputStream *iStr, 
                                     uint64_t aSourceOffset, 
                                     uint32_t aCount)
+{
+    if (mOutputMode == HTTP_COMPRESS_IDENTITY) {
+        return DecompressOnDataAvailable(request, aContext, iStr,
+                                         aSourceOffset, aCount);
+    }
+    return CompressOnDataAvailable(request, aContext, iStr, aSourceOffset, aCount);
+}
+
+nsresult
+nsHTTPCompressConv::CompressOnDataAvailable(nsIRequest* request,
+                                            nsISupports *aContext,
+                                            nsIInputStream *iStr,
+                                            uint64_t aSourceOffset,
+                                            uint32_t aCount)
+{
+    MOZ_ASSERT(mInputMode == HTTP_COMPRESS_IDENTITY);
+    MOZ_ASSERT(mOutputMode == HTTP_COMPRESS_GZIP);
+
+    uint32_t streamLen = aCount;
+    if (streamLen == 0) {
+        NS_ERROR("count of zero passed to OnDataAvailable");
+        return NS_ERROR_UNEXPECTED;
+    }
+
+    if (mInpBufferLen < streamLen) {
+        mInpBuffer = (unsigned char *) realloc(mInpBuffer, streamLen);
+    }
+
+    if (mOutBufferLen < (streamLen + 1024)) {
+        mOutBuffer = (unsigned char *) realloc(mOutBuffer, streamLen + 1024);
+    }
+
+    uint32_t unused;
+    iStr->Read((char *)mInpBuffer, streamLen, &unused);
+
+    d_stream.next_in = mInpBuffer;
+    d_stream.avail_in = (uInt)streamLen;
+    d_stream.avail_out = 0;
+
+    while (d_stream.avail_out == 0) {
+        d_stream.next_out = mOutBuffer;
+        d_stream.avail_out = (uInt)mOutBufferLen;
+        int code = deflate(&d_stream, Z_NO_FLUSH);
+        unsigned bytesWritten = (uInt)mOutBufferLen - d_stream.avail_out;
+
+        if (code == Z_OK) {
+            if (bytesWritten) {
+                nsresult rv = do_OnDataAvailable(request, aContext, aSourceOffset, (char *)mOutBuffer, bytesWritten);
+                if (NS_FAILED(rv)) {
+                    return rv;
+                }
+            }
+        } else if (code != Z_BUF_ERROR) {
+            return NS_ERROR_FAILURE;
+        }
+    }
+    return NS_OK;
+}
+
+nsresult
+nsHTTPCompressConv::DecompressOnDataAvailable(nsIRequest* request,
+                                              nsISupports *aContext,
+                                              nsIInputStream *iStr,
+                                              uint64_t aSourceOffset,
+                                              uint32_t aCount)
 {
     nsresult rv = NS_ERROR_INVALID_CONTENT_ENCODING;
     uint32_t streamLen = aCount;
@@ -116,7 +231,7 @@ nsHTTPCompressConv::OnDataAvailable(nsIRequest* request,
         return iStr->ReadSegments(NS_DiscardSegment, nullptr, streamLen, &n);
     }
 
-    switch (mMode)
+    switch (mInputMode)
     {
         case HTTP_COMPRESS_GZIP:
             streamLen = check_header(iStr, streamLen, &rv);
@@ -154,7 +269,7 @@ nsHTTPCompressConv::OnDataAvailable(nsIRequest* request,
             uint32_t unused;
             iStr->Read((char *)mInpBuffer, streamLen, &unused);
 
-            if (mMode == HTTP_COMPRESS_DEFLATE)
+            if (mInputMode == HTTP_COMPRESS_DEFLATE)
             {
                 if (!mStreamInitialized)
                 {
