@@ -356,9 +356,6 @@ TelephonyRequestQueue.prototype = {
   }
 };
 
-// Ril quirk to describe the SMSC address format.
-let RILQUIRKS_SMSC_ADDRESS_FORMAT;
-
 /**
  * The RIL state machine.
  *
@@ -1455,17 +1452,6 @@ RilObject.prototype = {
   },
 
   /**
-   * Set TTY mode
-   */
-  setTtyMode: function(options) {
-    let Buf = this.context.Buf;
-    Buf.newParcel(REQUEST_SET_TTY_MODE, options);
-    Buf.writeInt32(1);
-    Buf.writeInt32(options.mode);
-    Buf.sendParcel();
-  },
-
-  /**
    * Set the voice privacy mode
    */
   setVoicePrivacyMode: function(options) {
@@ -2337,91 +2323,12 @@ RilObject.prototype = {
    * Set the Short Message Service Center address.
    *
    * @param smscAddress
-   *        Number part of the SMSC address.
-   * @param typeOfNumber
-   *        Type of number in integer, as defined in
-   *        |Table 10.5.118: Called party BCD number| of 3GPP TS 24.008.
-   * @param numberPlanIdentification
-   *        Number plan identification in integer, as defined in
-   *        |Table 10.5.118: Called party BCD number| of 3GPP TS 24.008.
+   *        Short Message Service Center address in PDU format.
    */
   setSmscAddress: function(options) {
-    let ton = options.typeOfNumber;
-    let npi = CALLED_PARTY_BCD_NPI[options.numberPlanIdentification];
-
-    // If any of the mandatory arguments is not available, return an error
-    // immediately.
-    if (ton === undefined || npi === undefined || !options.smscAddress) {
-      options.errorMsg = GECKO_ERROR_INVALID_PARAMETER;
-      this.sendChromeMessage(options);
-      return;
-    }
-
-    // Remove all illegal characters in the number string for user-input fault
-    // tolerance.
-    let numStart = options.smscAddress[0] === "+" ? 1 : 0;
-    let number = options.smscAddress.substring(0, numStart) +
-                 options.smscAddress.substring(numStart)
-                                    .replace(/[^0-9*#abc]/ig, "");
-
-    // If the filtered number is an empty string, return an error immediately.
-    if (number.length === 0) {
-      options.errorMsg = GECKO_ERROR_INVALID_PARAMETER;
-      this.sendChromeMessage(options);
-      return;
-    }
-
-    // Init parcel.
-    this.SMSC = null;
     let Buf = this.context.Buf;
     Buf.newParcel(REQUEST_SET_SMSC_ADDRESS, options);
-
-    // +---+-----------+---------------+
-    // | 1 |    TON    |      NPI      |
-    // +---+-----------+---------------+
-    let tosca = (0x1 << 7) + (ton << 4) + npi;
-    if (RILQUIRKS_SMSC_ADDRESS_FORMAT === "pdu") {
-      let pduHelper = this.context.GsmPDUHelper;
-
-      // Remove the preceding '+', and covert the special BCD digits defined in
-      // |Called party BCD number| of 3GPP TS 24.008 to corresponding
-      // hexadecimal values (refer the following table).
-      //
-      // +=========+=======+=====+
-      // |  value  | digit | hex |
-      // +========================
-      // | 1 0 1 0 |   *   | 0xA |
-      // | 1 0 1 1 |   #   | 0xB |
-      // | 1 1 0 0 |   a   | 0xC |
-      // | 1 1 0 1 |   b   | 0xD |
-      // | 1 1 1 0 |   c   | 0xE |
-      // +=========+=======+=====+
-      //
-      // The replace order is reversed intentionally, because if the digits are
-      // replaced in ascending order, "#" will be converted to "b" and then be
-      // converted again to "d", which generates incorrect result.
-      let pureNumber = number.substring(numStart)
-                             .replace(/c/ig, "e")
-                             .replace(/b/ig, "d")
-                             .replace(/a/ig, "c")
-                             .replace(/\#/g, "b")
-                             .replace(/\*/g, "a");
-
-      // address length and string length
-      let length = Math.ceil(pureNumber.length / 2) + 1; // +1 octet for TOA
-      let strlen = length * 2 + 2; // +2 semi-octets for length octet
-
-      Buf.writeInt32(strlen);
-      pduHelper.writeHexOctet(length);
-      pduHelper.writeHexOctet(tosca);
-      pduHelper.writeSwappedNibbleBCD(pureNumber);
-      Buf.writeStringDelimiter(strlen);
-    } else /* RILQUIRKS_SMSC_ADDRESS_FORMAT === "text" */ {
-      let sca;
-      sca = '"' + number + '"' + ',' + tosca;
-      Buf.writeString(sca);
-    }
-
+    Buf.writeString(options.smscAddress);
     Buf.sendParcel();
   },
 
@@ -6622,15 +6529,7 @@ RilObject.prototype[REQUEST_CDMA_QUERY_ROAMING_PREFERENCE] = function REQUEST_CD
   }
   this.sendChromeMessage(options);
 };
-RilObject.prototype[REQUEST_SET_TTY_MODE] = function REQUEST_SET_TTY_MODE(length, options) {
-  if (options.rilRequestError) {
-    options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
-    this.sendChromeMessage(options);
-    return;
-  }
-
-  this.sendChromeMessage(options);
-};
+RilObject.prototype[REQUEST_SET_TTY_MODE] = null;
 RilObject.prototype[REQUEST_QUERY_TTY_MODE] = null;
 RilObject.prototype[REQUEST_CDMA_SET_PREFERRED_VOICE_PRIVACY_MODE] = function REQUEST_CDMA_SET_PREFERRED_VOICE_PRIVACY_MODE(length, options) {
   if (options.rilRequestError) {
@@ -6737,17 +6636,7 @@ RilObject.prototype[REQUEST_GET_SMSC_ADDRESS] = function REQUEST_GET_SMSC_ADDRES
   options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
   this.sendChromeMessage(options);
 };
-RilObject.prototype[REQUEST_SET_SMSC_ADDRESS] = function REQUEST_SET_SMSC_ADDRESS(length, options) {
-  if (!options.rilMessageType || options.rilMessageType !== "setSmscAddress") {
-    return;
-  }
-
-  if (options.rilRequestError) {
-    optioins.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
-  }
-
-  this.sendChromeMessage(options);
-};
+RilObject.prototype[REQUEST_SET_SMSC_ADDRESS] = null;
 RilObject.prototype[REQUEST_REPORT_SMS_MEMORY_STATUS] = function REQUEST_REPORT_SMS_MEMORY_STATUS(length, options) {
   this.pendingToReportSmsMemoryStatus = options.rilRequestError != ERROR_SUCCESS;
 };
@@ -16401,8 +16290,7 @@ let ContextPool = {
     RILQUIRKS_SEND_STK_PROFILE_DOWNLOAD = quirks.sendStkProfileDownload;
     RILQUIRKS_DATA_REGISTRATION_ON_DEMAND = quirks.dataRegistrationOnDemand;
     RILQUIRKS_SUBSCRIPTION_CONTROL = quirks.subscriptionControl;
-    RILQUIRKS_SMSC_ADDRESS_FORMAT = quirks.smscAddressFormat;
-},
+  },
 
   setDebugFlag: function(aOptions) {
     DEBUG = DEBUG_WORKER || aOptions.debug;

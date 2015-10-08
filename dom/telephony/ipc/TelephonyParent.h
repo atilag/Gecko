@@ -76,13 +76,6 @@ protected:
   virtual bool
   RecvSetSpeakerEnabled(const bool& aEnabled) MOZ_OVERRIDE;
 
-  virtual bool
-  RecvGetTtyMode(uint16_t* aEnabled) MOZ_OVERRIDE;
-
-  virtual bool
-  RecvSetTtyMode(const uint16_t& aEnabled) MOZ_OVERRIDE;
-
-
 private:
   bool mActorDestroyed;
   bool mRegistered;

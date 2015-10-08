@@ -557,8 +557,7 @@ XPCOMUtils.defineLazyGetter(this, "gRadioEnabledController", function() {
       return function() {
         let deferred = _deactivatingDeferred[clientId] = Promise.defer();
         let dataConnectionHandler = gDataConnectionManager.getConnectionHandler(clientId);
-        dataConnectionHandler.deactivateDataCalls(
-          RIL.DATACALL_DEACTIVATE_RADIO_SHUTDOWN);
+        dataConnectionHandler.deactivateDataCalls();
         return deferred.promise;
       };
     },
@@ -728,8 +727,7 @@ XPCOMUtils.defineLazyGetter(this, "gDataConnectionManager", function () {
         oldSettings.enabled = false;
       }
 
-      if (oldConnHandler.deactivateDataCalls(
-        RIL.DATACALL_DEACTIVATE_SERVICEID_CHANGED)) {
+      if (oldConnHandler.deactivateDataCalls()) {
         this._pendingDataCallRequest = applyPendingDataSettings;
         if (DEBUG) {
           this.debug("_handleDataClientIdChange: existing data call(s) active" +
@@ -1091,7 +1089,8 @@ DataConnectionHandler.prototype = {
   allDataDisconnected: function() {
     for (let i = 0; i < this._dataCalls.length; i++) {
       let dataCall = this._dataCalls[i];
-      if (dataCall.state != RIL.GECKO_NETWORK_STATE_DISCONNECTED) {
+      if (dataCall.state != RIL.GECKO_NETWORK_STATE_UNKNOWN &&
+          dataCall.state != RIL.GECKO_NETWORK_STATE_DISCONNECTED) {
         return false;
       }
     }
@@ -1112,7 +1111,7 @@ DataConnectionHandler.prototype = {
     this.dataNetworkInterfaces.forEach(function(networkInterface) {
       // Clear all existing connections.
       if (networkInterface.state == RIL.GECKO_NETWORK_STATE_CONNECTED) {
-        networkInterface.disconnect(RIL.DATACALL_DEACTIVATE_APN_CHANGED);
+        networkInterface.disconnect();
         isDeactivatingDataCalls = true;
       }
     });
@@ -1235,13 +1234,6 @@ DataConnectionHandler.prototype = {
     networkInterface.connect();
   },
 
-  handleDataRegistrationChange: function() {
-    for (let i = 0; i < this._dataCalls.length; i++) {
-      let datacall = this._dataCalls[i];
-      datacall.dataRegistrationChanged();
-    }
-  },
-
   _isMobileNetworkType: function(networkType) {
     if (networkType === NETWORK_TYPE_MOBILE ||
         networkType === NETWORK_TYPE_MOBILE_MMS ||
@@ -1310,14 +1302,14 @@ DataConnectionHandler.prototype = {
     networkInterface.disconnect();
   },
 
-  deactivateDataCalls: function(aReason) {
+  deactivateDataCalls: function() {
     let dataDisconnecting = false;
     this.dataNetworkInterfaces.forEach(function(networkInterface) {
       if (networkInterface.enabled) {
         if (networkInterface.state == RIL.GECKO_NETWORK_STATE_CONNECTED) {
           dataDisconnecting = true;
         }
-        networkInterface.disconnect(aReason);
+        networkInterface.disconnect();
       }
     });
 
@@ -1513,8 +1505,6 @@ WorkerMessenger.prototype = {
           libcutils.property_get("ro.moz.ril.query_icc_count", "false") == "true",
         sendStkProfileDownload:
           libcutils.property_get("ro.moz.ril.send_stk_profile_dl", "false") == "true",
-        smscAddressFormat:
-          libcutils.property_get("ro.moz.ril.smsc_address_format", "text"),
         dataRegistrationOnDemand: RILQUIRKS_DATA_REGISTRATION_ON_DEMAND,
         subscriptionControl: RILQUIRKS_SUBSCRIPTION_CONTROL
       }
@@ -1887,7 +1877,6 @@ RadioInterface.prototype = {
                                                           message);
         if (message[RIL.NETWORK_INFO_DATA_REGISTRATION_STATE]) {
           connHandler.updateRILNetworkInterface();
-          connHandler.handleDataRegistrationChange();
         }
         break;
       case "networkselectionmodechange":
@@ -1900,7 +1889,6 @@ RadioInterface.prototype = {
       case "dataregistrationstatechange":
         gMobileConnectionService.notifyDataInfoChanged(this.clientId, message);
         connHandler.updateRILNetworkInterface();
-        connHandler.handleDataRegistrationChange();
         break;
       case "signalstrengthchange":
         gMobileConnectionService.notifySignalStrengthChanged(this.clientId,
@@ -2645,7 +2633,7 @@ function DataCall(clientId, apnSetting) {
     dnses: [],
     gateways: []
   };
-  this.state = RIL.GECKO_NETWORK_STATE_DISCONNECTED;
+  this.state = RIL.GECKO_NETWORK_STATE_UNKNOWN;
   this.requestedNetworkIfaces = [];
 }
 
@@ -2673,20 +2661,6 @@ DataCall.prototype = {
   // Holds the authentication type sent to ril worker.
   chappap: null,
 
-  dataRegistrationChanged: function() {
-    if (this.requestedNetworkIfaces.length === 0 ||
-        this.state != RIL.GECKO_NETWORK_STATE_DISCONNECTED) {
-      return;
-    }
-
-    if (this.timer) {
-      this.timer.cancel();
-    }
-
-    if (DEBUG) this.debug("Setup data call on dataRegistrationChanged.")
-    this.setup();
-  },
-
   dataCallError: function(message) {
     if (DEBUG) {
       this.debug("Data call error on APN " + message.apn + ": " +
@@ -2704,12 +2678,6 @@ DataCall.prototype = {
     if (message.suggestedRetryTime === INT32_MAX ||
         this.isPermanentFail(message.status, message.errorMsg)) {
       if (DEBUG) this.debug("Data call error: no retry needed.");
-
-      for (let i = 0; i < this.requestedNetworkIfaces.length; i++) {
-        let networkInterface = this.requestedNetworkIfaces[i];
-        networkInterface.setReason(RIL.DATACALL_PERMANENT_FAILURE);
-        networkInterface.notifyRILNetworkInterface();
-      }
       return;
     }
 
@@ -2739,9 +2707,7 @@ DataCall.prototype = {
               this.debug("State is connected, but no network interface requested" +
                          " this DataCall");
             }
-
-            Services.tm.currentThread.dispatch(() => this.deactivate(),
-                                               Ci.nsIThread.DISPATCH_NORMAL);
+            this.deactivate();
             return;
           }
 
@@ -2783,6 +2749,7 @@ DataCall.prototype = {
         }
         break;
       case RIL.GECKO_NETWORK_STATE_DISCONNECTED:
+      case RIL.GECKO_NETWORK_STATE_UNKNOWN:
         if (this.state == RIL.GECKO_NETWORK_STATE_CONNECTED) {
           // Notify first on unexpected data call disconnection.
           this.state = datacall.state;
@@ -2797,11 +2764,7 @@ DataCall.prototype = {
             this.debug("State is disconnected/unknown, but this DataCall is" +
                        " requested.");
           }
-
-          // Do it in the next event tick, so that DISCONNECTED event can have
-          // time to propagate before state becomes CONNECTING.
-          Services.tm.currentThread.dispatch(() => this.setup(),
-                                             Ci.nsIThread.DISPATCH_NORMAL);
+          this.setup();
           return;
         }
         break;
@@ -2879,7 +2842,7 @@ DataCall.prototype = {
     this.linkInfo.dnses = [];
     this.linkInfo.gateways = [];
 
-    this.state = RIL.GECKO_NETWORK_STATE_DISCONNECTED;
+    this.state = RIL.GECKO_NETWORK_STATE_UNKNOWN;
 
     this.chappap = null;
     this.pdptype = null;
@@ -2982,12 +2945,6 @@ DataCall.prototype = {
       this.apnRetryCounter = 0;
       this.timer = null;
       if (DEBUG) this.debug("Too many APN Connection retries - STOP retrying");
-
-      for (let i = 0; i < this.requestedNetworkIfaces.length; i++) {
-        let networkInterface = this.requestedNetworkIfaces[i];
-        networkInterface.setReason(RIL.DATACALL_RETRY_FAILED);
-        networkInterface.notifyRILNetworkInterface();
-      }
       return;
     }
 
@@ -3019,6 +2976,15 @@ DataCall.prototype = {
     if (index != -1) {
       this.requestedNetworkIfaces.splice(index, 1);
 
+      if (this.state == RIL.GECKO_NETWORK_STATE_DISCONNECTED ||
+          this.state == RIL.GECKO_NETWORK_STATE_UNKNOWN) {
+        if (this.timer) {
+          this.timer.cancel();
+        }
+        this.reset();
+        return;
+      }
+
       // Notify the DISCONNECTED event immediately after network interface is
       // removed from requestedNetworkIfaces, to make the DataCall, shared or
       // not, to have the same behavior.
@@ -3029,14 +2995,6 @@ DataCall.prototype = {
           networkInterface.notifyRILNetworkInterface();
         }
       }.bind(null, RIL.GECKO_NETWORK_STATE_DISCONNECTED), Ci.nsIEventTarget.DISPATCH_NORMAL);
-
-      if (this.state == RIL.GECKO_NETWORK_STATE_DISCONNECTED) {
-        if (this.timer) {
-          this.timer.cancel();
-        }
-        this.reset();
-        return;
-      }
     }
 
     // Only deactivate data call if no more network interface needs this
@@ -3087,7 +3045,6 @@ function RILNetworkInterface(dataConnectionHandler, type, apnSetting, dataCall) 
   this.dataCall = dataCall;
 
   this.enabled = false;
-  this.reason = Ci.nsINetworkInterface.REASON_NONE;
 }
 
 RILNetworkInterface.prototype = {
@@ -3104,9 +3061,6 @@ RILNetworkInterface.prototype = {
 
   // If this RILNetworkInterface type is enabled or not.
   enabled: null,
-
-  // Reference count for non-default mobile data networks.
-  activeUsers: 0,
 
   /**
    * nsINetworkInterface Implementation
@@ -3132,8 +3086,6 @@ RILNetworkInterface.prototype = {
   get httpProxyPort() {
     return this.apnSetting.port || "";
   },
-
-  reason: null,
 
   getAddresses: function(ips, prefixLengths) {
     let linkInfo = this.dataCall.linkInfo;
@@ -3217,56 +3169,35 @@ RILNetworkInterface.prototype = {
     return this.state == Ci.nsINetworkInterface.NETWORK_STATE_CONNECTED;
   },
 
-  setReason: function(aReason) {
-    this.reason = aReason;
-  },
-
   notifyRILNetworkInterface: function() {
     if (DEBUG) {
       this.debug("notifyRILNetworkInterface type: " + this.type + ", state: " +
-                 this.state + ", reason: " + this.reason);
+                 this.state);
     }
 
     gNetworkManager.updateNetworkInterface(this);
   },
 
   connect: function() {
-    if (this.type != NETWORK_TYPE_MOBILE) {
-      this.activeUsers++;
-    }
     this.enabled = true;
-    this.reason = Ci.nsINetworkInterface.REASON_NONE;
 
-    // Call this even if activeUsers > 1, to allow state change event to be
-    // fired in this case.
     this.dataCall.connect(this);
   },
 
-  disconnect: function(aReason = Ci.nsINetworkInterface.REASON_NONE) {
+  disconnect: function() {
     if (!this.enabled) {
       return;
     }
+    this.enabled = false;
 
-    if (this.type == NETWORK_TYPE_MOBILE) {
-      this.enabled = false;
-    } else {
-      this.activeUsers--;
-      this.enabled = (this.activeUsers > 0 ? true : false);
-    }
-    this.reason = aReason;
-
-    // Force disconnect if reason is not REASON_NONE.
-    if (!this.enabled || this.reason != Ci.nsINetworkInterface.REASON_NONE) {
-      this.activeUsers = 0;
-      this.enabled = false;
-      this.dataCall.disconnect(this);
-    }
+    this.dataCall.disconnect(this);
   },
 
   shutdown: function() {
     this.dataCall.shutdown();
     this.dataCall = null;
   }
+
 };
 
 XPCOMUtils.defineLazyServiceGetter(DataCall.prototype, "gRIL",

@@ -516,11 +516,6 @@ this.CALL_PRESENTATION_PAYPHONE = 3;
 // Call forwarding actions, see TS 27.007 7.11 "mode"
 this.CALL_FORWARD_ACTION_QUERY_STATUS = 2;
 
-this.TTY_MODE_OFF = 0;
-this.TTY_MODE_FULL = 1;
-this.TTY_MODE_HCO = 2;
-this.TTY_MODE_VCO = 3;
-
 // ICC commands, see TS 27.007 +CRSM commands
 this.ICC_COMMAND_SEEK = 0xa2;
 this.ICC_COMMAND_READ_BINARY = 0xb0;
@@ -1443,30 +1438,6 @@ this.CB_ETWS_WARNING_TYPE_NAMES = [
 this.CB_UMTS_MESSAGE_TYPE_CBS      = 1;
 this.CB_UMTS_MESSAGE_TYPE_SCHEDULE = 2;
 this.CB_UMTS_MESSAGE_TYPE_CBS41    = 3;
-
-/**
- * Number plan identification defined in
- * |Table 10.5.118: Called party BCD number| of 3GPP TS 24.008.
- */
-this.CALLED_PARTY_BCD_NPI_UNKNOWN  = 0;
-this.CALLED_PARTY_BCD_NPI_ISDN     = 1;
-this.CALLED_PARTY_BCD_NPI_DATA     = 3;
-this.CALLED_PARTY_BCD_NPI_TELEX    = 4;
-this.CALLED_PARTY_BCD_NPI_NATIONAL = 8;
-this.CALLED_PARTY_BCD_NPI_PRIVATE  = 9;
-
-/**
- * Array of number plan identification values which can be used to map an
- * enumeration to the corresponding value.
- */
-this.CALLED_PARTY_BCD_NPI = [
-  CALLED_PARTY_BCD_NPI_UNKNOWN,
-  CALLED_PARTY_BCD_NPI_ISDN,
-  CALLED_PARTY_BCD_NPI_DATA,
-  CALLED_PARTY_BCD_NPI_TELEX,
-  CALLED_PARTY_BCD_NPI_NATIONAL,
-  CALLED_PARTY_BCD_NPI_PRIVATE
-];
 
 /**
  * GSM PDU constants
@@ -2505,13 +2476,8 @@ this.DATACALL_PROFILE_DEFAULT = 0;
 this.DATACALL_PROFILE_TETHERED = 1;
 this.DATACALL_PROFILE_OEM_BASE = 1000;
 
-// Keep consistent with nsINetworkManager.REASON_*.
 this.DATACALL_DEACTIVATE_NO_REASON = 0;
 this.DATACALL_DEACTIVATE_RADIO_SHUTDOWN = 1;
-this.DATACALL_DEACTIVATE_APN_CHANGED = 2;
-this.DATACALL_DEACTIVATE_SERVICEID_CHANGED = 3;
-this.DATACALL_RETRY_FAILED = 4;
-this.DATACALL_PERMANENT_FAILURE = 5;
 
 this.DATACALL_ACTIVE_UNKNOWN = -1;
 this.DATACALL_INACTIVE = 0;

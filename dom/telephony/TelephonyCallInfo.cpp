@@ -13,7 +13,6 @@ NS_IMPL_ISUPPORTS(TelephonyCallInfo, nsITelephonyCallInfo)
 TelephonyCallInfo::TelephonyCallInfo(uint32_t aClientId,
                                      uint32_t aCallIndex,
                                      uint16_t aCallState,
-                                     uint16_t aVoiceQuality,
                                      const nsAString& aNumber,
                                      uint16_t aNumberPresentation,
                                      const nsAString& aName,
@@ -26,7 +25,6 @@ TelephonyCallInfo::TelephonyCallInfo(uint32_t aClientId,
   : mClientId(aClientId),
     mCallIndex(aCallIndex),
     mCallState(aCallState),
-    mVoiceQuality(aVoiceQuality),
     mNumber(aNumber),
     mNumberPresentation(aNumberPresentation),
     mName(aName),
@@ -120,13 +118,6 @@ NS_IMETHODIMP
 TelephonyCallInfo::GetIsMergeable(bool* aIsMergeable)
 {
   *aIsMergeable = mIsMergeable;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-TelephonyCallInfo::GetVoiceQuality(uint16_t* aVoiceQuality)
-{
-  *aVoiceQuality = mVoiceQuality;
   return NS_OK;
 }
 

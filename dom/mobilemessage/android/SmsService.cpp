@@ -69,20 +69,7 @@ SmsService::GetSmscAddress(uint32_t aServiceId,
                            nsIMobileMessageCallback *aRequest)
 {
   // TODO: bug 878016 - Android backend: implement getSMSCAddress/setSMSCAddress
-  NS_NOTYETIMPLEMENTED("Implement me!");
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
-SmsService::SetSmscAddress(uint32_t aServiceId,
-                           const nsAString& aNumber,
-                           uint32_t aTypeOfNumber,
-                           uint32_t aNumberPlanIdentification,
-                           nsIMobileMessageCallback* aRequest)
-{
-  // TODO: bug 878016 - Android backend: implement getSMSCAddress/setSMSCAddress
-  NS_NOTYETIMPLEMENTED("Implement me!");
-  return NS_ERROR_NOT_IMPLEMENTED;
+  return NS_OK;
 }
 
 } // namespace mobilemessage

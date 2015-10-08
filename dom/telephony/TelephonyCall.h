@@ -9,7 +9,6 @@
 
 #include "mozilla/dom/DOMError.h"
 #include "mozilla/dom/Promise.h"
-#include "mozilla/dom/TelephonyCallBinding.h"
 #include "mozilla/dom/TelephonyCallId.h"
 #include "mozilla/dom/telephony/TelephonyCommon.h"
 
@@ -36,8 +35,6 @@ class TelephonyCall MOZ_FINAL : public DOMEventTargetHelper
   uint32_t mCallIndex;
   uint16_t mCallState;
   bool mLive;
-
-  TelephonyCallVoiceQuality mVoiceQuality;
 
 public:
   NS_DECL_ISUPPORTS_INHERITED
@@ -87,12 +84,6 @@ public:
     return mMergeable;
   }
 
-  TelephonyCallVoiceQuality
-  VoiceQuality() const
-  {
-    return mVoiceQuality;
-  }
-
   already_AddRefed<DOMError>
   GetError() const;
 
@@ -125,16 +116,10 @@ public:
   IMPL_EVENT_HANDLER(groupchange)
 
   static already_AddRefed<TelephonyCall>
-  Create(Telephony* aTelephony,
-         TelephonyCallId* aId,
-         uint32_t aServiceId,
-         uint32_t aCallIndex,
-         uint16_t aCallState,
-         TelephonyCallVoiceQuality aVoiceQuality,
-         bool aEmergency = false,
-         bool aConference = false,
-         bool aSwitchable = true,
-         bool aMergeable = true);
+  Create(Telephony* aTelephony, TelephonyCallId* aId,
+         uint32_t aServiceId, uint32_t aCallIndex, uint16_t aCallState,
+         bool aEmergency = false, bool aConference = false,
+         bool aSwitchable = true, bool aMergeable = true);
 
   void
   ChangeState(uint16_t aCallState)
@@ -179,11 +164,6 @@ public:
   void
   UpdateSecondId(TelephonyCallId* aId) {
     mSecondId = aId;
-  }
-
-  void
-  UpdateVoiceQuality(TelephonyCallVoiceQuality aVoiceQuality) {
-    mVoiceQuality = aVoiceQuality;
   }
 
   void

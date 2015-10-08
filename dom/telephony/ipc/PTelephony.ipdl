@@ -149,11 +149,6 @@ parent:
     returns (bool aEnabled);
 
   SetSpeakerEnabled(bool aEnabled);
-
-  sync GetTtyMode()
-    returns (uint16_t aMode);
-
-  SetTtyMode(uint16_t aMode);
 };
 
 } /* namespace telephony */

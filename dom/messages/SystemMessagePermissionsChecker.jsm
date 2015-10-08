@@ -104,9 +104,6 @@ this.SystemMessagePermissionsTable = {
   "telephony-call-ended": {
     "telephony": []
   },
-  "telephony-tty-mode-changed": {
-    "telephony": []
-  },
   "ussd-received": {
     "mobileconnection": []
   },

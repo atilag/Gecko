@@ -73,10 +73,6 @@ RILSystemMessengerHelper.prototype = {
                                    aDuration, aOutgoing, aHangUpLocal);
   },
 
-  notifyTtyModeChanged: function(aMode) {
-    this.messenger.notifyTtyModeChanged(aMode);
-  },
-
   notifyUssdReceived: function(aServiceId, aMessage, aSessionEnded) {
     this.messenger.notifyUssdReceived(aServiceId, aMessage, aSessionEnded);
   },

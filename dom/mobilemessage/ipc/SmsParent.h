@@ -117,9 +117,6 @@ protected:
   bool
   DoRequest(const GetSmscAddressRequest& aRequest);
 
-  bool
-  DoRequest(const SetSmscAddressRequest& aRequest);
-
   nsresult
   SendReply(const MessageReply& aReply);
 };

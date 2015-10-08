@@ -33,7 +33,6 @@ struct DialResponseCallSuccess
   uint32_t clientId;
   uint32_t callIndex;
   nsString number;
-  uint16_t voiceQuality;
 };
 
 struct DialResponseMMISuccess

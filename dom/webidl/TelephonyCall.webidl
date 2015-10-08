@@ -33,9 +33,6 @@ interface TelephonyCall : EventTarget {
 
   readonly attribute TelephonyCallGroup? group;
 
-  // Indicate whether the voice quality is Normal or HD(High Definition).
-  readonly attribute TelephonyCallVoiceQuality voiceQuality;
-
   [NewObject]
   Promise<void> answer();
   [NewObject]
@@ -59,9 +56,4 @@ interface TelephonyCall : EventTarget {
 
   // Fired whenever the group attribute changes.
   attribute EventHandler ongroupchange;
-};
-
-enum TelephonyCallVoiceQuality {
-  "Normal",
-  "HD",
 };
