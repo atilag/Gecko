@@ -214,6 +214,9 @@
 @BINPATH@/components/dom_xul.xpt
 @BINPATH@/components/dom_time.xpt
 @BINPATH@/components/dom_engineeringmode.xpt
+#ifdef VZW_B2G
+@BINPATH@/components/dom_vzwlogin.xpt
+#endif
 @BINPATH@/components/downloads.xpt
 @BINPATH@/components/editor.xpt
 @BINPATH@/components/embed_base.xpt
@@ -646,6 +649,12 @@
 #ifdef MOZ_DEBUG
 @BINPATH@/components/TestInterfaceJS.js
 @BINPATH@/components/TestInterfaceJS.manifest
+#endif
+
+#ifdef VZW_B2G
+@BINPATH@/components/VZWLogin.manifest
+@BINPATH@/components/VZWLoginAPI.js
+@BINPATH@/components/VZWLoginService.js
 #endif
 
 ; Modules

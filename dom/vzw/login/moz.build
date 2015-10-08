@@ -1,0 +1,11 @@
+EXTRA_COMPONENTS += [
+    'VZWLogin.manifest',
+    'VZWLoginAPI.js',
+    'VZWLoginService.js',
+]
+
+XPIDL_SOURCES += [
+    'nsIVZWLogin.idl',
+]
+
+XPIDL_MODULE = 'dom_vzwlogin'

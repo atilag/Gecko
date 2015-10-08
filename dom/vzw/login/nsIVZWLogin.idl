@@ -1,0 +1,11 @@
+#include "nsISupports.idl"
+
+// Implemented by contract id @mozilla.org/vzw-login-service;1
+[scriptable, uuid(cfb73213-61de-40a9-8ef7-6c3dbdf04447)]
+interface nsIVZWLoginService : nsISupports
+{
+  jsval getToken();
+  jsval deleteToken();
+  // temporary test. it will be deleted
+  jsval getAuthFromSim(in DOMString authData);
+};

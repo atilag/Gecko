@@ -832,3 +832,8 @@ if CONFIG['MOZ_PAY']:
     WEBIDL_FILES += [
         'MozPaymentProvider.webidl'
     ]
+
+if CONFIG['VZW_B2G']:
+    WEBIDL_FILES += [
+        'VZWLogin.webidl'
+    ]

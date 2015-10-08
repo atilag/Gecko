@@ -7574,6 +7574,21 @@ fi
 AC_SUBST(MOZ_B2G_CAMERA)
 
 dnl ========================================================
+dnl = Enable VZW Features for B2G (Gonk usually)
+dnl ========================================================
+MOZ_ARG_ENABLE_BOOL(b2g-vzw,
+[  --enable-b2g-vzw     Set compile flags necessary for compiling VZW Features for B2G ],
+    VZW_B2G=1,
+    VZW_B2G=,
+# temporary test. it will be deleted
+    VZW_B2G=1)
+#   VZW_B2G=$VZW_CONFIG)
+if test -n "$VZW_B2G"; then
+    AC_DEFINE(VZW_B2G)
+fi
+AC_SUBST(VZW_B2G)
+
+dnl ========================================================
 dnl = Enable Support for Payment API
 dnl ========================================================
 if test -n "$MOZ_PAY"; then
