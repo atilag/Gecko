@@ -1,0 +1,9 @@
+#include "nsISupports.idl"
+
+
+[scriptable, uuid(1ebf7e51-ca96-4d31-9a9f-f721c6825b26)]
+interface nsIImsAlarmService : nsISupports
+{
+ void ImsSetAlarm(in int32_t aSeconds, in int32_t timerId);
+  void ImsStopAlarm(in int32_t alarmID);
+};

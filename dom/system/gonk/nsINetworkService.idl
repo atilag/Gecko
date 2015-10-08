@@ -155,6 +155,11 @@ interface nsIDhcpRequestCallback : nsISupports
   void dhcpRequestResult(in boolean success, in jsval dhcpInfo);
 };
 
+[scriptable, function, uuid(1a81b36d-b7d6-4836-a84a-9ff4fd66f4f8)]
+interface nsIGetNetIdCallback : nsISupports
+{
+  void onGetNetId(in long id);
+};
 
 /**
  * Provide network services.
@@ -494,4 +499,6 @@ interface nsINetworkService : nsISupports
    *
    */
   jsval getNetId(in DOMString interfaceName);
+
+  void getNetIdWithCallback(in DOMString interfaceName, in nsIGetNetIdCallback callback);
 };

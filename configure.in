@@ -7502,6 +7502,19 @@ fi
 AC_SUBST(MOZ_B2G_FM)
 
 dnl ========================================================
+dnl = Enable LG IMS for B2G (Gonk usually)
+dnl ========================================================
+MOZ_ARG_ENABLE_BOOL(b2g-lgeims,
+[  --enable-b2g-lgeims      Set compile flags necessary for compiling LGE IMS API for B2G ],
+    LG_B2G_IMS=1,
+    LG_B2G_IMS=,
+    LG_B2G_IMS=1 )
+if test -n "$LG_B2G_IMS"; then
+    AC_DEFINE(LG_B2G_IMS)
+fi
+AC_SUBST(LG_B2G_IMS)
+
+dnl ========================================================
 dnl = Enable Bluetooth Interface for B2G (Gonk usually)
 dnl ========================================================
 MOZ_ARG_ENABLE_BOOL(b2g-bt,

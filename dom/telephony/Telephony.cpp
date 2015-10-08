@@ -246,7 +246,8 @@ already_AddRefed<TelephonyCall>
 Telephony::CreateCall(TelephonyCallId* aId, uint32_t aServiceId,
                       uint32_t aCallIndex, uint16_t aCallState,
                       bool aEmergency, bool aConference,
-                      bool aSwitchable, bool aMergeable)
+                      bool aSwitchable, bool aMergeable,
+                      bool aHdCall)
 {
   // We don't have to create an already ended call.
   if (aCallState == nsITelephonyService::CALL_STATE_DISCONNECTED) {
@@ -255,7 +256,8 @@ Telephony::CreateCall(TelephonyCallId* aId, uint32_t aServiceId,
 
   nsRefPtr<TelephonyCall> call =
     TelephonyCall::Create(this, aId, aServiceId, aCallIndex, aCallState,
-                          aEmergency, aConference, aSwitchable, aMergeable);
+                          aEmergency, aConference, aSwitchable, aMergeable,
+                          aHdCall);
 
   NS_ASSERTION(call, "This should never fail!");
   NS_ASSERTION(aConference ? mGroup->CallsArray().Contains(call)
@@ -316,6 +318,7 @@ Telephony::HandleCallInfo(nsITelephonyCallInfo* aInfo)
   bool isConference;
   bool isSwitchable;
   bool isMergeable;
+  bool isHdCall;
 
   aInfo->GetClientId(&serviceId);
   aInfo->GetCallIndex(&callIndex);
@@ -324,13 +327,15 @@ Telephony::HandleCallInfo(nsITelephonyCallInfo* aInfo)
   aInfo->GetIsConference(&isConference);
   aInfo->GetIsSwitchable(&isSwitchable);
   aInfo->GetIsMergeable(&isMergeable);
+  aInfo->GetIsHdCall(&isHdCall);
 
   nsRefPtr<TelephonyCall> call = GetCallFromEverywhere(serviceId, callIndex);
 
   if (!call) {
     nsRefPtr<TelephonyCallId> id = CreateCallId(aInfo);
     call = CreateCall(id, serviceId, callIndex, callState, isEmergency,
-                      isConference, isSwitchable, isMergeable);
+                      isConference, isSwitchable, isMergeable,
+                      isHdCall);
 
     if (call && callState == nsITelephonyService::CALL_STATE_INCOMING) {
       nsresult rv = DispatchCallEvent(NS_LITERAL_STRING("incoming"), call);
@@ -340,6 +345,7 @@ Telephony::HandleCallInfo(nsITelephonyCallInfo* aInfo)
     call->UpdateEmergency(isEmergency);
     call->UpdateSwitchable(isSwitchable);
     call->UpdateMergeable(isMergeable);
+    call->UpdateHdCall(isHdCall);
 
     nsAutoString number;
     aInfo->GetNumber(number);

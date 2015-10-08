@@ -109,6 +109,9 @@ DIRS += [
     'vr',
 ]
 
+if CONFIG['LG_B2G_IMS']:
+    DIRS += ['imsapi']
+
 if CONFIG['OS_ARCH'] == 'WINNT':
     DIRS += ['plugins/ipc/hangui']
 

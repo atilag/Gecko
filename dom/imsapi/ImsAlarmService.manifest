@@ -1,0 +1,4 @@
+# ImsAlarmService.js
+component 1ebf7e51-ca96-4d31-9a9f-f721c6825b26 ImsAlarmService.js
+contract @mozilla.org/ImsAlarmservice;1 1ebf7e51-ca96-4d31-9a9f-f721c6825b26
+category profile-after-change ImsAlarmService @mozilla.org/ImsAlarmservice;1

@@ -193,7 +193,8 @@ private:
   CreateCall(TelephonyCallId* aId,
              uint32_t aServiceId, uint32_t aCallIndex, uint16_t aCallState,
              bool aEmergency = false, bool aConference = false,
-             bool aSwitchable = true, bool aMergeable = true);
+             bool aSwitchable = true, bool aMergeable = true,
+             bool aHdCall = false);
 
   nsresult
   NotifyEvent(const nsAString& aType);

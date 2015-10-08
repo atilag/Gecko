@@ -70,4 +70,6 @@ interface nsITelephonyCallInfo : nsISupports
    * Indicates whether this call be be added into a conference.
    */
   readonly attribute boolean isMergeable;
+
+  readonly attribute boolean isHdCall;
 };

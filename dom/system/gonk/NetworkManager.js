@@ -287,6 +287,8 @@ NetworkManager.prototype = {
         let excludeIms = aMsg.json.excludeIms;
         let excludeDun = aMsg.json.excludeDun;
         let excludeFota = aMsg.json.excludeFota;
+        let excludeEmergency = aMsg.json.excludeEmergency;
+        let excludeClass6 = aMsg.json.excludeClass6;
         let interfaces = [];
 
         for each (let i in this.networkInterfaces) {
@@ -294,7 +296,9 @@ NetworkManager.prototype = {
               (i.type == Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_SUPL && excludeSupl) ||
               (i.type == Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_IMS && excludeIms) ||
               (i.type == Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_DUN && excludeDun) ||
-              (i.type == Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_FOTA && excludeFota)) {
+              (i.type == Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_FOTA && excludeFota) ||
+              (i.type == Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_EMERGENCY && excludeEmergency) ||
+              (i.type == Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_CLASS6 && excludeClass6)) {
             continue;
           }
 
@@ -640,7 +644,9 @@ NetworkManager.prototype = {
             type == Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_SUPL ||
             type == Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_IMS ||
             type == Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_DUN ||
-            type == Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_FOTA);
+            type == Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_FOTA ||
+            type == Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_EMERGENCY ||
+            type == Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_CLASS6);
   },
 
   isNetworkTypeMobile: function(type) {

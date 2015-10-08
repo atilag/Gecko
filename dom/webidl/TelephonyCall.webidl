@@ -29,6 +29,8 @@ interface TelephonyCall : EventTarget {
   // Indicate whether the call can be added into TelephonyCallGroup.
   readonly attribute boolean mergeable;
 
+  readonly attribute boolean hdcall;
+
   readonly attribute DOMError? error;
 
   readonly attribute TelephonyCallGroup? group;

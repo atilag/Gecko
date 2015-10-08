@@ -1,0 +1,41 @@
+XPIDL_SOURCES += [
+    'nsIImsAlarmService.idl',
+    'nsILgeImsAPI.idl',
+    'UC/nsILgeImsUCManager.idl',
+]
+
+XPIDL_MODULE = 'dom_imsapi'
+
+SOURCES += [
+    'ApnMang.cpp',
+    'ImsInterfaceImpl.cpp',
+    'LgeImsAPI.cpp',
+    'NativeWrapper.cpp',
+    'UC/Bundle.cpp',
+    'UC/IImsService.cpp',
+    'UC/ImsCall.cpp',
+    'UC/ImsCallProfile.cpp',
+    'UC/ImsCallSession.cpp',
+    'UC/ImsConferenceState.cpp',
+    'UC/ImsEcbm.cpp',
+    'UC/ImsManager.cpp',
+    'UC/ImsReasonInfo.cpp',
+    'UC/ImsStreamMediaProfile.cpp',
+    'UC/UCInterface.cpp',
+]
+
+EXTRA_COMPONENTS += [
+    'ImsAlarmService.js',
+    'ImsAlarmService.manifest'
+]
+
+
+LOCAL_INCLUDES += [
+        'UC',
+]
+
+FAIL_ON_WARNINGS = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'xul'

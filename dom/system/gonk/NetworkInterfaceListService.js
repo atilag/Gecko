@@ -44,7 +44,13 @@ NetworkInterfaceListService.prototype = {
                        LIST_NOT_INCLUDE_DUN_INTERFACES) != 0,
           excludeFota: (aConditions &
                         Ci.nsINetworkInterfaceListService.
-                        LIST_NOT_INCLUDE_FOTA_INTERFACES) != 0
+                        LIST_NOT_INCLUDE_FOTA_INTERFACES) != 0,
+          excludeEmergency: (aConditions &
+                        Ci.nsINetworkInterfaceListService.
+                        LIST_NOT_INCLUDE_EMERGENCY_INTERFACES) != 0,
+          excludeClass6: (aConditions &
+                          Ci.nsINetworkInterfaceListService.
+                          LIST_NOT_INCLUDE_CLASS6_INTERFACES) != 0
         }
       )[0]);
   }

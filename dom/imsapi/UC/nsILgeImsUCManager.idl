@@ -1,0 +1,419 @@
+#include "nsISupports.idl"
+%{C++
+#include "nsCOMArray.h"
+#include <map>
+%}
+
+[ref] native nsTArrayRef(nsTArray<nsString>);
+[ref] native nsTIntArrayRef(nsTArray<int32_t>);
+[ref] native nsTConfStateMapRef(std::map<nsString, int32_t>);
+
+[scriptable, builtinclass, uuid(D668B9AD-1DB3-5908-CDBC-712372CD0D10)]
+interface nsIImsEcbmListenerProxy : nsISupports
+{
+  void enteredECBM();
+  void exitedECBM();
+};
+
+[scriptable, builtinclass, uuid(19B0EF83-B17F-4ec6-C14F-423468902A7C)]
+interface nsIImsEcbm : nsISupports
+{
+  void setEcbmStateListener(in nsIImsEcbmListenerProxy listener);
+  void exitEmergencyCallbackMode();
+};
+
+[scriptable, builtinclass, uuid(C557A9AD-0CA2-4897-BCAB-601261BC9C19)]
+interface nsIImsReasonInfo : nsISupports
+{
+  attribute int32_t reasonType;
+  attribute int32_t reasonCode;
+  attribute int32_t extraCode;
+  attribute DOMString extraMessage;
+  /*
+
+
+
+
+
+
+
+
+
+  */
+  const int32_t TYPE_UNSPECIFIED = 0;
+  const int32_t TYPE_LOCAL = 1;
+  const int32_t TYPE_TIMEOUT = 2;
+  const int32_t TYPE_STATUSCODE = 3;
+  const int32_t TYPE_MEDIA = 4;
+  const int32_t TYPE_USER = 5;
+  const int32_t TYPE_UT = 8;
+
+  /*
+
+  */
+  const int32_t CODE_UNSPECIFIED = 0;
+
+  /*
+
+  */
+  //
+  //
+  const int32_t CODE_LOCAL_ILLEGAL_ARGUMENT = 101;
+  //
+  const int32_t CODE_LOCAL_ILLEGAL_STATE = 102;
+  //
+  const int32_t CODE_LOCAL_INTERNAL_ERROR = 103;
+  //
+  const int32_t CODE_LOCAL_IMS_SERVICE_DOWN = 106;
+  //
+  const int32_t CODE_LOCAL_NO_PENDING_CALL = 107;
+
+  //
+  //
+  const int32_t CODE_LOCAL_POWER_OFF = 111;
+  //
+  const int32_t CODE_LOCAL_LOW_BATTERY = 112;
+  //
+  const int32_t CODE_LOCAL_NETWORK_NO_SERVICE = 121;
+  //
+  //
+  const int32_t CODE_LOCAL_NETWORK_NO_LTE_COVERAGE = 122;
+  //
+  const int32_t CODE_LOCAL_NETWORK_ROAMING = 123;
+  //
+  const int32_t CODE_LOCAL_NETWORK_IP_CHANGED = 124;
+  //
+  const int32_t CODE_LOCAL_SERVICE_UNAVAILABLE = 131;
+  //
+  const int32_t CODE_LOCAL_NOT_REGISTERED = 132;
+
+  //
+  //
+  const int32_t CODE_LOCAL_CALL_EXCEEDED = 141;
+  //
+  //
+  const int32_t CODE_LOCAL_CALL_BUSY = 142;
+  //
+  const int32_t CODE_LOCAL_CALL_DECLINE = 143;
+  //
+  //
+  const int32_t CODE_LOCAL_CALL_VCC_ON_PROGRESSING = 144;
+  //
+  const int32_t CODE_LOCAL_CALL_RESOURCE_RESERVATION_FAILED = 145;
+  //
+  //
+  const int32_t CODE_LOCAL_CALL_CS_RETRY_REQUIRED = 146;
+  //
+  const int32_t CODE_LOCAL_CALL_VOLTE_RETRY_REQUIRED = 147;
+  //
+  const int32_t CODE_LOCAL_CALL_TERMINATED = 148;
+
+  /*
+
+  */
+  //
+  const int32_t CODE_TIMEOUT_1XX_WAITING = 201;
+  //
+  //
+  //
+  const int32_t CODE_TIMEOUT_NO_ANSWER = 202;
+  //
+  //
+  //
+  const int32_t CODE_TIMEOUT_NO_ANSWER_CALL_UPDATE = 203;
+
+  /*
+
+  */
+  //
+  //
+  const int32_t CODE_SIP_REDIRECTED = 321;
+  //
+  //
+  const int32_t CODE_SIP_BAD_REQUEST = 331;
+  //
+  const int32_t CODE_SIP_FORBIDDEN = 332;
+  //
+  const int32_t CODE_SIP_NOT_FOUND = 333;
+  //
+  //
+  //
+  const int32_t CODE_SIP_NOT_SUPPORTED = 334;
+  //
+  const int32_t CODE_SIP_REQUEST_TIMEOUT = 335;
+  //
+  const int32_t CODE_SIP_TEMPRARILY_UNAVAILABLE = 336;
+  //
+  const int32_t CODE_SIP_BAD_ADDRESS = 337;
+  //
+  //
+  const int32_t CODE_SIP_BUSY = 338;
+  //
+  const int32_t CODE_SIP_REQUEST_CANCELLED = 339;
+  //
+  //
+  //
+  const int32_t CODE_SIP_NOT_ACCEPTABLE = 340;
+  //
+  //
+  const int32_t CODE_SIP_NOT_REACHABLE = 341;
+  //
+  const int32_t CODE_SIP_CLIENT_ERROR = 342;
+  //
+  //
+  const int32_t CODE_SIP_SERVER_INTERNAL_ERROR = 351;
+  //
+  const int32_t CODE_SIP_SERVICE_UNAVAILABLE = 352;
+  //
+  const int32_t CODE_SIP_SERVER_TIMEOUT = 353;
+  //
+  const int32_t CODE_SIP_SERVER_ERROR = 354;
+  //
+  //
+  const int32_t CODE_SIP_USER_REJECTED = 361;
+  //
+  const int32_t CODE_SIP_GLOBAL_ERROR = 362;
+
+  /*
+
+   */
+  //
+  const int32_t CODE_MEDIA_INIT_FAILED = 401;
+  //
+  const int32_t CODE_MEDIA_NO_DATA = 402;
+  //
+  const int32_t CODE_MEDIA_NOT_ACCEPTABLE = 403;
+  //
+  const int32_t CODE_MEDIA_UNSPECIFIED = 404;
+
+  /*
+
+   */
+  //
+  //
+  const int32_t CODE_USER_TERMINATED = 501;
+  //
+  const int32_t CODE_USER_NOANSWER = 502;
+  //
+  const int32_t CODE_USER_IGNORE = 503;
+  //
+  const int32_t CODE_USER_DECLINE = 504;
+  //
+  //
+  const int32_t CODE_USER_TERMINATED_BY_REMOTE = 510;
+
+  /*
+
+
+   */
+  //
+  const int32_t EXTRA_CODE_CALL_RETRY_NORMAL = 1;
+  //
+  const int32_t EXTRA_CODE_CALL_RETRY_SILENT_REDIAL = 2;
+  //
+  const int32_t EXTRA_CODE_CALL_RETRY_BY_SETTINGS = 3;
+
+  /*
+
+  */
+  const int32_t CODE_UT_NOT_SUPPORTED = 801;
+  const int32_t CODE_UT_SERVICE_UNAVAILABLE = 802;
+  const int32_t CODE_UT_OPERATION_NOT_ALLOWED = 803;
+  const int32_t CODE_UT_NETWORK_ERROR = 804;
+  const int32_t CODE_UT_CB_PASSWORD_MISMATCH = 821;
+
+  /*
+
+  */
+  const int32_t CODE_ECBM_NOT_SUPPORTED = 901;
+};
+
+[scriptable, builtinclass, uuid(D244233B-89AD-40ec-A69A-E17D57788FC9)]
+interface nsIImsStreamMediaProfile : nsISupports
+{
+  attribute int32_t audioQuality;
+  attribute int32_t audioDirection;
+  attribute int32_t videoQuality;
+  attribute int32_t videoDirection;
+};
+
+[scriptable, builtinclass, uuid(D255244B-89AD-40ec-A69A-E17D58899FC0)]
+interface nsIImsCallProfile : nsISupports
+{
+  /*
+
+  */
+  /*
+
+
+
+
+  */
+  const int32_t SERVICE_TYPE_NONE = 0;
+  /*
+
+  */
+  const int32_t SERVICE_TYPE_NORMAL = 1;
+  /*
+
+  */
+  const int32_t SERVICE_TYPE_EMERGENCY = 2;
+
+  /*
+
+  */
+  /*
+
+  */
+  const int32_t CALL_TYPE_VOICE_N_VIDEO = 1;
+  /*
+
+  */
+  const int32_t CALL_TYPE_VOICE = 2;
+  /*
+
+  */
+  const int32_t CALL_TYPE_VIDEO_N_VOICE = 3;
+  /*
+
+  */
+  const int32_t CALL_TYPE_VT = 4;
+  /*
+
+  */
+  const int32_t CALL_TYPE_VT_TX = 5;
+  /*
+
+  */
+  const int32_t CALL_TYPE_VT_RX = 6;
+  /*
+
+  */
+  const int32_t CALL_TYPE_VT_NODIR = 7;
+  /*
+
+  */
+  const int32_t CALL_TYPE_VS = 8;
+  /*
+
+  */
+  const int32_t CALL_TYPE_VS_TX = 9;
+  /*
+
+  */
+  const int32_t CALL_TYPE_VS_RX = 10;
+
+  /*                                       */
+  const int32_t OIPTYPE_NONE         = 0;
+  const int32_t OIPTYPE_IDENTITY     = 1;
+  const int32_t OIPTYPE_RESTICTED    = 2;
+};
+
+[scriptable, builtinclass, uuid(0EF4AF03-766B-4ea1-98EB-932BD112EBF8)]
+interface nsIImsConferenceState : nsISupports
+{
+  const int32_t STATE_INITIALIZING     = 0;
+
+  const int32_t STATE_NEW              = 1;
+  const int32_t STATE_RINGING          = 2;
+  const int32_t STATE_DIALING          = 3;
+  const int32_t STATE_ACTIVE           = 4;
+  const int32_t STATE_HOLDING          = 5;
+  const int32_t STATE_DISCONNECTED     = 6;
+
+  attribute nsTConfStateMapRef ConfState;
+};
+
+[scriptable, builtinclass, uuid(04BCD86F-6C43-47c6-88EF-9DB042949016)]
+interface nsIImsCall : nsISupports
+{
+  const int32_t IDLE = 0;
+  const int32_t INITIATED = 1;
+  const int32_t NEGOTIATING = 2;
+  const int32_t ESTABLISHING = 3;
+  const int32_t ESTABLISHED = 4;
+
+  const int32_t RENEGOTIATING = 5;
+  const int32_t REESTABLISHING = 6;
+
+  const int32_t TERMINATING = 7;
+  const int32_t TERMINATED = 8;
+
+  const int32_t INVALID = (-1);
+
+  int32_t getState();
+  bool isInCall();
+  void startConference(in int32_t callType, in nsTArrayRef participants);
+  void accept(in int32_t callType);
+  void reject(in int32_t reason);
+  void hold();
+  void resume();
+  void sendDtmf(in DOMString c);
+  void terminate(in int32_t reason);
+  void terminateConnection(in int32_t reason);
+  void extendToConference(in nsTArrayRef participants);
+  void merge(in nsIImsCall bgCall);
+  void inviteParticipants(in nsTArrayRef participants);
+  void removeParticipants(in nsTArrayRef participants);
+  void update(in int32_t callType, in nsIImsStreamMediaProfile mediaProfile);
+  void sendUssd(in DOMString aType);
+  void close();
+  nsIImsStreamMediaProfile GetMediaProfile();
+  attribute DOMString callerPartyNum;
+  attribute int32_t serviceType;
+  attribute int32_t sessionType;
+  attribute bool isConf;
+  attribute int32_t OIPType;
+  attribute int32_t HDIcon;
+  attribute int64_t sessionKey;
+};
+
+[scriptable, builtinclass, uuid(80944AD5-6C39-4503-9096-13C12CB8E84F)]
+interface nsIImsConnectionStateListener : nsISupports
+{
+  void onImsConnected();
+  void onImsDisconnected();
+  void onImsResumed();
+  void onImsSuspended();
+  void onFeatureCapabilityChanged(in int32_t serviceClass, in nsTIntArrayRef enabledFeatures, in nsTIntArrayRef disabledFeatures);
+  void onVoiceMessageCountChanged(in int32_t count);
+};
+
+[scriptable, builtinclass, uuid(85985366-6D61-4b78-8CBC-E5ECEBECF012)]
+interface nsIImsCallListener : nsISupports
+{
+  void onCallStarted(in nsIImsCall call);
+  void onCallStartFailed(in nsIImsCall call, in nsIImsReasonInfo reasonInfo);
+  void onCallProgressing(in nsIImsCall call);
+  void onCallHeld(in nsIImsCall call);
+  void onCallHoldFailed(in nsIImsCall call, in nsIImsReasonInfo reasonInfo);
+  void onCallHoldReceived(in nsIImsCall call);
+  void onCallResumed(in nsIImsCall call);
+  void onCallResumeFailed(in nsIImsCall call, in nsIImsReasonInfo reasonInfo);
+  void onCallResumeReceived(in nsIImsCall call);
+  void onCallTerminated(in nsIImsCall call, in nsIImsReasonInfo reasonInfo);
+  void onCallConferenceExtended(in nsIImsCall call, in nsIImsCall newCall);
+  void onCallConferenceExtendFailed(in nsIImsCall call, in nsIImsReasonInfo reasonInfo);
+  void onCallConferenceExtendReceived(in nsIImsCall call, in nsIImsCall newCall);
+  void onCallMerged(in nsIImsCall call, in nsIImsCall newCall);
+  void onCallMergeFailed(in nsIImsCall call, in nsIImsReasonInfo reasonInfo);
+  void onCallInviteParticipantsRequestDelivered(in nsIImsCall call);
+  void onCallInviteParticipantsRequestFailed(in nsIImsCall call, in nsIImsReasonInfo reasonInfo);
+  void onCallRemoveParticipantsRequestDelivered(in nsIImsCall call);
+  void onCallRemoveParticipantsRequestFailed(in nsIImsCall call, in nsIImsReasonInfo reasonInfo);
+  void onCallConferenceStateUpdated(in nsIImsCall call, in nsIImsConferenceState state);
+  void onCallUpdated(in nsIImsCall call);
+  void onCallUpdateFailed(in nsIImsCall call, in nsIImsReasonInfo reasonInfo);
+  void onCallUpdateReceived(in nsIImsCall call);
+  void onCallIncommingResume(in nsIImsCall call);
+};
+
+[scriptable, builtinclass, uuid(08A9DF82-A17E-4dc5-B13F-413367992A7B)]
+interface nsIImsUCManager : nsISupports
+{
+  int32_t open(in int32_t serviceClass, in nsIImsConnectionStateListener listener);
+  void close(in int32_t serviceId);
+  nsIImsCall makeCall(in int32_t serviceId,  in int32_t serviceType, in int32_t callType, in nsIImsStreamMediaProfile mediaProfile, in nsTArrayRef callees, in nsIImsCallListener listener);
+  nsIImsCall takeCall(in int32_t serviceId, in nsTArrayRef callId, in nsIImsCallListener listener);
+  nsIImsEcbm getEcbmInterface(in int32_t serviceId);
+};

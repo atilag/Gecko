@@ -1,0 +1,658 @@
+#ifndef _IMS_EVENT_DEF_H_
+#define _IMS_EVENT_DEF_H_
+
+//
+#define  IMS_EVENT_AIRPLANE_MODE              (0x00000001)
+  //
+  #define  IMS_AIRPLANE_MODE_OFF            (0)
+  #define  IMS_AIRPLANE_MODE_ON            (1)
+
+#define  IMS_EVENT_MOBILE_NETWORK_DISABLE        (0x00000002)
+#define  IMS_EVENT_POWER_OFF                (0x00000004)
+
+#define IMS_EVENT_POWER_LOW_BATTERY            (0x00000008)
+
+  //
+  #define IMS_POWER_LOW_BATTERY            (0)
+  #define IMS_POWER_LOW_CHANGED            (1)
+
+//
+#define  IMS_EVENT_PHONE_NUMBER_AVAILABLE         (0x00000010)
+  //
+  #define IMS_PHONE_NUMBER_AVAILABLE_INITIAL      (0)
+  #define IMS_PHONE_NUMBER_AVAILABLE_REFRESH      (1)
+
+#define IMS_PHONE_NUMBER_SIM_LOADED        (0)
+#define IMS_PHONE_NUMBER_RETRY_SUCCESS  (1)
+#define IMS_PHONE_NUMBER_RETRY_FAILURE  (2)
+  //
+  #define IMS_REFRESH_FAIL              (0)
+  #define IMS_REFRESH_SUCCESS              (1)
+#define  IMS_EVENT_CSCALL_STATE              (0x00000020)
+  //
+  #define IMS_CSCALL_STATE_IDLE            (0)
+  #define IMS_CSCALL_STATE_INCOMING          (1)
+  #define IMS_CSCALL_STATE_ACTIVE            (2)
+
+#define IMS_EVENT_CALL_START                (0x00000023)    //
+  #define IMS_EVENT_CALL_START_VOICE          (1)
+  #define IMS_EVENT_CALL_START_VIDEO          (2)
+
+#define  IMS_EVENT_CONFIG_UPDATE              (0x00000040)
+  //
+  //
+  #define IMS_CONFIG_CAT_0              (0)
+  #define IMS_CONFIG_CAT_1              (1)
+  #define IMS_CONFIG_CAT_2              (2)
+  #define IMS_CONFIG_CAT_3              (3)
+  #define IMS_CONFIG_CAT_4              (4)
+  #define IMS_CONFIG_CAT_5              (5)
+  //
+  #define IMS_CONFIG_CAT_100              (100)
+  #define IMS_CONFIG_CAT_101              (101)
+  #define IMS_CONFIG_CAT_102              (102)
+  //
+  #define IMS_CONFIG_CAT_10000            (10000)
+  #define IMS_CONFIG_CAT_10001            (10001)
+  #define IMS_CONFIG_CAT_10002            (10002)
+
+#define  IMS_EVENT_GMSS_HANDOVER              (0x00000080)
+  //
+  #define IMS_GMSS_HANDOVER_START            (0)
+  #define IMS_GMSS_HANDOVER_END            (1)
+  //
+  #define IMS_HANDOVER_SUCCESS            (0)
+  #define IMS_HANDOVER_FAILURE            (1)
+  #define IMS_HANDOVER_KEEP_RAT            (2)
+
+#define  IMS_EVENT_QOS_STATUS              (0x00000100)
+    //
+  #define IMS_EVENT_QOS_ACTIVATED            (0)
+  #define IMS_EVENT_QOS_MODIFIED            (1)
+  #define IMS_EVENT_QOS_DEACTIVATED          (2)
+
+//
+#define  IMS_EVENT_AIRPLANE_MODE_ON_REPLY        (0x00000001)
+#define  IMS_EVENT_MOBILE_NETWORK_DISABLE_REPLY      (0x00000002)
+#define  IMS_EVENT_POWER_OFF_REPLY            (0x00000003)
+
+#define  IMS_EVENT_ROAMING_STATE              (0x00000200)
+    //
+  #define IMS_ROAMING_STATE_OFF            (0)
+  #define IMS_ROAMING_STATE_ON            (1)
+
+#define  IMS_EVENT_1XREG_DONE              (0x00000400)
+#define  IMS_EVENT_WIFI_RSSI_VALUE            (0x00000800)
+
+//
+#define  IMS_EVENT_FMC_SVC                (0x00001000)
+  //
+  #define  IMS_FMC_SVC_START              (0)
+  #define  IMS_FMC_SVC_STOP              (1)
+
+//
+#define  IMS_EVENT_WIFI_OFF                (0x00002000)
+
+//
+#define  IMS_EVENT_LOCK_ORDER_STATE            (0x00004000)
+    //
+  #define IMS_LOCK_ORDER_STATE_OFF            (0)
+  #define IMS_LOCK_ORDER_STATE_ON              (1)
+
+//
+#define  IMS_EVENT_SERVICE_SETTING            (0x00008000)
+  //
+  #define IMS_SERVICE_OFF                (0)
+  #define IMS_SERVICE_ON                (1)
+  //
+  #define IMS_SERVICE_PRESENTITY            (2)
+  //
+
+#define IMS_EVENT_AOS_START                (0x00010000)
+
+#define IMS_EVENT_IMSDB_UPDATE              (0x00020000)
+
+//
+#define IMS_EVENT_SERVICE_STATE              (0x00040000)
+  //
+  #define IMS_SERVICE_STATE_IN            (0)
+  #define IMS_SERVICE_STATE_OUT            (1)
+
+//
+#define IMS_EVENT_CONFIG_UPDATE_COMPLETED        (0x00080000)
+
+//
+#define IMS_EVENT_MODEM_STATE              (0x00100000)
+  //
+  #define IMS_MODEM_STATE_READY            (1)
+  #define IMS_MODEM_STATE_IN_SERVICE          (2)
+  #define IMS_MODEM_STATE_OUT_OF_SERVICE        (3)
+
+//
+#define IMS_EVENT_CS_CALL_PROTECTION_SETTING      (0x00200000)
+  //
+
+//
+#define IMS_EVENT_VOLTE_CALL_SETTING          (0x00400000)
+  //
+  #define IMS_VOLTE_SETTING_BLOCKON          (0)
+  #define IMS_VOLTE_SETTING_BLOCKOFF          (1)
+
+//
+#define IMS_EVENT_PS_BARRING_STATE            (0x00800000)
+//
+#define IMS_EVENT_AC_BARRING_STATE            (0x00800001)
+
+//
+#define IMS_EVENT_REG_STATE_INTERNAL          (0x00400002)
+  //
+  #define IMS_REG_INTERNAL_ON              (0)
+  #define IMS_REG_INTERNAL_OFF            (1)
+
+//
+#define IMS_EVENT_SEND_DOMAIN_NOTIFICATION        (0x00800002)
+#define IMS_DAN_FAILURE                  (0)
+#define IMS_DAN_SUCCESS                  (1)
+
+//
+#define  IMS_EVENT_DORMANT_STATE              (0x01000000)
+  //
+  #define IMS_DATA_ACTIVITY_NONE            (0)
+  #define IMS_DATA_ACTIVITY_IN            (1)
+  #define IMS_DATA_ACTIVITY_OUT            (2)
+  #define IMS_DATA_ACTIVITY_INOUT            (3)
+  #define IMS_DATA_ACTIVITY_DORMANT          (4)
+//
+
+//
+//
+#define IMS_EVENT_UEINITIATED_IMSPDN_DISCONNECTION    (0x02000000)
+
+//
+#define IMS_EVENT_USERSETTING_APN_ONOFF         (0x04000000)
+  #define APN_MOBILE_IMS                    (1)
+  #define APN_MOBILE_SOS                    (2)
+
+//
+#define  IMS_EVENT_MEM_DEBUG                (0x10000000)
+  //
+  #define IMS_MEM_DEBUG_ENABLE_FILE_WRITE          (0)
+    //
+    #define IMS_MEM_DEBUG_ENABLE_FILE_WRITE_OFF      (0)
+    #define IMS_MEM_DEBUG_ENABLE_FILE_WRITE_ON      (1)
+  #define IMS_MEM_DEBUG_PRINT_HEAP_LEAKAGE        (1)
+
+//
+#define IMS_EVENT_SERVICE_FEATURE             (0x20000000)
+    //
+    #define IMS_SERVICE_FEATURE_VCC           (1)
+    //
+
+//
+
+//
+
+//
+#define IMS_EVENT_WIFI_LOCK                (0x00000001)
+  //
+  #define IMS_WIFI_LOCK_TYPE_VT             (1)
+  #define IMS_WIFI_LOCK_TYPE_FMC            (2)
+  //
+  #define IMS_WIFI_LOCK_ACQUIRE            (1)
+  #define IMS_WIFI_LOCK_RELEASE            (2)
+
+//
+#define IMS_EVENT_REG_STATE                (0x00000002)
+  //
+  #define IMS_NET_LTE                 (1)
+  #define IMS_NET_WIFI                (2)
+  //
+  //
+
+  //
+  #define IMS_REG_OFF                  (0)
+  #define IMS_REG_ON                   (1)
+  #define IMS_REG_OFF_DONE              (2)
+
+//
+#define IMS_EVENT_DEBUG_STRING              (0x00000003)
+  //
+  /*              */
+  #define DEBUG_LTE_REG_FAILURE            (200)
+  #define DEBUG_LTE_REG_TXN_TIMEOUT          (201)
+  #define DEBUG_LTE_DATA_NOT_AVAILABLE        (202)
+  #define DEBUG_LTE_REG_FORBIDDEN            (203)
+  #define DEBUG_LTE_REREG_FAILURE            (204)
+  #define DEBUG_LTE_REREG_TXN_TIMEOUT          (205)
+  #define DEBUG_LTE_REG_DNS_FAILED          (206)
+
+  #define DEBUG_WIFI_REG_FAILURE             (210)
+  #define DEBUG_WIFI_REG_TXN_TIMEOUT           (211)
+  #define DEBUG_WIFI_DATA_NOT_AVAILABLE        (212)
+  #define DEBUG_WIFI_REG_FORBIDDEN          (213)
+  #define DEBUG_WIFI_REREG_FAILURE          (214)
+  #define DEBUG_WIFI_REREG_TXN_TIMEOUT        (215)
+  #define DEBUG_WIFI_REG_DNS_FAILED          (216)
+
+  #define DEBUG_VT_MEDIA_RTP_TIMEOUT          (301)
+  #define DEBUG_VT_ORG_QOS_TIMEOUT          (302)
+  #define DEBUG_VT_INVITE_FAILURE_RESP        (303)
+  #define DEBUG_VT_USER_CANCEL_CALL          (304)
+  #define DEBUG_VT_QOS_FAILURE_RESP          (305)
+  #define DEBUG_VT_BYE_RECEIVED            (306)
+  #define DEBUG_VT_ACK_TERMINATED            (307)
+  #define DEBUG_VT_ACK_WAIT_TIMEOUT          (308)
+  #define DEBUG_VT_UPDATE_TXN_TIMEOUT          (309)
+  #define DEBUG_VT_UPDATE_FAILURE_RESP        (310)
+  #define DEBUG_VT_RE_REGI_TXN_TIMEOUT        (311)
+  #define DEBUG_VT_RE_REGI_403_FORBIDDEN        (312)
+  #define DEBUG_VT_RE_REGI_FAILURE_RESP        (313)
+  #define DEBUG_VT_LOCK_ORDER              (314)
+  #define DEBUG_VT_PROVISIONAL_RESP_TIMEOUT      (315)
+  #define DEBUG_VT_RSVP_FORMAT_FAILURE        (316)
+  #define DEBUG_VT_RSVP_CONFIRM_TIMEOUT        (317)
+  #define DEBUG_VT_MEDIA_OPEN_FAILED          (318)
+  #define DEBUG_VT_WAIT_USER_ANSWER_TIMEOUT      (319)
+  #define DEBUG_VT_TERM_QOS_TIMEOUT          (320)
+  #define DEBUG_VT_QOS_DEACTIVATED          (58)
+  #define DEBUG_VT_QOS_UNAVAILABLE          (59)
+
+  #define DEBUG_UC_NO_PROVISIONAL_RESP        (401)
+  #define DEBUG_UC_MO_NO_ANSWER_TIMEOUT        (402)
+  #define DEBUG_UC_INVITE_FAILURE_RESP        (403)
+  #define DEBUG_UC_USER_CANCEL_CALL          (404)
+  #define DEBUG_UC_MT_NO_ANSWER_TIMEOUT        (405)
+  #define DEBUG_UC_MEDIA_NOT_SUPPORTED        (406)
+  #define DEBUG_UC_ACK_TIMEOUT            (407)
+  #define DEBUG_UC_RTP_TIMEOUT            (408)
+  #define DEBUG_UC_REFRESH_FAIL_TIMEOUT        (409)
+  #define DEBUG_UC_REFRESH_FAIL_RESP          (410)
+  #define DEBUG_UC_RECEIVED_BYE            (411)
+  #define DEBUG_UC_MEDIAFAIL              (412)
+
+//
+#define IMS_EVENT_VT_CALL                (0x00000004)
+  //
+  #define IMS_VT_CALL_STARTED              (0)
+  #define IMS_VT_CALL_ENDED              (1)
+  //
+  #define  IMS_VT_OTHER                 (0)
+  #define  IMS_VT_LTE                  (1)
+
+//
+#define IMS_EVENT_VT_INDICATOR              (0x00000005)
+  //
+  #define IMS_VT_INDICATOR_ON             (1)
+  #define IMS_VT_INDICATOR_OFF            (0)
+
+//
+#define IMS_EVENT_VOLTE_INDICATOR            (0x00000006)
+  //
+  #define IMS_VOLTE_INDICATOR_OFF            (0)
+  #define IMS_VOLTE_INDICATOR_ON             (1)
+  #define IMS_VOLTE_INDICATOR_UNSUPPORTED        (2)
+
+//
+#define IMS_EVENT_WIFI_OFF_REPLY            (0x00000007)
+
+//
+#define IMS_EVENT_LTE_VT_STATE              (0x00000008)
+  //
+  #define IMS_LTE_VT_STATE_ACTIVE           (1)
+  #define IMS_LTE_VT_STATE_INACTIVE          (0)
+
+//
+#define IMS_EVENT_EHPRD_REG_SENDING            (0x00000009)
+
+//
+#define IMS_EVENT_NATIVE_BOOT_COMPLETED          (0x00000012)
+
+#define IMS_EVENT_WAKE_LOCK                (0x00000013)
+
+#define IMS_EVENT_CALL_BARRED_TOAST            (0x00000014)
+
+//
+#define  IMS_EVENT_DATA_CONNECTION            (0x00000015)
+  //
+  #define IMS_DEACTIVATE_REQ              (1)
+    //
+    #define IMS_DETACH_TIMER            (1)
+    #define IMS_DETACH_PERMANENT          (2)
+    #define IMS_DETACH_AND_ATTACH          (3)
+  //
+  #define IMS_DEACTIVATE_CNF              (2)
+    //
+    #define IMS_LTE_DETACH              (1)
+    #define IMS_PDN_DISCONNECTION          (2)
+//
+   //
+   #define IMS_ACTIVATE_REQ   (3)
+  //
+  #define IMS_ATTACH_NOW  (1)
+  #define IMS_ATTACH_TIMER  (2)
+
+#define  IMS_EVENT_PHONE_NUMBER_READY          (0x00000016)
+
+#define  IMS_EVENT_DATA_DISCONNECTING_BY_NETWORK      (0x00000018)
+  //
+  #define IMS_DATE_DISCONNECTING_BY_LTE_DETACH    (0)
+  #define IMS_DATE_DISCONNECTING_BY_IMSPDN_CLOSE    (1)
+
+//
+#define IMS_EVENT_AC_CONFIGURATION_RETRIEVAL      (0x00000070)
+
+//
+#define IMS_EVENT_SHOW_MESSAGE              (0x00000080)
+  //
+  //
+  #define IMS_MESSAGE_REGISTRAION_FAILED        (1)
+  #define IMS_MESSAGE_SERVICE_NOT_PROVISIONED      (2)
+
+//
+#define IMS_EVENT_CS_CALL_PROTECTION          (0x00000100)
+  //
+  #define IMS_CS_CALL_PROTECTION_OFF          (0)
+  #define IMS_CS_CALL_PROTECTION_ON          (1)
+
+#define IMS_EVENT_ISIM_STATE              (0x00000700)
+  //
+  #define IMS_ISIM_STATE_INVALID            (0)
+  #define IMS_ISIM_STATE_VALID            (1)
+
+//
+//
+#define IMS_EVENT_DOMAIN_NOTIFICATION          (0x00000200)
+
+//
+//
+#define IMS_EVENT_DOMAIN_NOTIFICATION_RESULT      (0x00000300)
+   //
+   #define  IMS_DAN_FAILURE                (0)
+   #define  IMS_DAN_SUCCESS                (1)
+//
+#define IMS_EVENT_DRVCC_MODE              (0x00000400)
+  //
+  #define IMS_DRVCC_MODE_DISABLED            (0)
+  #define IMS_DRVCC_MODE_ENABLED            (1)
+//
+
+//
+//
+#define IMS_EVENT_TRACE_MOCA              (0x00000500)
+      //
+  #define IMS_TRACE_MOCA_STOP              (1)
+
+//
+#define IMS_EVENT_GBA_SERVICE_STATE            (0x00000600)
+  //
+  #define IMS_GBA_SERVICE_UNBINDED              (0)
+  #define IMS_GBA_SERVICE_BINDED            (1)
+
+//
+#define IMS_EVENT_QOS_CHANGED            (0x06000000)
+  //
+  #define IMS_QOS_STATUS_ENABLED          (1)
+  #define IMS_QOS_STATUS_INACTIVE          (2)
+  #define IMS_QOS_STATUS_SUSPENDED        (3)
+  #define IMS_QOS_STATUS_PARAM_INVALID        (4)
+
+#define IMS_EVENT_QOS_SRC_PORT_INFO            (0x40000000)
+#define IMS_EVENT_QOS_DEST_PORT_INFO            (0x80000000)
+
+#define IMS_EVENT_DEBUG                  (0x00000800)
+  //
+  //
+  //
+  //
+  //
+
+//
+
+//
+//
+//
+//
+
+//
+#define  IMS_EVENT_WIFI_SERVICE              (0x10000000)
+  //
+  #define  IMS_WIFI_OFF                (0)
+  #define  IMS_WIFI_ON                  (1)
+//
+//
+//
+
+//
+#define  IMS_EVENT_TTY_ONOFF               (0x20000000)
+  #define REGI_OFF                       (0)
+  #define REGI_ON                        (1)
+
+//
+#define IMS_EVENT_VOLTE_E911_STATUS_CHANGE          (0x08000000)
+  //
+  #define IMS_VOLTE_E911_CALL_NONE          (0)
+  #define IMS_VOLTE_E911_CALL_ORIG          (1)
+  #define IMS_VOLTE_E911_CALL_CONNECT          (2)
+  #define IMS_VOLTE_E911_CALL_END            (3)
+  #define IMS_VOLTE_E911_CALL_SRVCC          (4)
+
+
+//
+#define  IMS_MAKEPARAM(HIWORD, LOWORD) \
+      (IMS_UINT32) (((HIWORD) << 16) | (LOWORD))
+
+#define  IMS_HIWORD(LPARAM) \
+      (IMS_UINT16) (((LPARAM) >> 16) & (0xFFFF))
+
+#define  IMS_LOWORD(LPARAM) \
+      (IMS_UINT16) ((LPARAM) & 0xFFFF)
+
+#define IMS_EVENT_MMTEL_SERVICE_READY           (0x00000700)
+
+#define IMS_RETRY_GET_PSI_INFO_MAX_COUNT 20
+
+#define TEST_MASK_ROAMING_CONDITION  0x0004
+
+//
+//
+#define CATEGORY_BASE  0x00000000
+#define CATEGORY_NETWORK  0x00010000
+#define CATEGORY_WIFI  0x00020000
+#define CATEGORY_CALL  0x00040000
+#define CATEGORY_POWER 0x00080000
+#define CATEGORY_ALARM  0x00100000
+#define CATEGORY_CONFIG  0x00200000
+#define CATEGORY_EVENT 0x00400000
+#define CATEGORY_ISIM_EVENT  0x00800000
+#define CATEGORY_USIM_EVENT  0x01000000
+
+//
+#define  NOTIFY_AIRPLANE_MODE_CHANGED  CATEGORY_NETWORK + 1
+#define  NOTIFY_ALARM_EXPIRED  CATEGORY_ALARM + 2
+#define  NOTIFY_BATTERY_LEVEL_CHANGED  CATEGORY_POWER + 3
+#define  NOTIFY_DATA_CONNECTION_FAILED  CATEGORY_NETWORK + 4
+#define  NOTIFY_DATA_CONNECTION_STATE_CHANGED CATEGORY_NETWORK + 5
+#define  NOTIFY_NETWORK_TYPE_CHANGED  CATEGORY_NETWORK + 6
+#define  NOTIFY_SERVICE_STATE_CHANGED  CATEGORY_NETWORK + 7
+#define  NOTIFY_VOICE_CALL_STATE_CHANGED  CATEGORY_CALL + 8
+#define  NOTIFY_WIFI_STATE_CHANGED  CATEGORY_WIFI + 9
+#define  NOTIFY_WIFI_DETAILED_STATE_CHANGED  CATEGORY_WIFI + 10
+#define  NOTIFY_CONFIGURATION_CHANGED CATEGORY_CONFIG + 11
+#define  NOTIFY_EVENT CATEGORY_EVENT + 12
+#define  NOTIFY_ISIM_EVENT  CATEGORY_ISIM_EVENT + 13
+#define  NOTIFY_USIM_EVENT  CATEGORY_USIM_EVENT + 14
+#define  NOTIFY_DATA_CONNECTION_IPCAN_CHANGED  CATEGORY_NETWORK + 15
+
+
+//
+#define GET_BATTERY_LEVEL CATEGORY_BASE + 1
+
+//
+#define GET_BUILD_TARGET_OPERATOR CATEGORY_BASE + 101
+#define GET_BUILD_TARGET_COUNTRY CATEGORY_BASE + 102
+#define GET_DEVICE_ID CATEGORY_BASE + 103
+#define GET_DEVICE_SOFTWARE_VERSION CATEGORY_BASE + 104
+#define GET_EXTERNAL_STORAGE_PATH CATEGORY_BASE + 105
+#define GET_PHONE_NUMBER CATEGORY_BASE + 106
+#define GET_SUBSCRIBER_ID CATEGORY_BASE + 107
+#define GET_MCC CATEGORY_BASE + 108
+#define GET_MNC CATEGORY_BASE + 109
+#define GET_OPERATOR CATEGORY_BASE + 110
+#define GET_COUNTRY CATEGORY_BASE + 111
+//
+#define GET_ISIM_STATE CATEGORY_BASE + 151
+#define READ_ISIM_FILE_ATTR CATEGORY_BASE + 152
+#define READ_ISIM_RECORD CATEGORY_BASE + 153
+#define REQ_ISIM_AUTH CATEGORY_BASE + 154
+//
+#define REQ_USIM_AUTH CATEGORY_BASE + 155
+
+//
+#define GET_CALL_STATE CATEGORY_BASE + 201
+#define SAVE_MISSED_CALL CATEGORY_BASE + 202
+#define SAVE_REJECTED_CALL CATEGORY_BASE + 203
+#define IS_BLOCKED_NUMBER CATEGORY_BASE + 204
+#define IS_EMERGENCY_NUMBER CATEGORY_BASE + 205
+
+//
+#define GET_MODEL_NAME CATEGORY_BASE + 301
+#define GET_RCS_VERSION CATEGORY_BASE + 302
+#define GET_DIGEST_SHA1 CATEGORY_BASE + 303
+#define GET_DEVICE_NAME CATEGORY_BASE + 304
+
+//
+#define GET_NETWORK_TYPE CATEGORY_BASE + 401
+#define GET_ROAMING_STATE CATEGORY_BASE + 402
+#define GET_SERVICE_STATE CATEGORY_BASE + 403
+#define GET_ACCESS_NETWORK_INFO CATEGORY_BASE + 404
+#define ACTIVATE_DATA_CONNECTION CATEGORY_BASE + 405
+#define DEACTIVATE_DATA_CONNECTION CATEGORY_BASE + 406
+#define GET_APN_NAME CATEGORY_BASE + 407
+#define GET_DATA_CONNECTION_STATE CATEGORY_BASE + 408
+#define GET_LOCAL_ADDRESS CATEGORY_BASE + 409
+#define GET_PCSCF_ADDRESSES CATEGORY_BASE + 410
+#define REQUEST_ROUTE_TO_HOST_ADDRESS CATEGORY_BASE + 411
+#define IS_IMS_VOICE_CALL_SUPPPORTED CATEGORY_BASE + 412
+    //
+#define GET_IFACE_NAME CATEGORY_BASE + 413
+    //
+#define GET_LTE_RSRP_STRENGTH CATEGORY_BASE + 414
+#define GET_LAST_ACCESS_NETWORK_INFO CATEGORY_BASE + 415
+#define GET_IFACE_ID CATEGORY_BASE + 416
+#define GET_HOST_BY_NAME CATEGORY_BASE + 417
+#define SEND_PING_TO_HOST_ADDRESS CATEGORY_BASE + 418
+#define IS_IMS_EMERGENCY_CALL_SUPPPORTED CATEGORY_BASE + 419
+
+//
+#define GET_WIFI_BSS_ID CATEGORY_BASE + 501
+#define GET_WIFI_DETAILED_STATE CATEGORY_BASE + 502
+#define GET_WIFI_STATE CATEGORY_BASE + 503
+#define GET_WIFI_SSID CATEGORY_BASE + 504
+
+//
+#define SET_ALARM CATEGORY_BASE + 601
+#define KILL_ALARM CATEGORY_BASE + 602
+
+//
+#define GET_PREFERENCE CATEGORY_BASE + 701
+#define SET_PREFERENCE CATEGORY_BASE + 702
+
+//
+#define SEND_EVENT CATEGORY_BASE + 801
+#define SET_EVENT CATEGORY_BASE + 802
+#define RESET_EVENT CATEGORY_BASE + 803
+
+//
+#define GET_GBA_B_TID CATEGORY_BASE + 901
+#define GET_GBA_KS_EXT_NAF CATEGORY_BASE + 902
+#define GET_GBA_KEY_LIFE_TIME CATEGORY_BASE + 903
+#define IS_GBA_SUPPORTED CATEGORY_BASE + 904
+#define PERFORM_GBA_U_AUTHENTICATION CATEGORY_BASE + 905
+
+//
+#define LISTEN_SRVCC_EVT CATEGORY_BASE + 1001
+#define UNLISTEN_SRVCC_EVT CATEGORY_BASE + 1002
+
+//
+#define IS_WFC_ENABLED CATEGORY_BASE + 1101
+#define GET_WFC_PREFERENCES CATEGORY_BASE + 1102
+
+//
+#define START_LOCATION_INFO CATEGORY_BASE + 1201
+#define STOP_LOCATION_INFO CATEGORY_BASE + 1202
+#define GET_LOCATION_INFO CATEGORY_BASE + 1203
+
+#define IMS_EVENT_LTE_STATE = 0x00001000;
+//
+#define IMS_LTE_STATE_CHANGED = 1;
+#define IMS_LTE_RACH_REJECT_WITH_WAITTIME = 11;  //
+#define IMS_LTE_RACH_IGNORE_DURING_T300_3TIMES = 12;
+#define IMS_LTE_SR_REJECT_WITH_EMM9_EMM10 = 13;
+#define IMS_LTE_SR_REJECT_WITH_EMM17_3TIMES = 14;
+#define IMS_LTE_SR_IGNORE_DURING_5SEC = 15;
+#define IMS_LTE_BARRING_MO_DATA = 16;
+#define IMS_LTE_SR_REJECT_WITH_EMM = 17;
+#define IMS_LTE_BARRING_SSAC = 18;
+#define IMS_LTE_BARRING_SSAC_EX = 19;
+#define IMS_LTE_BARRING_EMERGENCY = 20;
+//
+#define IMS_LTE_BARRING_SSAC_VOICE = 0x00000000;
+#define IMS_LTE_BARRING_SSAC_VIDEO = 0x01000000;
+//
+#define IMS_LTE_QOS_DEDICATED_BEARER_COMPLETED = 31; //
+#define IMS_LTE_TRIGGER_DEREGISTRATION = 32; //
+#define IMS_LTE_DEACTIVATE_IMS_PDN = 33; //
+#define IMS_LTE_BLOCK_WITH_TIME = 34; //
+#define IMS_LTE_UPDATE_CURRENT_REG_STATE = 35; //
+//
+#define IMS_LTE_STATE_DETACHED = 1;
+//
+//
+
+enum
+{
+    WIFI_NET_DETAILED_STATE_IDLE                     = 0,
+    WIFI_NET_DETAILED_STATE_SCANNING,
+    WIFI_NET_DETAILED_STATE_CONNECTING,
+    WIFI_NET_DETAILED_STATE_AUTHENTICATING,
+    WIFI_NET_DETAILED_STATE_OBTAINING_IPADDR,
+    WIFI_NET_DETAILED_STATE_CONNECTED,
+    WIFI_NET_DETAILED_STATE_SUSPENDED,
+    WIFI_NET_DETAILED_STATE_DISCONNECTING,
+    WIFI_NET_DETAILED_STATE_DISCONNECTED,
+    WIFI_NET_DETAILED_STATE_FAILED,
+    WIFI_NET_DETAILED_STATE_BLOCKED,
+    WIFI_NET_DETAILED_STATE_VERIFYING_POOR_LINK,
+    WIFI_NET_DETAILED_STATE_CAPTIVE_PORTAL_CHECK
+} ;
+
+enum
+{
+    STATE_INVALID             = -1,
+    STATE_IN_SERVICE          = 0,
+    STATE_OUT_OF_SERVICE    = 1,
+    STATE_EMERGENCY_ONLY    = 2,
+    STATE_POWER_OFF            = 3,
+    STATE_MAX,
+} ;
+
+enum
+{
+    WIFI_NET_STATE_CONNECTING         = 0,
+    WIFI_NET_STATE_CONNECTED,
+    WIFI_NET_STATE_SUSPENDED,
+    WIFI_NET_STATE_DISCONNECTING,
+    WIFI_NET_STATE_DISCONNECTED,
+    WIFI_NET_STATE_UNKNOWN
+} ;
+
+enum
+{
+    WIFI_STATE_DISABLING     = 0,
+    WIFI_STATE_DISABLED        = 1,
+    WIFI_STATE_ENABLING     = 2,
+    WIFI_STATE_ENABLED         = 3,
+    WIFI_STATE_UNKNOWN            = 4    //
+} ;
+
+#endif  //

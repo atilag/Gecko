@@ -23,7 +23,8 @@ already_AddRefed<TelephonyCall>
 TelephonyCall::Create(Telephony* aTelephony, TelephonyCallId* aId,
                       uint32_t aServiceId, uint32_t aCallIndex,
                       uint16_t aCallState, bool aEmergency, bool aConference,
-                      bool aSwitchable, bool aMergeable)
+                      bool aSwitchable, bool aMergeable,
+                      bool aIsHdCall)
 {
   NS_ASSERTION(aTelephony, "Null aTelephony pointer!");
   NS_ASSERTION(aId, "Null aId pointer!");
@@ -39,6 +40,7 @@ TelephonyCall::Create(Telephony* aTelephony, TelephonyCallId* aId,
   call->mGroup = aConference ? aTelephony->ConferenceGroup() : nullptr;
   call->mSwitchable = aSwitchable;
   call->mMergeable = aMergeable;
+  call->mIsHdCall = aIsHdCall;
   call->mError = nullptr;
 
   call->ChangeStateInternal(aCallState, false);

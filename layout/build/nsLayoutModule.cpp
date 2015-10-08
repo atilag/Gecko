@@ -248,7 +248,9 @@ static void Shutdown();
 #include "MediaManager.h"
 
 #include "GMPService.h"
-
+#ifdef LG_B2G_IMS
+#include "LgeImsAPI.h"
+#endif
 using namespace mozilla;
 using namespace mozilla::dom;
 using mozilla::dom::alarm::AlarmHalService;
@@ -286,6 +288,9 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsMediaSourceProtocolHandler)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsFontTableProtocolHandler)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsHostObjectURI)
 NS_GENERIC_FACTORY_CONSTRUCTOR(DOMParser)
+#ifdef LG_B2G_IMS
+NS_GENERIC_FACTORY_CONSTRUCTOR(LgeImsAPI)
+#endif
 NS_GENERIC_FACTORY_CONSTRUCTOR(Exception)
 NS_GENERIC_FACTORY_CONSTRUCTOR(DOMSessionStorageManager)
 NS_GENERIC_FACTORY_CONSTRUCTOR(DOMLocalStorageManager)
@@ -796,6 +801,9 @@ NS_DEFINE_NAMED_CID(MOBILE_MESSAGE_DATABASE_SERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_POWERMANAGERSERVICE_CID);
 NS_DEFINE_NAMED_CID(OSFILECONSTANTSSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_ALARMHALSERVICE_CID);
+#ifdef LG_B2G_IMS
+NS_DEFINE_NAMED_CID(LgeImsAPI_CID);
+#endif
 NS_DEFINE_NAMED_CID(TCPSOCKETCHILD_CID);
 NS_DEFINE_NAMED_CID(TCPSOCKETPARENT_CID);
 NS_DEFINE_NAMED_CID(TCPSERVERSOCKETCHILD_CID);
@@ -1106,6 +1114,9 @@ static const mozilla::Module::CIDEntry kLayoutCIDs[] = {
   { &kTELEPHONY_SERVICE_CID, false, nullptr, nsITelephonyServiceConstructor },
   { &kNS_MOBILE_CONNECTION_SERVICE_CID, false, NULL, nsIMobileConnectionServiceConstructor },
   { &kNS_VOICEMAIL_SERVICE_CID, false, nullptr, nsIVoicemailServiceConstructor },
+#ifdef LG_B2G_IMS
+  { &kLgeImsAPI_CID, true, nullptr, LgeImsAPIConstructor },
+#endif
   { &kFAKE_TV_SERVICE_CID, false, nullptr, FakeTVServiceConstructor },
   { &kTV_TUNER_DATA_CID, false, nullptr, TVTunerDataConstructor },
   { &kTV_CHANNEL_DATA_CID, false, nullptr, TVChannelDataConstructor },
@@ -1270,6 +1281,9 @@ static const mozilla::Module::ContractIDEntry kLayoutContracts[] = {
   { "@mozilla.org/gecko-media-plugin-service;1",  &kGECKO_MEDIA_PLUGIN_SERVICE_CID },
   { NS_MOBILE_CONNECTION_SERVICE_CONTRACTID, &kNS_MOBILE_CONNECTION_SERVICE_CID },
   { NS_VOICEMAIL_SERVICE_CONTRACTID, &kNS_VOICEMAIL_SERVICE_CID },
+#ifdef LG_B2G_IMS
+  { LgeImsAPI_ContractID, &kLgeImsAPI_CID },
+#endif
   { nullptr }
 };
 
@@ -1292,6 +1306,9 @@ static const mozilla::Module::CategoryEntry kLayoutCategories[] = {
 #endif
 #ifdef MOZ_B2G_BT
   { "profile-after-change", "Bluetooth Service", BLUETOOTHSERVICE_CONTRACTID },
+#endif
+#ifdef LG_B2G_IMS
+  { "profile-after-change", "Lge IMS Servive", LgeImsAPI_ContractID },
 #endif
   { nullptr }
 };

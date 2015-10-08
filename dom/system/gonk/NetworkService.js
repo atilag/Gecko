@@ -702,6 +702,24 @@ NetworkService.prototype = {
     });
   },
 
+  getNetIdWithCallback: function(interfaceName, callback) {
+    let params = {
+      cmd: "getNetId",
+      ifname: interfaceName
+    };
+    this.controlMessage(params, function(result) {
+      if (result.error) {
+        callback.onGetNetId(-1);
+        return;
+      }
+      if ((result.netId - 0) == result.netId && ('' + result.netId).trim().length > 0) {
+        callback.onGetNetId(parseInt(result.netId));
+      } else {
+        callback.onGetNetId(-1);
+      }
+    });
+  },
+
   shutdown: false,
 
   observe: function observe(aSubject, aTopic, aData) {

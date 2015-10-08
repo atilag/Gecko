@@ -1,0 +1,147 @@
+#include "nsISupports.idl"
+
+%{C++
+#include "nsCOMArray.h"
+%}
+#include "nsILgeImsUCManager.idl"
+[ref] native nsTArrayRef(nsTArray<nsString>);
+[ref] native nsTIntArrayRef(nsTArray<int32_t>);
+
+[scriptable, builtinclass, uuid(A361A6EF-A112-4aec-9985-F3BDE4B1B621)]
+interface nsILgeImsAPI : nsISupports
+{
+  void NotifySIMLoaded();
+  [noscript] void NotifyPcscfUpdate(in nsTArrayRef v4address, in nsTArrayRef v6address, in int32_t ApnType);
+  void NotifyOnAlarmTimerFired(in int32_t alarmId);
+  void NotifyOnAlarmId(in int32_t iTimerID, in int32_t iAlarmId);
+  nsIImsUCManager GetImsUcManager();
+  void OnPhoneStateChanged(in int32_t item, in int32_t param1, in int32_t param2, in nsTArrayRef paramEx);
+  void NotifyLteConnectionStatus(in nsTIntArrayRef param);
+};
+
+[scriptable, builtinclass, uuid(A361A6EF-A112-4aec-9985-F4CEF5C2C732)]
+interface nsISysInfo : nsISupports
+{
+  //
+  const int32_t MODEM_INFO = 1;
+  const int32_t PCSCF_ADDRESS = 2;
+  const int32_t ACCESS_NETWORK_INFO = 3;
+  //
+  const int32_t CLOSE_DATA_CONNECTION = 5;
+  const int32_t CS_CALL_PROTECTION = 6;
+  const int32_t ICC_EF_READ = 7;
+  const int32_t LTE_NETWORK_FEATURE = 8;
+  const int32_t APN = 9;
+  const int32_t SRVCC_CALL_INFO = 10;
+  const int32_t IMS_REG_STATUS_FOR_DAN = 11;
+  const int32_t SRVCC_CNAP_INFO = 12;
+
+  const int32_t E911_CALL_STATE_FOR_GPS = 13;
+  //
+  const int32_t VOLTE_E911_CALL_START = 0;
+  const int32_t VOLTE_E911_CALL_STOP_WITH_ECB = 1;
+  const int32_t VOLTE_E911_CALL_STOP = 2;
+  const int32_t VOLTE_E911_ECB_START = 3;
+
+  const int32_t IMS_SET_E911_TELEPHONY = 14;
+  //
+  const int32_t SET_E911_TELEPHONY_DIAL = 1;
+  const int32_t SET_E911_TELEPHONY_HANGUP = 2;
+
+  const int32_t CS_CALL_STATE = 15;
+  const int32_t IMS_STATUS_FOR_UICC = 16;
+  const int32_t SRVCC_PARTYTYPE_INFO = 17;
+  const int32_t IMS_REGISTRATION_STATE_FOR_MODEM = 18;
+  const int32_t SRVCC_IMSCALL_STATE_INFO = 19;
+  const int32_t SYS_INFO_SET_CFU_STATE = 20;
+  const int32_t SINGNAL_STRENGTH = 21;
+  const int32_t IMS_REG_INDICATOR = 22;
+
+  const int32_t NOTIFY_SRVCC_STATE = 23;
+  //
+  const int32_t SRVCC_STATE_START       = 0;
+  const int32_t SRVCC_STATE_SUCCESS     = 1;
+  const int32_t SRVCC_STATE_CANCEL      = 2;
+  const int32_t SRVCC_STATE_FAILURE     = 3;
+
+  //
+  const int32_t SET_PHONE_ID = 24;
+  //
+  const int32_t GET_ISIM_STATE = 25;
+
+  //
+  //
+  const int32_t SYS_INFO_WMS_CREATE_SOIMNGR = 61;
+  const int32_t SYS_INFO_WMS_DESTROY_SOIMNGR = 62;
+  const int32_t SYS_INFO_WMS_UPDATE_SVC_STATUS = 63;
+  const int32_t SYS_INFO_WMS_UPDATE_SMS_FORMAT = 64;
+  const int32_t SYS_INFO_WMS_REPORT_MO_STATUS = 65;
+  const int32_t SYS_INFO_WMS_REPORT_MT_SMS = 66;
+
+  //
+  const int32_t SYS_INFO_USIM_AUTH = 71;
+
+  //
+  const int32_t SYS_INFO_SERVICE_REGI_STATE = 81;
+  const int32_t SERVICE_VOLTE = 1;
+  const int32_t SERVICE_VT = 2;
+  const int32_t SERVICE_SMS = 3;
+  const int32_t REGI_ON = 1;
+  const int32_t REGI_OFF = 2;
+
+  //
+  const int32_t BAL_ITEM_RADIO_SIP_REG_SENDING = 10;
+  const int32_t BAL_ITEM_RADIO_IMS_CALL_STATE = 11;
+  const int32_t BAL_ITEM_RADIO_VOLTE_NV_ITEMS = 12;
+  const int32_t BAL_ITEM_RADIO_IMS_REG_STATE = 13;
+  //
+  const int32_t IMS_REG_OFF = 0x00000000;
+  const int32_t IMS_REG_VOLTE = 0x00000001;
+  const int32_t IMS_REG_VT = 0x00000002;
+  const int32_t IMS_REG_FAILED = 0x00010000;
+  const int32_t BAL_ITEM_RADIO_LTE_RF_QUALITY = 14;
+
+  //
+  const int32_t REASON_DETACH_WITH_T3402_TIMER = 1;
+  const int32_t REASON_PERMANENT_DETACH = 2;
+  const int32_t REASON_DETACH_AND_ATTACH = 3;
+
+  //
+  const int32_t LTE_NETWORK_FEATURE_EMERGENCY_CALL = 1;
+  const int32_t LTE_NETWORK_FEATURE_VOICE_CALL = 2;
+
+  //
+  //
+  //
+  const int32_t PHONE_STATE_CDMA_LOCK_INFO = 1;
+  //
+  //
+  const int32_t PHONE_STATE_ICC_EF_READ_DONE = 3;
+  const int32_t PHONE_STATE_IMS_PREF_STATE = 4;
+  //
+  const int32_t PHONE_STATE_IMS_REG_CONTROL = 5;
+  const int32_t PHONE_STATE_LTE_RF_QUALITY = 6;
+
+  //
+  //
+  const int32_t PHONE_STATE_WMS_SEND_MO_SMS = 61;
+
+  //
+  const int32_t PHONE_STATE_ICC_USIM_AUTH_RESULT = 71;
+
+  //
+  const int32_t PHONE_STATE_SRVCC_NOTI = 81;
+  //
+
+  //
+  const int32_t UPDATE_REG_STATE = 100; //
+  const int32_t GET_PREF_REG_STATE = 101; //
+  const int32_t UPDATE_VOICE_DOMAIN_STATE = 102; //
+  const int32_t UPDATE_VOLTE_CALL_STATE = 103; //
+
+  //
+
+  //
+
+  //
+};

@@ -44,6 +44,7 @@ struct ParamTraits<nsITelephonyCallInfo*>
     bool isConference;
     bool isSwitchable;
     bool isMergeable;
+    bool isHdCall;
 
     aParam->GetClientId(&clientId);
     aParam->GetCallIndex(&callIndex);
@@ -57,6 +58,7 @@ struct ParamTraits<nsITelephonyCallInfo*>
     aParam->GetIsConference(&isConference);
     aParam->GetIsSwitchable(&isSwitchable);
     aParam->GetIsMergeable(&isMergeable);
+    aParam->GetIsHdCall(&isHdCall);
 
     WriteParam(aMsg, clientId);
     WriteParam(aMsg, callIndex);
@@ -70,6 +72,7 @@ struct ParamTraits<nsITelephonyCallInfo*>
     WriteParam(aMsg, isConference);
     WriteParam(aMsg, isSwitchable);
     WriteParam(aMsg, isMergeable);
+    WriteParam(aMsg, isHdCall);
   }
 
   static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
@@ -97,6 +100,7 @@ struct ParamTraits<nsITelephonyCallInfo*>
     bool isConference;
     bool isSwitchable;
     bool isMergeable;
+    bool isHdCall;
 
     // It's not important to us where it fails, but rather if it fails
     if (!(ReadParam(aMsg, aIter, &clientId) &&
@@ -110,7 +114,8 @@ struct ParamTraits<nsITelephonyCallInfo*>
           ReadParam(aMsg, aIter, &isEmergency) &&
           ReadParam(aMsg, aIter, &isConference) &&
           ReadParam(aMsg, aIter, &isSwitchable) &&
-          ReadParam(aMsg, aIter, &isMergeable))) {
+          ReadParam(aMsg, aIter, &isMergeable) &&
+          ReadParam(aMsg, aIter, &isHdCall))) {
       return false;
     }
 
@@ -118,7 +123,8 @@ struct ParamTraits<nsITelephonyCallInfo*>
         new TelephonyCallInfo(clientId, callIndex, callState, number,
                               numberPresentation, name, namePresentation,
                               isOutgoing, isEmergency, isConference,
-                              isSwitchable, isMergeable);
+                              isSwitchable, isMergeable,
+                              isHdCall);
 
     info.forget(aResult);
 

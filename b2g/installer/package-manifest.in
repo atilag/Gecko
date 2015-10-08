@@ -157,6 +157,7 @@
 #ifdef MOZ_WIDGET_GONK
 @BINPATH@/components/dom_wifi.xpt
 @BINPATH@/components/dom_system_gonk.xpt
+@BINPATH@/components/dom_imsapi.xpt
 #endif
 #ifdef MOZ_B2G_RIL
 @BINPATH@/components/dom_icc.xpt
@@ -432,6 +433,8 @@
 @BINPATH@/components/NetworkStatsServiceProxy.manifest
 @BINPATH@/components/WifiWorker.js
 @BINPATH@/components/WifiWorker.manifest
+@BINPATH@/components/ImsAlarmService.js
+@BINPATH@/components/ImsAlarmService.manifest
 #endif // MOZ_WIDGET_GONK
 
 ; Tethering

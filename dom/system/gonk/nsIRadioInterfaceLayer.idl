@@ -2,6 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+%{C++
+#include "nsCOMArray.h"
+#include "nsStringGlue.h"
+%}
+[ref] native nsStringTArrayRef(nsTArray<nsString>);
+
 #include "nsISupports.idl"
 #include "nsINetworkManager.idl"
 
@@ -19,6 +25,7 @@ interface nsIRilNetworkInterface : nsINetworkInterface
   readonly attribute DOMString mmsc;     // Empty string if not set.
   readonly attribute DOMString mmsProxy; // Empty string if not set.
   readonly attribute long      mmsPort;  // -1 if not set.
+  readonly attribute DOMString apnEnable;
 };
 
 [scriptable, uuid(4441e660-4ad0-11e4-916c-0800200c9a66)]
@@ -57,10 +64,26 @@ interface nsIRadioInterface : nsISupports
   long getDataCallStateByType(in long networkType);
 
   void updateRILNetworkInterface();
+  void getPCSCFAddressIF(out DOMString v6address, out DOMString v4address);
+  [noscript] void getPCSCFAddressList(out nsStringTArrayRef v6addressList, out nsStringTArrayRef v4addressList);
 
   void sendWorkerMessage(in DOMString type,
               [optional] in jsval message,
               [optional] in nsIRilSendWorkerMessageCallback callback);
+
+  void QueryInfoForImsIF();
+  void GetLteInfoIF(out DOMString LteInfo);
+  void GetEhrpdInfoIF(out DOMString EhrpdInfo);
+  void SetIMSRegistateIF(in boolean regiState);
+  void SetImsStatusForDanIF( in unsigned long ims_status);
+  void SetE911StateIF( in unsigned long ims_status, in unsigned long ims_mode);
+  void GetPhoneInfoIF(in unsigned long mode,out DOMString PhoneInfo);
+
+  void sendDefaultAttachProfileIF(in unsigned long profileId);
+
+  void getActiveImsApnStringIF(out DOMString mActiveApn);
+
+  void getActiveEmergencyApnStringIF(out DOMString mActiveEApn);
 };
 
 [scriptable, uuid(78b65e8c-68e7-4510-9a05-65bba12b283e)]

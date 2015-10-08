@@ -21,7 +21,8 @@ TelephonyCallInfo::TelephonyCallInfo(uint32_t aClientId,
                                      bool aIsEmergency,
                                      bool aIsConference,
                                      bool aIsSwitchable,
-                                     bool aIsMergeable)
+                                     bool aIsMergeable,
+                                     bool aIsHdCall)
   : mClientId(aClientId),
     mCallIndex(aCallIndex),
     mCallState(aCallState),
@@ -33,7 +34,8 @@ TelephonyCallInfo::TelephonyCallInfo(uint32_t aClientId,
     mIsEmergency(aIsEmergency),
     mIsConference(aIsConference),
     mIsSwitchable(aIsSwitchable),
-    mIsMergeable(aIsMergeable)
+    mIsMergeable(aIsMergeable),
+    mIsHdCall(aIsHdCall)
 {
 }
 
@@ -121,6 +123,12 @@ TelephonyCallInfo::GetIsMergeable(bool* aIsMergeable)
   return NS_OK;
 }
 
+NS_IMETHODIMP
+TelephonyCallInfo::GetIsHdCall(bool* aIsHdCall)
+{
+  *aIsHdCall = mIsHdCall;
+  return NS_OK;
+}
 } // namespace telephony
 } // namespace dom
 } // namespace mozilla

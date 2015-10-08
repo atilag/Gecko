@@ -35,6 +35,8 @@ interface nsINetworkInterface : nsISupports
   const long NETWORK_TYPE_MOBILE_IMS  = 5;
   const long NETWORK_TYPE_MOBILE_DUN  = 6;
   const long NETWORK_TYPE_MOBILE_FOTA = 7;
+  const long NETWORK_TYPE_MOBILE_EMERGENCY = 8;
+  const long NETWORK_TYPE_MOBILE_CLASS6 = 9;
 
   /**
    * Network type. One of the NETWORK_TYPE_* constants.

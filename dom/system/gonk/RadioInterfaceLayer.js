@@ -84,6 +84,8 @@ const NETWORK_TYPE_MOBILE_SUPL = Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_SUPL
 const NETWORK_TYPE_MOBILE_IMS  = Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_IMS;
 const NETWORK_TYPE_MOBILE_DUN  = Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_DUN;
 const NETWORK_TYPE_MOBILE_FOTA = Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_FOTA;
+const NETWORK_TYPE_MOBILE_EMERGENCY = Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_EMERGENCY;
+const NETWORK_TYPE_MOBILE_CLASS6 = Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_CLASS6;
 
 const RIL_IPC_ICCMANAGER_MSG_NAMES = [
   "RIL:GetRilContext",
@@ -968,6 +970,10 @@ DataConnectionHandler.prototype = {
         return NETWORK_TYPE_MOBILE_DUN;
       case "fota":
         return NETWORK_TYPE_MOBILE_FOTA;
+      case "emergency":
+        return NETWORK_TYPE_MOBILE_EMERGENCY;
+      case "class6":
+        return NETWORK_TYPE_MOBILE_CLASS6;
       default:
         return NETWORK_TYPE_UNKNOWN;
      }
@@ -1240,7 +1246,9 @@ DataConnectionHandler.prototype = {
         networkType === NETWORK_TYPE_MOBILE_SUPL ||
         networkType === NETWORK_TYPE_MOBILE_IMS ||
         networkType === NETWORK_TYPE_MOBILE_DUN ||
-        networkType === NETWORK_TYPE_MOBILE_FOTA) {
+        networkType === NETWORK_TYPE_MOBILE_FOTA ||
+        networkType === NETWORK_TYPE_MOBILE_EMERGENCY ||
+        networkType === NETWORK_TYPE_MOBILE_CLASS6) {
       return true;
     }
 
@@ -2623,7 +2631,8 @@ function DataCall(clientId, apnSetting) {
     password: apnSetting.password,
     authType: apnSetting.authtype,
     protocol: apnSetting.protocol,
-    roaming_protocol: apnSetting.roaming_protocol
+    roaming_protocol: apnSetting.roaming_protocol,
+    apn_enable: apnSetting.apn_enable
   };
   this.linkInfo = {
     cid: null,
@@ -3086,7 +3095,9 @@ RILNetworkInterface.prototype = {
   get httpProxyPort() {
     return this.apnSetting.port || "";
   },
-
+  get apnEnable() {
+    return this.apnSetting.apn_enable || "enable";
+  },
   getAddresses: function(ips, prefixLengths) {
     let linkInfo = this.dataCall.linkInfo;
 

@@ -24,7 +24,8 @@ public:
                     uint16_t aNumberPresentation, const nsAString& aName,
                     uint16_t aNamePresentation, bool aIsOutgoing,
                     bool aIsEmergency, bool aIsConference,
-                    bool aIsSwitchable, bool aIsMergeable);
+                    bool aIsSwitchable, bool aIsMergeable,
+                    bool aIsHdCall);
 
 private:
   // Don't try to use the default constructor.
@@ -44,6 +45,7 @@ private:
   bool mIsConference;
   bool mIsSwitchable;
   bool mIsMergeable;
+  bool mIsHdCall;
 };
 
 } // namespace telephony

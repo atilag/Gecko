@@ -31,6 +31,7 @@ class TelephonyCall MOZ_FINAL : public DOMEventTargetHelper
   nsRefPtr<DOMError> mError;
   bool mSwitchable;
   bool mMergeable;
+  bool mIsHdCall;
 
   uint32_t mCallIndex;
   uint16_t mCallState;
@@ -84,6 +85,12 @@ public:
     return mMergeable;
   }
 
+  bool
+  Hdcall() const
+  {
+    return mIsHdCall;
+  }
+
   already_AddRefed<DOMError>
   GetError() const;
 
@@ -119,7 +126,8 @@ public:
   Create(Telephony* aTelephony, TelephonyCallId* aId,
          uint32_t aServiceId, uint32_t aCallIndex, uint16_t aCallState,
          bool aEmergency = false, bool aConference = false,
-         bool aSwitchable = true, bool aMergeable = true);
+         bool aSwitchable = true, bool aMergeable = true,
+         bool aIsHdCall = false);
 
   void
   ChangeState(uint16_t aCallState)
@@ -159,6 +167,11 @@ public:
   void
   UpdateMergeable(bool aMergeable) {
     mMergeable = aMergeable;
+  }
+
+  void
+  UpdateHdCall(bool aIsHdCall) {
+    mIsHdCall = aIsHdCall;
   }
 
   void
