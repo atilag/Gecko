@@ -1621,6 +1621,7 @@ Navigator::HasFeature(const nsAString& aName, ErrorResult& aRv)
 #ifdef MOZ_B2G
   , "manifest.chrome.navigation"
   , "manifest.precompile"
+  , "manifest.role.homescreen"
 #endif
   };
 
