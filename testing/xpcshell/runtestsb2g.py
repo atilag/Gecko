@@ -130,6 +130,9 @@ def run_remote_xpcshell(parser, options, log):
         options.remoteTestRoot = dm.deviceRoot
     xpcsh = B2GXPCShellRemote(dm, options, log)
 
+    #HACK JUST FOR DEBUGGING INTERMITENT TESTS FAILURE
+    xpcsh.env['NSPR_LOG_MODULES'] = 'IndexedDB:3'
+
     # we don't run concurrent tests on mobile
     options.sequential = True
 
