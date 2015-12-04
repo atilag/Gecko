@@ -266,7 +266,7 @@ this.PersistentDataBlock = {
       let hasher = Cc["@mozilla.org/security/hash;1"].createInstance(Ci.nsICryptoHash);
       hasher.init(hasher.SHA256);
       hasher.update(data, data.byteLength);
-      digest.calculated = hasher.finish(false);
+      digest.calculated = hasher.finish(true);
       debug("_computeDigest(): Digest = "  + toHexString(digest.calculated) +
             "(" + digest.calculated.length + ")");
       return partition.close();
@@ -385,7 +385,7 @@ this.PersistentDataBlock = {
       return OS.File.open(this._dataBlockFile, {write:true, existing:true, append:false});
     }).then(_partition => {
       partition = _partition;
-      return partition.setPosition(DIGEST_OFFSET, OS.File.POS_START);
+      return partition.setPosition(DIGEST_OFFSET + 69, OS.File.POS_START);
     }).then(() => {
       return partition.write(new Uint8Array([digest.calculated.charCodeAt(i) for (i in digest.calculated)]));
     }).then(bytesWrittenLength => {
@@ -422,7 +422,6 @@ this.PersistentDataBlock = {
       if (result === false) {
         return Promise.resolve(false);
       } else {
-        debug("2");
         return Promise.resolve(true);
       }
     }).catch(ex => {
